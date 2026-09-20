@@ -1,21 +1,36 @@
 # PROJECT_STATUS.md
 
-## Trạng thái tổng thể: PHASE 1 COMPLETE (OSS Validation Passed)
+## Trạng thái tổng thể: PHASE 1 BLOCKED
 
-| Hạng mục kiểm thử | Trạng thái | Ghi chú / Bằng chứng |
+Dự án tạm thời dừng tại **Phase 1: OSS Validation** và **CHƯA bắt đầu Phase 2**, do nguồn **Douyin Discovery** chưa khả dụng cục bộ ở trạng thái không đăng nhập hoặc qua CDP chưa có phiên tài khoản xác thực.
+
+| Hạng mục kiểm thử | Trạng thái | Ghi chú / Bằng chứng thực nghiệm |
 | :--- | :--- | :--- |
-| **1. Project Bootstrap** | **COMPLETE** | Khởi tạo repo sạch, tài liệu chuẩn, clone MediaCrawler & ViralMint, tạo virtualenv Python 3.11 (`research/OSS_INVENTORY.md`). |
-| **2. MediaCrawler - Bilibili** | **PASS** | Thu thập thành công 45 records qua 2 từ khóa (`AI`, `Python`), đầy đủ 100% metadata (`data/evidence/mediacrawler/bilibili/`). |
-| **2. MediaCrawler - Douyin** | **PARTIAL** | API web bị chặn bởi Argus WAF (`code 2483`), cần adapter dùng browser CDP người dùng hoặc session cookie thật. |
-| **2. MediaCrawler - Xiaohongshu** | **FAIL** | Optional - Bị chặn HTTP 403 (yêu cầu session đăng nhập tài khoản thật). Quyết định: DROP trong Phase 1. |
+| **1. Project Bootstrap** | **COMPLETE** | Khởi tạo repo sạch, tài liệu chuẩn, clone MediaCrawler & ViralMint, virtualenv Python 3.11 (`research/OSS_INVENTORY.md`). |
+| **2. MediaCrawler - Bilibili** | **PASS** | Thu thập thành công **45 records** qua 2 từ khóa (`AI`, `Python`), đầy đủ 100% metadata (`data/evidence/mediacrawler/bilibili/`). Hoạt động ổn định không cần đăng nhập. |
+| **2. MediaCrawler - Douyin Discovery** | **FAIL / BLOCKER** | - **Direct API**: Trả về `status_code: 2483` (Argus WAF).<br>- **CDP Mode**: Thu thập được **0/20 records** (`data/evidence/mediacrawler/douyin/cdp_validation_result.json`). Bị chặn hoàn toàn bởi Modal bắt buộc đăng nhập ("登录后免费看"), DOM không render video card.<br>- **Session**: Profile Chrome chỉ có 30 cookie vãng lai, thiếu session đăng nhập thật (`sessionid`). Chrome 127+ mã hóa `v20` App-Bound Encryption ngăn trích xuất cookie. |
+| **2. MediaCrawler - Xiaohongshu** | **FAIL** | Optional - Bị chặn HTTP 403 (yêu cầu session đăng nhập). Quyết định: DROP trong Phase 1. |
 | **2. MediaCrawler - Kuaishou** | **PARTIAL** | Optional - Tìm kiếm lấy được 21 records (`data/evidence/mediacrawler/kuaishou/`), comment API bị chặn bởi slider captcha. |
-| **3. ViralMint - Input Validation** | **PASS** | 6/6 file input được nạp và phân tích thành công (3 Douyin-derived, 2 Bilibili, 1 Local) (`data/evidence/viralmint/input_validation.json`). |
-| **4. Chinese ASR** | **PASS** | 5/5 video tiếng Trung được bóc băng chính xác 100% qua `faster-whisper`, đủ timestamps (`data/evidence/viralmint/transcripts/`). |
-| **5. Content Analysis** | **PASS** | 5/5 video trích xuất đầy đủ Topic, Hook, Format, Structure, Attention Mechanism (`data/evidence/viralmint/analysis/`). |
-| **6. Vietnamese Adaptation** | **PASS** | 5/5 kịch bản chuyển thể tiếng Việt tự nhiên, 0 từ tiếng Trung sót lại, sẵn sàng lồng tiếng (`data/evidence/viralmint/scripts/`). |
-| **7. Vietnamese TTS** | **PASS** | 5/5 file audio giọng Việt chuẩn (`vi-VN-HoaiMyNeural`, `vi-VN-NamMinhNeural`) qua Edge-TTS (`data/evidence/viralmint/tts/`). |
-| **8. Render Video 9:16** | **PASS** | 3/3 video render chuẩn dọc 1080x1920 (9:16), khớp giọng lồng tiếng, không lỗi corrupt (`data/evidence/viralmint/renders/`). |
-| **9. Background Audio** | **PASS** | 2/2 mẫu thử nghiệm phối trộn BGM với giọng đọc (ducking -14dB, fade in/out) (`data/evidence/viralmint/audio_mix/`). |
+| **3. Real Douyin Media Inputs** | **PASS** | Tải thành công **2 video thực tế** trực tiếp từ ByteDance CDN Douyin (`real_douyin_sample1.mp4`, `real_douyin_sample2.mp4`), kiểm tra qua `ffprobe` (`data/evidence/viralmint/real_douyin_pipeline_summary.json`). |
+| **4. Chinese ASR (Real Douyin)** | **PASS** | 2/2 video Douyin thật được bóc băng chính xác 100% ngôn ngữ `zh` với timestamps (`data/evidence/viralmint/transcripts/asr_real_douyin_sample*.json`). |
+| **5. ViralMint Content Analysis** | **PARTIAL** | Upstream có prompt template `INSIGHTS_PROMPT` và schema dữ liệu trong `AnalyzerAgent`, nhưng **phụ thuộc 100% vào Cloud BYOK Key** (OpenAI/Claude/OpenRouter), không có local inference. Quyết định: **REUSE WITH ADAPTER**. (`data/evidence/viralmint/viralmint_real_capability_audit.json`). |
+| **6. ViralMint Vietnamese Adaptation** | **FAIL** | Upstream ViralMint **hoàn toàn không có tính năng dịch thuật hay chuyển thể tiếng Việt** (chỉ có prompt tiếng Anh `SCRIPT_PROMPT`). Quyết định: **BUILD**. (`data/evidence/viralmint/viralmint_real_capability_audit.json`). |
+| **7. Vietnamese TTS** | **PASS** | 5/5 file audio giọng Việt chuẩn (`vi-VN-HoaiMyNeural`, `vi-VN-NamMinhNeural`) qua Edge-TTS (`data/evidence/viralmint/tts_summary.json`). |
+| **8. Render Video 9:16** | **PASS** | Render chuẩn dọc 1080x1920 (9:16) cho cả 2 video Douyin thật và video Bilibili, khớp audio, không lỗi corrupt (`data/evidence/viralmint/renders/`). |
+| **9. Background Audio Mixing** | **PASS** | 2/2 mẫu thử nghiệm phối trộn BGM với giọng đọc (ducking -14dB, fade in/out) (`data/evidence/viralmint/audio_mix_summary.json`). |
 | **10. Batch Processing** | **PASS** | Xử lý song song 3 video thành công trong 5.69s với cơ chế cô lập lỗi độc lập (`data/evidence/viralmint/batch_summary.json`). |
 | **11. Programmatic Integration** | **PASS** | Luồng FastAPI hoàn chỉnh: Submit (`/api/downloaded/import`) -> Inspect (`/api/jobs/{id}`) -> Retrieve (`/api/downloaded/{id}`). |
 | **12. Local Benchmark** | **PASS** | Đo đạc tài nguyên thực tế: E2E 1 video = 11.07s (Peak RAM: 314MB), Batch 3 = 5.69s (`research/LOCAL_BENCHMARK.md`). |
+
+---
+
+## Exit Gate Decision
+
+Theo quy tắc nghiêm ngặt của dự án:
+- Nguồn Bilibili Discovery: `PASS`
+- Nguồn Douyin Discovery: `FAIL` (Chưa usable do WAF + Login Gate)
+- Real Douyin Media Pipeline: `PASS` (Input -> ASR -> Render)
+- ViralMint Analysis/Adaptation: Đã audit thực tế và phân loại chính xác (`Analysis = PARTIAL / REUSE WITH ADAPTER`, `Adaptation = FAIL / BUILD`).
+
+**TRẠNG THÁI HIỆN TẠI: PHASE 1 BLOCKED.**  
+Chờ quyết định của User về phương án thu thập nguồn Douyin trước khi có thể mở khóa Phase 2.

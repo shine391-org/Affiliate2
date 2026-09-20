@@ -1,0 +1,50 @@
+{
+  "status": "PASS",
+  "description": "Real Douyin media downloaded, verified via ffprobe, transcribed with Chinese ASR, and rendered to 9:16 format.",
+  "probe": {
+    "real_douyin_sample1": {
+      "source_url": "https://www.douyin.com/video/7525538910311632128",
+      "codec": "h264",
+      "width": 1312,
+      "height": 1080,
+      "fps": "30/1",
+      "size_bytes": 10000001
+    },
+    "real_douyin_sample2": {
+      "source_url": "https://www.douyin.com/video/7525082444551310602",
+      "codec": "h264",
+      "width": 780,
+      "height": 720,
+      "fps": "30/1",
+      "size_bytes": 10000001
+    }
+  },
+  "asr": {
+    "real_douyin_sample1": {
+      "language": "zh",
+      "latency_s": 5.13,
+      "text_sample": "我的开连项目30k star 说实话 今年前后我是绝对绝对想不到自己 就是能做出这样的开连项目 今天给大家分享一下我的一个真实的经历 一个曾经成名游戏 然后做过全支之物的人 是如何一步一步地走上开连之",
+      "transcript_file": "data\\evidence\\viralmint\\transcripts\\asr_real_douyin_sample1.json"
+    },
+    "real_douyin_sample2": {
+      "language": "zh",
+      "latency_s": 4.76,
+      "text_sample": "说话我现在都有点不太敢相信我的开音项目 他不仅在之前保持了热榜第一好几天 现在又登上这个周榜第一 作为这个项目的作者真的非常非常的开心 今天就我想给大家分享一下这个背后的故事 我是陈薛亚江 然后Mid",
+      "transcript_file": "data\\evidence\\viralmint\\transcripts\\asr_real_douyin_sample2.json"
+    }
+  },
+  "render": {
+    "real_douyin_sample1": {
+      "rendered_file": "data\\evidence\\viralmint\\renders\\render_real_douyin_sample1_9x16.mp4",
+      "resolution": "1080x1920",
+      "latency_s": 2.67,
+      "size_bytes": 5117823
+    },
+    "real_douyin_sample2": {
+      "rendered_file": "data\\evidence\\viralmint\\renders\\render_real_douyin_sample2_9x16.mp4",
+      "resolution": "1080x1920",
+      "latency_s": 2.08,
+      "size_bytes": 3122161
+    }
+  }
+}

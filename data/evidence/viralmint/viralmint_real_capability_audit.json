@@ -1,0 +1,79 @@
+{
+  "content_analysis": {
+    "verdict": "PARTIAL",
+    "architecture_decision": "REUSE WITH ADAPTER",
+    "rationale": "ViralMint provides structured prompts (INSIGHTS_PROMPT, SEGMENT_ANALYSIS_PROMPT) and schema in AnalyzerAgent, but has zero offline/local analysis capability and requires Bring-Your-Own-Key cloud LLM (OpenAI/Anthropic/OpenRouter). Needs an adapter to inject local LLM or project-managed LLM gateway.",
+    "audit_results": [
+      {
+        "video": "bilibili_sample1.mp4",
+        "upstream_class": "backend.agents.analyzer.AnalyzerAgent",
+        "prompt_template": "INSIGHTS_PROMPT",
+        "prompt_length_chars": 2320,
+        "transcript_snippet": "这些词你可能都听说过 但是我问大家 你真的能准确地说出其中每个概念的确切含意吗 这期视频我们不准那些续头八脑的商业概念 我们就从最底层的工程式脚出发 一个一个的把这些概念拆开 揉碎 讲清楚 看完这期视频相信你对AI的理解绝对会上",
+        "ai_client_required": true,
+        "offline_local_llm_supported": false,
+        "invocation_status": "BLOCKED_WITHOUT_BYOK_KEY",
+        "error": "No AI provider configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or OPENROUTER_API_KEY in your .env, or configure your provider and key in Settings."
+      },
+      {
+        "video": "real_douyin_sample1.mp4",
+        "upstream_class": "backend.agents.analyzer.AnalyzerAgent",
+        "prompt_template": "INSIGHTS_PROMPT",
+        "prompt_length_chars": 2461,
+        "transcript_snippet": "我的开连项目30k star 说实话 今年前后我是绝对绝对想不到自己 就是能做出这样的开连项目 今天给大家分享一下我的一个真实的经历 一个曾经成名游戏 然后做过全支之物的人 是如何一步一步地走上开连之路的 OK 那先简单作为一个简单的作介绍",
+        "ai_client_required": true,
+        "offline_local_llm_supported": false,
+        "invocation_status": "BLOCKED_WITHOUT_BYOK_KEY",
+        "error": "No AI provider configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or OPENROUTER_API_KEY in your .env, or configure your provider and key in Settings."
+      },
+      {
+        "video": "real_douyin_sample2.mp4",
+        "upstream_class": "backend.agents.analyzer.AnalyzerAgent",
+        "prompt_template": "INSIGHTS_PROMPT",
+        "prompt_length_chars": 2429,
+        "transcript_snippet": "说话我现在都有点不太敢相信我的开音项目 他不仅在之前保持了热榜第一好几天 现在又登上这个周榜第一 作为这个项目的作者真的非常非常的开心 今天就我想给大家分享一下这个背后的故事 我是陈薛亚江 然后Midikura的这个开音超过的作者 那上期视",
+        "ai_client_required": true,
+        "offline_local_llm_supported": false,
+        "invocation_status": "BLOCKED_WITHOUT_BYOK_KEY",
+        "error": "No AI provider configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or OPENROUTER_API_KEY in your .env, or configure your provider and key in Settings."
+      }
+    ]
+  },
+  "vietnamese_adaptation": {
+    "verdict": "FAIL",
+    "architecture_decision": "BUILD",
+    "rationale": "ViralMint upstream has NO Vietnamese adaptation, localization, translation, or terminology mapping capabilities. It only provides a generic English SCRIPT_PROMPT for generating English TikTok/YouTube scripts via cloud LLMs. Vietnamese adaptation must be BUILT as a custom module.",
+    "audit_results": [
+      {
+        "video": "bilibili_sample1.mp4",
+        "upstream_class": "backend.agents.generator.GeneratorAgent",
+        "prompt_template": "SCRIPT_PROMPT",
+        "native_vietnamese_adaptation_support": false,
+        "native_translation_support": false,
+        "prompt_language": "en",
+        "explanation": "ViralMint only provides an English script generation prompt (SCRIPT_PROMPT) with a generic hint for user to pass translation instructions to an external LLM. ViralMint has no Vietnamese adaptation, translation, or localization engine.",
+        "invocation_status": "NOT_SUPPORTED_NATIVELY"
+      },
+      {
+        "video": "real_douyin_sample1.mp4",
+        "upstream_class": "backend.agents.generator.GeneratorAgent",
+        "prompt_template": "SCRIPT_PROMPT",
+        "native_vietnamese_adaptation_support": false,
+        "native_translation_support": false,
+        "prompt_language": "en",
+        "explanation": "ViralMint only provides an English script generation prompt (SCRIPT_PROMPT) with a generic hint for user to pass translation instructions to an external LLM. ViralMint has no Vietnamese adaptation, translation, or localization engine.",
+        "invocation_status": "NOT_SUPPORTED_NATIVELY"
+      },
+      {
+        "video": "real_douyin_sample2.mp4",
+        "upstream_class": "backend.agents.generator.GeneratorAgent",
+        "prompt_template": "SCRIPT_PROMPT",
+        "native_vietnamese_adaptation_support": false,
+        "native_translation_support": false,
+        "prompt_language": "en",
+        "explanation": "ViralMint only provides an English script generation prompt (SCRIPT_PROMPT) with a generic hint for user to pass translation instructions to an external LLM. ViralMint has no Vietnamese adaptation, translation, or localization engine.",
+        "invocation_status": "NOT_SUPPORTED_NATIVELY"
+      }
+    ]
+  }
+}

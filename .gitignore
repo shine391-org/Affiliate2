@@ -39,6 +39,8 @@ Thumbs.db
 *.log
 douyin_cookies.txt
 .env
+data/*profile*/
+
 
 # Upstream cloned tools
 tools/
