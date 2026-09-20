@@ -14,7 +14,7 @@ Dự án tạm thời dừng tại **Phase 1: OSS Validation** và **CHƯA bắt
 | **3. Real Douyin Media Inputs** | **PASS** | Tải thành công **2 video thực tế** trực tiếp từ ByteDance CDN Douyin (`real_douyin_sample1.mp4`, `real_douyin_sample2.mp4`), kiểm tra qua `ffprobe` (`data/evidence/viralmint/real_douyin_pipeline_summary.json`). |
 | **4. Chinese ASR (Real Douyin)** | **PASS** | 2/2 video Douyin thật được bóc băng chính xác 100% ngôn ngữ `zh` với timestamps (`data/evidence/viralmint/transcripts/asr_real_douyin_sample*.json`). |
 | **5. ViralMint Content Analysis** | **PARTIAL** | Upstream có prompt template `INSIGHTS_PROMPT` và schema dữ liệu trong `AnalyzerAgent`, nhưng **phụ thuộc 100% vào Cloud BYOK Key** (OpenAI/Claude/OpenRouter), không có local inference. Quyết định: **REUSE WITH ADAPTER**. (`data/evidence/viralmint/viralmint_real_capability_audit.json`). |
-| **6. ViralMint Vietnamese Translation & Dub** | **PASS** | Hoàn thành pipeline E2E đầy đủ: Whisper ASR tiếng Trung -> Gemini 3.5 Flash-Lite dịch tiếng Việt súc tích -> Edge TTS (HoaiMy/NamMinh) -> Reframe dọc chuẩn 1080x1920 (9:16) blur-fill -> Burn phụ đề tiếng Việt karaoke -> Render MP4 đồng bộ âm thanh/hình ảnh (`research/VIRALMINT_AI_PROVIDER.md`). Quyết định: **REUSE ViralMint + compatible provider**. |
+| **6. ViralMint Vietnamese Translation & Dub** | **PASS — INTEGRATION COMPLETE** | Hoàn thành pipeline E2E đầy đủ: Whisper ASR tiếng Trung -> Gemini 3.5 Flash-Lite dịch tiếng Việt súc tích -> Edge TTS (HoaiMy/NamMinh) -> Reframe dọc chuẩn 1080x1920 (9:16) blur-fill -> Burn phụ đề tiếng Việt karaoke -> Render MP4 đồng bộ âm thanh/hình ảnh. **Cleanup 2026-09-21**: `target_aspect` opt-in (không ép 9:16 khi không cần), `captions_only` khôi phục upstream semantics, Edge TTS 3-retry resilience. Regression 12/12 PASS. ViralMint `71253e2`, root `9703d7a`. Quyết định: **REUSE ViralMint + compatible provider**. |
 | **7. Vietnamese TTS** | **PASS** | 5/5 file audio giọng Việt chuẩn (`vi-VN-HoaiMyNeural`, `vi-VN-NamMinhNeural`) qua Edge-TTS (`data/evidence/viralmint/tts_summary.json`). |
 | **8. Render Video 9:16** | **PASS** | Render chuẩn dọc 1080x1920 (9:16) cho cả 2 video Douyin thật và video Bilibili, khớp audio, không lỗi corrupt (`data/evidence/viralmint/renders/`). |
 | **9. Background Audio Mixing** | **PASS** | 2/2 mẫu thử nghiệm phối trộn BGM với giọng đọc (ducking -14dB, fade in/out) (`data/evidence/viralmint/audio_mix_summary.json`). |
@@ -58,4 +58,5 @@ Theo quy tắc nghiêm ngặt của dự án:
 - Vietnamese Adaptation / Dubbing: `READY` (ASR -> Gemini Translation -> Vietnamese Subtitles -> Edge TTS Dubbing -> FFmpeg Render)
 
 **TRẠNG THÁI HIỆN TẠI: PHASE 1 BLOCKED.**  
-Chờ cung cấp `GEMINI_API_KEY` để hoàn tất bài test E2E live video, và phương án thu thập nguồn Douyin trước khi có thể mở khóa Phase 2.
+ViralMint integration: **COMPLETE** (commits `71253e2` / `9703d7a`).  
+Blocker còn lại: Douyin Discovery (`FAIL` — WAF + Login Gate). Cần phương án thu thập nguồn Douyin trước khi mở khóa Phase 2.
