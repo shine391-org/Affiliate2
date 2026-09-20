@@ -1,0 +1,82 @@
+﻿{
+    "raw_data_path":  "tools/MediaCrawler/data/douyin/jsonl/search_contents_2026-09-21.jsonl",
+    "field_notes":  {
+                        "shares":  "share_count (present)",
+                        "likes":  "liked_count (present)",
+                        "content_id":  "aweme_id (present, e.g. 7558451761959226665)",
+                        "canonical_url":  "aweme_url (present, e.g. https://www.douyin.com/video/7558451761959226665)",
+                        "views":  "NOT available in search result (not returned by Douyin search API)",
+                        "favorites":  "collected_count (present)",
+                        "publish_time":  "create_time (Unix timestamp, present)",
+                        "comments":  "comment_count (present)",
+                        "creator":  "nickname (present, partial masked)"
+                    },
+    "tool":  "MediaCrawler (CDP mode, Edge browser)",
+    "records_per_keyword":  {
+                                "减肥食谱":  28,
+                                "健身教程":  14
+                            },
+    "keywords_tested":  [
+                            "减肥食谱",
+                            "健身教程"
+                        ],
+    "auth_method":  "Manual login via Edge CDP profile (cdp_dy_user_data_dir)",
+    "blockers":  "NONE",
+    "browser":  "Microsoft Edge 153.0.4234.48",
+    "unique_records_total":  42,
+    "verdict":  "PASS",
+    "fields_available":  [
+                             "aweme_id",
+                             "aweme_url",
+                             "nickname",
+                             "create_time",
+                             "liked_count",
+                             "comment_count",
+                             "share_count",
+                             "collected_count",
+                             "title",
+                             "desc",
+                             "cover_url",
+                             "video_download_url",
+                             "source_keyword"
+                         ],
+    "sample_records":  [
+                           {
+                               "source_keyword":  "减肥食谱",
+                               "collected_count":  "226614",
+                               "nickname":  "一***薯",
+                               "liked_count":  "574211",
+                               "aweme_id":  "7558451761959226665",
+                               "create_time":  1759839202,
+                               "aweme_url":  "https://www.douyin.com/video/7558451761959226665",
+                               "comment_count":  "7299",
+                               "share_count":  "233851"
+                           },
+                           {
+                               "source_keyword":  "减肥食谱",
+                               "collected_count":  "103426",
+                               "nickname":  "小***常",
+                               "liked_count":  "93195",
+                               "aweme_id":  "7638587864506952138",
+                               "create_time":  1778497330,
+                               "aweme_url":  "https://www.douyin.com/video/7638587864506952138",
+                               "comment_count":  "2016",
+                               "share_count":  "70838"
+                           },
+                           {
+                               "source_keyword":  "减肥食谱",
+                               "collected_count":  "320284",
+                               "nickname":  "李***）",
+                               "liked_count":  "878350",
+                               "aweme_id":  "7461967499584638265",
+                               "create_time":  1737374718,
+                               "aweme_url":  "https://www.douyin.com/video/7461967499584638265",
+                               "comment_count":  "22802",
+                               "share_count":  "274671"
+                           }
+                       ],
+    "platform":  "Douyin",
+    "session_persistence":  "PASS - session survived close/reopen without re-login",
+    "comments_data_path":  "tools/MediaCrawler/data/douyin/jsonl/search_comments_2026-09-21.jsonl",
+    "test_date":  "2026-09-21"
+}

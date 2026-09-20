@@ -1,14 +1,14 @@
 # PROJECT_STATUS.md
 
-## Trạng thái tổng thể: PHASE 1 BLOCKED
+## Trạng thái tổng thể: **PHASE 1 COMPLETE** ✅
 
-Dự án tạm thời dừng tại **Phase 1: OSS Validation** và **CHƯA bắt đầu Phase 2**, do nguồn **Douyin Discovery** chưa khả dụng cục bộ ở trạng thái không đăng nhập hoặc qua CDP chưa có phiên tài khoản xác thực.
+Tất cả hạng mục Phase 1 OSS Validation đã hoàn thành. Sẵn sàng chuyển Phase 2 khi được phê duyệt.
 
 | Hạng mục kiểm thử | Trạng thái | Ghi chú / Bằng chứng thực nghiệm |
 | :--- | :--- | :--- |
 | **1. Project Bootstrap** | **COMPLETE** | Khởi tạo repo sạch, tài liệu chuẩn, clone MediaCrawler & ViralMint, virtualenv Python 3.11 (`research/OSS_INVENTORY.md`). |
 | **2. MediaCrawler - Bilibili** | **PASS** | Thu thập thành công **45 records** qua 2 từ khóa (`AI`, `Python`), đầy đủ 100% metadata (`data/evidence/mediacrawler/bilibili/`). Hoạt động ổn định không cần đăng nhập. |
-| **2. MediaCrawler - Douyin Discovery** | **FAIL / BLOCKER** | - **Direct API**: Trả về `status_code: 2483` (Argus WAF).<br>- **CDP Mode**: Thu thập được **0/20 records** (`data/evidence/mediacrawler/douyin/cdp_validation_result.json`). Bị chặn hoàn toàn bởi Modal bắt buộc đăng nhập ("登录后免费看"), DOM không render video card.<br>- **Session**: Profile Chrome chỉ có 30 cookie vãng lai, thiếu session đăng nhập thật (`sessionid`). Chrome 127+ mã hóa `v20` App-Bound Encryption ngăn trích xuất cookie. |
+| **2. MediaCrawler - Douyin Discovery** | **PASS** | CDP Mode với Edge + login session thật: **28 unique videos** qua 2 keyword (`减肥食谱`, `健身教程`). Fields: `aweme_id`, `aweme_url`, `nickname`, `create_time`, `liked_count`, `comment_count`, `share_count`, `collected_count`. Session persistence PASS (đóng/mở lại browser, không cần login lại). Evidence: `data/evidence/mediacrawler/douyin/douyin_discovery_evidence.json`. NOTE: `video_play_count` (views) không có trong search API response. |
 | **2. MediaCrawler - Xiaohongshu** | **FAIL** | Optional - Bị chặn HTTP 403 (yêu cầu session đăng nhập). Quyết định: DROP trong Phase 1. |
 | **2. MediaCrawler - Kuaishou** | **PARTIAL** | Optional - Tìm kiếm lấy được 21 records (`data/evidence/mediacrawler/kuaishou/`), comment API bị chặn bởi slider captcha. |
 | **3. Real Douyin Media Inputs** | **PASS** | Tải thành công **2 video thực tế** trực tiếp từ ByteDance CDN Douyin (`real_douyin_sample1.mp4`, `real_douyin_sample2.mp4`), kiểm tra qua `ffprobe` (`data/evidence/viralmint/real_douyin_pipeline_summary.json`). |
@@ -52,11 +52,11 @@ ADAPTER
 
 Theo quy tắc nghiêm ngặt của dự án:
 - Nguồn Bilibili Discovery: `PASS`
-- Nguồn Douyin Discovery: `FAIL` (Chưa usable do WAF + Login Gate)
-- Real Douyin Media Pipeline: `PASS` (Input -> ASR -> Render)
+- Nguồn Douyin Discovery: `PASS` (CDP + Edge + login session thật — 28 records, 2 keywords, session persistence OK)
+- Real Douyin Media Pipeline: `PASS` (Input → ASR → Render)
 - ViralMint AI Provider: `PASS (ADAPTER)` (Đã thêm generic OpenAI-compatible provider cho Gemini Free Tier / Local LLM)
-- Vietnamese Adaptation / Dubbing: `READY` (ASR -> Gemini Translation -> Vietnamese Subtitles -> Edge TTS Dubbing -> FFmpeg Render)
+- Vietnamese Adaptation / Dubbing: `PASS` (ASR → Gemini Translation → Vietnamese Subtitles → Edge TTS Dubbing → FFmpeg Render)
 
-**TRẠNG THÁI HIỆN TẠI: PHASE 1 BLOCKED.**  
-ViralMint integration: **COMPLETE** (commits `71253e2` / `9703d7a`).  
-Blocker còn lại: Douyin Discovery (`FAIL` — WAF + Login Gate). Cần phương án thu thập nguồn Douyin trước khi mở khóa Phase 2.
+**TRẠNG THÁI HIỆN TẠI: PHASE 1 COMPLETE ✅**  
+Tất cả blocker đã được giải quyết. ViralMint integration COMPLETE. Douyin Discovery PASS.  
+Sẵn sàng chuyển Phase 2 khi được phê duyệt.
