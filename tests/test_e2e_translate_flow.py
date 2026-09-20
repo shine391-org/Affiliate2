@@ -30,7 +30,7 @@ async def run_e2e_translation_pipeline():
     # Set configuration for generic compatible provider pointing to Gemini
     settings.AI_PROVIDER = "compatible"
     settings.AI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
-    settings.AI_MODEL = "gemini-2.5-flash"
+    settings.AI_MODEL = "gemini-3.6-flash"
 
     # Check key from environment
     gemini_key = (

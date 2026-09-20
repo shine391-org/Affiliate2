@@ -1,14 +1,14 @@
 {
-  "job_id": "6e318cf9-0ab6-4c4a-bc09-e2540277c2ce",
+  "job_id": "373b9d71-4cbc-4f17-bd9a-81a8a7ab65e5",
   "provider": "compatible",
   "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
-  "model": "gemini-2.5-flash",
+  "model": "gemini-3.6-flash",
   "target_language": "Vietnamese",
   "mode": "full_dub",
   "voice_id": "vi-VN-HoaiMyNeural",
   "secondary_voice_tested": "vi-VN-NamMinhNeural",
-  "job_status": "failed",
-  "error_message": "GEMINI_API_KEY REQUIRED: No AI_API_KEY or GEMINI_API_KEY configured for compatible provider.",
-  "output_file": null,
-  "verdict": "BLOCKED (GEMINI_API_KEY REQUIRED)"
+  "job_status": "success",
+  "error_message": null,
+  "output_file": "E:\\Affiliate ver 1\\storage\\tools\\out\\373b9d71-4cbc-4f17-bd9a-81a8a7ab65e5.mp4",
+  "verdict": "PASS"
 }
