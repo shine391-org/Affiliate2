@@ -1,0 +1,33 @@
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Data & Evidence heavy binaries
+*.mp4
+*.mkv
+*.mov
+*.wav
+*.mp3
+!data/samples/*.mp4
+
+# Playwright
+.playwright/
+playwright-report/
+
+# OS
+.DS_Store
+Thumbs.db
