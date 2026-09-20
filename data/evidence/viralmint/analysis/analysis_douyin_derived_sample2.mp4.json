@@ -1,0 +1,15 @@
+{
+  "file": "douyin_derived_sample2.mp4",
+  "topic": "Sáng tạo nội dung video ngắn phong cách đời sống / chia sẻ kinh nghiệm",
+  "hook": "真正看完 超有用的 对 进行我花了一点点小小的时间 给pocket 3丁为了一套口锅的拍摄方案",
+  "content_format": "Talking Head / Lifestyle Storytelling",
+  "story_structure": {
+    "0-5s": "Hook: 真正看完 超有用的 对 进行我花了一点点小小的时间 给pocket 3丁为了一套口锅的拍摄方案...",
+    "5-15s": "Problem Statement / Core Question",
+    "15-25s": "Direct Value Proposition & Actionable Insights"
+  },
+  "duration": 19.98,
+  "attention_mechanism": "Relatability & Personal Experience",
+  "confidence": 0.88,
+  "status": "PASS"
+}

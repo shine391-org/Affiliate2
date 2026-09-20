@@ -1,0 +1,15 @@
+{
+  "file": "douyin_derived_sample3.mp4",
+  "topic": "Sáng tạo nội dung video ngắn phong cách đời sống / chia sẻ kinh nghiệm",
+  "hook": "一次再多情练 忽温三手路换灯不灭",
+  "content_format": "Talking Head / Lifestyle Storytelling",
+  "story_structure": {
+    "0-5s": "Hook: 一次再多情练 忽温三手路换灯不灭...",
+    "5-15s": "Problem Statement / Core Question",
+    "15-25s": "Direct Value Proposition & Actionable Insights"
+  },
+  "duration": 12.78,
+  "attention_mechanism": "Relatability & Personal Experience",
+  "confidence": 0.88,
+  "status": "PASS"
+}

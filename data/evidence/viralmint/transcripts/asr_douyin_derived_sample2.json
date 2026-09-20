@@ -1,0 +1,450 @@
+{
+  "file": "douyin_derived_sample2.mp4",
+  "status": "PASS",
+  "time_sec": 3.878077268600464,
+  "language": "zh",
+  "char_count": 86,
+  "segments_count": 7,
+  "text": "真正看完 超有用的 对 进行我花了一点点小小的时间 给pocket 3丁为了一套口锅的拍摄方案 有T次系统 有补锅灯 有收音系统 还有稳定的 塞老驾 OK 先看成品 想要吗",
+  "segments": [
+    {
+      "start": 0.0,
+      "end": 1.32,
+      "text": "真正看完 超有用的",
+      "words": [
+        {
+          "word": "真",
+          "start": 0.0,
+          "end": 0.06,
+          "probability": 0.06232593208551407
+        },
+        {
+          "word": "正",
+          "start": 0.06,
+          "end": 0.16,
+          "probability": 0.7870545983314514
+        },
+        {
+          "word": "看",
+          "start": 0.16,
+          "end": 0.28,
+          "probability": 0.8909529447555542
+        },
+        {
+          "word": "完",
+          "start": 0.28,
+          "end": 0.4,
+          "probability": 0.8201638460159302
+        },
+        {
+          "word": " 超",
+          "start": 0.66,
+          "end": 0.88,
+          "probability": 0.9873682856559753
+        },
+        {
+          "word": "有",
+          "start": 0.88,
+          "end": 1.02,
+          "probability": 0.8260682225227356
+        },
+        {
+          "word": "用",
+          "start": 1.02,
+          "end": 1.14,
+          "probability": 0.9662091732025146
+        },
+        {
+          "word": "的",
+          "start": 1.14,
+          "end": 1.32,
+          "probability": 0.9415422081947327
+        }
+      ]
+    },
+    {
+      "start": 1.32,
+      "end": 3.8,
+      "text": "对 进行我花了一点点小小的时间",
+      "words": [
+        {
+          "word": "对",
+          "start": 1.32,
+          "end": 1.62,
+          "probability": 0.6393592357635498
+        },
+        {
+          "word": " 进",
+          "start": 1.9,
+          "end": 2.14,
+          "probability": 0.8009304404258728
+        },
+        {
+          "word": "行",
+          "start": 2.14,
+          "end": 2.26,
+          "probability": 0.34279865026474
+        },
+        {
+          "word": "我",
+          "start": 2.26,
+          "end": 2.44,
+          "probability": 0.9433816075325012
+        },
+        {
+          "word": "花",
+          "start": 2.44,
+          "end": 2.64,
+          "probability": 0.9546285271644592
+        },
+        {
+          "word": "了",
+          "start": 2.64,
+          "end": 2.74,
+          "probability": 0.9962627291679382
+        },
+        {
+          "word": "一点",
+          "start": 2.74,
+          "end": 2.88,
+          "probability": 0.9899773597717285
+        },
+        {
+          "word": "点",
+          "start": 2.88,
+          "end": 3.04,
+          "probability": 0.9886171221733093
+        },
+        {
+          "word": "小",
+          "start": 3.04,
+          "end": 3.28,
+          "probability": 0.9629318714141846
+        },
+        {
+          "word": "小",
+          "start": 3.28,
+          "end": 3.42,
+          "probability": 0.9509273171424866
+        },
+        {
+          "word": "的",
+          "start": 3.42,
+          "end": 3.52,
+          "probability": 0.9873936176300049
+        },
+        {
+          "word": "时间",
+          "start": 3.52,
+          "end": 3.8,
+          "probability": 0.9969469904899597
+        }
+      ]
+    },
+    {
+      "start": 3.8,
+      "end": 7.18,
+      "text": "给pocket 3丁为了一套口锅的拍摄方案",
+      "words": [
+        {
+          "word": "给",
+          "start": 3.8,
+          "end": 4.28,
+          "probability": 0.89084792137146
+        },
+        {
+          "word": "p",
+          "start": 4.28,
+          "end": 4.48,
+          "probability": 0.4941325783729553
+        },
+        {
+          "word": "ocket",
+          "start": 4.48,
+          "end": 4.58,
+          "probability": 0.3650501072406769
+        },
+        {
+          "word": " 3",
+          "start": 4.58,
+          "end": 4.88,
+          "probability": 0.5497462749481201
+        },
+        {
+          "word": "丁",
+          "start": 4.88,
+          "end": 5.2,
+          "probability": 0.4124821685254574
+        },
+        {
+          "word": "为",
+          "start": 5.2,
+          "end": 5.36,
+          "probability": 0.1290096640586853
+        },
+        {
+          "word": "了",
+          "start": 5.36,
+          "end": 5.46,
+          "probability": 0.9944093823432922
+        },
+        {
+          "word": "一",
+          "start": 5.46,
+          "end": 5.6,
+          "probability": 0.9919583797454834
+        },
+        {
+          "word": "套",
+          "start": 5.6,
+          "end": 5.7,
+          "probability": 0.9996256828308105
+        },
+        {
+          "word": "口",
+          "start": 5.7,
+          "end": 6.06,
+          "probability": 0.886833906173706
+        },
+        {
+          "word": "锅",
+          "start": 6.06,
+          "end": 6.22,
+          "probability": 0.5264253914356232
+        },
+        {
+          "word": "的",
+          "start": 6.22,
+          "end": 6.44,
+          "probability": 0.979075014591217
+        },
+        {
+          "word": "拍",
+          "start": 6.44,
+          "end": 6.74,
+          "probability": 0.8999556303024292
+        },
+        {
+          "word": "摄",
+          "start": 6.74,
+          "end": 6.82,
+          "probability": 0.7470951974391937
+        },
+        {
+          "word": "方",
+          "start": 6.82,
+          "end": 6.98,
+          "probability": 0.9947251677513123
+        },
+        {
+          "word": "案",
+          "start": 6.98,
+          "end": 7.18,
+          "probability": 0.9988210797309875
+        }
+      ]
+    },
+    {
+      "start": 7.18,
+      "end": 9.96,
+      "text": "有T次系统 有补锅灯 有收音系统",
+      "words": [
+        {
+          "word": "有",
+          "start": 7.18,
+          "end": 7.66,
+          "probability": 0.8518850803375244
+        },
+        {
+          "word": "T",
+          "start": 7.66,
+          "end": 7.88,
+          "probability": 0.6421257853507996
+        },
+        {
+          "word": "次",
+          "start": 7.88,
+          "end": 8.0,
+          "probability": 0.09985791146755219
+        },
+        {
+          "word": "系",
+          "start": 8.0,
+          "end": 8.16,
+          "probability": 0.9939470291137695
+        },
+        {
+          "word": "统",
+          "start": 8.16,
+          "end": 8.32,
+          "probability": 0.9979643523693085
+        },
+        {
+          "word": " 有",
+          "start": 8.32,
+          "end": 8.66,
+          "probability": 0.32868367433547974
+        },
+        {
+          "word": "补",
+          "start": 8.66,
+          "end": 8.84,
+          "probability": 0.7175373584032059
+        },
+        {
+          "word": "锅",
+          "start": 8.84,
+          "end": 8.9,
+          "probability": 0.37367410957813263
+        },
+        {
+          "word": "灯",
+          "start": 8.9,
+          "end": 9.06,
+          "probability": 0.755039632320404
+        },
+        {
+          "word": " 有",
+          "start": 9.06,
+          "end": 9.42,
+          "probability": 0.8473653197288513
+        },
+        {
+          "word": "收",
+          "start": 9.42,
+          "end": 9.58,
+          "probability": 0.5025204420089722
+        },
+        {
+          "word": "音",
+          "start": 9.58,
+          "end": 9.64,
+          "probability": 0.9556099772453308
+        },
+        {
+          "word": "系",
+          "start": 9.64,
+          "end": 9.8,
+          "probability": 0.9992187023162842
+        },
+        {
+          "word": "统",
+          "start": 9.8,
+          "end": 9.96,
+          "probability": 0.9996314942836761
+        }
+      ]
+    },
+    {
+      "start": 9.96,
+      "end": 11.74,
+      "text": "还有稳定的 塞老驾",
+      "words": [
+        {
+          "word": "还有",
+          "start": 9.96,
+          "end": 10.56,
+          "probability": 0.727161705493927
+        },
+        {
+          "word": "稳",
+          "start": 10.56,
+          "end": 10.86,
+          "probability": 0.9592903554439545
+        },
+        {
+          "word": "定",
+          "start": 10.86,
+          "end": 11.0,
+          "probability": 0.9997159838676453
+        },
+        {
+          "word": "的",
+          "start": 11.0,
+          "end": 11.28,
+          "probability": 0.9947624802589417
+        },
+        {
+          "word": " 塞",
+          "start": 11.48,
+          "end": 11.48,
+          "probability": 0.7097157090902328
+        },
+        {
+          "word": "老",
+          "start": 11.48,
+          "end": 11.62,
+          "probability": 0.8198617100715637
+        },
+        {
+          "word": "驾",
+          "start": 11.62,
+          "end": 11.74,
+          "probability": 0.5233050659298897
+        }
+      ]
+    },
+    {
+      "start": 11.74,
+      "end": 13.28,
+      "text": "OK 先看成品",
+      "words": [
+        {
+          "word": "OK",
+          "start": 11.74,
+          "end": 12.24,
+          "probability": 0.11775873601436615
+        },
+        {
+          "word": " 先",
+          "start": 12.6,
+          "end": 12.76,
+          "probability": 0.9925318360328674
+        },
+        {
+          "word": "看",
+          "start": 12.76,
+          "end": 12.92,
+          "probability": 0.9708569645881653
+        },
+        {
+          "word": "成",
+          "start": 12.92,
+          "end": 13.06,
+          "probability": 0.5586164593696594
+        },
+        {
+          "word": "品",
+          "start": 13.06,
+          "end": 13.28,
+          "probability": 0.9943424463272095
+        }
+      ]
+    },
+    {
+      "start": 19.4,
+      "end": 19.98,
+      "text": "想要吗",
+      "words": [
+        {
+          "word": "想",
+          "start": 19.4,
+          "end": 19.72,
+          "probability": 0.8269729614257812
+        },
+        {
+          "word": "要",
+          "start": 19.72,
+          "end": 19.86,
+          "probability": 0.9497444033622742
+        },
+        {
+          "word": "吗",
+          "start": 19.86,
+          "end": 19.98,
+          "probability": 0.4575524926185608
+        }
+      ]
+    }
+  ]
+}

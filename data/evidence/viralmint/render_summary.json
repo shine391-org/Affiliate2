@@ -1,0 +1,37 @@
+{
+  "total_rendered": 3,
+  "usable_count": 3,
+  "verdict": "PASS",
+  "details": {
+    "render_douyin1.mp4": {
+      "source": "douyin_derived_sample1.mp4",
+      "output": "render_douyin1.mp4",
+      "status": "PASS",
+      "resolution": "1080x1920",
+      "aspect_ratio": "9:16",
+      "duration_sec": 20.04,
+      "render_time_sec": 5.753410339355469,
+      "size_bytes": 1374590
+    },
+    "render_douyin2.mp4": {
+      "source": "douyin_derived_sample2.mp4",
+      "output": "render_douyin2.mp4",
+      "status": "PASS",
+      "resolution": "1080x1920",
+      "aspect_ratio": "9:16",
+      "duration_sec": 6.32,
+      "render_time_sec": 2.227604866027832,
+      "size_bytes": 1394336
+    },
+    "render_bilibili1.mp4": {
+      "source": "bilibili_sample1.mp4",
+      "output": "render_bilibili1.mp4",
+      "status": "PASS",
+      "resolution": "1080x1920",
+      "aspect_ratio": "9:16",
+      "duration_sec": 20.0,
+      "render_time_sec": 5.728410959243774,
+      "size_bytes": 1309217
+    }
+  }
+}

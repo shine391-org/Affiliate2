@@ -1,0 +1,2167 @@
+{
+  "total_tested": 5,
+  "usable_count": 5,
+  "verdict": "PASS",
+  "details": {
+    "douyin_derived_sample1.mp4": {
+      "file": "douyin_derived_sample1.mp4",
+      "status": "PASS",
+      "time_sec": 4.273961782455444,
+      "language": "zh",
+      "char_count": 29,
+      "segments_count": 3,
+      "text": "我们可以在配置文件之类的新建 然后设置一个数品 然后取消吧",
+      "segments": [
+        {
+          "start": 5.039999999999998,
+          "end": 8.28,
+          "text": "我们可以在配置文件之类的新建",
+          "words": [
+            {
+              "word": "我们",
+              "start": 5.039999999999998,
+              "end": 5.579999999999999,
+              "probability": 0.09829738736152649
+            },
+            {
+              "word": "可以",
+              "start": 5.579999999999999,
+              "end": 6.12,
+              "probability": 0.8012457489967346
+            },
+            {
+              "word": "在",
+              "start": 6.12,
+              "end": 6.4,
+              "probability": 0.6059615015983582
+            },
+            {
+              "word": "配",
+              "start": 6.4,
+              "end": 6.62,
+              "probability": 0.9589559435844421
+            },
+            {
+              "word": "置",
+              "start": 6.62,
+              "end": 6.88,
+              "probability": 0.9922980666160583
+            },
+            {
+              "word": "文",
+              "start": 6.88,
+              "end": 7.1,
+              "probability": 0.9130979180335999
+            },
+            {
+              "word": "件",
+              "start": 7.1,
+              "end": 7.3,
+              "probability": 0.9966629147529602
+            },
+            {
+              "word": "之",
+              "start": 7.3,
+              "end": 7.58,
+              "probability": 0.12165368348360062
+            },
+            {
+              "word": "类",
+              "start": 7.58,
+              "end": 7.68,
+              "probability": 0.9515132308006287
+            },
+            {
+              "word": "的",
+              "start": 7.68,
+              "end": 7.88,
+              "probability": 0.22061468660831451
+            },
+            {
+              "word": "新",
+              "start": 7.88,
+              "end": 8.0,
+              "probability": 0.7200746536254883
+            },
+            {
+              "word": "建",
+              "start": 8.0,
+              "end": 8.28,
+              "probability": 0.5495626330375671
+            }
+          ]
+        },
+        {
+          "start": 9.18,
+          "end": 15.1,
+          "text": "然后设置一个数品",
+          "words": [
+            {
+              "word": "然后",
+              "start": 9.18,
+              "end": 9.72,
+              "probability": 0.8923673033714294
+            },
+            {
+              "word": "设",
+              "start": 9.72,
+              "end": 9.96,
+              "probability": 0.8558232486248016
+            },
+            {
+              "word": "置",
+              "start": 9.96,
+              "end": 10.14,
+              "probability": 0.9944135546684265
+            },
+            {
+              "word": "一个",
+              "start": 10.14,
+              "end": 10.4,
+              "probability": 0.8367481827735901
+            },
+            {
+              "word": "数",
+              "start": 10.4,
+              "end": 10.7,
+              "probability": 0.5284796953201294
+            },
+            {
+              "word": "品",
+              "start": 10.7,
+              "end": 15.1,
+              "probability": 0.4104612171649933
+            }
+          ]
+        },
+        {
+          "start": 22.6,
+          "end": 24.98,
+          "text": "然后取消吧",
+          "words": [
+            {
+              "word": "然后",
+              "start": 22.6,
+              "end": 23.14,
+              "probability": 0.8383532762527466
+            },
+            {
+              "word": "取",
+              "start": 23.14,
+              "end": 23.68,
+              "probability": 0.3427336513996124
+            },
+            {
+              "word": "消",
+              "start": 23.68,
+              "end": 24.72,
+              "probability": 0.37910935282707214
+            },
+            {
+              "word": "吧",
+              "start": 24.72,
+              "end": 24.98,
+              "probability": 0.8126596808433533
+            }
+          ]
+        }
+      ]
+    },
+    "douyin_derived_sample2.mp4": {
+      "file": "douyin_derived_sample2.mp4",
+      "status": "PASS",
+      "time_sec": 3.878077268600464,
+      "language": "zh",
+      "char_count": 86,
+      "segments_count": 7,
+      "text": "真正看完 超有用的 对 进行我花了一点点小小的时间 给pocket 3丁为了一套口锅的拍摄方案 有T次系统 有补锅灯 有收音系统 还有稳定的 塞老驾 OK 先看成品 想要吗",
+      "segments": [
+        {
+          "start": 0.0,
+          "end": 1.32,
+          "text": "真正看完 超有用的",
+          "words": [
+            {
+              "word": "真",
+              "start": 0.0,
+              "end": 0.06,
+              "probability": 0.06232593208551407
+            },
+            {
+              "word": "正",
+              "start": 0.06,
+              "end": 0.16,
+              "probability": 0.7870545983314514
+            },
+            {
+              "word": "看",
+              "start": 0.16,
+              "end": 0.28,
+              "probability": 0.8909529447555542
+            },
+            {
+              "word": "完",
+              "start": 0.28,
+              "end": 0.4,
+              "probability": 0.8201638460159302
+            },
+            {
+              "word": " 超",
+              "start": 0.66,
+              "end": 0.88,
+              "probability": 0.9873682856559753
+            },
+            {
+              "word": "有",
+              "start": 0.88,
+              "end": 1.02,
+              "probability": 0.8260682225227356
+            },
+            {
+              "word": "用",
+              "start": 1.02,
+              "end": 1.14,
+              "probability": 0.9662091732025146
+            },
+            {
+              "word": "的",
+              "start": 1.14,
+              "end": 1.32,
+              "probability": 0.9415422081947327
+            }
+          ]
+        },
+        {
+          "start": 1.32,
+          "end": 3.8,
+          "text": "对 进行我花了一点点小小的时间",
+          "words": [
+            {
+              "word": "对",
+              "start": 1.32,
+              "end": 1.62,
+              "probability": 0.6393592357635498
+            },
+            {
+              "word": " 进",
+              "start": 1.9,
+              "end": 2.14,
+              "probability": 0.8009304404258728
+            },
+            {
+              "word": "行",
+              "start": 2.14,
+              "end": 2.26,
+              "probability": 0.34279865026474
+            },
+            {
+              "word": "我",
+              "start": 2.26,
+              "end": 2.44,
+              "probability": 0.9433816075325012
+            },
+            {
+              "word": "花",
+              "start": 2.44,
+              "end": 2.64,
+              "probability": 0.9546285271644592
+            },
+            {
+              "word": "了",
+              "start": 2.64,
+              "end": 2.74,
+              "probability": 0.9962627291679382
+            },
+            {
+              "word": "一点",
+              "start": 2.74,
+              "end": 2.88,
+              "probability": 0.9899773597717285
+            },
+            {
+              "word": "点",
+              "start": 2.88,
+              "end": 3.04,
+              "probability": 0.9886171221733093
+            },
+            {
+              "word": "小",
+              "start": 3.04,
+              "end": 3.28,
+              "probability": 0.9629318714141846
+            },
+            {
+              "word": "小",
+              "start": 3.28,
+              "end": 3.42,
+              "probability": 0.9509273171424866
+            },
+            {
+              "word": "的",
+              "start": 3.42,
+              "end": 3.52,
+              "probability": 0.9873936176300049
+            },
+            {
+              "word": "时间",
+              "start": 3.52,
+              "end": 3.8,
+              "probability": 0.9969469904899597
+            }
+          ]
+        },
+        {
+          "start": 3.8,
+          "end": 7.18,
+          "text": "给pocket 3丁为了一套口锅的拍摄方案",
+          "words": [
+            {
+              "word": "给",
+              "start": 3.8,
+              "end": 4.28,
+              "probability": 0.89084792137146
+            },
+            {
+              "word": "p",
+              "start": 4.28,
+              "end": 4.48,
+              "probability": 0.4941325783729553
+            },
+            {
+              "word": "ocket",
+              "start": 4.48,
+              "end": 4.58,
+              "probability": 0.3650501072406769
+            },
+            {
+              "word": " 3",
+              "start": 4.58,
+              "end": 4.88,
+              "probability": 0.5497462749481201
+            },
+            {
+              "word": "丁",
+              "start": 4.88,
+              "end": 5.2,
+              "probability": 0.4124821685254574
+            },
+            {
+              "word": "为",
+              "start": 5.2,
+              "end": 5.36,
+              "probability": 0.1290096640586853
+            },
+            {
+              "word": "了",
+              "start": 5.36,
+              "end": 5.46,
+              "probability": 0.9944093823432922
+            },
+            {
+              "word": "一",
+              "start": 5.46,
+              "end": 5.6,
+              "probability": 0.9919583797454834
+            },
+            {
+              "word": "套",
+              "start": 5.6,
+              "end": 5.7,
+              "probability": 0.9996256828308105
+            },
+            {
+              "word": "口",
+              "start": 5.7,
+              "end": 6.06,
+              "probability": 0.886833906173706
+            },
+            {
+              "word": "锅",
+              "start": 6.06,
+              "end": 6.22,
+              "probability": 0.5264253914356232
+            },
+            {
+              "word": "的",
+              "start": 6.22,
+              "end": 6.44,
+              "probability": 0.979075014591217
+            },
+            {
+              "word": "拍",
+              "start": 6.44,
+              "end": 6.74,
+              "probability": 0.8999556303024292
+            },
+            {
+              "word": "摄",
+              "start": 6.74,
+              "end": 6.82,
+              "probability": 0.7470951974391937
+            },
+            {
+              "word": "方",
+              "start": 6.82,
+              "end": 6.98,
+              "probability": 0.9947251677513123
+            },
+            {
+              "word": "案",
+              "start": 6.98,
+              "end": 7.18,
+              "probability": 0.9988210797309875
+            }
+          ]
+        },
+        {
+          "start": 7.18,
+          "end": 9.96,
+          "text": "有T次系统 有补锅灯 有收音系统",
+          "words": [
+            {
+              "word": "有",
+              "start": 7.18,
+              "end": 7.66,
+              "probability": 0.8518850803375244
+            },
+            {
+              "word": "T",
+              "start": 7.66,
+              "end": 7.88,
+              "probability": 0.6421257853507996
+            },
+            {
+              "word": "次",
+              "start": 7.88,
+              "end": 8.0,
+              "probability": 0.09985791146755219
+            },
+            {
+              "word": "系",
+              "start": 8.0,
+              "end": 8.16,
+              "probability": 0.9939470291137695
+            },
+            {
+              "word": "统",
+              "start": 8.16,
+              "end": 8.32,
+              "probability": 0.9979643523693085
+            },
+            {
+              "word": " 有",
+              "start": 8.32,
+              "end": 8.66,
+              "probability": 0.32868367433547974
+            },
+            {
+              "word": "补",
+              "start": 8.66,
+              "end": 8.84,
+              "probability": 0.7175373584032059
+            },
+            {
+              "word": "锅",
+              "start": 8.84,
+              "end": 8.9,
+              "probability": 0.37367410957813263
+            },
+            {
+              "word": "灯",
+              "start": 8.9,
+              "end": 9.06,
+              "probability": 0.755039632320404
+            },
+            {
+              "word": " 有",
+              "start": 9.06,
+              "end": 9.42,
+              "probability": 0.8473653197288513
+            },
+            {
+              "word": "收",
+              "start": 9.42,
+              "end": 9.58,
+              "probability": 0.5025204420089722
+            },
+            {
+              "word": "音",
+              "start": 9.58,
+              "end": 9.64,
+              "probability": 0.9556099772453308
+            },
+            {
+              "word": "系",
+              "start": 9.64,
+              "end": 9.8,
+              "probability": 0.9992187023162842
+            },
+            {
+              "word": "统",
+              "start": 9.8,
+              "end": 9.96,
+              "probability": 0.9996314942836761
+            }
+          ]
+        },
+        {
+          "start": 9.96,
+          "end": 11.74,
+          "text": "还有稳定的 塞老驾",
+          "words": [
+            {
+              "word": "还有",
+              "start": 9.96,
+              "end": 10.56,
+              "probability": 0.727161705493927
+            },
+            {
+              "word": "稳",
+              "start": 10.56,
+              "end": 10.86,
+              "probability": 0.9592903554439545
+            },
+            {
+              "word": "定",
+              "start": 10.86,
+              "end": 11.0,
+              "probability": 0.9997159838676453
+            },
+            {
+              "word": "的",
+              "start": 11.0,
+              "end": 11.28,
+              "probability": 0.9947624802589417
+            },
+            {
+              "word": " 塞",
+              "start": 11.48,
+              "end": 11.48,
+              "probability": 0.7097157090902328
+            },
+            {
+              "word": "老",
+              "start": 11.48,
+              "end": 11.62,
+              "probability": 0.8198617100715637
+            },
+            {
+              "word": "驾",
+              "start": 11.62,
+              "end": 11.74,
+              "probability": 0.5233050659298897
+            }
+          ]
+        },
+        {
+          "start": 11.74,
+          "end": 13.28,
+          "text": "OK 先看成品",
+          "words": [
+            {
+              "word": "OK",
+              "start": 11.74,
+              "end": 12.24,
+              "probability": 0.11775873601436615
+            },
+            {
+              "word": " 先",
+              "start": 12.6,
+              "end": 12.76,
+              "probability": 0.9925318360328674
+            },
+            {
+              "word": "看",
+              "start": 12.76,
+              "end": 12.92,
+              "probability": 0.9708569645881653
+            },
+            {
+              "word": "成",
+              "start": 12.92,
+              "end": 13.06,
+              "probability": 0.5586164593696594
+            },
+            {
+              "word": "品",
+              "start": 13.06,
+              "end": 13.28,
+              "probability": 0.9943424463272095
+            }
+          ]
+        },
+        {
+          "start": 19.4,
+          "end": 19.98,
+          "text": "想要吗",
+          "words": [
+            {
+              "word": "想",
+              "start": 19.4,
+              "end": 19.72,
+              "probability": 0.8269729614257812
+            },
+            {
+              "word": "要",
+              "start": 19.72,
+              "end": 19.86,
+              "probability": 0.9497444033622742
+            },
+            {
+              "word": "吗",
+              "start": 19.86,
+              "end": 19.98,
+              "probability": 0.4575524926185608
+            }
+          ]
+        }
+      ]
+    },
+    "douyin_derived_sample3.mp4": {
+      "file": "douyin_derived_sample3.mp4",
+      "status": "PASS",
+      "time_sec": 3.241791248321533,
+      "language": "zh",
+      "char_count": 40,
+      "segments_count": 6,
+      "text": "一次再多情练 忽温三手路换灯不灭 好歧视谁的 转型感动伤天气 等我太遗憾 这人间",
+      "segments": [
+        {
+          "start": 0.0,
+          "end": 1.7,
+          "text": "一次再多情练",
+          "words": [
+            {
+              "word": "一次",
+              "start": 0.0,
+              "end": 0.28,
+              "probability": 0.14379271864891052
+            },
+            {
+              "word": "再",
+              "start": 0.28,
+              "end": 0.72,
+              "probability": 0.9780574440956116
+            },
+            {
+              "word": "多",
+              "start": 0.72,
+              "end": 0.96,
+              "probability": 0.9056461453437805
+            },
+            {
+              "word": "情",
+              "start": 0.96,
+              "end": 1.18,
+              "probability": 0.19050990045070648
+            },
+            {
+              "word": "练",
+              "start": 1.18,
+              "end": 1.7,
+              "probability": 0.3414333909749985
+            }
+          ]
+        },
+        {
+          "start": 2.72,
+          "end": 5.54,
+          "text": "忽温三手路换灯不灭",
+          "words": [
+            {
+              "word": "忽",
+              "start": 2.5100000000000002,
+              "end": 2.86,
+              "probability": 0.535941157490015
+            },
+            {
+              "word": "温",
+              "start": 2.86,
+              "end": 3.04,
+              "probability": 0.6684783548116684
+            },
+            {
+              "word": "三",
+              "start": 3.04,
+              "end": 3.28,
+              "probability": 0.7540929913520813
+            },
+            {
+              "word": "手",
+              "start": 3.28,
+              "end": 3.52,
+              "probability": 0.21818044781684875
+            },
+            {
+              "word": "路",
+              "start": 3.52,
+              "end": 4.06,
+              "probability": 0.583586573600769
+            },
+            {
+              "word": "换",
+              "start": 4.06,
+              "end": 4.46,
+              "probability": 0.706240713596344
+            },
+            {
+              "word": "灯",
+              "start": 4.46,
+              "end": 4.72,
+              "probability": 0.6875774562358856
+            },
+            {
+              "word": "不",
+              "start": 4.72,
+              "end": 4.98,
+              "probability": 0.8168249726295471
+            },
+            {
+              "word": "灭",
+              "start": 4.98,
+              "end": 5.54,
+              "probability": 0.810007631778717
+            }
+          ]
+        },
+        {
+          "start": 6.48,
+          "end": 7.84,
+          "text": "好歧视谁的",
+          "words": [
+            {
+              "word": "好",
+              "start": 6.23,
+              "end": 6.58,
+              "probability": 0.8322073817253113
+            },
+            {
+              "word": "歧",
+              "start": 6.58,
+              "end": 6.8,
+              "probability": 0.5651509612798691
+            },
+            {
+              "word": "视",
+              "start": 6.8,
+              "end": 6.98,
+              "probability": 0.976220965385437
+            },
+            {
+              "word": "谁",
+              "start": 6.98,
+              "end": 7.42,
+              "probability": 0.9766033887863159
+            },
+            {
+              "word": "的",
+              "start": 7.42,
+              "end": 7.84,
+              "probability": 0.9325394034385681
+            }
+          ]
+        },
+        {
+          "start": 7.84,
+          "end": 10.3,
+          "text": "转型感动伤天气",
+          "words": [
+            {
+              "word": "转",
+              "start": 7.84,
+              "end": 8.22,
+              "probability": 0.34623338654637337
+            },
+            {
+              "word": "型",
+              "start": 8.22,
+              "end": 8.4,
+              "probability": 0.6110459566116333
+            },
+            {
+              "word": "感",
+              "start": 8.4,
+              "end": 8.66,
+              "probability": 0.9879162311553955
+            },
+            {
+              "word": "动",
+              "start": 8.66,
+              "end": 9.02,
+              "probability": 0.635402500629425
+            },
+            {
+              "word": "伤",
+              "start": 9.02,
+              "end": 9.48,
+              "probability": 0.735546812415123
+            },
+            {
+              "word": "天",
+              "start": 9.48,
+              "end": 9.86,
+              "probability": 0.7527632117271423
+            },
+            {
+              "word": "气",
+              "start": 9.86,
+              "end": 10.3,
+              "probability": 0.7140740156173706
+            }
+          ]
+        },
+        {
+          "start": 10.3,
+          "end": 11.76,
+          "text": "等我太遗憾",
+          "words": [
+            {
+              "word": "等",
+              "start": 10.3,
+              "end": 10.56,
+              "probability": 0.690234363079071
+            },
+            {
+              "word": "我",
+              "start": 10.56,
+              "end": 10.96,
+              "probability": 0.8851236701011658
+            },
+            {
+              "word": "太",
+              "start": 10.96,
+              "end": 11.26,
+              "probability": 0.48673221468925476
+            },
+            {
+              "word": "遗",
+              "start": 11.26,
+              "end": 11.62,
+              "probability": 0.8785580396652222
+            },
+            {
+              "word": "憾",
+              "start": 11.62,
+              "end": 11.76,
+              "probability": 0.4316242188215256
+            }
+          ]
+        },
+        {
+          "start": 11.76,
+          "end": 12.78,
+          "text": "这人间",
+          "words": [
+            {
+              "word": "这",
+              "start": 11.76,
+              "end": 12.18,
+              "probability": 0.17492800951004028
+            },
+            {
+              "word": "人",
+              "start": 12.18,
+              "end": 12.44,
+              "probability": 0.8985437750816345
+            },
+            {
+              "word": "间",
+              "start": 12.44,
+              "end": 12.78,
+              "probability": 0.6448465585708618
+            }
+          ]
+        }
+      ]
+    },
+    "bilibili_sample1.mp4": {
+      "file": "bilibili_sample1.mp4",
+      "status": "PASS",
+      "time_sec": 4.273909091949463,
+      "language": "zh",
+      "char_count": 114,
+      "segments_count": 8,
+      "text": "这些词你可能都听说过 但是我问大家 你真的能准确地说出其中每个概念的确切含意吗 这期视频我们不准那些续头八脑的商业概念 我们就从最底层的工程式脚出发 一个一个的把这些概念拆开 揉碎 讲清楚 看完这期视频相信你对AI的理解绝对会上",
+      "segments": [
+        {
+          "start": 1.4399999999999997,
+          "end": 3.02,
+          "text": "这些词你可能都听说过",
+          "words": [
+            {
+              "word": "这",
+              "start": 1.4399999999999997,
+              "end": 1.76,
+              "probability": 0.5496445298194885
+            },
+            {
+              "word": "些",
+              "start": 1.76,
+              "end": 1.86,
+              "probability": 0.8723381757736206
+            },
+            {
+              "word": "词",
+              "start": 1.86,
+              "end": 2.02,
+              "probability": 0.9194273948669434
+            },
+            {
+              "word": "你",
+              "start": 2.02,
+              "end": 2.14,
+              "probability": 0.9331908226013184
+            },
+            {
+              "word": "可能",
+              "start": 2.14,
+              "end": 2.3,
+              "probability": 0.9920777678489685
+            },
+            {
+              "word": "都",
+              "start": 2.3,
+              "end": 2.46,
+              "probability": 0.9801104068756104
+            },
+            {
+              "word": "听",
+              "start": 2.46,
+              "end": 2.64,
+              "probability": 0.9926388263702393
+            },
+            {
+              "word": "说",
+              "start": 2.64,
+              "end": 2.84,
+              "probability": 0.9889580011367798
+            },
+            {
+              "word": "过",
+              "start": 2.84,
+              "end": 3.02,
+              "probability": 0.9973646998405457
+            }
+          ]
+        },
+        {
+          "start": 3.02,
+          "end": 4.2,
+          "text": "但是我问大家",
+          "words": [
+            {
+              "word": "但是",
+              "start": 3.02,
+              "end": 3.32,
+              "probability": 0.7433175444602966
+            },
+            {
+              "word": "我",
+              "start": 3.32,
+              "end": 3.76,
+              "probability": 0.8224554657936096
+            },
+            {
+              "word": "问",
+              "start": 3.76,
+              "end": 3.9,
+              "probability": 0.9978410005569458
+            },
+            {
+              "word": "大家",
+              "start": 3.9,
+              "end": 4.2,
+              "probability": 0.9688771367073059
+            }
+          ]
+        },
+        {
+          "start": 4.2,
+          "end": 7.6,
+          "text": "你真的能准确地说出其中每个概念的确切含意吗",
+          "words": [
+            {
+              "word": "你",
+              "start": 4.2,
+              "end": 4.58,
+              "probability": 0.8946089148521423
+            },
+            {
+              "word": "真的",
+              "start": 4.58,
+              "end": 4.9,
+              "probability": 0.987007200717926
+            },
+            {
+              "word": "能",
+              "start": 4.9,
+              "end": 5.1,
+              "probability": 0.9953252077102661
+            },
+            {
+              "word": "准",
+              "start": 5.1,
+              "end": 5.3,
+              "probability": 0.9986481070518494
+            },
+            {
+              "word": "确",
+              "start": 5.3,
+              "end": 5.54,
+              "probability": 0.9981953501701355
+            },
+            {
+              "word": "地",
+              "start": 5.54,
+              "end": 5.66,
+              "probability": 0.5527156591415405
+            },
+            {
+              "word": "说",
+              "start": 5.66,
+              "end": 5.78,
+              "probability": 0.9755414724349976
+            },
+            {
+              "word": "出",
+              "start": 5.78,
+              "end": 5.9,
+              "probability": 0.9711101651191711
+            },
+            {
+              "word": "其",
+              "start": 5.9,
+              "end": 6.08,
+              "probability": 0.9941044449806213
+            },
+            {
+              "word": "中",
+              "start": 6.08,
+              "end": 6.18,
+              "probability": 0.9994080066680908
+            },
+            {
+              "word": "每",
+              "start": 6.18,
+              "end": 6.4,
+              "probability": 0.9640348553657532
+            },
+            {
+              "word": "个",
+              "start": 6.4,
+              "end": 6.58,
+              "probability": 0.45716097950935364
+            },
+            {
+              "word": "概",
+              "start": 6.58,
+              "end": 6.7,
+              "probability": 0.9995070695877075
+            },
+            {
+              "word": "念",
+              "start": 6.7,
+              "end": 6.8,
+              "probability": 0.9998319149017334
+            },
+            {
+              "word": "的",
+              "start": 6.8,
+              "end": 6.9,
+              "probability": 0.9853113889694214
+            },
+            {
+              "word": "确",
+              "start": 6.9,
+              "end": 7.06,
+              "probability": 0.9091286659240723
+            },
+            {
+              "word": "切",
+              "start": 7.06,
+              "end": 7.18,
+              "probability": 0.960603654384613
+            },
+            {
+              "word": "含",
+              "start": 7.18,
+              "end": 7.36,
+              "probability": 0.8134508728981018
+            },
+            {
+              "word": "意",
+              "start": 7.36,
+              "end": 7.46,
+              "probability": 0.49810636043548584
+            },
+            {
+              "word": "吗",
+              "start": 7.46,
+              "end": 7.6,
+              "probability": 0.9865826964378357
+            }
+          ]
+        },
+        {
+          "start": 8.16,
+          "end": 10.96,
+          "text": "这期视频我们不准那些续头八脑的商业概念",
+          "words": [
+            {
+              "word": "这",
+              "start": 8.16,
+              "end": 8.48,
+              "probability": 0.7174124121665955
+            },
+            {
+              "word": "期",
+              "start": 8.48,
+              "end": 8.58,
+              "probability": 0.9276714324951172
+            },
+            {
+              "word": "视",
+              "start": 8.58,
+              "end": 8.72,
+              "probability": 0.997350811958313
+            },
+            {
+              "word": "频",
+              "start": 8.72,
+              "end": 8.82,
+              "probability": 0.998759388923645
+            },
+            {
+              "word": "我们",
+              "start": 8.82,
+              "end": 9.22,
+              "probability": 0.9521028399467468
+            },
+            {
+              "word": "不",
+              "start": 9.22,
+              "end": 9.48,
+              "probability": 0.9165189266204834
+            },
+            {
+              "word": "准",
+              "start": 9.48,
+              "end": 9.6,
+              "probability": 0.6310352683067322
+            },
+            {
+              "word": "那",
+              "start": 9.6,
+              "end": 9.76,
+              "probability": 0.9498534798622131
+            },
+            {
+              "word": "些",
+              "start": 9.76,
+              "end": 9.86,
+              "probability": 0.9959239959716797
+            },
+            {
+              "word": "续",
+              "start": 9.86,
+              "end": 9.96,
+              "probability": 0.8090853095054626
+            },
+            {
+              "word": "头",
+              "start": 9.96,
+              "end": 10.06,
+              "probability": 0.5051383376121521
+            },
+            {
+              "word": "八",
+              "start": 10.06,
+              "end": 10.22,
+              "probability": 0.18001264333724976
+            },
+            {
+              "word": "脑",
+              "start": 10.22,
+              "end": 10.34,
+              "probability": 0.990227997303009
+            },
+            {
+              "word": "的",
+              "start": 10.34,
+              "end": 10.46,
+              "probability": 0.957982063293457
+            },
+            {
+              "word": "商",
+              "start": 10.46,
+              "end": 10.58,
+              "probability": 0.9718309640884399
+            },
+            {
+              "word": "业",
+              "start": 10.58,
+              "end": 10.68,
+              "probability": 0.9845919609069824
+            },
+            {
+              "word": "概",
+              "start": 10.68,
+              "end": 10.8,
+              "probability": 0.9995079040527344
+            },
+            {
+              "word": "念",
+              "start": 10.8,
+              "end": 10.96,
+              "probability": 0.9999475479125977
+            }
+          ]
+        },
+        {
+          "start": 10.96,
+          "end": 13.32,
+          "text": "我们就从最底层的工程式脚出发",
+          "words": [
+            {
+              "word": "我们",
+              "start": 10.96,
+              "end": 11.4,
+              "probability": 0.9939262270927429
+            },
+            {
+              "word": "就",
+              "start": 11.4,
+              "end": 11.54,
+              "probability": 0.9877877831459045
+            },
+            {
+              "word": "从",
+              "start": 11.54,
+              "end": 11.74,
+              "probability": 0.9981971383094788
+            },
+            {
+              "word": "最",
+              "start": 11.74,
+              "end": 11.94,
+              "probability": 0.9934806823730469
+            },
+            {
+              "word": "底",
+              "start": 11.94,
+              "end": 12.12,
+              "probability": 0.9935130476951599
+            },
+            {
+              "word": "层",
+              "start": 12.12,
+              "end": 12.32,
+              "probability": 0.9627466797828674
+            },
+            {
+              "word": "的",
+              "start": 12.32,
+              "end": 12.46,
+              "probability": 0.9864647388458252
+            },
+            {
+              "word": "工",
+              "start": 12.46,
+              "end": 12.6,
+              "probability": 0.9540913701057434
+            },
+            {
+              "word": "程",
+              "start": 12.6,
+              "end": 12.76,
+              "probability": 0.9973906874656677
+            },
+            {
+              "word": "式",
+              "start": 12.76,
+              "end": 12.94,
+              "probability": 0.8555946946144104
+            },
+            {
+              "word": "脚",
+              "start": 12.94,
+              "end": 13.04,
+              "probability": 0.5787053182721138
+            },
+            {
+              "word": "出",
+              "start": 13.04,
+              "end": 13.14,
+              "probability": 0.7110353112220764
+            },
+            {
+              "word": "发",
+              "start": 13.14,
+              "end": 13.32,
+              "probability": 0.9963033199310303
+            }
+          ]
+        },
+        {
+          "start": 13.32,
+          "end": 15.18,
+          "text": "一个一个的把这些概念拆开",
+          "words": [
+            {
+              "word": "一个",
+              "start": 13.32,
+              "end": 13.64,
+              "probability": 0.8691307902336121
+            },
+            {
+              "word": "一个",
+              "start": 13.64,
+              "end": 14.02,
+              "probability": 0.9799537658691406
+            },
+            {
+              "word": "的",
+              "start": 14.02,
+              "end": 14.14,
+              "probability": 0.8035714626312256
+            },
+            {
+              "word": "把",
+              "start": 14.14,
+              "end": 14.24,
+              "probability": 0.9928168058395386
+            },
+            {
+              "word": "这",
+              "start": 14.24,
+              "end": 14.4,
+              "probability": 0.9814985394477844
+            },
+            {
+              "word": "些",
+              "start": 14.4,
+              "end": 14.48,
+              "probability": 0.9450867772102356
+            },
+            {
+              "word": "概",
+              "start": 14.48,
+              "end": 14.6,
+              "probability": 0.9988155364990234
+            },
+            {
+              "word": "念",
+              "start": 14.6,
+              "end": 14.76,
+              "probability": 0.9999949932098389
+            },
+            {
+              "word": "拆",
+              "start": 14.76,
+              "end": 14.96,
+              "probability": 0.9866765737533569
+            },
+            {
+              "word": "开",
+              "start": 14.96,
+              "end": 15.18,
+              "probability": 0.9990246295928955
+            }
+          ]
+        },
+        {
+          "start": 15.18,
+          "end": 16.5,
+          "text": "揉碎 讲清楚",
+          "words": [
+            {
+              "word": "揉",
+              "start": 15.18,
+              "end": 15.5,
+              "probability": 0.4885624796152115
+            },
+            {
+              "word": "碎",
+              "start": 15.5,
+              "end": 15.76,
+              "probability": 0.9581132233142853
+            },
+            {
+              "word": " 讲",
+              "start": 16.0,
+              "end": 16.14,
+              "probability": 0.9681259393692017
+            },
+            {
+              "word": "清楚",
+              "start": 16.14,
+              "end": 16.5,
+              "probability": 0.9982205033302307
+            }
+          ]
+        },
+        {
+          "start": 16.5,
+          "end": 19.98,
+          "text": "看完这期视频相信你对AI的理解绝对会上",
+          "words": [
+            {
+              "word": "看",
+              "start": 16.5,
+              "end": 17.06,
+              "probability": 0.9437500238418579
+            },
+            {
+              "word": "完",
+              "start": 17.06,
+              "end": 17.22,
+              "probability": 0.9914413690567017
+            },
+            {
+              "word": "这",
+              "start": 17.22,
+              "end": 17.42,
+              "probability": 0.9980530738830566
+            },
+            {
+              "word": "期",
+              "start": 17.42,
+              "end": 17.56,
+              "probability": 0.9966386556625366
+            },
+            {
+              "word": "视",
+              "start": 17.56,
+              "end": 17.7,
+              "probability": 0.9970661997795105
+            },
+            {
+              "word": "频",
+              "start": 17.7,
+              "end": 17.9,
+              "probability": 0.999729573726654
+            },
+            {
+              "word": "相信",
+              "start": 17.9,
+              "end": 18.36,
+              "probability": 0.9171779155731201
+            },
+            {
+              "word": "你",
+              "start": 18.36,
+              "end": 18.54,
+              "probability": 0.9339567422866821
+            },
+            {
+              "word": "对",
+              "start": 18.54,
+              "end": 18.66,
+              "probability": 0.9931435585021973
+            },
+            {
+              "word": "AI",
+              "start": 18.66,
+              "end": 18.9,
+              "probability": 0.8411030173301697
+            },
+            {
+              "word": "的",
+              "start": 18.9,
+              "end": 19.08,
+              "probability": 0.9680445194244385
+            },
+            {
+              "word": "理",
+              "start": 19.08,
+              "end": 19.18,
+              "probability": 0.9914320707321167
+            },
+            {
+              "word": "解",
+              "start": 19.18,
+              "end": 19.36,
+              "probability": 0.9972571730613708
+            },
+            {
+              "word": "绝",
+              "start": 19.36,
+              "end": 19.58,
+              "probability": 0.9568766057491302
+            },
+            {
+              "word": "对",
+              "start": 19.58,
+              "end": 19.7,
+              "probability": 0.9892873764038086
+            },
+            {
+              "word": "会",
+              "start": 19.7,
+              "end": 19.88,
+              "probability": 0.9871408939361572
+            },
+            {
+              "word": "上",
+              "start": 19.88,
+              "end": 19.98,
+              "probability": 0.7932444214820862
+            }
+          ]
+        }
+      ]
+    },
+    "bilibili_sample2.mp4": {
+      "file": "bilibili_sample2.mp4",
+      "status": "PASS",
+      "time_sec": 4.499657392501831,
+      "language": "zh",
+      "char_count": 110,
+      "segments_count": 11,
+      "text": "共同教程 相信大家在之前 或多或少的看过拍损产出的系列视频 有无恐不入的网络爬崇 有目不瞎接的网站开发 也有审视多式的数据分析 和一劳永逸的自动化办公 等等一系列的作品 为了制作这套课程 我不仅翻变了 毕战几乎所有的课程",
+      "segments": [
+        {
+          "start": 0.0,
+          "end": 0.5,
+          "text": "共同教程",
+          "words": [
+            {
+              "word": "共",
+              "start": 0.0,
+              "end": 0.0,
+              "probability": 0.010497170500457287
+            },
+            {
+              "word": "同",
+              "start": 0.0,
+              "end": 0.12,
+              "probability": 0.9255315661430359
+            },
+            {
+              "word": "教",
+              "start": 0.12,
+              "end": 0.3,
+              "probability": 0.9197755455970764
+            },
+            {
+              "word": "程",
+              "start": 0.3,
+              "end": 0.5,
+              "probability": 0.9583927989006042
+            }
+          ]
+        },
+        {
+          "start": 0.5,
+          "end": 2.08,
+          "text": "相信大家在之前",
+          "words": [
+            {
+              "word": "相信",
+              "start": 0.5,
+              "end": 1.1,
+              "probability": 0.9708802103996277
+            },
+            {
+              "word": "大家",
+              "start": 1.1,
+              "end": 1.48,
+              "probability": 0.9803668260574341
+            },
+            {
+              "word": "在",
+              "start": 1.48,
+              "end": 1.66,
+              "probability": 0.9848035573959351
+            },
+            {
+              "word": "之前",
+              "start": 1.66,
+              "end": 2.08,
+              "probability": 0.9991287589073181
+            }
+          ]
+        },
+        {
+          "start": 2.08,
+          "end": 5.12,
+          "text": "或多或少的看过拍损产出的系列视频",
+          "words": [
+            {
+              "word": "或",
+              "start": 2.08,
+              "end": 2.5,
+              "probability": 0.694309413433075
+            },
+            {
+              "word": "多",
+              "start": 2.5,
+              "end": 2.68,
+              "probability": 0.9837026596069336
+            },
+            {
+              "word": "或",
+              "start": 2.68,
+              "end": 2.86,
+              "probability": 0.9958668947219849
+            },
+            {
+              "word": "少",
+              "start": 2.86,
+              "end": 3.06,
+              "probability": 0.9958196878433228
+            },
+            {
+              "word": "的",
+              "start": 3.06,
+              "end": 3.22,
+              "probability": 0.8580964207649231
+            },
+            {
+              "word": "看",
+              "start": 3.22,
+              "end": 3.4,
+              "probability": 0.978733241558075
+            },
+            {
+              "word": "过",
+              "start": 3.4,
+              "end": 3.56,
+              "probability": 0.734463095664978
+            },
+            {
+              "word": "拍",
+              "start": 3.56,
+              "end": 3.74,
+              "probability": 0.7081859707832336
+            },
+            {
+              "word": "损",
+              "start": 3.74,
+              "end": 3.9,
+              "probability": 0.8792748749256134
+            },
+            {
+              "word": "产",
+              "start": 3.9,
+              "end": 4.14,
+              "probability": 0.7971291840076447
+            },
+            {
+              "word": "出",
+              "start": 4.14,
+              "end": 4.36,
+              "probability": 0.431211918592453
+            },
+            {
+              "word": "的",
+              "start": 4.36,
+              "end": 4.5,
+              "probability": 0.9979384541511536
+            },
+            {
+              "word": "系",
+              "start": 4.5,
+              "end": 4.64,
+              "probability": 0.9707190990447998
+            },
+            {
+              "word": "列",
+              "start": 4.64,
+              "end": 4.76,
+              "probability": 0.9996139407157898
+            },
+            {
+              "word": "视",
+              "start": 4.76,
+              "end": 4.92,
+              "probability": 0.9258714318275452
+            },
+            {
+              "word": "频",
+              "start": 4.92,
+              "end": 5.12,
+              "probability": 0.9990371465682983
+            }
+          ]
+        },
+        {
+          "start": 5.12,
+          "end": 7.2,
+          "text": "有无恐不入的网络爬崇",
+          "words": [
+            {
+              "word": "有",
+              "start": 5.12,
+              "end": 5.56,
+              "probability": 0.9530933499336243
+            },
+            {
+              "word": "无",
+              "start": 5.56,
+              "end": 5.76,
+              "probability": 0.8817928433418274
+            },
+            {
+              "word": "恐",
+              "start": 5.76,
+              "end": 5.94,
+              "probability": 0.6443594694137573
+            },
+            {
+              "word": "不",
+              "start": 5.94,
+              "end": 6.18,
+              "probability": 0.5142951607704163
+            },
+            {
+              "word": "入",
+              "start": 6.18,
+              "end": 6.3,
+              "probability": 0.5872930288314819
+            },
+            {
+              "word": "的",
+              "start": 6.3,
+              "end": 6.48,
+              "probability": 0.9923484325408936
+            },
+            {
+              "word": "网",
+              "start": 6.48,
+              "end": 6.6,
+              "probability": 0.9889737367630005
+            },
+            {
+              "word": "络",
+              "start": 6.6,
+              "end": 6.76,
+              "probability": 0.9528361558914185
+            },
+            {
+              "word": "爬",
+              "start": 6.76,
+              "end": 6.96,
+              "probability": 0.9505105316638947
+            },
+            {
+              "word": "崇",
+              "start": 6.96,
+              "end": 7.2,
+              "probability": 0.6289921402931213
+            }
+          ]
+        },
+        {
+          "start": 7.2,
+          "end": 9.38,
+          "text": "有目不瞎接的网站开发",
+          "words": [
+            {
+              "word": "有",
+              "start": 7.2,
+              "end": 7.7,
+              "probability": 0.9449720978736877
+            },
+            {
+              "word": "目",
+              "start": 7.7,
+              "end": 7.9,
+              "probability": 0.41763418912887573
+            },
+            {
+              "word": "不",
+              "start": 7.9,
+              "end": 8.12,
+              "probability": 0.9734574556350708
+            },
+            {
+              "word": "瞎",
+              "start": 8.12,
+              "end": 8.24,
+              "probability": 0.5246360898017883
+            },
+            {
+              "word": "接",
+              "start": 8.24,
+              "end": 8.46,
+              "probability": 0.9510282874107361
+            },
+            {
+              "word": "的",
+              "start": 8.46,
+              "end": 8.6,
+              "probability": 0.7598857879638672
+            },
+            {
+              "word": "网",
+              "start": 8.6,
+              "end": 8.72,
+              "probability": 0.9878464639186859
+            },
+            {
+              "word": "站",
+              "start": 8.72,
+              "end": 8.9,
+              "probability": 0.9907100200653076
+            },
+            {
+              "word": "开",
+              "start": 8.9,
+              "end": 9.12,
+              "probability": 0.9956901669502258
+            },
+            {
+              "word": "发",
+              "start": 9.12,
+              "end": 9.38,
+              "probability": 0.9915067553520203
+            }
+          ]
+        },
+        {
+          "start": 9.38,
+          "end": 11.6,
+          "text": "也有审视多式的数据分析",
+          "words": [
+            {
+              "word": "也",
+              "start": 9.38,
+              "end": 9.7,
+              "probability": 0.9622947573661804
+            },
+            {
+              "word": "有",
+              "start": 9.7,
+              "end": 9.94,
+              "probability": 0.8810485005378723
+            },
+            {
+              "word": "审",
+              "start": 9.94,
+              "end": 10.16,
+              "probability": 0.8668482899665833
+            },
+            {
+              "word": "视",
+              "start": 10.16,
+              "end": 10.32,
+              "probability": 0.30702248215675354
+            },
+            {
+              "word": "多",
+              "start": 10.32,
+              "end": 10.48,
+              "probability": 0.8959473371505737
+            },
+            {
+              "word": "式",
+              "start": 10.48,
+              "end": 10.66,
+              "probability": 0.6543314456939697
+            },
+            {
+              "word": "的",
+              "start": 10.66,
+              "end": 10.8,
+              "probability": 0.9865777492523193
+            },
+            {
+              "word": "数",
+              "start": 10.8,
+              "end": 11.0,
+              "probability": 0.9787017107009888
+            },
+            {
+              "word": "据",
+              "start": 11.0,
+              "end": 11.12,
+              "probability": 0.9967088997364044
+            },
+            {
+              "word": "分",
+              "start": 11.12,
+              "end": 11.32,
+              "probability": 0.9868943691253662
+            },
+            {
+              "word": "析",
+              "start": 11.32,
+              "end": 11.6,
+              "probability": 0.9806371629238129
+            }
+          ]
+        },
+        {
+          "start": 11.6,
+          "end": 13.76,
+          "text": "和一劳永逸的自动化办公",
+          "words": [
+            {
+              "word": "和",
+              "start": 11.6,
+              "end": 11.9,
+              "probability": 0.9889709949493408
+            },
+            {
+              "word": "一",
+              "start": 11.9,
+              "end": 12.14,
+              "probability": 0.36095982789993286
+            },
+            {
+              "word": "劳",
+              "start": 12.14,
+              "end": 12.3,
+              "probability": 0.7107357531785965
+            },
+            {
+              "word": "永",
+              "start": 12.3,
+              "end": 12.5,
+              "probability": 0.4782125651836395
+            },
+            {
+              "word": "逸",
+              "start": 12.5,
+              "end": 12.72,
+              "probability": 0.6547365337610245
+            },
+            {
+              "word": "的",
+              "start": 12.72,
+              "end": 12.88,
+              "probability": 0.9902172684669495
+            },
+            {
+              "word": "自",
+              "start": 12.88,
+              "end": 13.06,
+              "probability": 0.9840445518493652
+            },
+            {
+              "word": "动",
+              "start": 13.06,
+              "end": 13.18,
+              "probability": 0.9910227060317993
+            },
+            {
+              "word": "化",
+              "start": 13.18,
+              "end": 13.4,
+              "probability": 0.8340858817100525
+            },
+            {
+              "word": "办",
+              "start": 13.4,
+              "end": 13.52,
+              "probability": 0.646937906742096
+            },
+            {
+              "word": "公",
+              "start": 13.52,
+              "end": 13.76,
+              "probability": 0.975618839263916
+            }
+          ]
+        },
+        {
+          "start": 13.76,
+          "end": 15.3,
+          "text": "等等一系列的作品",
+          "words": [
+            {
+              "word": "等等",
+              "start": 13.76,
+              "end": 14.18,
+              "probability": 0.966277539730072
+            },
+            {
+              "word": "一",
+              "start": 14.18,
+              "end": 14.46,
+              "probability": 0.9119101762771606
+            },
+            {
+              "word": "系",
+              "start": 14.46,
+              "end": 14.68,
+              "probability": 0.9998084902763367
+            },
+            {
+              "word": "列",
+              "start": 14.68,
+              "end": 14.82,
+              "probability": 0.9995606541633606
+            },
+            {
+              "word": "的",
+              "start": 14.82,
+              "end": 14.94,
+              "probability": 0.9952700734138489
+            },
+            {
+              "word": "作",
+              "start": 14.94,
+              "end": 15.1,
+              "probability": 0.9867289662361145
+            },
+            {
+              "word": "品",
+              "start": 15.1,
+              "end": 15.3,
+              "probability": 0.9996242523193359
+            }
+          ]
+        },
+        {
+          "start": 15.3,
+          "end": 16.86,
+          "text": "为了制作这套课程",
+          "words": [
+            {
+              "word": "为",
+              "start": 15.3,
+              "end": 15.62,
+              "probability": 0.9915158748626709
+            },
+            {
+              "word": "了",
+              "start": 15.62,
+              "end": 15.78,
+              "probability": 0.9996040463447571
+            },
+            {
+              "word": "制",
+              "start": 15.78,
+              "end": 15.94,
+              "probability": 0.9793368577957153
+            },
+            {
+              "word": "作",
+              "start": 15.94,
+              "end": 16.12,
+              "probability": 0.9865298271179199
+            },
+            {
+              "word": "这",
+              "start": 16.12,
+              "end": 16.3,
+              "probability": 0.9944631457328796
+            },
+            {
+              "word": "套",
+              "start": 16.3,
+              "end": 16.5,
+              "probability": 0.9898971319198608
+            },
+            {
+              "word": "课",
+              "start": 16.5,
+              "end": 16.68,
+              "probability": 0.7569559514522552
+            },
+            {
+              "word": "程",
+              "start": 16.68,
+              "end": 16.86,
+              "probability": 0.9260898232460022
+            }
+          ]
+        },
+        {
+          "start": 16.86,
+          "end": 18.1,
+          "text": "我不仅翻变了",
+          "words": [
+            {
+              "word": "我不",
+              "start": 16.86,
+              "end": 17.3,
+              "probability": 0.7512183785438538
+            },
+            {
+              "word": "仅",
+              "start": 17.3,
+              "end": 17.5,
+              "probability": 0.9925950467586517
+            },
+            {
+              "word": "翻",
+              "start": 17.5,
+              "end": 17.74,
+              "probability": 0.949766993522644
+            },
+            {
+              "word": "变",
+              "start": 17.74,
+              "end": 17.96,
+              "probability": 0.7151447534561157
+            },
+            {
+              "word": "了",
+              "start": 17.96,
+              "end": 18.1,
+              "probability": 0.9953573346138
+            }
+          ]
+        },
+        {
+          "start": 18.1,
+          "end": 19.74,
+          "text": "毕战几乎所有的课程",
+          "words": [
+            {
+              "word": "毕",
+              "start": 18.1,
+              "end": 18.26,
+              "probability": 0.570853129029274
+            },
+            {
+              "word": "战",
+              "start": 18.26,
+              "end": 18.44,
+              "probability": 0.8253788650035858
+            },
+            {
+              "word": "几",
+              "start": 18.44,
+              "end": 18.68,
+              "probability": 0.8933436870574951
+            },
+            {
+              "word": "乎",
+              "start": 18.68,
+              "end": 18.84,
+              "probability": 0.9952092468738556
+            },
+            {
+              "word": "所有",
+              "start": 18.84,
+              "end": 19.14,
+              "probability": 0.9993019104003906
+            },
+            {
+              "word": "的",
+              "start": 19.14,
+              "end": 19.36,
+              "probability": 0.9948687553405762
+            },
+            {
+              "word": "课",
+              "start": 19.36,
+              "end": 19.52,
+              "probability": 0.9717298448085785
+            },
+            {
+              "word": "程",
+              "start": 19.52,
+              "end": 19.74,
+              "probability": 0.9997809529304504
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

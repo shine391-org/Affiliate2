@@ -1,0 +1,126 @@
+{
+  "total_inputs": 6,
+  "successful_inputs": 5,
+  "verdict": "PASS",
+  "details": {
+    "douyin_derived_sample1.mp4": {
+      "status": "PASS",
+      "has_video": true,
+      "has_audio": true,
+      "duration": 25.033333,
+      "size_bytes": 1622292,
+      "streams": [
+        {
+          "codec_name": "h264",
+          "codec_type": "video",
+          "width": 1920,
+          "height": 1080,
+          "duration": "25.033333"
+        },
+        {
+          "codec_name": "aac",
+          "codec_type": "audio",
+          "duration": "25.000000"
+        }
+      ]
+    },
+    "douyin_derived_sample2.mp4": {
+      "status": "PASS",
+      "has_video": true,
+      "has_audio": true,
+      "duration": 20.0,
+      "size_bytes": 1206123,
+      "streams": [
+        {
+          "codec_name": "h264",
+          "codec_type": "video",
+          "width": 1920,
+          "height": 1080,
+          "duration": "6.320000"
+        },
+        {
+          "codec_name": "aac",
+          "codec_type": "audio",
+          "duration": "20.000000"
+        }
+      ]
+    },
+    "douyin_derived_sample3.mp4": {
+      "status": "FAIL",
+      "has_video": false,
+      "has_audio": true,
+      "duration": 20.0,
+      "size_bytes": 333446,
+      "streams": [
+        {
+          "codec_name": "aac",
+          "codec_type": "audio",
+          "duration": "20.000000"
+        }
+      ]
+    },
+    "bilibili_sample1.mp4": {
+      "status": "PASS",
+      "has_video": true,
+      "has_audio": true,
+      "duration": 20.0,
+      "size_bytes": 2554366,
+      "streams": [
+        {
+          "codec_name": "h264",
+          "codec_type": "video",
+          "width": 1920,
+          "height": 1080,
+          "duration": "20.000000"
+        },
+        {
+          "codec_name": "aac",
+          "codec_type": "audio",
+          "duration": "20.000000"
+        }
+      ]
+    },
+    "bilibili_sample2.mp4": {
+      "status": "PASS",
+      "has_video": true,
+      "has_audio": true,
+      "duration": 20.0,
+      "size_bytes": 2877264,
+      "streams": [
+        {
+          "codec_name": "h264",
+          "codec_type": "video",
+          "width": 1920,
+          "height": 1080,
+          "duration": "20.000000"
+        },
+        {
+          "codec_name": "aac",
+          "codec_type": "audio",
+          "duration": "20.000000"
+        }
+      ]
+    },
+    "local_sample1.mp4": {
+      "status": "PASS",
+      "has_video": true,
+      "has_audio": true,
+      "duration": 15.0,
+      "size_bytes": 171834,
+      "streams": [
+        {
+          "codec_name": "h264",
+          "codec_type": "video",
+          "width": 1080,
+          "height": 1920,
+          "duration": "15.000000"
+        },
+        {
+          "codec_name": "aac",
+          "codec_type": "audio",
+          "duration": "15.000000"
+        }
+      ]
+    }
+  }
+}

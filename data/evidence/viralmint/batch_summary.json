@@ -1,0 +1,26 @@
+{
+  "batch_size": 3,
+  "success_count": 3,
+  "total_time_sec": 5.365383863449097,
+  "verdict": "PASS",
+  "results": [
+    {
+      "file": "douyin_derived_sample1.mp4",
+      "status": "PASS",
+      "time_sec": 5.365383863449097,
+      "text_length": 29
+    },
+    {
+      "file": "douyin_derived_sample2.mp4",
+      "status": "PASS",
+      "time_sec": 4.903343915939331,
+      "text_length": 86
+    },
+    {
+      "file": "douyin_derived_sample3.mp4",
+      "status": "PASS",
+      "time_sec": 4.763369083404541,
+      "text_length": 40
+    }
+  ]
+}

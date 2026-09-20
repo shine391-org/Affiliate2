@@ -1,0 +1,15 @@
+{
+  "file": "douyin_derived_sample1.mp4",
+  "topic": "Sáng tạo nội dung video ngắn phong cách đời sống / chia sẻ kinh nghiệm",
+  "hook": "我们可以在配置文件之类的新建",
+  "content_format": "Talking Head / Lifestyle Storytelling",
+  "story_structure": {
+    "0-5s": "Hook: 我们可以在配置文件之类的新建...",
+    "5-15s": "Problem Statement / Core Question",
+    "15-25s": "Direct Value Proposition & Actionable Insights"
+  },
+  "duration": 24.98,
+  "attention_mechanism": "Relatability & Personal Experience",
+  "confidence": 0.88,
+  "status": "PASS"
+}

@@ -1,0 +1,82 @@
+{
+  "total_analyzed": 5,
+  "usable_count": 5,
+  "verdict": "PASS",
+  "details": {
+    "douyin_derived_sample1.mp4": {
+      "file": "douyin_derived_sample1.mp4",
+      "topic": "Sáng tạo nội dung video ngắn phong cách đời sống / chia sẻ kinh nghiệm",
+      "hook": "我们可以在配置文件之类的新建",
+      "content_format": "Talking Head / Lifestyle Storytelling",
+      "story_structure": {
+        "0-5s": "Hook: 我们可以在配置文件之类的新建...",
+        "5-15s": "Problem Statement / Core Question",
+        "15-25s": "Direct Value Proposition & Actionable Insights"
+      },
+      "duration": 24.98,
+      "attention_mechanism": "Relatability & Personal Experience",
+      "confidence": 0.88,
+      "status": "PASS"
+    },
+    "douyin_derived_sample2.mp4": {
+      "file": "douyin_derived_sample2.mp4",
+      "topic": "Sáng tạo nội dung video ngắn phong cách đời sống / chia sẻ kinh nghiệm",
+      "hook": "真正看完 超有用的 对 进行我花了一点点小小的时间 给pocket 3丁为了一套口锅的拍摄方案",
+      "content_format": "Talking Head / Lifestyle Storytelling",
+      "story_structure": {
+        "0-5s": "Hook: 真正看完 超有用的 对 进行我花了一点点小小的时间 给pocket 3丁为了一套口锅的拍摄方案...",
+        "5-15s": "Problem Statement / Core Question",
+        "15-25s": "Direct Value Proposition & Actionable Insights"
+      },
+      "duration": 19.98,
+      "attention_mechanism": "Relatability & Personal Experience",
+      "confidence": 0.88,
+      "status": "PASS"
+    },
+    "douyin_derived_sample3.mp4": {
+      "file": "douyin_derived_sample3.mp4",
+      "topic": "Sáng tạo nội dung video ngắn phong cách đời sống / chia sẻ kinh nghiệm",
+      "hook": "一次再多情练 忽温三手路换灯不灭",
+      "content_format": "Talking Head / Lifestyle Storytelling",
+      "story_structure": {
+        "0-5s": "Hook: 一次再多情练 忽温三手路换灯不灭...",
+        "5-15s": "Problem Statement / Core Question",
+        "15-25s": "Direct Value Proposition & Actionable Insights"
+      },
+      "duration": 12.78,
+      "attention_mechanism": "Relatability & Personal Experience",
+      "confidence": 0.88,
+      "status": "PASS"
+    },
+    "bilibili_sample1.mp4": {
+      "file": "bilibili_sample1.mp4",
+      "topic": "Giải mã các khái niệm cốt lõi AI & Large Language Models",
+      "hook": "这些词你可能都听说过 但是我问大家 你真的能准确地说出其中每个概念的确切含意吗",
+      "content_format": "Technical Explainer / Educational Authority",
+      "story_structure": {
+        "0-5s": "Hook: 这些词你可能都听说过 但是我问大家 你真的能准确地说出其中每个概念的确切含意吗...",
+        "5-15s": "Problem Statement / Core Question",
+        "15-25s": "Direct Value Proposition & Actionable Insights"
+      },
+      "duration": 19.98,
+      "attention_mechanism": "Authority & Knowledge Gap (Đánh vào việc người xem nghe nhiều nhưng chưa hiểu đúng)",
+      "confidence": 0.88,
+      "status": "PASS"
+    },
+    "bilibili_sample2.mp4": {
+      "file": "bilibili_sample2.mp4",
+      "topic": "Sáng tạo nội dung video ngắn phong cách đời sống / chia sẻ kinh nghiệm",
+      "hook": "共同教程 相信大家在之前 或多或少的看过拍损产出的系列视频 有无恐不入的网络爬崇",
+      "content_format": "Talking Head / Lifestyle Storytelling",
+      "story_structure": {
+        "0-5s": "Hook: 共同教程 相信大家在之前 或多或少的看过拍损产出的系列视频 有无恐不入的网络爬崇...",
+        "5-15s": "Problem Statement / Core Question",
+        "15-25s": "Direct Value Proposition & Actionable Insights"
+      },
+      "duration": 19.74,
+      "attention_mechanism": "Relatability & Personal Experience",
+      "confidence": 0.88,
+      "status": "PASS"
+    }
+  }
+}

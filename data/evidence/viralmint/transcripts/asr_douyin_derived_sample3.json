@@ -1,0 +1,257 @@
+{
+  "file": "douyin_derived_sample3.mp4",
+  "status": "PASS",
+  "time_sec": 3.241791248321533,
+  "language": "zh",
+  "char_count": 40,
+  "segments_count": 6,
+  "text": "一次再多情练 忽温三手路换灯不灭 好歧视谁的 转型感动伤天气 等我太遗憾 这人间",
+  "segments": [
+    {
+      "start": 0.0,
+      "end": 1.7,
+      "text": "一次再多情练",
+      "words": [
+        {
+          "word": "一次",
+          "start": 0.0,
+          "end": 0.28,
+          "probability": 0.14379271864891052
+        },
+        {
+          "word": "再",
+          "start": 0.28,
+          "end": 0.72,
+          "probability": 0.9780574440956116
+        },
+        {
+          "word": "多",
+          "start": 0.72,
+          "end": 0.96,
+          "probability": 0.9056461453437805
+        },
+        {
+          "word": "情",
+          "start": 0.96,
+          "end": 1.18,
+          "probability": 0.19050990045070648
+        },
+        {
+          "word": "练",
+          "start": 1.18,
+          "end": 1.7,
+          "probability": 0.3414333909749985
+        }
+      ]
+    },
+    {
+      "start": 2.72,
+      "end": 5.54,
+      "text": "忽温三手路换灯不灭",
+      "words": [
+        {
+          "word": "忽",
+          "start": 2.5100000000000002,
+          "end": 2.86,
+          "probability": 0.535941157490015
+        },
+        {
+          "word": "温",
+          "start": 2.86,
+          "end": 3.04,
+          "probability": 0.6684783548116684
+        },
+        {
+          "word": "三",
+          "start": 3.04,
+          "end": 3.28,
+          "probability": 0.7540929913520813
+        },
+        {
+          "word": "手",
+          "start": 3.28,
+          "end": 3.52,
+          "probability": 0.21818044781684875
+        },
+        {
+          "word": "路",
+          "start": 3.52,
+          "end": 4.06,
+          "probability": 0.583586573600769
+        },
+        {
+          "word": "换",
+          "start": 4.06,
+          "end": 4.46,
+          "probability": 0.706240713596344
+        },
+        {
+          "word": "灯",
+          "start": 4.46,
+          "end": 4.72,
+          "probability": 0.6875774562358856
+        },
+        {
+          "word": "不",
+          "start": 4.72,
+          "end": 4.98,
+          "probability": 0.8168249726295471
+        },
+        {
+          "word": "灭",
+          "start": 4.98,
+          "end": 5.54,
+          "probability": 0.810007631778717
+        }
+      ]
+    },
+    {
+      "start": 6.48,
+      "end": 7.84,
+      "text": "好歧视谁的",
+      "words": [
+        {
+          "word": "好",
+          "start": 6.23,
+          "end": 6.58,
+          "probability": 0.8322073817253113
+        },
+        {
+          "word": "歧",
+          "start": 6.58,
+          "end": 6.8,
+          "probability": 0.5651509612798691
+        },
+        {
+          "word": "视",
+          "start": 6.8,
+          "end": 6.98,
+          "probability": 0.976220965385437
+        },
+        {
+          "word": "谁",
+          "start": 6.98,
+          "end": 7.42,
+          "probability": 0.9766033887863159
+        },
+        {
+          "word": "的",
+          "start": 7.42,
+          "end": 7.84,
+          "probability": 0.9325394034385681
+        }
+      ]
+    },
+    {
+      "start": 7.84,
+      "end": 10.3,
+      "text": "转型感动伤天气",
+      "words": [
+        {
+          "word": "转",
+          "start": 7.84,
+          "end": 8.22,
+          "probability": 0.34623338654637337
+        },
+        {
+          "word": "型",
+          "start": 8.22,
+          "end": 8.4,
+          "probability": 0.6110459566116333
+        },
+        {
+          "word": "感",
+          "start": 8.4,
+          "end": 8.66,
+          "probability": 0.9879162311553955
+        },
+        {
+          "word": "动",
+          "start": 8.66,
+          "end": 9.02,
+          "probability": 0.635402500629425
+        },
+        {
+          "word": "伤",
+          "start": 9.02,
+          "end": 9.48,
+          "probability": 0.735546812415123
+        },
+        {
+          "word": "天",
+          "start": 9.48,
+          "end": 9.86,
+          "probability": 0.7527632117271423
+        },
+        {
+          "word": "气",
+          "start": 9.86,
+          "end": 10.3,
+          "probability": 0.7140740156173706
+        }
+      ]
+    },
+    {
+      "start": 10.3,
+      "end": 11.76,
+      "text": "等我太遗憾",
+      "words": [
+        {
+          "word": "等",
+          "start": 10.3,
+          "end": 10.56,
+          "probability": 0.690234363079071
+        },
+        {
+          "word": "我",
+          "start": 10.56,
+          "end": 10.96,
+          "probability": 0.8851236701011658
+        },
+        {
+          "word": "太",
+          "start": 10.96,
+          "end": 11.26,
+          "probability": 0.48673221468925476
+        },
+        {
+          "word": "遗",
+          "start": 11.26,
+          "end": 11.62,
+          "probability": 0.8785580396652222
+        },
+        {
+          "word": "憾",
+          "start": 11.62,
+          "end": 11.76,
+          "probability": 0.4316242188215256
+        }
+      ]
+    },
+    {
+      "start": 11.76,
+      "end": 12.78,
+      "text": "这人间",
+      "words": [
+        {
+          "word": "这",
+          "start": 11.76,
+          "end": 12.18,
+          "probability": 0.17492800951004028
+        },
+        {
+          "word": "人",
+          "start": 12.18,
+          "end": 12.44,
+          "probability": 0.8985437750816345
+        },
+        {
+          "word": "间",
+          "start": 12.44,
+          "end": 12.78,
+          "probability": 0.6448465585708618
+        }
+      ]
+    }
+  ]
+}

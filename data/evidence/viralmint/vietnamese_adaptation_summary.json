@@ -1,0 +1,42 @@
+{
+  "total_scripts": 5,
+  "usable_count": 5,
+  "verdict": "PASS",
+  "details": {
+    "bilibili_sample1.mp4": {
+      "file": "bilibili_sample1.mp4",
+      "status": "PASS",
+      "word_count": 93,
+      "has_untranslated_chinese": false,
+      "script": "Những thuật ngữ AI này chắc hẳn bạn đã nghe qua rất nhiều lần. Nhưng nếu được hỏi, liệu bạn có thực sự giải thích chính xác được bản chất từng khái niệm? Trong video hôm nay, chúng ta sẽ không nói về những lý thuyết kinh doanh sáo rỗng, mà sẽ đi thẳng từ góc nhìn kỹ thuật cốt lõi: mổ xẻ từng khái niệm từ LLM, Token cho đến Agent Skill. Xem hết video này, chắc chắn tư duy của bạn về AI sẽ được nâng lên một tầm cao mới!"
+    },
+    "bilibili_sample2.mp4": {
+      "file": "bilibili_sample2.mp4",
+      "status": "PASS",
+      "word_count": 73,
+      "has_untranslated_chinese": false,
+      "script": "Học lập trình Python thực ra không hề phức tạp như bạn nghĩ. Chỉ cần nắm vững ba tư duy then chốt: hiểu rõ cấu trúc dữ liệu, rèn luyện kỹ năng giải quyết vấn đề và bắt tay ngay vào làm các project thực tế. Hãy bỏ qua những cuốn giáo trình khô khan dài hàng trăm trang, bắt đầu với 15 phút mỗi ngày cùng lộ trình tinh gọn này nhé!"
+    },
+    "douyin_derived_sample1.mp4": {
+      "file": "douyin_derived_sample1.mp4",
+      "status": "PASS",
+      "word_count": 71,
+      "has_untranslated_chinese": false,
+      "script": "Làm thế nào để chỉ trong 5 phút bạn có thể tự tin làm chủ một buổi livestream màn hình dọc chuẩn nét? Rất nhiều bạn gặp lỗi mờ hình, lag giật hoặc âm thanh bị vang. Bí quyết nằm ở ba bước cài đặt khung hình 9:16 và bitrate chuẩn ngay trên thiết bị này. Lưu lại ngay video để áp dụng cho phiên live tiếp theo của bạn nhé!"
+    },
+    "douyin_derived_sample2.mp4": {
+      "file": "douyin_derived_sample2.mp4",
+      "status": "PASS",
+      "word_count": 63,
+      "has_untranslated_chinese": false,
+      "script": "Nếu bạn đang làm video ngắn nói chuyện trước ống kính, đây chắc chắn là món đồ không thể thiếu trên bàn làm việc! Thiết bị gimbal mini này không chỉ giữ góc quay siêu ổn định, mà còn tự động bám theo gương mặt cực nhạy. Dù bạn ngồi quay cả ngày cũng không lo bị lệch khung hình hay rung lắc."
+    },
+    "douyin_derived_sample3.mp4": {
+      "file": "douyin_derived_sample3.mp4",
+      "status": "PASS",
+      "word_count": 61,
+      "has_untranslated_chinese": false,
+      "script": "Muốn giữ chân người xem ngay từ 3 giây đầu tiên của một video dọc? Đừng bắt đầu bằng lời chào rườm rà. Hãy đi thẳng vào câu hỏi kích thích sự tò mò hoặc một sự thật gây bất ngờ. Đó chính là công thức hook triệu view mà các nhà sáng tạo hàng đầu đang áp dụng mỗi ngày."
+    }
+  }
+}

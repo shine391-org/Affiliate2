@@ -1,0 +1,32 @@
+{
+  "verdict": "PASS",
+  "hardware_info": {
+    "cpu_cores": 20,
+    "total_ram_gb": 63.9,
+    "os": "win32"
+  },
+  "single_video": {
+    "source": "douyin_derived_sample1.mp4",
+    "pipeline_time_sec": 11.07,
+    "ram_start_mb": 314.6,
+    "ram_peak_mb": 314.7,
+    "output_size_mb": 4.28
+  },
+  "batch_3_videos": {
+    "sources": [
+      "douyin_derived_sample1.mp4",
+      "douyin_derived_sample2.mp4",
+      "douyin_derived_sample3.mp4"
+    ],
+    "batch_time_sec": 5.69,
+    "ram_peak_mb": 313.8
+  },
+  "storage": {
+    "total_evidence_size_mb": 7.0
+  },
+  "bottlenecks": [
+    "Whisper ASR CPU compute bound during initial audio decode",
+    "FFmpeg vertical scaling and x264 re-encoding bound by CPU preset",
+    "Network latency for Edge TTS (Microsoft CDN response time)"
+  ]
+}

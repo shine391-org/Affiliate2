@@ -31,3 +31,15 @@ playwright-report/
 # OS
 .DS_Store
 Thumbs.db
+
+# Databases & runtime local state
+*.db
+*.db-shm
+*.db-wal
+*.log
+douyin_cookies.txt
+.env
+
+# Upstream cloned tools
+tools/
+

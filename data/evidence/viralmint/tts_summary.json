@@ -1,0 +1,62 @@
+{
+  "total_samples": 5,
+  "usable_count": 5,
+  "verdict": "PASS",
+  "details": {
+    "bilibili_sample1.mp4": {
+      "file": "bilibili_sample1.mp4",
+      "status": "PASS",
+      "engine": "Microsoft Edge TTS",
+      "voice": "vi-VN-HoaiMyNeural",
+      "is_local": false,
+      "latency_sec": 5.8,
+      "duration_sec": 26.64,
+      "file_size_bytes": 159840,
+      "audio_path": "data\\evidence\\viralmint\\tts\\tts_bilibili_sample1.mp3"
+    },
+    "bilibili_sample2.mp4": {
+      "file": "bilibili_sample2.mp4",
+      "status": "PASS",
+      "engine": "Microsoft Edge TTS",
+      "voice": "vi-VN-NamMinhNeural",
+      "is_local": false,
+      "latency_sec": 5.8,
+      "duration_sec": 19.032,
+      "file_size_bytes": 114192,
+      "audio_path": "data\\evidence\\viralmint\\tts\\tts_bilibili_sample2.mp3"
+    },
+    "douyin_derived_sample1.mp4": {
+      "file": "douyin_derived_sample1.mp4",
+      "status": "PASS",
+      "engine": "Microsoft Edge TTS",
+      "voice": "vi-VN-HoaiMyNeural",
+      "is_local": false,
+      "latency_sec": 5.8,
+      "duration_sec": 20.04,
+      "file_size_bytes": 120240,
+      "audio_path": "data\\evidence\\viralmint\\tts\\tts_douyin_derived_sample1.mp3"
+    },
+    "douyin_derived_sample2.mp4": {
+      "file": "douyin_derived_sample2.mp4",
+      "status": "PASS",
+      "engine": "Microsoft Edge TTS",
+      "voice": "vi-VN-NamMinhNeural",
+      "is_local": false,
+      "latency_sec": 5.8,
+      "duration_sec": 17.112,
+      "file_size_bytes": 102672,
+      "audio_path": "data\\evidence\\viralmint\\tts\\tts_douyin_derived_sample2.mp3"
+    },
+    "douyin_derived_sample3.mp4": {
+      "file": "douyin_derived_sample3.mp4",
+      "status": "PASS",
+      "engine": "Microsoft Edge TTS",
+      "voice": "vi-VN-HoaiMyNeural",
+      "is_local": false,
+      "latency_sec": 5.8,
+      "duration_sec": 17.256,
+      "file_size_bytes": 103536,
+      "audio_path": "data\\evidence\\viralmint\\tts\\tts_douyin_derived_sample3.mp3"
+    }
+  }
+}

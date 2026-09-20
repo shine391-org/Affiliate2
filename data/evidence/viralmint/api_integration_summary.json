@@ -1,0 +1,24 @@
+{
+  "verdict": "PASS",
+  "endpoints_tested": {
+    "GET /api/jobs": 200,
+    "GET /api/config/voices/edge_tts": 200,
+    "POST /api/downloaded/import": 200,
+    "GET /api/downloaded/{video_id}": 200
+  },
+  "import_response": {
+    "id": "fb842117-6825-42c5-bffd-bae3c5cdd4dc",
+    "job_id": "1b32e345-c730-494d-97c1-13ddb6745618",
+    "title": "Test Local Import",
+    "file_size_mb": 0.16,
+    "message": "Video imported. Transcription and analysis starting..."
+  },
+  "job_inspected": {
+    "job_id": "1b32e345-c730-494d-97c1-13ddb6745618",
+    "status": "pending"
+  },
+  "retrieved_result": {
+    "video_id": "fb842117-6825-42c5-bffd-bae3c5cdd4dc",
+    "retrieved": true
+  }
+}

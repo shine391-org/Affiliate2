@@ -1,0 +1,21 @@
+{
+  "total_tested": 2,
+  "usable_count": 1,
+  "verdict": "PARTIAL",
+  "details": {
+    "douyin_derived_sample1.mp4": {
+      "file": "douyin_derived_sample1.mp4",
+      "status": "FAIL",
+      "mixed_path": ".",
+      "mix_time_sec": 1.7593979835510254,
+      "size_bytes": 4096
+    },
+    "bilibili_sample1.mp4": {
+      "file": "bilibili_sample1.mp4",
+      "status": "PASS",
+      "mixed_path": "data\\evidence\\viralmint\\audio_mix\\mixed_bilibili_sample1.mp3",
+      "mix_time_sec": 1.8824615478515625,
+      "size_bytes": 534284
+    }
+  }
+}
