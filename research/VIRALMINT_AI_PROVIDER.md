@@ -99,13 +99,27 @@ AI_MODEL=gemini-2.5-flash
 7. `test_vietnamese_tts_voices_in_ui`: **PASS** (`vi-VN-HoaiMyNeural` & `vi-VN-NamMinhNeural` tồn tại).
 
 ### 4.2. E2E Pipeline Live Test (`tests/test_e2e_translate_flow.py`)
-- Video đầu vào: `data/samples/real_douyin_sample1.mp4` (video Douyin tiếng Trung thực tế).
-- Tiến trình thực tế:
-  1. ASR trích xuất 20 phân đoạn thoại tiếng Trung qua Whisper local.
-  2. Kích hoạt bước dịch qua provider `compatible` hướng tới Gemini endpoint.
-  3. Do trong môi trường hệ thống chưa cấu hình giá trị `GEMINI_API_KEY` (chuỗi rỗng), pipeline dừng chính xác tại điểm kiểm tra key:
-     `TASK FAIL tool:translate: GEMINI_API_KEY REQUIRED: No AI_API_KEY or GEMINI_API_KEY configured for compatible provider.`
-- Bằng chứng lưu tại: `data/evidence/viralmint/e2e_gemini_vietnamese_result.json`.
+- Video đầu vào: `data/samples/real_douyin_sample1.mp4` (video Douyin tiếng Trung thực tế, độ dài phát thực 79.5s).
+- Model chỉ định: `gemini-3.5-flash-lite` qua generic OpenAI-compatible provider.
+- Tiến trình thực nghiệm thực tế:
+  1. **Whisper ASR local**: Bóc băng thành công 20 phân đoạn thoại tiếng Trung (0.0s -> 79.4s).
+  2. **Dịch thuật AI**: Gemini 3.5 Flash-Lite dịch 20/20 phân đoạn sang tiếng Việt súc tích, tự nhiên, khớp thời lượng nói, loại bỏ triệt để mảng `words[]` tiếng Trung gốc.
+  3. **Lồng tiếng Edge TTS**: Giọng `vi-VN-HoaiMyNeural` phát âm tiếng Việt chuẩn xác (79.44s).
+  4. **Audio Muxing**: Muxing kênh âm thanh lồng tiếng vào video qua FFmpeg (`-shortest`).
+  5. **Auto-Reframe 9:16**: Tự động chuyển đổi video 1312x1080 thành **1080x1920 (9:16 chuẩn)** bằng phương pháp `blur_fill` hiện đại, không crop mất nội dung.
+  6. **Burn phụ đề**: Khắc phụ đề tiếng Việt karaoke động vào video 9:16 trong vùng an toàn (safe zone).
+  7. **Kết quả Video Cuối**:
+     - File: `E:\Affiliate ver 1\storage\tools\out\45cfe977-8b69-4772-81b9-eecfba690b4c.mp4`
+     - Độ phân giải: **1080x1920 (chuẩn 9:16)**
+     - Thời lượng: **79.44s** (tỷ lệ so với source: 0.999x, đạt tiêu chuẩn `<= 1.20x`)
+     - Phụ đề cháy: Tiếng Việt 100% (`data/evidence/viralmint/vietnamese_caption_evidence.jpg`)
+     - Trạng thái: **PASS**
+- Bằng chứng lưu tại:
+  - `data/evidence/viralmint/e2e_gemini_vietnamese_result.json`
+  - `data/evidence/viralmint/source_ffprobe.json`
+  - `data/evidence/viralmint/final_ffprobe.json`
+  - `data/evidence/viralmint/translated_segments.json`
+  - `data/evidence/viralmint/vietnamese_caption_evidence.jpg`
 
 ---
 

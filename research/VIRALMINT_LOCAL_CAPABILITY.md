@@ -120,10 +120,12 @@ Theo đúng quy tắc thực chứng và không suy diễn từ README:
 - **Giao diện Web (Frontend)**: **ĐÃ ĐƯỢC BỔ SUNG**. Đã cập nhật `Translate.jsx` với option `{ code: "vi", name: "Vietnamese" }` và build lại production bundle.
 
 ### 6. Vietnamese full dub có chạy được không?
-- **Trạng thái**: **ĐÃ SẴN SÀNG**.
-  1. Backend đã hỗ trợ generic compatible provider kết nối Gemini / OpenAI / Local LLM.
-  2. Giao diện `Translate.jsx` đã tích hợp 2 giọng Edge-TTS tiếng Việt: `vi-VN-HoaiMyNeural` (nữ) và `vi-VN-NamMinhNeural` (nam).
-  3. Khi có `GEMINI_API_KEY` (hoặc local LLM server), pipeline chạy trơn tru từ ASR tiếng Trung -> Dịch tiếng Việt -> Tạo audio tiếng Việt -> Burn phụ đề -> Mux MP4 9:16 hoàn chỉnh.
+- **Trạng thái**: **PASS (ĐÃ XÁC MINH THỰC NGHIỆM ĐẦY ĐỦ)**.
+  1. Backend hỗ trợ generic compatible provider kết nối `gemini-3.5-flash-lite`.
+  2. Giao diện `Translate.jsx` tích hợp 2 giọng Edge-TTS tiếng Việt: `vi-VN-HoaiMyNeural` (nữ) và `vi-VN-NamMinhNeural` (nam).
+  3. Tự động reframe sang chuẩn dọc 1080x1920 (9:16) bằng `blur_fill` hiện đại.
+  4. Pipeline chạy trơn tru: ASR Whisper tiếng Trung -> Gemini 3.5 Flash-Lite dịch súc tích -> Edge TTS lồng tiếng -> Auto 9:16 reframe -> Burn phụ đề karaoke tiếng Việt -> MP4 hoàn chỉnh (khớp thời lượng 0.999x, không lỗi corrupt).
+  5. Quyết định kiến trúc: **REUSE ViralMint + compatible provider**. Không cần tự build translation module.
 
 ### 7. Cần sửa bao nhiêu để dùng local LLM?
 - **Khối lượng thực hiện**: Đã hoàn thành (~25 dòng code trong `ai_provider.py`, `config.py`, `database.py`, `user_settings.py`).

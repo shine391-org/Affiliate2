@@ -1,14 +1,27 @@
 {
-  "job_id": "373b9d71-4cbc-4f17-bd9a-81a8a7ab65e5",
+  "job_id": "45cfe977-8b69-4772-81b9-eecfba690b4c",
   "provider": "compatible",
   "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
-  "model": "gemini-3.6-flash",
+  "model": "gemini-3.5-flash-lite",
   "target_language": "Vietnamese",
   "mode": "full_dub",
   "voice_id": "vi-VN-HoaiMyNeural",
   "secondary_voice_tested": "vi-VN-NamMinhNeural",
+  "source": {
+    "resolution": "1312x1080",
+    "header_duration": 933.326009,
+    "playable_duration": 79.5
+  },
+  "final_output": {
+    "file": "E:\\Affiliate ver 1\\storage\\tools\\out\\45cfe977-8b69-4772-81b9-eecfba690b4c.mp4",
+    "resolution": "1080x1920",
+    "exact_9x16": true,
+    "duration": 79.436871,
+    "duration_ratio_vs_actual": 0.999,
+    "duration_acceptable": true,
+    "caption_frame_evidence": "data\\evidence\\viralmint\\vietnamese_caption_evidence.jpg"
+  },
   "job_status": "success",
   "error_message": null,
-  "output_file": "E:\\Affiliate ver 1\\storage\\tools\\out\\373b9d71-4cbc-4f17-bd9a-81a8a7ab65e5.mp4",
   "verdict": "PASS"
 }
