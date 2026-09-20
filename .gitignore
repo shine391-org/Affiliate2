@@ -44,4 +44,5 @@ data/*profile*/
 
 # Upstream cloned tools
 tools/
+storage/
 

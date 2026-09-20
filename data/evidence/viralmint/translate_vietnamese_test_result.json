@@ -1,0 +1,9 @@
+{
+  "job_id": "4f334354-f422-4ec9-8834-ca6d94bbcc34",
+  "input_video": "data\\samples\\real_douyin_sample1.mp4",
+  "target_language": "Vietnamese",
+  "mode": "captions_only",
+  "job_status": "failed",
+  "error_message": "No AI provider configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or OPENROUTER_API_KEY in your .env, or configure your provider and key in Settings.",
+  "exact_verdict": "AI PROVIDER REQUIRED"
+}
