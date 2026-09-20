@@ -14,7 +14,7 @@ Dự án tạm thời dừng tại **Phase 1: OSS Validation** và **CHƯA bắt
 | **3. Real Douyin Media Inputs** | **PASS** | Tải thành công **2 video thực tế** trực tiếp từ ByteDance CDN Douyin (`real_douyin_sample1.mp4`, `real_douyin_sample2.mp4`), kiểm tra qua `ffprobe` (`data/evidence/viralmint/real_douyin_pipeline_summary.json`). |
 | **4. Chinese ASR (Real Douyin)** | **PASS** | 2/2 video Douyin thật được bóc băng chính xác 100% ngôn ngữ `zh` với timestamps (`data/evidence/viralmint/transcripts/asr_real_douyin_sample*.json`). |
 | **5. ViralMint Content Analysis** | **PARTIAL** | Upstream có prompt template `INSIGHTS_PROMPT` và schema dữ liệu trong `AnalyzerAgent`, nhưng **phụ thuộc 100% vào Cloud BYOK Key** (OpenAI/Claude/OpenRouter), không có local inference. Quyết định: **REUSE WITH ADAPTER**. (`data/evidence/viralmint/viralmint_real_capability_audit.json`). |
-| **6. ViralMint Vietnamese Adaptation** | **FAIL** | Upstream ViralMint **hoàn toàn không có tính năng dịch thuật hay chuyển thể tiếng Việt** (chỉ có prompt tiếng Anh `SCRIPT_PROMPT`). Quyết định: **BUILD**. (`data/evidence/viralmint/viralmint_real_capability_audit.json`). |
+| **6. ViralMint Vietnamese Translation & Dub** | **READY (ADAPTER)** | Đã tích hợp generic OpenAI-compatible provider (`compatible`) hỗ trợ Gemini/Groq/Local LLM, bổ sung `vi` và 2 giọng Edge TTS (`vi-VN-HoaiMyNeural`, `vi-VN-NamMinhNeural`) vào Translate UI (`research/VIRALMINT_AI_PROVIDER.md`). Quyết định: **REUSE ViralMint + compatible LLM provider**. |
 | **7. Vietnamese TTS** | **PASS** | 5/5 file audio giọng Việt chuẩn (`vi-VN-HoaiMyNeural`, `vi-VN-NamMinhNeural`) qua Edge-TTS (`data/evidence/viralmint/tts_summary.json`). |
 | **8. Render Video 9:16** | **PASS** | Render chuẩn dọc 1080x1920 (9:16) cho cả 2 video Douyin thật và video Bilibili, khớp audio, không lỗi corrupt (`data/evidence/viralmint/renders/`). |
 | **9. Background Audio Mixing** | **PASS** | 2/2 mẫu thử nghiệm phối trộn BGM với giọng đọc (ducking -14dB, fade in/out) (`data/evidence/viralmint/audio_mix_summary.json`). |
@@ -24,13 +24,38 @@ Dự án tạm thời dừng tại **Phase 1: OSS Validation** và **CHƯA bắt
 
 ---
 
+## Architecture Decisions
+
+```text
+Media processing:
+REUSE ViralMint
+
+Chinese ASR:
+REUSE ViralMint
+
+Vietnamese translation:
+REUSE ViralMint + compatible LLM provider
+
+Vietnamese dub:
+REUSE ViralMint + UI/config adapter
+
+Creative localization:
+REUSE WITH PROMPT/LOGIC ADAPTER
+
+Generic AI provider:
+ADAPTER
+```
+
+---
+
 ## Exit Gate Decision
 
 Theo quy tắc nghiêm ngặt của dự án:
 - Nguồn Bilibili Discovery: `PASS`
 - Nguồn Douyin Discovery: `FAIL` (Chưa usable do WAF + Login Gate)
 - Real Douyin Media Pipeline: `PASS` (Input -> ASR -> Render)
-- ViralMint Analysis/Adaptation: Đã audit thực tế và phân loại chính xác (`Analysis = PARTIAL / REUSE WITH ADAPTER`, `Adaptation = FAIL / BUILD`).
+- ViralMint AI Provider: `PASS (ADAPTER)` (Đã thêm generic OpenAI-compatible provider cho Gemini Free Tier / Local LLM)
+- Vietnamese Adaptation / Dubbing: `READY` (ASR -> Gemini Translation -> Vietnamese Subtitles -> Edge TTS Dubbing -> FFmpeg Render)
 
 **TRẠNG THÁI HIỆN TẠI: PHASE 1 BLOCKED.**  
-Chờ quyết định của User về phương án thu thập nguồn Douyin trước khi có thể mở khóa Phase 2.
+Chờ cung cấp `GEMINI_API_KEY` để hoàn tất bài test E2E live video, và phương án thu thập nguồn Douyin trước khi có thể mở khóa Phase 2.

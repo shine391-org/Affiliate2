@@ -82,15 +82,14 @@ Theo đúng quy tắc thực chứng và không suy diễn từ README:
 - Giọng nam: `vi-VN-NamMinhNeural` -> Tạo file MP3 30.8 KB (3.2s âm thanh rõ ràng).
 - Kết luận: **Edge-TTS có hỗ trợ giọng tiếng Việt rất tốt**, hoàn toàn miễn phí, nhưng là dịch vụ **Free Online** qua WebSocket, không phải offline trên máy.
 
-### 4.4. Đánh giá Khả năng Local LLM trong Upstream
-- Kiểm tra file `tools/ViralMint/backend/core/ai_provider.py`:
-  - Enums được hỗ trợ: `AIProvider.ANTHROPIC`, `AIProvider.OPENAI`, `AIProvider.OPENROUTER`.
-  - Client khởi tạo:
-    ```python
-    AsyncOpenAI(api_key=key) # Không truyền base_url
-    ```
-  - Upstream hoàn toàn **chưa hỗ trợ native** việc đổi `base_url` để trỏ vào Ollama (`http://localhost:11434/v1`), vLLM, LM Studio, hay custom OpenAI-compatible gateway.
-  - Đánh giá độ phức tạp: Cần khoảng **15 - 20 dòng code** bổ sung trường cấu hình `ai_base_url` vào `UserSettings` và truyền `base_url=...` vào `AsyncOpenAI`.
+### 4.4. Đánh giá & Triển khai Khả năng OpenAI-Compatible / Local LLM
+- Upstream ban đầu chỉ hỗ trợ Anthropic, OpenAI, OpenRouter mà không cho phép đổi `base_url`.
+- **Hiện trạng đã giải quyết**: Đã triển khai generic adapter `compatible` trong `tools/ViralMint/backend/core/ai_provider.py` (sử dụng `openai.AsyncOpenAI` với `api_key`, `base_url`, `model`).
+- Cấu hình hỗ trợ trực tiếp:
+  - Google Gemini (qua `https://generativelanguage.googleapis.com/v1beta/openai/`)
+  - Local LLM: LM Studio, Ollama, vLLM
+  - Groq Cloud API
+- Chi tiết xem tại: `research/VIRALMINT_AI_PROVIDER.md`.
 
 ---
 
@@ -98,7 +97,7 @@ Theo đúng quy tắc thực chứng và không suy diễn từ README:
 
 ### 1. ViralMint có chạy hoàn toàn trên máy không?
 - **Kiến trúc App/DB/Storage**: **CÓ**. Ứng dụng chạy trên web server cục bộ (`http://localhost:16888`), lưu trữ toàn bộ dữ liệu vào SQLite (`viralmint.db`) và thư mục `storage/` trên ổ cứng. Không bắt buộc tài khoản cloud nào của ViralMint.
-- **Tính độc lập với Internet (Air-gapped)**: **KHÔNG**. Một số tính năng phụ thuộc vào internet (Edge-TTS, yt-dlp) và cloud API trả phí (dịch thuật, phân tích nội dung).
+- **Tính độc lập với Internet (Air-gapped)**: **KHÔNG**. Một số tính năng phụ thuộc vào internet (Edge-TTS, yt-dlp) và cloud API (Gemini/Claude/OpenAI cho dịch thuật và phân tích nếu không chạy local LLM).
 
 ### 2. Capability nào offline 100%?
 1. **Audio Transcription**: Whisper cục bộ (`faster-whisper`), nhận diện speech-to-text và word-level timestamps không tốn phí, không gửi audio ra ngoài.
@@ -110,25 +109,22 @@ Theo đúng quy tắc thực chứng và không suy diễn từ README:
 1. **Lồng tiếng / Dubbing / Voiceover qua Edge-TTS**: Sử dụng giao thức WebSocket kết nối trực tiếp đến máy chủ Microsoft Cognitive Services. Không mất phí bản quyền, không cần API key, nhưng bắt buộc có kết nối internet.
 2. **Tải video (yt-dlp)**: Tải video từ các nền tảng công khai.
 
-### 4. Capability nào cần paid / cloud LLM?
+### 4. Capability nào cần LLM (Paid hoặc Free-tier)?
 1. **Dịch thuật kịch bản / phụ đề** (`_translate_segments`).
 2. **Phân tích Hook / Topic / Structure** (`run_tool_hook_analysis`).
 3. **Viết lại kịch bản / Repurpose** (`run_tool_repurpose`).
-*Tất cả các tính năng này trong upstream bắt buộc cấu hình API key của OpenAI, Anthropic, hoặc OpenRouter.*
+*Sau khi bổ sung adapter `compatible`, các tính năng này có thể chạy bằng Gemini API Free Tier hoặc mô hình Local LLM hoàn toàn miễn phí.*
 
 ### 5. Vietnamese translation có được backend hỗ trợ không?
-- **Về mặt Logic Backend**: **CÓ HỖ TRỢ**. Endpoint `/api/tools/translate` nhận tự do chuỗi `target_language`. Khi truyền `"Vietnamese"`, backend đưa thẳng vào prompt: `"Translate each line below into natural, conversational Vietnamese."` và mô hình LLM có thể hiểu và dịch chuẩn xác.
-- **Về mặt Giao diện (Frontend)**: **CHƯA CÓ**. File `frontend/src/pages/tools/Translate.jsx` định nghĩa cứng mảng `LANGUAGES` gồm 19 ngôn ngữ và bỏ quên tiếng Việt.
+- **Backend API**: **CÓ HỖ TRỢ**. Endpoint `/api/tools/translate` nhận tự do chuỗi `target_language`. Khi truyền `"Vietnamese"`, backend chèn trực tiếp vào system prompt: `"Translate each line below into natural, conversational Vietnamese."`.
+- **Giao diện Web (Frontend)**: **ĐÃ ĐƯỢC BỔ SUNG**. Đã cập nhật `Translate.jsx` với option `{ code: "vi", name: "Vietnamese" }` và build lại production bundle.
 
 ### 6. Vietnamese full dub có chạy được không?
-- **Chạy được nếu**:
-  1. Cấu hình AI Provider (OpenAI/Anthropic/OpenRouter hoặc qua adapter) để dịch nội dung.
-  2. Chỉ định voice tiếng Việt của Edge TTS (ví dụ `vi-VN-HoaiMyNeural` hoặc `vi-VN-NamMinhNeural`) khi gọi backend.
-- **Giao diện người dùng hiện tại**: Bị nghẽn do dropdown `Translate.jsx` chỉ liệt kê các giọng tiếng Anh (`en-US-AndrewMultilingualNeural`,...).
+- **Trạng thái**: **ĐÃ SẴN SÀNG**.
+  1. Backend đã hỗ trợ generic compatible provider kết nối Gemini / OpenAI / Local LLM.
+  2. Giao diện `Translate.jsx` đã tích hợp 2 giọng Edge-TTS tiếng Việt: `vi-VN-HoaiMyNeural` (nữ) và `vi-VN-NamMinhNeural` (nam).
+  3. Khi có `GEMINI_API_KEY` (hoặc local LLM server), pipeline chạy trơn tru từ ASR tiếng Trung -> Dịch tiếng Việt -> Tạo audio tiếng Việt -> Burn phụ đề -> Mux MP4 9:16 hoàn chỉnh.
 
 ### 7. Cần sửa bao nhiêu để dùng local LLM?
-- **Khối lượng công việc**: Rất nhỏ (**khoảng 15 - 20 dòng code**).
-- **Vị trí sửa đổi**:
-  - `backend/models/user_settings.py`: Thêm cột `ai_base_url` (mặc định `None` hoặc `http://localhost:11434/v1`).
-  - `backend/core/ai_provider.py`: Khi khởi tạo `AsyncOpenAI`, truyền thêm tham số `base_url=settings.ai_base_url`. Cho phép người dùng chọn provider là `openai_compatible` hoặc `ollama`.
-  - Không cần sửa đổi thuật toán dịch hay logic xử lý video.
+- **Khối lượng thực hiện**: Đã hoàn thành (~25 dòng code trong `ai_provider.py`, `config.py`, `database.py`, `user_settings.py`).
+- Không làm ảnh hưởng đến các provider cũ (OpenAI, Anthropic, OpenRouter).
