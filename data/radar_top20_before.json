@@ -1,0 +1,503 @@
+{
+  "generated_at": "2026-09-21T03:08:56.509875+00:00",
+  "count": 20,
+  "candidates": [
+    {
+      "platform": "douyin",
+      "content_id": "7653466619146170234",
+      "title": "宿舍党狂喜，没有油烟味的一锅出❗️ 一个普通的晚上，30+的顾先生，应粉丝要求做了一大碗粉丝煲 #好奇我怎么瘦的可以看我的饭 #一个普通的晚上 #满级吃商通关赛 #美食判官已上线 #校园美食判官请出战",
+      "creator_name": "顾***房",
+      "creator_id": "98db6dc407151c80",
+      "canonical_url": "https://www.douyin.com/video/7653466619146170234",
+      "publish_time": 1781962461,
+      "publish_time_iso": "2026-06-20T13:34:21+00:00",
+      "latest_metrics": {
+        "views": null,
+        "likes": 1021271,
+        "comments": 6761,
+        "shares": 293303,
+        "favorites": 383679
+      },
+      "snapshot_count": 1,
+      "total_score": 88.39,
+      "confidence": 0.8,
+      "breakdown": {
+        "freshness": 83.93,
+        "engagement": 91.07
+      }
+    },
+    {
+      "platform": "bilibili",
+      "content_id": "117058578750960",
+      "title": "如果做饭可以不开火，6个免流汗的适夏料理",
+      "creator_name": "泡厨房的顾小胖",
+      "creator_id": "474803476",
+      "canonical_url": "http://www.bilibili.com/video/av117058578750960",
+      "publish_time": 1786179600,
+      "publish_time_iso": "2026-08-08T09:00:00+00:00",
+      "latest_metrics": {
+        "views": 995372,
+        "likes": 31821,
+        "comments": 606,
+        "shares": null,
+        "favorites": 25713
+      },
+      "snapshot_count": 1,
+      "total_score": 80.33,
+      "confidence": 0.85,
+      "breakdown": {
+        "freshness": 83.63,
+        "engagement": 77.35,
+        "creator": 90.38
+      }
+    },
+    {
+      "platform": "bilibili",
+      "content_id": "116245336759183",
+      "title": "专治挑食，家长必学系列之无敌小孩菜",
+      "creator_name": "泡厨房的顾小胖",
+      "creator_id": "474803476",
+      "canonical_url": "http://www.bilibili.com/video/av116245336759183",
+      "publish_time": 1773826200,
+      "publish_time_iso": "2026-03-18T09:30:00+00:00",
+      "latest_metrics": {
+        "views": 11540627,
+        "likes": 215691,
+        "comments": 3399,
+        "shares": null,
+        "favorites": 443393
+      },
+      "snapshot_count": 1,
+      "total_score": 77.54,
+      "confidence": 0.85,
+      "breakdown": {
+        "freshness": 38.34,
+        "engagement": 99.78,
+        "creator": 90.38
+      }
+    },
+    {
+      "platform": "bilibili",
+      "content_id": "1756414622",
+      "title": "第一次下厨必看，刻在中国人基因里的人生家常菜，我能吃一辈子",
+      "creator_name": "泡厨房的顾小胖",
+      "creator_id": "474803476",
+      "canonical_url": "http://www.bilibili.com/video/av1756414622",
+      "publish_time": 1722571200,
+      "publish_time_iso": "2024-08-02T04:00:00+00:00",
+      "latest_metrics": {
+        "views": 9529298,
+        "likes": 374400,
+        "comments": 7208,
+        "shares": null,
+        "favorites": 575003
+      },
+      "snapshot_count": 1,
+      "total_score": 77.28,
+      "confidence": 0.85,
+      "breakdown": {
+        "freshness": 38.34,
+        "engagement": 99.33,
+        "creator": 90.38
+      }
+    },
+    {
+      "platform": "bilibili",
+      "content_id": "691055564",
+      "title": "十元贫穷料理再升级，十道大餐让你月底不再勒腰带",
+      "creator_name": "泡厨房的顾小胖",
+      "creator_id": "474803476",
+      "canonical_url": "http://www.bilibili.com/video/av691055564",
+      "publish_time": 1670578953,
+      "publish_time_iso": "2022-12-09T09:42:33+00:00",
+      "latest_metrics": {
+        "views": 9211134,
+        "likes": 374362,
+        "comments": 8516,
+        "shares": null,
+        "favorites": 433380
+      },
+      "snapshot_count": 1,
+      "total_score": 77.01,
+      "confidence": 0.85,
+      "breakdown": {
+        "freshness": 38.34,
+        "engagement": 98.88,
+        "creator": 90.38
+      }
+    },
+    {
+      "platform": "bilibili",
+      "content_id": "117272756624085",
+      "title": "管理期美食低卡平替",
+      "creator_name": "TANK和嫂子",
+      "creator_id": "500957592",
+      "canonical_url": "http://www.bilibili.com/video/av117272756624085",
+      "publish_time": 1789639500,
+      "publish_time_iso": "2026-09-17T10:05:00+00:00",
+      "latest_metrics": {
+        "views": 382467,
+        "likes": 8640,
+        "comments": 15,
+        "shares": null,
+        "favorites": 3359
+      },
+      "snapshot_count": 1,
+      "total_score": 76.68,
+      "confidence": 0.8,
+      "breakdown": {
+        "freshness": 95.74,
+        "engagement": 65.25
+      }
+    },
+    {
+      "platform": "bilibili",
+      "content_id": "1706621248",
+      "title": "一期带你学会煮饭，9道中国人都知道的人生家常菜 2.0",
+      "creator_name": "泡厨房的顾小胖",
+      "creator_id": "474803476",
+      "canonical_url": "http://www.bilibili.com/video/av1706621248",
+      "publish_time": 1724988600,
+      "publish_time_iso": "2024-08-30T03:30:00+00:00",
+      "latest_metrics": {
+        "views": 6344696,
+        "likes": 198717,
+        "comments": 3736,
+        "shares": null,
+        "favorites": 334453
+      },
+      "snapshot_count": 1,
+      "total_score": 76.48,
+      "confidence": 0.85,
+      "breakdown": {
+        "freshness": 38.34,
+        "engagement": 97.98,
+        "creator": 90.38
+      }
+    },
+    {
+      "platform": "bilibili",
+      "content_id": "116854752417739",
+      "title": "吃的干净就是最懒人的料理法",
+      "creator_name": "泡厨房的顾小胖",
+      "creator_id": "474803476",
+      "canonical_url": "http://www.bilibili.com/video/av116854752417739",
+      "publish_time": 1783065600,
+      "publish_time_iso": "2026-07-03T08:00:00+00:00",
+      "latest_metrics": {
+        "views": 706497,
+        "likes": 28507,
+        "comments": 603,
+        "shares": null,
+        "favorites": 30224
+      },
+      "snapshot_count": 2,
+      "total_score": 76.35,
+      "confidence": 0.85,
+      "breakdown": {
+        "freshness": 79.82,
+        "engagement": 72.87,
+        "creator": 90.38
+      }
+    },
+    {
+      "platform": "bilibili",
+      "content_id": "116523184167908",
+      "title": "自律必备，6个无敌蘸水拯救天下水煮菜",
+      "creator_name": "泡厨房的顾小胖",
+      "creator_id": "474803476",
+      "canonical_url": "http://www.bilibili.com/video/av116523184167908",
+      "publish_time": 1778054400,
+      "publish_time_iso": "2026-05-06T08:00:00+00:00",
+      "latest_metrics": {
+        "views": 6347184,
+        "likes": 128191,
+        "comments": 766,
+        "shares": null,
+        "favorites": 238332
+      },
+      "snapshot_count": 1,
+      "total_score": 76.22,
+      "confidence": 0.85,
+      "breakdown": {
+        "freshness": 38.34,
+        "engagement": 97.53,
+        "creator": 90.38
+      }
+    },
+    {
+      "platform": "bilibili",
+      "content_id": "314007733",
+      "title": "新手下厨关于调料收藏这一个就够了，15个必买调料做9个家常味道，手把手教你炸厨房",
+      "creator_name": "泡厨房的顾小胖",
+      "creator_id": "474803476",
+      "canonical_url": "http://www.bilibili.com/video/av314007733",
+      "publish_time": 1685003919,
+      "publish_time_iso": "2023-05-25T08:38:39+00:00",
+      "latest_metrics": {
+        "views": 4500711,
+        "likes": 236155,
+        "comments": 3501,
+        "shares": null,
+        "favorites": 383176
+      },
+      "snapshot_count": 1,
+      "total_score": 75.7,
+      "confidence": 0.85,
+      "breakdown": {
+        "freshness": 38.34,
+        "engagement": 96.64,
+        "creator": 90.38
+      }
+    },
+    {
+      "platform": "douyin",
+      "content_id": "7582219573560085779",
+      "title": "晚餐搭配 #减脂餐 #低卡低脂餐 #吃瘦不饿瘦 #会吃会瘦 #自律",
+      "creator_name": "轻***波",
+      "creator_id": "026f39a5c3c461a7",
+      "canonical_url": "https://www.douyin.com/video/7582219573560085779",
+      "publish_time": 1765373081,
+      "publish_time_iso": "2025-12-10T13:24:41+00:00",
+      "latest_metrics": {
+        "views": null,
+        "likes": 1977813,
+        "comments": 34245,
+        "shares": 406409,
+        "favorites": 664007
+      },
+      "snapshot_count": 4,
+      "total_score": 75.62,
+      "confidence": 0.95,
+      "breakdown": {
+        "freshness": 41.07,
+        "engagement": 98.21,
+        "velocity": 69.44
+      }
+    },
+    {
+      "platform": "bilibili",
+      "content_id": "113205858800070",
+      "title": "第一次做饭必学，那些中国人都熟悉的人生主食，一碗吃饱又吃好",
+      "creator_name": "泡厨房的顾小胖",
+      "creator_id": "474803476",
+      "canonical_url": "http://www.bilibili.com/video/av113205858800070",
+      "publish_time": 1727407800,
+      "publish_time_iso": "2024-09-27T03:30:00+00:00",
+      "latest_metrics": {
+        "views": 4228464,
+        "likes": 129724,
+        "comments": 1926,
+        "shares": null,
+        "favorites": 215662
+      },
+      "snapshot_count": 1,
+      "total_score": 74.9,
+      "confidence": 0.85,
+      "breakdown": {
+        "freshness": 38.34,
+        "engagement": 95.29,
+        "creator": 90.38
+      }
+    },
+    {
+      "platform": "bilibili",
+      "content_id": "116990647800952",
+      "title": "专治没胃口，一些奇妙又简单的懒人冷面",
+      "creator_name": "泡厨房的顾小胖",
+      "creator_id": "474803476",
+      "canonical_url": "http://www.bilibili.com/video/av116990647800952",
+      "publish_time": 1785135797,
+      "publish_time_iso": "2026-07-27T07:03:17+00:00",
+      "latest_metrics": {
+        "views": 458437,
+        "likes": 25299,
+        "comments": 164,
+        "shares": null,
+        "favorites": 26732
+      },
+      "snapshot_count": 1,
+      "total_score": 74.85,
+      "confidence": 0.85,
+      "breakdown": {
+        "freshness": 82.29,
+        "engagement": 68.83,
+        "creator": 90.38
+      }
+    },
+    {
+      "platform": "bilibili",
+      "content_id": "708257215",
+      "title": "上海竟有30一天的5平米出租屋？老田实测7天真实蜗居生活！",
+      "creator_name": "干饭了田田圈",
+      "creator_id": "481575325",
+      "canonical_url": "http://www.bilibili.com/video/av708257215",
+      "publish_time": 1704340800,
+      "publish_time_iso": "2024-01-04T04:00:00+00:00",
+      "latest_metrics": {
+        "views": 5437288,
+        "likes": 129464,
+        "comments": 7205,
+        "shares": null,
+        "favorites": 55389
+      },
+      "snapshot_count": 1,
+      "total_score": 74.68,
+      "confidence": 0.85,
+      "breakdown": {
+        "freshness": 38.34,
+        "engagement": 97.09,
+        "creator": 68.59
+      }
+    },
+    {
+      "platform": "douyin",
+      "content_id": "7528034386399563017",
+      "title": "今日份炒鸡好吃又简单的#低卡低脂餐 来喽，黄瓜+玉米+生菜加小番茄+大虾和鸡蛋，简直绝了#会吃才会瘦 #减脂晚餐",
+      "creator_name": "超***路",
+      "creator_id": "8645b6363e9600f7",
+      "canonical_url": "https://www.douyin.com/video/7528034386399563017",
+      "publish_time": 1752757094,
+      "publish_time_iso": "2025-07-17T12:58:14+00:00",
+      "latest_metrics": {
+        "views": null,
+        "likes": 1280958,
+        "comments": 30066,
+        "shares": 442148,
+        "favorites": 383736
+      },
+      "snapshot_count": 4,
+      "total_score": 74.62,
+      "confidence": 0.95,
+      "breakdown": {
+        "freshness": 41.07,
+        "engagement": 94.64,
+        "velocity": 75.0
+      }
+    },
+    {
+      "platform": "bilibili",
+      "content_id": "1855797469",
+      "title": "【暑期减肥就练这！】60min全程站立瘦身运动合集🔥7天见效",
+      "creator_name": "韩小四AprilHan",
+      "creator_id": "369750017",
+      "canonical_url": "http://www.bilibili.com/video/av1855797469",
+      "publish_time": 1719136800,
+      "publish_time_iso": "2024-06-23T10:00:00+00:00",
+      "latest_metrics": {
+        "views": 4299333,
+        "likes": 118322,
+        "comments": 14011,
+        "shares": null,
+        "favorites": 398205
+      },
+      "snapshot_count": 1,
+      "total_score": 74.5,
+      "confidence": 0.8,
+      "breakdown": {
+        "freshness": 38.34,
+        "engagement": 96.19
+      }
+    },
+    {
+      "platform": "bilibili",
+      "content_id": "935769930",
+      "title": "5天60颗鸡蛋，13个难度19种吃法，尽管收藏，我还能卷自己",
+      "creator_name": "泡厨房的顾小胖",
+      "creator_id": "474803476",
+      "canonical_url": "http://www.bilibili.com/video/av935769930",
+      "publish_time": 1642676817,
+      "publish_time_iso": "2022-01-20T11:06:57+00:00",
+      "latest_metrics": {
+        "views": 3668030,
+        "likes": 137147,
+        "comments": 7120,
+        "shares": null,
+        "favorites": 161611
+      },
+      "snapshot_count": 1,
+      "total_score": 74.37,
+      "confidence": 0.85,
+      "breakdown": {
+        "freshness": 38.34,
+        "engagement": 94.39,
+        "creator": 90.38
+      }
+    },
+    {
+      "platform": "bilibili",
+      "content_id": "117227625977944",
+      "title": "大学生减脂，一个月花600，速食分享",
+      "creator_name": "张原赫同学",
+      "creator_id": "1907583359",
+      "canonical_url": "http://www.bilibili.com/video/av117227625977944",
+      "publish_time": 1788771600,
+      "publish_time_iso": "2026-09-07T09:00:00+00:00",
+      "latest_metrics": {
+        "views": 320304,
+        "likes": 36851,
+        "comments": 78,
+        "shares": null,
+        "favorites": 44600
+      },
+      "snapshot_count": 3,
+      "total_score": 74.21,
+      "confidence": 0.95,
+      "breakdown": {
+        "freshness": 89.01,
+        "engagement": 64.35,
+        "velocity": 77.5
+      }
+    },
+    {
+      "platform": "bilibili",
+      "content_id": "263009913",
+      "title": "预算十元，十道打工族必备月末贫穷料理，拮据的日子我要放开吃",
+      "creator_name": "泡厨房的顾小胖",
+      "creator_id": "474803476",
+      "canonical_url": "http://www.bilibili.com/video/av263009913",
+      "publish_time": 1669369928,
+      "publish_time_iso": "2022-11-25T09:52:08+00:00",
+      "latest_metrics": {
+        "views": 3359263,
+        "likes": 137449,
+        "comments": 4954,
+        "shares": null,
+        "favorites": 159869
+      },
+      "snapshot_count": 1,
+      "total_score": 74.11,
+      "confidence": 0.85,
+      "breakdown": {
+        "freshness": 38.34,
+        "engagement": 93.95,
+        "creator": 90.38
+      }
+    },
+    {
+      "platform": "bilibili",
+      "content_id": "344687930",
+      "title": "太热了！九道电饭煲一锅出料理，菜饭齐出，不洗锅，不开火，Buff直接拉满",
+      "creator_name": "泡厨房的顾小胖",
+      "creator_id": "474803476",
+      "canonical_url": "http://www.bilibili.com/video/av344687930",
+      "publish_time": 1660890698,
+      "publish_time_iso": "2022-08-19T06:31:38+00:00",
+      "latest_metrics": {
+        "views": 3052265,
+        "likes": 106030,
+        "comments": 2991,
+        "shares": null,
+        "favorites": 170074
+      },
+      "snapshot_count": 1,
+      "total_score": 73.85,
+      "confidence": 0.85,
+      "breakdown": {
+        "freshness": 38.34,
+        "engagement": 93.5,
+        "creator": 90.38
+      }
+    }
+  ]
+}

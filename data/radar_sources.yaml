@@ -1,0 +1,30 @@
+# radar_sources.yaml — Scan plan for Radar Signal Accumulation (Phase 2.3)
+# Each source: platform, keyword, enabled, max_count
+# Douyin requires Edge CDP session on port 9222 (douyin_cdp_profile).
+# Bilibili uses public search API, no auth needed.
+
+sources:
+  - platform: douyin
+    keyword: "减肥食谱"
+    enabled: true
+    max_count: 15
+
+  - platform: douyin
+    keyword: "减脂餐"
+    enabled: true
+    max_count: 15
+
+  - platform: bilibili
+    keyword: "减肥食谱"
+    enabled: true
+    max_count: 20
+
+  - platform: bilibili
+    keyword: "减脂餐"
+    enabled: true
+    max_count: 20
+
+  - platform: bilibili
+    keyword: "低卡低脂餐"
+    enabled: true
+    max_count: 20

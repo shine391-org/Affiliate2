@@ -1,6 +1,6 @@
 # PROJECT_STATUS.md
 
-## Trạng thái tổng thể: **PHASE 1 COMPLETE** ✅
+## Trạng thái tổng thể: **PHASE 2.3 COMPLETE** ✅
 
 Tất cả hạng mục Phase 1 OSS Validation đã hoàn thành. Sẵn sàng chuyển Phase 2 khi được phê duyệt.
 
@@ -24,7 +24,25 @@ Tất cả hạng mục Phase 1 OSS Validation đã hoàn thành. Sẵn sàng ch
 
 ---
 
-## Architecture Decisions
+## Phase 2 — Radar (Discovery → Ranking → Signal Accumulation)
+
+| Hạng mục | Trạng thái | Ghi chú |
+| :--- | :--- | :--- |
+| **2.1 Radar Ingestion** | **COMPLETE** | SQLite schema (content, metric_snapshots, source_runs), Douyin adapter (MediaCrawler CDP), Bilibili adapter (public search API), normalize NULL-policy. 23/23 tests PASS. Commit `82de947` chain. |
+| **2.2 Candidate Ranking V0** | **COMPLETE** | Deterministic per-platform percentile scoring: freshness (7d half-life decay), engagement (log1p + percentile trong platform), velocity (≥30min interval), creator baseline (≥5 content). Missing signals → NULL + reweight. CLI `top` (terminal/json/markdown). 26/26 tests PASS. Commit `82de947`. |
+| **2.3 Signal Accumulation** | **COMPLETE** | Scan plan YAML (`data/radar_sources.yaml`), CLI `scan-all` + `creators`. Bilibili creator feed: space API (wbi signing port từ MediaCrawler, stdlib only) + name-search fallback khi bị risk control -352. Data: 46→268 content, 81→475 snapshots. Velocity 0%→14.2%, creator baseline 0%→68%. 49/49 tests PASS (23+26). Report: `research/RADAR_SIGNAL_COVERAGE.md`. |
+
+**Radar DB hiện tại:** 268 content, 475 snapshots, 78 creators (6 đạt ≥5 content cho baseline).
+
+**Engagement availability (documented cho phase sau):**
+- Douyin: likes/comments/shares/favorites 100%, views 0% (search API không trả)
+- Bilibili: views/comments 100%, likes/favorites 75% (thiếu ở space API vlist), shares/coins 0%
+
+---
+
+## Phase 1 — OSS Validation (đã hoàn thành)
+
+Tất cả hạng mục Phase 1 OSS Validation đã hoàn thành.
 
 ```text
 Media processing:
@@ -57,6 +75,6 @@ Theo quy tắc nghiêm ngặt của dự án:
 - ViralMint AI Provider: `PASS (ADAPTER)` (Đã thêm generic OpenAI-compatible provider cho Gemini Free Tier / Local LLM)
 - Vietnamese Adaptation / Dubbing: `PASS` (ASR → Gemini Translation → Vietnamese Subtitles → Edge TTS Dubbing → FFmpeg Render)
 
-**TRẠNG THÁI HIỆN TẠI: PHASE 1 COMPLETE ✅**  
-Tất cả blocker đã được giải quyết. ViralMint integration COMPLETE. Douyin Discovery PASS.  
-Sẵn sàng chuyển Phase 2 khi được phê duyệt.
+**TRẠNG THÁI HIỆN TẠI: PHASE 2.3 COMPLETE ✅**  
+Radar: ingestion + ranking + signal accumulation hoàn thành. Velocity và creator baseline đã kích hoạt với data thực.  
+Không bắt đầu content production.

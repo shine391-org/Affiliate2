@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -24,8 +25,10 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from radar.ingest import ingest
 from radar.ranking import CandidateScore, rank_candidates
+from radar.scanplan import load_scan_plan, run_scan_all
 from radar.sources import bilibili as bili_source
 from radar.sources import douyin as dy_source
+from radar.sources.bili_creator import scan_creator, scan_creator_via_search
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +115,80 @@ def cmd_scan(args) -> int:
 def cmd_stats(args) -> int:
     _print_stats()
     return 0
+
+
+def cmd_scan_all(args) -> int:
+    plan_path = Path(args.plan) if args.plan else None
+    print("\n[radar] scan-all: running all enabled sources sequentially")
+    try:
+        results = run_scan_all(path=plan_path)
+    except FileNotFoundError as e:
+        print(f"[radar] ERROR: {e}")
+        return 1
+
+    if not results:
+        print("[radar] No enabled sources in scan plan.")
+        return 0
+
+    ok = sum(1 for _, r in results if r.status == "SUCCESS")
+    empty = sum(1 for _, r in results if r.status == "EMPTY")
+    errors = sum(1 for _, r in results if r.status in ("ERROR", "AUTH_REQUIRED"))
+    total_new = sum(r.records_new for _, r in results)
+    total_upd = sum(r.records_updated for _, r in results)
+
+    print()
+    print(f"[radar] scan-all done: {len(results)} sources | {ok} success | {empty} empty | {errors} error/auth")
+    print(f"[radar] new content: {total_new}, updated: {total_upd}")
+    return 0 if errors == 0 else 2
+
+
+def cmd_creators(args) -> int:
+    """Crawl video history for top Bilibili creators (creator baseline signal)."""
+    from radar.db import get_conn
+
+    top_n = args.top
+    max_videos = args.max_videos
+
+    conn = get_conn()
+    rows = conn.execute(
+        """SELECT creator_id, creator_name, COUNT(*) as cnt
+           FROM content
+           WHERE platform = 'bilibili' AND creator_id IS NOT NULL AND creator_id != ''
+           GROUP BY creator_id
+           ORDER BY cnt DESC, creator_id
+           LIMIT ?""",
+        (top_n,),
+    ).fetchall()
+    conn.close()
+
+    if not rows:
+        print("[radar] No Bilibili creators found.")
+        return 0
+
+    print(f"\n[radar] creators: crawling history for top {len(rows)} Bilibili creators (max {max_videos} videos each)")
+    total_new = 0
+    errors = 0
+    for r in rows:
+        mid = r["creator_id"]
+        name = r["creator_name"] or ""
+        print(f"  [creator] {mid} {name or '(unknown)'} (has {r['cnt']} in DB)")
+        # Primary: space API; Fallback: search by creator name (risk-control safe)
+        result = scan_creator(mid, creator_name=name, max_count=max_videos)
+        if result.status != "SUCCESS" and name:
+            print(f"    (space API {result.status}, falling back to name search)")
+            result = scan_creator_via_search(mid, name, max_count=max_videos)
+        if result.status == "SUCCESS":
+            result = ingest(result)
+            print(f"    -> SUCCESS: raw={result.records_raw} norm={result.records_normalized} +new={result.records_new} ~upd={result.records_updated}")
+            total_new += result.records_new
+        else:
+            errors += 1
+            print(f"    -> {result.status}: {result.error or 'no data'}")
+        time.sleep(2)   # polite pause between creators
+
+    print()
+    print(f"[radar] creators done: {total_new} new content, {errors} errors")
+    return 0 if errors == 0 else 2
 
 
 def _format_terminal(cands: list[CandidateScore], limit: int) -> str:
@@ -273,6 +350,18 @@ def main() -> int:
     # stats subcommand
     sub.add_parser("stats", help="Show DB statistics")
 
+    # scan-all subcommand
+    p_all = sub.add_parser("scan-all", help="Run all enabled sources from scan plan")
+    p_all.add_argument("--plan", type=str, default=None,
+                       help="Path to scan plan YAML (default: data/radar_sources.yaml)")
+
+    # creators subcommand
+    p_cre = sub.add_parser("creators", help="Crawl history for top Bilibili creators")
+    p_cre.add_argument("--top", type=int, default=10,
+                       help="Number of top creators to crawl (default: 10)")
+    p_cre.add_argument("--max-videos", type=int, default=30,
+                       help="Max videos per creator (default: 30)")
+
     # top subcommand
     p_top = sub.add_parser("top", help="Show top ranked candidates")
     p_top.add_argument("--platform", choices=["douyin", "bilibili"], default=None,
@@ -290,6 +379,10 @@ def main() -> int:
         return cmd_scan(args)
     elif args.command == "stats":
         return cmd_stats(args)
+    elif args.command == "scan-all":
+        return cmd_scan_all(args)
+    elif args.command == "creators":
+        return cmd_creators(args)
     elif args.command == "top":
         return cmd_top(args)
     else:
