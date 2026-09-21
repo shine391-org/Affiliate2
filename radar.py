@@ -328,6 +328,59 @@ def cmd_top(args) -> int:
     return 0
 
 
+def cmd_analyze(args) -> int:
+    """Candidate Content Intelligence pipeline (Phase 3.1)."""
+    import json as _json
+    from radar.intel.pipeline import run_intelligence
+    from radar.intel.report import build_report, write_reports
+
+    limit = args.limit
+    force = args.force
+    content_id_filter = args.content_id
+
+    print(f"\n[radar] analyze: building candidate intelligence (limit={limit}, force={force})")
+
+    # Load candidates from ranking (reuse current ranking output)
+    if content_id_filter:
+        # single candidate by id
+        ranked = rank_candidates()
+        cands = [c for c in ranked if c.content_id == content_id_filter]
+        if not cands:
+            print(f"[radar] ERROR: content_id {content_id_filter} not found in ranking")
+            return 1
+        cand_dicts = [_to_dict(c) for c in cands]
+    else:
+        top_path = Path("data/radar_top20.json")
+        if not top_path.exists():
+            print("[radar] Ranking output not found. Run 'python radar.py top --limit 20' first.")
+            return 1
+        with top_path.open(encoding="utf-8") as f:
+            data = _json.load(f)
+        cand_dicts = data["candidates"][:limit]
+
+    if not cand_dicts:
+        print("[radar] No candidates to analyze.")
+        return 0
+
+    print(f"[radar] Analyzing {len(cand_dicts)} candidates\n")
+    summary = run_intelligence(cand_dicts, force=force)
+
+    # Build + write reports
+    json_str, md_str = build_report(summary, cand_dicts)
+    jpath, mpath = write_reports(json_str, md_str)
+
+    print()
+    print("[radar] analyze done:")
+    print(f"  requested:          {summary['requested']}")
+    print(f"  media downloaded:   {summary['media_downloaded']} (+{summary['media_already']} cached, {summary['media_unavailable']} unavailable)")
+    print(f"  transcripts:        {summary['transcripts']}")
+    print(f"  intelligence:       {summary['intelligence_generated']} generated, {summary['intelligence_cached']} cached, {summary['intelligence_errors']} errors")
+    print(f"  model calls:        {summary['model_calls']} (retries: {summary['model_retries']})")
+    print(f"  JSON report:        {jpath}")
+    print(f"  Markdown report:    {mpath}")
+    return 0 if summary["intelligence_errors"] == 0 else 2
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -362,6 +415,15 @@ def main() -> int:
     p_cre.add_argument("--max-videos", type=int, default=30,
                        help="Max videos per creator (default: 30)")
 
+    # analyze subcommand
+    p_ana = sub.add_parser("analyze", help="Build candidate content intelligence (Phase 3.1)")
+    p_ana.add_argument("--limit", type=int, default=10,
+                       help="Number of top candidates to analyze (default: 10)")
+    p_ana.add_argument("--content-id", type=str, default=None,
+                       help="Analyze a single candidate by content_id")
+    p_ana.add_argument("--force", action="store_true",
+                       help="Re-run even if cached intelligence.json exists")
+
     # top subcommand
     p_top = sub.add_parser("top", help="Show top ranked candidates")
     p_top.add_argument("--platform", choices=["douyin", "bilibili"], default=None,
@@ -383,6 +445,8 @@ def main() -> int:
         return cmd_scan_all(args)
     elif args.command == "creators":
         return cmd_creators(args)
+    elif args.command == "analyze":
+        return cmd_analyze(args)
     elif args.command == "top":
         return cmd_top(args)
     else:
