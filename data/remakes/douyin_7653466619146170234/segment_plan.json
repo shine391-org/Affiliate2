@@ -1,0 +1,29 @@
+{
+  "source_path": "E:\\Affiliate ver 1\\data\\candidates\\douyin_7653466619146170234\\source.mp4",
+  "target_width": 1080,
+  "target_height": 1920,
+  "target_aspect": "9:16",
+  "segments": [
+    {
+      "start": 0.0,
+      "end": 4.0,
+      "purpose": "hook/intro",
+      "keep": true,
+      "narration_section": "Đứa nào ở phòng trọ mà lười dọn dẹp, tối đói bụng mà sợ khói bếp ám mùi thì bơi hết vào đây! Nay tui chỉ cho mấy ní món miến cà chua một nồi siêu đỉnh."
+    },
+    {
+      "start": 4.0,
+      "end": 15.0,
+      "purpose": "content",
+      "keep": true,
+      "narration_section": "Rau xanh với nấm kim châm lót đáy, thêm quả cà chua cắt múi cho nước dùng ngọt thanh, và không thể thiếu miến đã ngâm mềm. Rưới ngay sốt sa tế thần thánh này lên."
+    },
+    {
+      "start": 15.0,
+      "end": 25.0,
+      "purpose": "CTA/outro",
+      "keep": true,
+      "narration_section": "Thêm chút nước rồi đậy nắp đun sôi. Sôi rồi thì đảo đều, rim lửa nhỏ 5 phút cho thấm gia vị. Cuối cùng đập thêm quả trứng gà, đậy nắp hãm thêm nửa phút là béo ngậy chuẩn bài. Làm ngay một nồi nóng hổi nào!"
+    }
+  ]
+}

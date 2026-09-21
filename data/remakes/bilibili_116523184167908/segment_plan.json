@@ -1,0 +1,43 @@
+{
+  "source_path": "E:\\Affiliate ver 1\\data\\candidates\\bilibili_116523184167908\\source.mp4",
+  "target_width": 1080,
+  "target_height": 1920,
+  "target_aspect": "9:16",
+  "segments": [
+    {
+      "start": 0.0,
+      "end": 7.0,
+      "purpose": "hook/intro",
+      "keep": true,
+      "narration_section": "Đang ăn kiêng rau luộc khổ sở quá hả? Nhìn thì chán đời vậy thôi chứ chấm trúng 3 chén sốt thần thánh này đảm bảo ăn rau luộc ngon như ăn lẩu!"
+    },
+    {
+      "start": 7.0,
+      "end": 20.0,
+      "purpose": "sauce 1 tutorial",
+      "keep": true,
+      "narration_section": "Số một: Sốt tắc xí muội thanh mát. Tắc, đường cỏ ngọt, nước mắm, ớt và đá lạnh. Chua ngọt cay sảng khoái!"
+    },
+    {
+      "start": 20.0,
+      "end": 33.0,
+      "purpose": "sauce 2 tutorial",
+      "keep": true,
+      "narration_section": "Số hai: Sốt Thái me tỏi ớt. Cốt me, nước mắm, đường thốt nốt, thính gạo và rau mùi tàu. Đậm đà thơm phức."
+    },
+    {
+      "start": 33.0,
+      "end": 46.0,
+      "purpose": "sauce 3 tutorial",
+      "keep": true,
+      "narration_section": "Số ba: Sốt đậu phộng béo ngậy. Bơ đậu phộng, xì dầu, dầu mè, tỏi băm. Chấm ức gà hay rau củ là hết sảy."
+    },
+    {
+      "start": 46.0,
+      "end": 55.0,
+      "purpose": "CTA/outro",
+      "keep": true,
+      "narration_section": "Giảm cân đừng ép mình ăn khổ quá. Lưu lại video này để triển ngay bữa tối nay nha!"
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "source_path": "E:\\Affiliate ver 1\\data\\candidates\\bilibili_117272756624085\\source.mp4",
+  "target_width": 1080,
+  "target_height": 1920,
+  "target_aspect": "9:16",
+  "segments": [
+    {
+      "start": 0.0,
+      "end": 8.0,
+      "purpose": "hook/intro",
+      "keep": true,
+      "narration_section": "Đứa nào vừa thề hôm nay ăn salad giảm cân đâu rồi? Sáng nay tao ăn healthy lắm nha!"
+    },
+    {
+      "start": 8.0,
+      "end": 20.0,
+      "purpose": "content",
+      "keep": true,
+      "narration_section": "Thế làm ly trà sữa không đường không? Mà thèm quá thì thêm ít trân châu hoàng kim. Xem phim mà không gặm bánh tráng trộn với khô gà lá chanh thì sao chịu nổi!"
+    },
+    {
+      "start": 20.0,
+      "end": 29.117823,
+      "purpose": "CTA/outro",
+      "keep": true,
+      "narration_section": "Thôi chốt đơn đĩa súp cua trứng cút lộn đi, rồi húp thêm chén chè dưỡng nhan gọi là thanh lọc cơ thể. Giảm cân đúng là một cú lừa, ăn xong mai tính!"
+    }
+  ]
+}

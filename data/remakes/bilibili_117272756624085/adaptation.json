@@ -1,0 +1,67 @@
+{
+  "content_id": "VN_DIET_01",
+  "platform": "TikTok / YouTube Shorts / Reels",
+  "original": {
+    "hook": "我在减肥 平时我就喜欢吃点稿茶",
+    "structure": "Conversational dialogue sketching the mutual temptation and escalation of diet-breaking cravings among friends.",
+    "value_proposition": "Validates the psychological struggle of sticking to a weight-loss diet while offering comfort through shared humor and low-calorie snack alternatives."
+  },
+  "vietnamese_adaptation": {
+    "audience": "Vietnamese Gen Z and Millennials (office workers and students) striving to stay in shape while battling constant food temptations.",
+    "angle": "Relatable comedy sketch between two friends who swore to lose weight today, but instantly cave in by upgrading their 'diet' snacks to Vietnamese street food favorites.",
+    "hook": "Đứa nào vừa thề hôm nay ăn salad giảm cân đâu rồi? Tối nay làm ly trà sữa không đường... trân châu đường đen nhé?",
+    "script": "A: Ê, tao đang giảm cân nha! Sáng nay tao chỉ tính ăn nhẹ nhàng thanh đạm thôi.\nB: Ủa kì vậy? Tao cũng đang giảm cân nè, mà tao thích ăn healthy cơ!\nA: Thế thì làm ly trà sữa thanh nhiệt, không đường... à quên, trân châu hoàng kim cho dễ nuốt!\nB: Chuẩn luôn! Mà xem phim cày netflix mà không có bịch bánh tráng trộn với khô gà lá chanh thì giảm cân kiểu gì nổi?\nA: Thôi dẹp mẹ cái kế hoạch đi! Làm đĩa súp cua với trứng cút lộn cho ấm bụng rồi mai tính tiếp!\nB: Phục vụ tao thêm chén chè dưỡng nhan nữa là trọn vẹn quá trình thanh lọc cơ thể!\nA: Giảm cân khó quá, thà ăn no rồi có sức mai giảm tiếp!",
+    "sections": [
+      {
+        "time": "0-8s",
+        "text": "Đứa nào vừa thề hôm nay ăn salad giảm cân đâu rồi? Sáng nay tao ăn healthy lắm nha!",
+        "purpose": "hook/intro"
+      },
+      {
+        "time": "8-20s",
+        "text": "Thế làm ly trà sữa không đường không? Mà thèm quá thì thêm ít trân châu hoàng kim. Xem phim mà không gặm bánh tráng trộn với khô gà lá chanh thì sao chịu nổi!",
+        "purpose": "content"
+      },
+      {
+        "time": "20-30s",
+        "text": "Thôi chốt đơn đĩa súp cua trứng cút lộn đi, rồi húp thêm chén chè dưỡng nhan gọi là thanh lọc cơ thể. Giảm cân đúng là một cú lừa, ăn xong mai tính!",
+        "purpose": "CTA/outro"
+      }
+    ],
+    "cta": "Tag ngay đứa bạn thân chuyên mồm hô giảm cân nhưng tối nào cũng rủ ăn vặt vào đây!"
+  },
+  "localization_changes": {
+    "ingredients": [
+      "Replaced Chinese tea/yogurt/chicken feet with Vietnamese favorites: trà sữa trân châu hoàng kim, bánh tráng trộn, khô gà lá chanh, súp cua trứng cút lộn, chè dưỡng nhan."
+    ],
+    "cultural_references": [
+      "Shifted from generic snacking habits to the iconic Vietnamese 'thề giảm cân nhưng miệng vẫn nhai' culture among office workers and Gen Z."
+    ],
+    "terminology": [
+      "Used trending local slang like 'hứa mồm', 'healthy và balance', 'thanh lọc cơ thể', 'mai tính'."
+    ],
+    "pacing": "Fast-paced conversational rhythm with quick back-and-forth dialogue to match the comedic escalation of the original video.",
+    "sponsor_product_removal": "Removed any specific brand mentions of commercial diet products, focusing purely on relatable humorous dialogue and local food items."
+  },
+  "reuse_plan": {
+    "source_segments": [
+      "0-10s (Mutual diet claim)",
+      "10-25s (Escalation of craving excuses)",
+      "25-30s (Give up and surrender to food)"
+    ],
+    "segments_to_drop": [
+      "Specific Chinese product names and regional slang not translatable to Vietnamese youth culture."
+    ],
+    "segments_to_reorder": [
+      "Keep chronological escalation: Healthy claim -> First cheat item -> Full street food binge -> Giving up."
+    ],
+    "additional_visual_needed": [
+      "Props: Bubble tea cup, bag of rice paper (bánh tráng trộn), or a bowl of soup to make the sketch visually engaging."
+    ]
+  },
+  "risk_notes": [
+    "Ensure the tone remains playful and lighthearted so it doesn't promote unhealthy binge eating as a serious lifestyle choice.",
+    "Keep expressions exaggerated and comedic to emphasize the sketch format."
+  ],
+  "target_duration": "25-35s"
+}

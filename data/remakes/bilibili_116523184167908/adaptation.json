@@ -1,0 +1,77 @@
+{
+  "content_id": "VN_REMOTE_DIET_SAUCE_001",
+  "platform": "TikTok / Reels / Shorts",
+  "original": {
+    "hook": "最近吃腻了水煮菜 但又不想吃的太命苦 於是我就做了六個化無聊為神奇的萬能蘸水",
+    "structure": "Hook -> 6 fast-paced sauce recipes -> Outro/CTA",
+    "value_proposition": "Transforms boring diet food into craveable meals through 6 creative dipping sauces."
+  },
+  "vietnamese_adaptation": {
+    "audience": "Vietnamese Gen Z and young adults (fitness enthusiasts, office workers on weight loss/eat clean diets)",
+    "angle": "Cứu rỗi rau luộc nhạt nhẽo bằng 3 loại nước chấm eat-clean cực cuốn, giảm cân không cần khổ sở",
+    "hook": "Đang ăn kiêng rau luộc khổ sở quá hả? Nhìn thì chán đời vậy thôi chứ chấm trúng 3 chén sốt thần thánh này đảm bảo ăn rau luộc ngon như ăn lẩu!",
+    "script": "Đang ăn kiêng rau luộc khổ sở quá hả? Nhìn thì chán đời vậy thôi chứ chấm trunch 3 chén sốt thần thánh này đảm bảo ăn rau luộc ngon như ăn lẩu!\n\nSố một: Sốt tắc xí muội thanh mát. Tắc cắt lát, thêm một muỗng đường cỏ ngọt, nước mắm ngon, ớt hiểm giã nhuyễn và vài viên đá lạnh. Chua ngọt cay sảng khoái, húp sạch chén nước sốt luôn!\n\nSố hai: Sốt Thái me tỏi ớt. Me chín dầm lấy nước cốt, nước mắm, đường thốt nốt, thính gạo rang và rau mùi tàu thái nhỏ. Đậm đà, thơm phức, chấm món gì cũng dính.\n\nSố ba: Sốt đậu phộng số lượng thập cẩm siêu béo ngậy. Bơ đậu phộng không đường, chút xì dầu, dầu mè, tỏi băm và một ít nước ấm khuấy đều. Béo ngậy thơm lừng, chấm ức gà hay bông cải xanh là hợp bài nhất!\n\nLưu ý là giảm cân nhưng đừng ép bản thân ăn khổ quá nhé. Lưu lại video này để triển ngay bữa tối nay nha!",
+    "sections": [
+      {
+        "time": "0-7s",
+        "text": "Đang ăn kiêng rau luộc khổ sở quá hả? Nhìn thì chán đời vậy thôi chứ chấm trúng 3 chén sốt thần thánh này đảm bảo ăn rau luộc ngon như ăn lẩu!",
+        "purpose": "hook/intro"
+      },
+      {
+        "time": "7-20s",
+        "text": "Số một: Sốt tắc xí muội thanh mát. Tắc, đường cỏ ngọt, nước mắm, ớt và đá lạnh. Chua ngọt cay sảng khoái!",
+        "purpose": "sauce 1 tutorial"
+      },
+      {
+        "time": "20-33s",
+        "text": "Số hai: Sốt Thái me tỏi ớt. Cốt me, nước mắm, đường thốt nốt, thính gạo và rau mùi tàu. Đậm đà thơm phức.",
+        "purpose": "sauce 2 tutorial"
+      },
+      {
+        "time": "33-46s",
+        "text": "Số ba: Sốt đậu phộng béo ngậy. Bơ đậu phộng, xì dầu, dầu mè, tỏi băm. Chấm ức gà hay rau củ là hết sảy.",
+        "purpose": "sauce 3 tutorial"
+      },
+      {
+        "time": "46-55s",
+        "text": "Giảm cân đừng ép mình ăn khổ quá. Lưu lại video này để triển ngay bữa tối nay nha!",
+        "purpose": "CTA/outro"
+      }
+    ],
+    "cta": "Lưu lại video này và làm thử ngay cho bữa tối nay nhé!"
+  },
+  "localization_changes": {
+    "ingredients": [
+      "Replaced Chinese iced tea lime sauce with Vietnamese-style kumquat (tắc) fish sauce",
+      "Replaced Guizhou dry chili and roasted tomato sauces with local Vietnamese Thai-style tamarind sauce and peanut butter sauce",
+      "Used familiar Vietnamese diet sweeteners like stevia/monk fruit sugar (đường cỏ ngọt) and palm sugar (đường thốt nốt)"
+    ],
+    "cultural_references": [
+      "Shifted from complex regional Chinese spice profiles to widely popular Vietnamese/Southeast Asian flavor combos (tắc ớt, me Thái, sốt đậu phộng)"
+    ],
+    "terminology": [
+      "Used natural Vietnamese spoken terms like 'ăn kiêng', 'rau luộc', 'eat-clean', 'ngon như ăn lẩu'"
+    ],
+    "pacing": "Condensed 6 sauces down to top 3 highest-impact, easiest-to-make sauces to fit a tight 45-second retention window for Vietnamese short-form video habits.",
+    "sponsor_product_removal": "Removed any specific branded seasonings or pre-made sauce bottles from the original video."
+  },
+  "reuse_plan": {
+    "source_segments": [
+      "0-10s (hook structure)",
+      "Fast-paced cooking and mixing action shots"
+    ],
+    "segments_to_drop": [
+      "Sauce recipes 4, 5, 6 from original to shorten duration and prevent viewer fatigue"
+    ],
+    "segments_to_reorder": [
+      "Selected the 3 most visually appealing and easiest local-ingredient sauces to feature first"
+    ],
+    "additional_visual_needed": [
+      "B-roll of dipping fresh boiled vegetables/chicken breast into the finished sauces"
+    ]
+  },
+  "risk_notes": [
+    "Ensure the visual contrast between boring boiled food and delicious sauces is stark enough in the first 3 seconds to prevent drop-off."
+  ],
+  "target_duration": "45-55s"
+}

@@ -1,0 +1,68 @@
+{
+  "content_id": "VN_REMOTE_FOOD_001",
+  "platform": "TikTok / YouTube Shorts / Reels",
+  "original": {
+    "hook": "大家别只关注蛋神啦 我是简子餐神 每天都会更新好吃的简子餐 今天做小锅一锅出的番茄粉丝饱",
+    "structure": "Hook -> Ingredient Assembly -> One-Pot Cooking -> Final Result & CTA",
+    "value_proposition": "A quick, delicious, and healthy one-pot meal that requires no heavy cooking equipment or oil, perfect for students and office workers in small living spaces."
+  },
+  "vietnamese_adaptation": {
+    "audience": "Vietnamese Gen Z, students, and young office workers living in rented rooms (phòng trọ) with limited cooking spaces.",
+    "angle": "Dorm-friendly/phòng trọ friendly late-night quick fix using a mini electric pot (nồi điện mini), focusing on zero oil smoke and extreme convenience.",
+    "hook": "Đứa nào ở phòng trọ mà lười dọn dẹp, tối đói bụng mà sợ khói bếp ám mùi thì bơi hết vào đây! Nay tui chỉ cho mấy ní món miến cà chua một nồi siêu đỉnh.",
+    "script": "Đứa nào ở phòng trọ mà lười dọn dẹp, tối đói bụng mà sợ khói bếp ám mùi thì bơi hết vào đây! Nay tui chỉ cho mấy ní món miến cà chua một nồi siêu đỉnh. Rau xanh với nấm kim châm lót đáy, thêm quả cà chua cắt múi cho nước dùng ngọt thanh, và không thể thiếu miến đã ngâm mềm. Rưới ngay sốt sa tế thần thánh này lên, thêm chút nước rồi đậy nắp đun sôi. Sôi rồi thì đảo đều, rim lửa nhỏ 5 phút cho thấm gia vị. Cuối cùng đập thêm quả trứng gà, đậy nắp hãm thêm nửa phút là béo ngậy chuẩn bài. Làm ngay một nồi nóng hổi hổi hổi nào!",
+    "sections": [
+      {
+        "time": "0-4s",
+        "text": "Đứa nào ở phòng trọ mà lười dọn dẹp, tối đói bụng mà sợ khói bếp ám mùi thì bơi hết vào đây! Nay tui chỉ cho mấy ní món miến cà chua một nồi siêu đỉnh.",
+        "purpose": "hook/intro"
+      },
+      {
+        "time": "4-15s",
+        "text": "Rau xanh với nấm kim châm lót đáy, thêm quả cà chua cắt múi cho nước dùng ngọt thanh, và không thể thiếu miến đã ngâm mềm. Rưới ngay sốt sa tế thần thánh này lên.",
+        "purpose": "content"
+      },
+      {
+        "time": "15-25s",
+        "text": "Thêm chút nước rồi đậy nắp đun sôi. Sôi rồi thì đảo đều, rim lửa nhỏ 5 phút cho thấm gia vị. Cuối cùng đập thêm quả trứng gà, đậy nắp hãm thêm nửa phút là béo ngậy chuẩn bài. Làm ngay một nồi nóng hổi nào!",
+        "purpose": "CTA/outro"
+      }
+    ],
+    "cta": "Lưu lại video ngay tối nay thử liền đi mấy ní ơi!"
+  },
+  "localization_changes": {
+    "ingredients": [
+      "Replaced Chinese specific noodles with local 'miến' (glass noodles)",
+      "Replaced heavy spicy paste with familiar Vietnamese 'sốt sa tế'",
+      "Kept Napa cabbage (cải thảo/rau xanh), enoki mushrooms (nấm kim châm), tomatoes (cà chua), and eggs (trứng gà)"
+    ],
+    "cultural_references": [
+      "Replaced '蛋神' and '简子餐神' persona references with relatable Vietnamese renting culture ('đứa nào ở phòng trọ', 'mấy ní')",
+      "Shifted context from Chinese dormitory ('宿舍党') to Vietnamese rented room ('phòng trọ')"
+    ],
+    "terminology": [
+      "Used casual, Gen Z spoken Vietnamese slang ('mấy ní', 'chuẩn bài', 'bơi hết vào đây')"
+    ],
+    "pacing": "Fast-paced ASMR-style cuts, synchronized with the cooking actions to match short attention spans on TikTok.",
+    "sponsor_product_removal": "Removed any specific branded seasoning or creator challenge gimmicks, focusing purely on the universal mini-electric-pot cooking method."
+  },
+  "reuse_plan": {
+    "source_segments": [
+      "03s-15s (Ingredient stacking visuals)",
+      "15s-25s (Cooking, pouring sauce, simmering, adding egg)"
+    ],
+    "segments_to_drop": [
+      "0-3s original Chinese voiceover and creator introduction"
+    ],
+    "segments_to_reorder": [],
+    "additional_visual_needed": [
+      "Text-on-screen (bouncing captions) for key ingredients in Vietnamese",
+      "ASMR sound effects boost (bubbling, pouring, stirring)"
+    ]
+  },
+  "risk_notes": [
+    "Ensure the mini electric pot looks common in Vietnamese student rooms so it feels authentic.",
+    "Avoid making medical or weight-loss claims about the dish."
+  ],
+  "target_duration": "25-30s"
+}
