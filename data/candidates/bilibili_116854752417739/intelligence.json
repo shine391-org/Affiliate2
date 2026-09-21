@@ -1,0 +1,71 @@
+{
+  "topic": "Healthy and lazy cooking / Fitness meal prep",
+  "subtopic": "Quick and clean eating recipes for busy fitness enthusiasts",
+  "hook": {
+    "text": "朋友问我 我也想健康 但没时间做饭怎么办 嗯 又不是功课什么人间美味 想吃的健康不要太简单 不信 我证明给你看 健身人的水煮菜能有多简单",
+    "type": "Pain Point & Challenge",
+    "first_seconds": 3
+  },
+  "content_format": {
+    "type": "Talking Head & Recipe Tutorial",
+    "presentation_style": "Fast-paced, conversational voiceover with practical cooking demos and a seamless mid-roll native ad integration"
+  },
+  "structure": [
+    {
+      "section": "Hook & Quick Soup",
+      "approximate_time": "0-20s",
+      "purpose": "Address the time-poor healthy eating pain point and show a 5-minute beef hotpot soup."
+    },
+    {
+      "section": "Batch Prep (Rice Cooker)",
+      "approximate_time": "20-40s",
+      "purpose": "Demonstrate batch-cooking protein (braised meats) using a rice cooker for efficiency."
+    },
+    {
+      "section": "Native Ad Insertion",
+      "approximate_time": "40-60s",
+      "purpose": "Smooth transition from hair loss anxiety (common among fitness/busy people) to minoxidil foam product placement."
+    },
+    {
+      "section": "Quick Canned Goods & Steaming Recipes",
+      "approximate_time": "60-90s",
+      "purpose": "Provide quick meal ideas using canned tomatoes/tuna and waterless steaming techniques."
+    },
+    {
+      "section": "One-Pot Salmon Veggie Rice & Outro",
+      "approximate_time": "90-120s",
+      "purpose": "Showcase a complete meal-in-one rice cooker recipe and wrap up with lifestyle encouragement."
+    }
+  ],
+  "value_proposition": "Learn ultra-lazy, delicious, and clean-eating recipes tailored for fitness goals without spending hours in the kitchen.",
+  "emotional_trigger": "Relief from the pressure of healthy eating combined with the anxiety of hair loss and lack of time.",
+  "retention_devices": [
+    "Rapid-fire recipe transitions",
+    "Practical batch-cooking life hacks",
+    "Seamless natural transition into a sponsored product"
+  ],
+  "cta": "Check the pinned comment in the description for the product link (hair loss foam) and enjoy your meals.",
+  "why_it_may_work": [
+    "Directly targets young urbanites who want to stay fit and healthy but have zero time to cook.",
+    "Combines multiple bite-sized value hacks (soups, batch cooking, canned goods, waterless steaming) in one video.",
+    "Native advertising feels organic by linking fitness stress/lifestyle directly to hair loss care."
+  ],
+  "remake_difficulty": "MEDIUM",
+  "localization_potential": "HIGH",
+  "vietnamese_angle": {
+    "concept": "Adapt for Vietnamese office workers and gym-goers who want eat clean (eat clean/healthy) but find traditional prep too tedious, utilizing local ingredients like canned fish (cá mòi/cá ngừ), rice cookers, and quick air-fryer/one-pot methods.",
+    "suggested_hook": "Tập gym muốn ăn clean mà cứ sợ cực, không có thời gian nấu nướng? Để tôi chỉ bạn cách nấu đồ ăn healthy vừa nhác vừa ngon thế này!",
+    "notes": "Keep the fast cuts and local Vietnamese pantry equivalents (e.g., using fish sauce/local spices instead of complex Chinese bean pastes if needed, though keeping it simple is key)."
+  },
+  "risks": {
+    "copyright_dependency": "LOW",
+    "personality_dependency": "MEDIUM",
+    "product_dependency": "HIGH",
+    "context_dependency": "LOW"
+  },
+  "_meta": {
+    "analyzed_at": "2026-09-21T04:08:49.646361+00:00",
+    "model": "gemini-3.5-flash-lite",
+    "provider": "compatible"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "content_id": "117272756624085",
+  "platform": "bilibili",
+  "title": "管理期美食低卡平替",
+  "creator_name": "TANK和嫂子",
+  "creator_id": "500957592",
+  "canonical_url": "http://www.bilibili.com/video/av117272756624085",
+  "publish_time": 1789639500,
+  "publish_time_iso": "2026-09-17T10:05:00+00:00",
+  "latest_metrics": {
+    "views": 382467,
+    "likes": 8640,
+    "comments": 15,
+    "shares": null,
+    "favorites": 3359
+  },
+  "snapshot_count": 1,
+  "radar_total_score": 76.63,
+  "radar_confidence": 0.8,
+  "radar_breakdown": {
+    "freshness": 92.19,
+    "engagement": 67.3
+  },
+  "pipeline_run_at": "2026-09-21T04:23:25.265889+00:00",
+  "media": {
+    "status": "ALREADY_EXISTS",
+    "meta": {
+      "size": 786545
+    }
+  }
+}

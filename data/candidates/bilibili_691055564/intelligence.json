@@ -1,0 +1,61 @@
+{
+  "topic": "Budget cooking",
+  "subtopic": "Low-cost gourmet meals under tight budgets",
+  "hook": {
+    "text": "论十块钱在当今社会有多么渺小 不够一杯奶茶 勉强三颗生煎... 年轻人的贫穷生活总是格外艰难 所以我们的贫穷料理再次登场",
+    "type": "Relatable Pain Point / Financial Reality Check",
+    "first_seconds": 3
+  },
+  "content_format": {
+    "type": "Cooking/Food VLOG",
+    "presentation_style": "Humorous, fast-paced, first-person narrative voiceover with practical step-by-step demonstrations"
+  },
+  "structure": [
+    {
+      "section": "Hook & Intro",
+      "approximate_time": "0:00 - 0:15",
+      "purpose": "Highlight modern financial struggles and introduce the budget cooking series."
+    },
+    {
+      "section": "Recipe Compilation (Scallion Oil Noodles, Sour Soup Noodles, Bo Lazi, Tomato Dough Drop Soup, Egg Mochi, Egg Rice, Fried Vermicelli, Lazy Rice, Ham Tofu Hotpot, Mapo Tofu with Duck Blood)",
+      "approximate_time": "0:15 - 9:00",
+      "purpose": "Demonstrate 10 creative, ultra-low-cost dishes with engaging commentary and cooking tips."
+    },
+    {
+      "section": "Outro & Teaser",
+      "approximate_time": "9:00 - End",
+      "purpose": "Wrap up the video, offer words of encouragement for tight budgets, and tease the next episode."
+    }
+  ],
+  "value_proposition": "Show how to cook 10 delicious, satisfying, and creative meals on an extreme budget, proving that financial constraints don't mean sacrificing food quality or joy.",
+  "emotional_trigger": "Financial anxiety mixed with comfort food warmth and self-deprecating humor",
+  "retention_devices": [
+    "Rapid-fire recipe transitions",
+    "Humorous self-deprecating commentary ('I'm fat only because I digest well')",
+    "Satisfying ASMR cooking sounds and visual close-ups of food textures (egg yolks breaking, bubbling broth)"
+  ],
+  "cta": "If you like the budget cooking theme, it will continue as a recurring show. Stay tuned for the next episode!",
+  "why_it_may_work": [
+    "High economic resonance with young audiences facing rising living costs.",
+    "Practical yet creative recipes that go beyond basic instant noodles.",
+    "Strong entertainment value through witty narration and comforting visuals."
+  ],
+  "remake_difficulty": "MEDIUM",
+  "localization_potential": "HIGH",
+  "vietnamese_angle": {
+    "concept": "Món ngon cuối tháng: 10 món ăn 'sang chảnh' nhưng tốn chưa tới 20k, cứu đói ví tiền hẻo lánh",
+    "suggested_hook": "Lương chưa về mà ví đã sạch bay? Thử ngay 10 món ăn siêu rẻ, siêu ngon này để qua cơn đói tháng này nhé!",
+    "notes": "Adapt the recipes to local affordable Vietnamese ingredients like instant noodles, eggs, tofu, fermented pork roll (nem chua) or local greens, while keeping the witty, relatable tone of surviving the end of the month."
+  },
+  "risks": {
+    "copyright_dependency": "LOW",
+    "personality_dependency": "MEDIUM",
+    "product_dependency": "LOW",
+    "context_dependency": "LOW"
+  },
+  "_meta": {
+    "analyzed_at": "2026-09-21T04:06:37.417861+00:00",
+    "model": "gemini-3.5-flash-lite",
+    "provider": "compatible"
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "topic": "Culinary & Cooking Education",
+  "subtopic": "Essential condiments guide and master sauce recipes for beginners",
+  "hook": {
+    "text": "今天的主題非常簡單 新手炸廚房第一課 調料 不是每個做飯的都要當大廚...",
+    "type": "Problem-solution / Pain-point hook targeting kitchen beginners",
+    "first_seconds": 3
+  },
+  "content_format": {
+    "type": "Educational / Tutorial",
+    "presentation_style": "Practical, humorous voiceover with structured step-by-step demonstrations and ingredient breakdowns."
+  },
+  "structure": [
+    {
+      "section": "Introduction & Pantry Essentials",
+      "approximate_time": "0:00 - 1:30",
+      "purpose": "Introduce the 15 essential condiments for beginners and explain their basic functions."
+    },
+    {
+      "section": "Master Sauce 1 & 2: Sweet-Savory Glaze & Quick Sour Soup",
+      "approximate_time": "1:30 - 2:40",
+      "purpose": "Demonstrate practical, everyday quick sauces for fried eggs, rice, noodles, and dumplings."
+    },
+    {
+      "section": "Master Sauce 3 & 4: Tangy Sweet-Sour (Ketchup-based) & Yuxiang Sauce",
+      "approximate_time": "2:40 - 4:45",
+      "purpose": "Showcase crowd-pleasing classic flavor profiles paired with fried shrimp and shredded pork."
+    },
+    {
+      "section": "Master Sauce 5 & 6: Refreshing Cold-Dress Sauce & Cantonese Baiqie/Steam Sauce",
+      "approximate_time": "4:45 - 6:30",
+      "purpose": "Provide lighter, diet-friendly options for cold dishes and steamed seafood/chicken."
+    },
+    {
+      "section": "Master Sauce 7 & 8: Mala (Spicy-Numbing) Mix & Rich Braised Sauce (Shandong-style / Street Food Sauce)",
+      "approximate_time": "6:30 - 9:30",
+      "purpose": "Deliver indulgent heavy-flavor solutions for banquets, potato stews, and street-food style scallion pancake sauce."
+    },
+    {
+      "section": "Conclusion & Encouragement",
+      "approximate_time": "9:30 - End",
+      "purpose": "Encourage beginners to trust their palate and tease the next episode on spices."
+    }
+  ],
+  "value_proposition": "Simplifies kitchen seasoning for complete beginners by boiling down complex recipes into 15 essential condiments and 8 master sauce formulas.",
+  "emotional_trigger": "Relatability and self-deprecation regarding 'destroying the kitchen' (炸厨房), combined with the satisfaction of easily making delicious food.",
+  "retention_devices": [
+    "Fast-paced transitions between theory (condiments) and application (dishes)",
+    "Humorous metaphors and engaging storytelling ('the soul of Chinese cooking', 'attracting human cubs')",
+    "Clear categorical breakdowns that reduce cognitive overload for beginners"
+  ],
+  "cta": "Encourages viewers to taste, experiment, make mistakes, and stay tuned for the next episode on spices.",
+  "why_it_may_work": [
+    "Solves a genuine, high-friction pain point for young people learning to cook (too many obscure condiments, fear of failure).",
+    "Actionable framework: instead of teaching single dishes, it teaches 'master sauce formulas' that can be applied to anything.",
+    "Engaging, high-energy delivery style with strong comedic timing."
+  ],
+  "remake_difficulty": "HIGH",
+  "localization_potential": "HIGH",
+  "vietnamese_angle": {
+    "concept": "Adapt the 15 essential Chinese condiments and master sauces into a Vietnamese kitchen context using local pantry staples (nước mắm, hạt nêm, mắm tôm, đường thốt nốt, tắc/quất, etc.) to teach young Vietnamese Gen Z how to cook standard family meals or trending street food at home.",
+    "suggested_hook": "Nấu ăn không khó, nhưng tại sao bạn cứ 'phá bếp'? Bí kíp 15 loại gia vị cơ bản và 8 sốt thần thánh giúp bạn nấu món nào cũng ngon như ngoài hàng!",
+    "notes": "Replace region-specific Chinese sauces (like specific doubanjiang brands) with easily accessible Vietnamese alternatives or clearly explain how to source them at Asian supermarkets in Vietnam."
+  },
+  "risks": {
+    "copyright_dependency": "LOW",
+    "personality_dependency": "MEDIUM",
+    "product_dependency": "LOW",
+    "context_dependency": "LOW"
+  },
+  "_meta": {
+    "analyzed_at": "2026-09-21T04:20:58.558141+00:00",
+    "model": "gemini-3.5-flash-lite",
+    "provider": "compatible"
+  }
+}

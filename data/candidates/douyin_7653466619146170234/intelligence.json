@@ -1,0 +1,66 @@
+{
+  "topic": "Food & Cooking",
+  "subtopic": "Dormitory-friendly Healthy One-Pot Meal",
+  "hook": {
+    "text": "大家别只关注蛋神啦 我是简子餐神 每天都会更新好吃的简子餐 今天做小锅一锅出的番茄粉丝饱",
+    "type": "Persona & Challenge Hook",
+    "first_seconds": 3
+  },
+  "content_format": {
+    "type": "Recipe / ASMR Cooking",
+    "presentation_style": "First-person voiceover with fast-paced cooking demonstration in a small kitchen/dorm setting"
+  },
+  "structure": [
+    {
+      "section": "Hook & Introduction",
+      "approximate_time": "0-3s",
+      "purpose": "Grab attention by referencing another creator (蛋神) and introducing the dish."
+    },
+    {
+      "section": "Ingredient Assembly",
+      "approximate_time": "3-15s",
+      "purpose": "Showcase easy-to-find ingredients (Napa cabbage, enoki mushrooms, tomatoes, vermicelli, secret spicy sauce, egg) tailored for dorm/simple cooking."
+    },
+    {
+      "section": "Cooking Process",
+      "approximate_time": "15-25s",
+      "purpose": "Demonstrate the quick, no-oil-fume one-pot cooking method (boil, mix, simmer)."
+    },
+    {
+      "section": "Final Result & Call to Action",
+      "approximate_time": "25-30s",
+      "purpose": "Reveal the final appetizing dish and tie into weight loss/healthy eating hashtags."
+    }
+  ],
+  "value_proposition": "A quick, delicious, and healthy one-pot meal that requires no heavy cooking equipment or oil, perfect for students and office workers in small living spaces.",
+  "emotional_trigger": "Craving for comforting, flavorful food late at night without the guilt of heavy calories or cleaning up greasy dishes.",
+  "retention_devices": [
+    "Fast pacing and rhythmic editing",
+    "Humorous persona introduction ('Meal God')",
+    "Appetizing visual layers of ingredients coming together in a small pot"
+  ],
+  "cta": "Check out how I lost weight through my meals (#好奇我怎么瘦的可以看我的饭)",
+  "why_it_may_work": [
+    "Extremely relatable to students and renters ('dorms/宿舍党') with limited cooking facilities.",
+    "Solves the pain point of oil smoke ('没有油烟味').",
+    "Low barrier to entry for ingredients and cooking skills."
+  ],
+  "remake_difficulty": "LOW",
+  "localization_potential": "HIGH",
+  "vietnamese_angle": {
+    "concept": "Adapt for Vietnamese students and office workers living in rented rooms (phòng trọ) using local ingredients like miến/bún, tomatoes, mushrooms, and a secret satế/chấm sauce.",
+    "suggested_hook": "Đứa nào ở phòng trọ mà thèm ăn đêm, không có bếp phức tạp thì bơi hết vào đây! Món miến trộn một nồi không khói mỡ cực đỉnh.",
+    "notes": "Keep the energetic pacing and focus on convenience, low cost, and no oil fumes which is a huge plus for small Vietnamese rented kitchens."
+  },
+  "risks": {
+    "copyright_dependency": "LOW",
+    "personality_dependency": "MEDIUM",
+    "product_dependency": "LOW",
+    "context_dependency": "LOW"
+  },
+  "_meta": {
+    "analyzed_at": "2026-09-21T03:46:36.239184+00:00",
+    "model": "gemini-3.5-flash-lite",
+    "provider": "compatible"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "content_id": "117058578750960",
+  "platform": "bilibili",
+  "title": "如果做饭可以不开火，6个免流汗的适夏料理",
+  "creator_name": "泡厨房的顾小胖",
+  "creator_id": "474803476",
+  "canonical_url": "http://www.bilibili.com/video/av117058578750960",
+  "publish_time": 1786179600,
+  "publish_time_iso": "2026-08-08T09:00:00+00:00",
+  "latest_metrics": {
+    "views": 995372,
+    "likes": 31821,
+    "comments": 606,
+    "shares": null,
+    "favorites": 25713
+  },
+  "snapshot_count": 1,
+  "radar_total_score": 80.07,
+  "radar_confidence": 0.85,
+  "radar_breakdown": {
+    "freshness": 80.38,
+    "engagement": 78.69,
+    "creator": 92.02
+  },
+  "pipeline_run_at": "2026-09-21T04:23:25.246313+00:00",
+  "media": {
+    "status": "ALREADY_EXISTS",
+    "meta": {
+      "size": 7872214
+    }
+  }
+}

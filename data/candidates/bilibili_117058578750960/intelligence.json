@@ -1,0 +1,86 @@
+{
+  "topic": "Food & Cooking",
+  "subtopic": "No-fire summer lazy meals & kitchen hacks",
+  "hook": {
+    "text": "恭喜我 搬家了 裝修的苦我是吃夠了 這個月開荒累的是筋疲力盡又汗留甲背 所以今天我們就做點不開火 不流汗的試下料理 放鬆一下",
+    "type": "Relatable Pain Point / Situation",
+    "first_seconds": 3
+  },
+  "content_format": {
+    "type": "Listicle / Compilation",
+    "presentation_style": "Vlog-style cooking tutorial with integrated sponsored product showcase"
+  },
+  "structure": [
+    {
+      "section": "Introduction",
+      "approximate_time": "0:00 - 0:15",
+      "purpose": "Hook viewers with moving exhaustion and introduce the no-fire summer meal concept."
+    },
+    {
+      "section": "Recipe 1: Microwave Vermicelli with Beef & Veggies",
+      "approximate_time": "0:15 - 0:55",
+      "purpose": "Demonstrate a quick, one-bowl microwave meal requiring zero stove heat."
+    },
+    {
+      "section": "Recipe 2: Rice Cooker One-Pot Chicken, Meat Patties & Corn",
+      "approximate_time": "0:55 - 1:40",
+      "purpose": "Showcase maximum efficiency using a rice cooker to make multiple dishes simultaneously."
+    },
+    {
+      "section": "Recipe 3: 3-Minute Tuna Rice Bowl",
+      "approximate_time": "1:40 - 2:10",
+      "purpose": "Provide an ultra-fast fitness/quick meal option with a clever dressing hack."
+    },
+    {
+      "section": "Sponsor Integration: Roborock Vacuum Cleaner",
+      "approximate_time": "2:10 - 3:15",
+      "purpose": "Natural transition to cleaning up kitchen mess after cooking, highlighting features like steam and pet hair care."
+    },
+    {
+      "section": "Recipe 4: Microwave Buldak Udon",
+      "approximate_time": "3:15 - 3:55",
+      "purpose": "Indulgent, cheesy microwave noodle dish for cheese and spicy lovers."
+    },
+    {
+      "section": "Recipe 5 & 6: Green Bean Soup & Soy Milk Pudding Hacks",
+      "approximate_time": "3:55 - 4:50",
+      "purpose": "Summer dessert hacks focusing on texture tricks (freezing green beans, pudding powder shortcut)."
+    },
+    {
+      "section": "Outro",
+      "approximate_time": "4:50 - End",
+      "purpose": "Warm sign-off about the new home and community engagement."
+    }
+  ],
+  "value_proposition": "Practical, sweat-free summer recipes using simple appliances (microwave, rice cooker) combined with smart home maintenance tips.",
+  "emotional_trigger": "Empathy for summer heat exhaustion and kitchen fatigue; desire for easy, low-effort lifestyle hacks.",
+  "retention_devices": [
+    "Rapid pacing moving from one dish to another without dead air",
+    "Visually satisfying close-up textures of food (Q-skin, melting cheese, soft desserts)",
+    "Natural mid-roll product integration disguised as a moving cleanup necessity"
+  ],
+  "cta": "Buy ingredients/gadgets and try out the recipes; comment and stay tuned for new home updates.",
+  "why_it_may_work": [
+    "Directly targets seasonal discomfort (summer heat and kitchen sweat)",
+    "Uses household appliances everyone owns (microwave, rice cooker) lowering barrier to entry",
+    "Blends multiple short recipes into a fast-paced compilation format that holds attention"
+  ],
+  "remake_difficulty": "MEDIUM",
+  "localization_potential": "HIGH",
+  "vietnamese_angle": {
+    "concept": "Adapt for Vietnamese hot season ('mùa nóng nực') using familiar local ingredients like phở khô, mì tôm, rice cooker, and microwave hacks.",
+    "suggested_hook": "Trời nóng bức thế này mà phải đứng trước bếp lửa nấu ăn chắc xỉu! Hôm nay mình làm mấy món không cần bật bếp, siêu nhanh gọn cho mấy đứa lười.",
+    "notes": "Replace ingredients like specific Chinese sauces with standard Vietnamese pantry staples (nước mắm, dầu hào, tương ớt) and feature local convenience foods."
+  },
+  "risks": {
+    "copyright_dependency": "LOW",
+    "personality_dependency": "MEDIUM",
+    "product_dependency": "HIGH",
+    "context_dependency": "MEDIUM"
+  },
+  "_meta": {
+    "analyzed_at": "2026-09-21T03:50:49.141415+00:00",
+    "model": "gemini-3.5-flash-lite",
+    "provider": "compatible"
+  }
+}

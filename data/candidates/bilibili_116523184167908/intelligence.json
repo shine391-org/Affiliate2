@@ -1,0 +1,86 @@
+{
+  "topic": "Healthy eating / Diet recipes",
+  "subtopic": "6 dipping sauce recipes for boiled/plain diet food",
+  "hook": {
+    "text": "最近吃腻了水煮菜 但又不想吃的太命苦 於是我就做了六個化無聊為神奇的萬能蘸水",
+    "type": "Pain Point Hook",
+    "first_seconds": 3
+  },
+  "content_format": {
+    "type": "Recipe / Food Tutorial",
+    "presentation_style": "Fast-paced voiceover with clear step-by-step cooking demonstrations and humorous self-commentary"
+  },
+  "structure": [
+    {
+      "section": "Hook & Introduction",
+      "approximate_time": "0-10s",
+      "purpose": "Address the boredom of eating plain boiled vegetables during fitness/dieting and introduce the 6 dipping sauces solution."
+    },
+    {
+      "section": "Sauce 1: Iced Lime Tea Dipping Sauce",
+      "approximate_time": "10-25s",
+      "purpose": "Provide a refreshing, sweet-and-sour summer option using tea and lime."
+    },
+    {
+      "section": "Sauce 2: Guizhou Dry Chili Dipping Sauce",
+      "approximate_time": "25-45s",
+      "purpose": "Introduce a spicy, smoky regional flavor using air-fried and crushed ingredients."
+    },
+    {
+      "section": "Sauce 3: Roasted Tomato & Chili Dipping Sauce",
+      "approximate_time": "45-60s",
+      "purpose": "Offer an easy pan-roasted, smoky-sweet alternative for handling difficult ingredients."
+    },
+    {
+      "section": "Sauce 4: Thai Style Dipping Sauce",
+      "approximate_time": "60-75s",
+      "purpose": "Deliver a zesty, seafood-friendly sour and spicy option with fish sauce and lemon."
+    },
+    {
+      "section": "Sauce 5: Upgraded Shacha Dipping Sauce",
+      "approximate_time": "75-90s",
+      "purpose": "Showcase a rich, restaurant-style meat pairing option using peanut sauce and shacha."
+    },
+    {
+      "section": "Sauce 6: Low-Calorie Soy Milk Spicy Meat Sauce",
+      "approximate_time": "90-110s",
+      "purpose": "Provide a high-satisfaction, low-calorie meaty sauce made with soy milk instead of oil."
+    },
+    {
+      "section": "Outro & CTA",
+      "approximate_time": "110-120s",
+      "purpose": "Encourage healthy eating without guilt and wrap up the video."
+    }
+  ],
+  "value_proposition": "Transforms boring, miserable diet food (boiled vegetables) into craveable, flavorful meals through 6 creative, easy-to-make dipping sauces.",
+  "emotional_trigger": "Relief and excitement (solving the diet fatigue pain point with delicious, guilt-free solutions)",
+  "retention_devices": [
+    "Rapid-fire pacing moving quickly from one sauce to the next",
+    "Humorous commentary (e.g., '魂已经走了有一会' when tasting spicy sauce)",
+    "Visual variety across 6 distinct culinary styles (tea-infused, spicy, roasted, Thai, shacha, soy milk meat sauce)"
+  ],
+  "cta": "祝大家爽吃不胖 下期再見 (Wishing everyone satisfying eating without gaining weight, see you next time)",
+  "why_it_may_work": [
+    "Directly targets a massive pain point for fitness enthusiasts and people on weight-loss diets (eating plain boiled food is miserable)",
+    "High utility and save-worthiness (6 distinct recipes in one short video)",
+    "Engaging persona with witty narration that keeps viewers entertained throughout the fast-paced tutorial"
+  ],
+  "remake_difficulty": "MEDIUM",
+  "localization_potential": "HIGH",
+  "vietnamese_angle": {
+    "concept": "6 loại nước chấm 'cứu rỗi' món ăn eat-clean luộc nhạt nhẽo cho người đang giảm cân",
+    "suggested_hook": "Đang ăn kiêng rau luộc khổ sở quá hả? Để tôi cứu mấy bạn với 6 loại sốt chấm thần thánh này, ăn rau luộc ngon như ăn lẩu!",
+    "notes": "Adapt the sauces to local Vietnamese taste preferences (e.g., keeping Thai style, fish sauce-based options, or adding a lime-chili-salt variation that Vietnamese fitness lifestyle audiences love)."
+  },
+  "risks": {
+    "copyright_dependency": "LOW",
+    "personality_dependency": "MEDIUM",
+    "product_dependency": "LOW",
+    "context_dependency": "LOW"
+  },
+  "_meta": {
+    "analyzed_at": "2026-09-21T04:15:08.876013+00:00",
+    "model": "gemini-3.5-flash-lite",
+    "provider": "compatible"
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "topic": "Cooking & Home Recipes",
+  "subtopic": "Easy beginner-friendly Chinese home-cooked dishes (Part 2)",
+  "hook": {
+    "text": "尽得起时间才是经典板车不厌的才叫家常 好久不见 今天是人生家常菜2.0 还是那些中国人都熟悉的老味道 无聊 普通 但就是好吃",
+    "type": "Nostalgic / Relatable Statement",
+    "first_seconds": 0
+  },
+  "content_format": {
+    "type": "Tutorial / Cooking Guide",
+    "presentation_style": "Voiceover with practical, down-to-earth cooking demonstrations and simplified techniques"
+  },
+  "structure": [
+    {
+      "section": "Introduction & Rice Cooking",
+      "approximate_time": "0:00 - 0:45",
+      "purpose": "Hook the audience and explain the foundation of a good meal: how to cook rice properly"
+    },
+    {
+      "section": "Quick Vegetarian Dishes",
+      "approximate_time": "0:45 - 2:30",
+      "purpose": "Showcase easy dishes like chives with eggs and hand-torn cabbage with simplified steps"
+    },
+    {
+      "section": "Classic Meat Dishes (Simplified)",
+      "approximate_time": "2:30 - 6:30",
+      "purpose": "Break down intimidating dishes like shredded pork with green peppers, boiled pork slices, braised pork belly, and sweet and sour ribs into foolproof steps"
+    },
+    {
+      "section": "Tofu & Soup",
+      "approximate_time": "6:30 - End",
+      "purpose": "Cover comfort food classics like Mapo Tofu and milky fish soup, ending with a warm concluding thought on home cooking"
+    }
+  ],
+  "value_proposition": "Teaches 9 essential, foolproof Chinese home-cooked dishes simplified for absolute beginners without sacrificing flavor.",
+  "emotional_trigger": "Nostalgia for home-cooked meals, relief from simplified cooking methods, and practical utility.",
+  "retention_devices": [
+    "Fast-paced transitions between 9 distinct dishes",
+    "Humorous and self-deprecating commentary ('刀工稀烂', '博主的尊严保证')",
+    "Practical hacks and troubleshooting tips for common cooking mistakes"
+  ],
+  "cta": "None explicitly stated in transcript (typical for short-form recipe videos focusing on watch time and saves).",
+  "why_it_may_work": [
+    "High utility value: viewers love saving easy recipe collections",
+    "Relatable and humorous tone lowers the barrier to entry for cooking",
+    "Pacing keeps viewers engaged through multiple dishes without feeling rushed"
+  ],
+  "remake_difficulty": "HIGH",
+  "localization_potential": "HIGH",
+  "vietnamese_angle": {
+    "concept": "Adapt into '9 món ăn gia đình Việt Nam kinh điển nhưng phiên bản siêu dễ cho Gen Z' (9 classic Vietnamese home dishes simplified for Gen Z beginners).",
+    "suggested_hook": "Nấu ăn không khó như bạn nghĩ! 9 món cơm nhà đơn giản nhưng 'tốn cơm' nhất mà ai cũng phải biết làm.",
+    "notes": "Replace Chinese staples like Mapo Tofu and Braised Pork Belly with Vietnamese equivalents like Thịt kho tàu, Canh chua, Rau muống xào tỏi, but keep the humorous, simplified, anti-perfectionist tutorial style."
+  },
+  "risks": {
+    "copyright_dependency": "LOW",
+    "personality_dependency": "MEDIUM",
+    "product_dependency": "LOW",
+    "context_dependency": "LOW"
+  },
+  "_meta": {
+    "analyzed_at": "2026-09-21T04:13:37.138346+00:00",
+    "model": "gemini-3.5-flash-lite",
+    "provider": "compatible"
+  }
+}

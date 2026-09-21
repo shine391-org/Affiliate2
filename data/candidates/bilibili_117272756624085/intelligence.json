@@ -1,0 +1,60 @@
+{
+  "topic": "Diet & Weight Loss",
+  "subtopic": "Diet-friendly food substitutes and shared struggles of dieting",
+  "hook": {
+    "text": "我在减肥 平时我就喜欢吃点稿茶",
+    "type": "Relatable Pain Point / Internal Monologue",
+    "first_seconds": 3
+  },
+  "content_format": {
+    "type": "Sketch Comedy / Dialogue Skit",
+    "presentation_style": "Multi-character roleplay or conversational dialogue reflecting the inner conflict of people on a diet craving snacks"
+  },
+  "structure": [
+    {
+      "section": "The Diet Trap / Cravings",
+      "approximate_time": "0-10s",
+      "purpose": "Establish the universal struggle of dieting while craving favorite comfort foods (bubble tea, yogurt, chicken feet, salads, fruits)."
+    },
+    {
+      "section": "Justification & Escalation",
+      "approximate_time": "10-25s",
+      "purpose": "Comically escalate the mutual temptation between friends or the inner voice, giving into low-calorie or alternative treats."
+    },
+    {
+      "section": "Climax / Emotional Release",
+      "approximate_time": "25-30s",
+      "purpose": "Deliver the punchline about how hard dieting is and the ultimate surrender to eating."
+    }
+  ],
+  "value_proposition": "Validates the psychological struggle of sticking to a weight-loss diet while offering comfort through shared humor and low-calorie snack ideas.",
+  "emotional_trigger": "Empathy, humor, guilt-free indulgence, and shared camaraderie among dieters.",
+  "retention_devices": [
+    "Rapid-fire dialogue and echoing phrases ('我也是', '我也爱吃')",
+    "Relatable everyday snack items (bubble tea, yogurt, chicken feet, fruit)"
+  ],
+  "cta": "None explicit in transcript",
+  "why_it_may_work": [
+    "Extremely relatable content for anyone currently trying to lose weight.",
+    "Fast-paced conversational format keeps viewers engaged.",
+    "Easily adaptable to local snacking culture."
+  ],
+  "remake_difficulty": "LOW",
+  "localization_potential": "HIGH",
+  "vietnamese_angle": {
+    "concept": "Adapt into a relatable sketch about office workers or friends trying to maintain a 'shape đẹp' (good shape) while constantly tempted by popular Vietnamese street snacks like trà sữa, bánh tráng trộn, or chè dưỡng nhan.",
+    "suggested_hook": "Đứa nào hứa mồm đi giảm cân với tao đâu rồi? Tối nay làm ly trà sữa trân châu không đường hay gì?",
+    "notes": "Keep the energetic, conversational tone and mimic the comical back-and-forth dialogue style."
+  },
+  "risks": {
+    "copyright_dependency": "LOW",
+    "personality_dependency": "MEDIUM",
+    "product_dependency": "LOW",
+    "context_dependency": "LOW"
+  },
+  "_meta": {
+    "analyzed_at": "2026-09-21T04:00:13.463222+00:00",
+    "model": "gemini-3.5-flash-lite",
+    "provider": "compatible"
+  }
+}

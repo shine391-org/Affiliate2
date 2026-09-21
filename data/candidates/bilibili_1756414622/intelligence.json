@@ -1,0 +1,101 @@
+{
+  "topic": "Home Cooking",
+  "subtopic": "Basic Home-Cooked Dishes for Beginners",
+  "hook": {
+    "text": "作为博主网红美食师工作，但镜头一关，简单重复才是生活。今天是我想做，却一直不敢做的主题，人生家常菜……",
+    "type": "Relatable Pain Point & Contrast",
+    "first_seconds": 3
+  },
+  "content_format": {
+    "type": "Compilation / Masterclass Tutorial",
+    "presentation_style": "Fast-paced, humorous, practical ASMR cooking demonstration with voiceover"
+  },
+  "structure": [
+    {
+      "section": "Introduction",
+      "approximate_time": "0:00 - 0:30",
+      "purpose": "Establish creator credibility and address the anxiety of cooking basic dishes."
+    },
+    {
+      "section": "Dish 1: Tomato Scrambled Eggs",
+      "approximate_time": "0:30 - 1:20",
+      "purpose": "Teach the ultimate comfort food with tips on rich soup and fluffy eggs."
+    },
+    {
+      "section": "Dish 2: Stir-fried Bok Choy",
+      "approximate_time": "1:20 - 2:00",
+      "purpose": "Showcase high-heat technique for simple greens."
+    },
+    {
+      "section": "Dish 3: Shredded Potatoes",
+      "approximate_time": "2:00 - 2:45",
+      "purpose": "Demonstrate knife skills and fast stir-frying for crisp texture."
+    },
+    {
+      "section": "Dish 4: Steamed Egg Custard",
+      "approximate_time": "2:45 - 3:20",
+      "purpose": "Provide the exact water-to-egg ratio for a smooth, bubble-free result."
+    },
+    {
+      "section": "Dish 5: Cola Chicken Wings",
+      "approximate_time": "3:20 - 4:10",
+      "purpose": "Highlight the easiest meat dish for beginners using cola as a shortcut."
+    },
+    {
+      "section": "Dish 6: Minced Pork with Vermicelli",
+      "approximate_time": "4:10 - 5:00",
+      "purpose": "Teach savory, flavorful pan-fried noodle dishes."
+    },
+    {
+      "section": "Dish 7: Stir-fried Pork with Chili",
+      "approximate_time": "5:00 - 6:00",
+      "purpose": "Demonstrate dry-frying chili peppers for authentic wok aroma."
+    },
+    {
+      "section": "Dish 8: Boiled & Steamed Shrimp",
+      "approximate_time": "6:00 - 7:00",
+      "purpose": "Simplify seafood preparation with exact timing."
+    },
+    {
+      "section": "Dish 9: Seaweed Egg Drop Soup",
+      "approximate_time": "7:00 - 7:40",
+      "purpose": "Conclude with a quick, comforting 4-minute soup."
+    },
+    {
+      "section": "Outro",
+      "approximate_time": "7:40 - 8:00",
+      "purpose": "Encourage beginners and wrap up the video."
+    }
+  ],
+  "value_proposition": "Master essential, foolproof home-cooked Chinese dishes that every beginner can actually replicate without fancy ingredients.",
+  "emotional_trigger": "Nostalgia, comfort, and the relief of overcoming cooking anxiety (\"Kitchen Imposter Syndrome\").",
+  "retention_devices": [
+    "Rapid-fire pacing shifting between dishes quickly",
+    "Practical pro-tips embedded in each recipe (e.g., exact water-to-egg ratio)",
+    "Relatable self-deprecating humor and anti-Michelin sentiment"
+  ],
+  "cta": "Encourage viewers to try making these dishes to survive without takeout, and follow for more easy recipes.",
+  "why_it_may_work": [
+    "Addresses a universal audience segment: absolute beginners and young people living alone who are intimidated by cooking.",
+    "High density of actionable, high-value tips within a single video instead of stretching one simple recipe.",
+    "Bypasses complex restaurant-style cooking in favor of ultimate comfort food classics."
+  ],
+  "remake_difficulty": "MEDIUM",
+  "localization_potential": "HIGH",
+  "vietnamese_angle": {
+    "concept": "Adapt the concept to 'Mâm cơm sinh viên/người ở trọ' featuring essential Vietnamese comfort dishes (Trứng chiên cà chua, Thịt kho tiêu, Rau muống xào tỏi, Canh rau ngót thịt băm).",
+    "suggested_hook": "Nấu ăn trên mạng thì sang chảnh, nhưng về nhà trọ bật bếp lên mới thấy… Cẩm nang 5 món cơm nhà dễ không tưởng cho ai mới tập tành bếp núc.",
+    "notes": "Keep the fast-paced, humorous tone. Focus on local budget-friendly ingredients available at any Vietnamese wet market."
+  },
+  "risks": {
+    "copyright_dependency": "LOW",
+    "personality_dependency": "MEDIUM",
+    "product_dependency": "LOW",
+    "context_dependency": "LOW"
+  },
+  "_meta": {
+    "analyzed_at": "2026-09-21T03:59:52.766926+00:00",
+    "model": "gemini-3.5-flash-lite",
+    "provider": "compatible"
+  }
+}

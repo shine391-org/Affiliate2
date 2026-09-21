@@ -1,0 +1,86 @@
+{
+  "topic": "Food & Cooking",
+  "subtopic": "Kid-friendly / Picky eater recipes",
+  "hook": {
+    "text": "朋友向我求助 孩子挑食怎麼辦 好像也不能怪孩子 這菜要我也吃不下",
+    "type": "Pain Point & Empathy Hook",
+    "first_seconds": 3
+  },
+  "content_format": {
+    "type": "Recipe Compilation / Cooking Tutorial",
+    "presentation_style": "Voiceover with fast-paced cooking demonstrations, focusing on practical tips and flavor upgrades."
+  },
+  "structure": [
+    {
+      "section": "Introduction",
+      "approximate_time": "0:00 - 0:15",
+      "purpose": "Address the universal parenting pain point of picky eaters and introduce the theme of kid-friendly sweet/savory dishes."
+    },
+    {
+      "section": "Dish 1: Cheese Tomato Scrambled Eggs",
+      "approximate_time": "0:15 - 1:05",
+      "purpose": "Showcase a familiar dish upgraded with cheese and sweet flavor profile for kids."
+    },
+    {
+      "section": "Dish 2: Pineapple Shrimp Balls (Air Fryer Alternative)",
+      "approximate_time": "1:05 - 2:05",
+      "purpose": "Demonstrate a crispy fried favorite with a health-conscious air fryer tip."
+    },
+    {
+      "section": "Dish 3: Sweet & Sour Chicken",
+      "approximate_time": "2:05 - 2:45",
+      "purpose": "Provide a nostalgic sweet-and-sour recipe suitable for adults and kids alike."
+    },
+    {
+      "section": "Dish 4: Enhanced Curry Rice",
+      "approximate_time": "2:45 - 3:30",
+      "purpose": "Elevate instant curry cubes with secret ingredients like milk and dark chocolate."
+    },
+    {
+      "section": "Dish 5: Glass-skin Crispy Chicken Wings",
+      "approximate_time": "3:30 - 4:15",
+      "purpose": "Teach an oil-free, air-fryer technique for ultra-crispy skin."
+    },
+    {
+      "section": "Dish 6: Sweet & Sour Shredded Pork (Kid version)",
+      "approximate_time": "4:15 - 5:10",
+      "purpose": "Adapt a classic spicy dish into a sweet, non-spicy version for children."
+    },
+    {
+      "section": "Outro",
+      "approximate_time": "5:10 - End",
+      "purpose": "Wrap up the series, offering encouragement to parents."
+    }
+  ],
+  "value_proposition": "Practical, delicious, and upgraded recipes specifically designed to solve picky eating habits in children while satisfying adult cravings too.",
+  "emotional_trigger": "Empathy for struggling parents (\"not the kid's fault, even I wouldn't want to eat adult food\") combined with childhood food nostalgia.",
+  "retention_devices": [
+    "Fast-paced editing with multiple mini-recipes in one video",
+    "Secret ingredient reveals (e.g., adding dark chocolate to curry, mozzarella on tomato eggs)",
+    "Practical kitchen hacks (e.g., freezing tomatoes to make them melt faster, air fryer shortcuts)"
+  ],
+  "cta": "Hope this solves your worries, let me know if you need more ideas so kids can eat without stress!",
+  "why_it_may_work": [
+    "Targets a massive, highly engaged demographic: parents dealing with picky eaters.",
+    "High visual satisfaction with cheese pulls, crispy textures, and rich sauces.",
+    "Practical hacks (air fryer options, secret flavor boosters) provide high save-and-share value."
+  ],
+  "remake_difficulty": "MEDIUM",
+  "localization_potential": "HIGH",
+  "vietnamese_angle": {
+    "concept": "Món ngon trị dứt chứng kén ăn của con: Biến tấu 5 món ăn vặt thành bữa chính siêu dính cơm cho bé",
+    "suggested_hook": "Con lười ăn, chê cơm nhà? Mẹ thử ngay 5 món này xem, đảm bảo vét sạch nồi cơm!",
+    "notes": "Adapt the recipes using local Vietnamese ingredients or flavors kids love (e.g., sweet & sour tamarind sauce, local herbs, or cheese-infused dishes popular among Gen Z/Alpha in Vietnam)."
+  },
+  "risks": {
+    "copyright_dependency": "LOW",
+    "personality_dependency": "LOW",
+    "product_dependency": "LOW",
+    "context_dependency": "LOW"
+  },
+  "_meta": {
+    "analyzed_at": "2026-09-21T03:53:51.240537+00:00",
+    "model": "gemini-3.5-flash-lite",
+    "provider": "compatible"
+  }
+}

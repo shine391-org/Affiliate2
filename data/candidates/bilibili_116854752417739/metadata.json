@@ -1,0 +1,32 @@
+{
+  "content_id": "116854752417739",
+  "platform": "bilibili",
+  "title": "吃的干净就是最懒人的料理法",
+  "creator_name": "泡厨房的顾小胖",
+  "creator_id": "474803476",
+  "canonical_url": "http://www.bilibili.com/video/av116854752417739",
+  "publish_time": 1783065600,
+  "publish_time_iso": "2026-07-03T08:00:00+00:00",
+  "latest_metrics": {
+    "views": 706499,
+    "likes": 28502,
+    "comments": 603,
+    "shares": null,
+    "favorites": 30213
+  },
+  "snapshot_count": 3,
+  "radar_total_score": 76.17,
+  "radar_confidence": 0.85,
+  "radar_breakdown": {
+    "freshness": 76.37,
+    "engagement": 74.47,
+    "creator": 92.02
+  },
+  "pipeline_run_at": "2026-09-21T04:23:25.280046+00:00",
+  "media": {
+    "status": "ALREADY_EXISTS",
+    "meta": {
+      "size": 8982044
+    }
+  }
+}

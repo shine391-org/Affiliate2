@@ -1,0 +1,945 @@
+{
+  "generated_at": "2026-09-21T04:23:25.308078+00:00",
+  "pipeline_summary": {
+    "requested": 10,
+    "media_downloaded": 0,
+    "media_already": 10,
+    "media_unavailable": 0,
+    "transcripts": 10,
+    "transcript_unavailable": 0,
+    "intelligence_generated": 0,
+    "intelligence_cached": 10,
+    "intelligence_errors": 0,
+    "model_calls": 0,
+    "model_retries": 0
+  },
+  "candidates": [
+    {
+      "rank": null,
+      "platform": "douyin",
+      "content_id": "7653466619146170234",
+      "title": "宿舍党狂喜，没有油烟味的一锅出❗️ 一个普通的晚上，30+的顾先生，应粉丝要求做了一大碗粉丝煲 #好奇我怎么瘦的可以看我的饭 #一个普通的晚上 #满级吃商通关赛 #美食判官已上线 #校园美食判官请出战",
+      "creator": "顾***房",
+      "url": "https://www.douyin.com/video/7653466619146170234",
+      "radar_score": 89.52,
+      "radar_confidence": 0.8,
+      "radar_breakdown": {
+        "freshness": 85.48,
+        "engagement": 91.94
+      },
+      "media_status": "ALREADY_EXISTS",
+      "transcript_status": "CACHED",
+      "intelligence": {
+        "topic": "Food & Cooking",
+        "subtopic": "Dormitory-friendly Healthy One-Pot Meal",
+        "hook": {
+          "text": "大家别只关注蛋神啦 我是简子餐神 每天都会更新好吃的简子餐 今天做小锅一锅出的番茄粉丝饱",
+          "type": "Persona & Challenge Hook",
+          "first_seconds": 3
+        },
+        "content_format": {
+          "type": "Recipe / ASMR Cooking",
+          "presentation_style": "First-person voiceover with fast-paced cooking demonstration in a small kitchen/dorm setting"
+        },
+        "structure": [
+          {
+            "section": "Hook & Introduction",
+            "approximate_time": "0-3s",
+            "purpose": "Grab attention by referencing another creator (蛋神) and introducing the dish."
+          },
+          {
+            "section": "Ingredient Assembly",
+            "approximate_time": "3-15s",
+            "purpose": "Showcase easy-to-find ingredients (Napa cabbage, enoki mushrooms, tomatoes, vermicelli, secret spicy sauce, egg) tailored for dorm/simple cooking."
+          },
+          {
+            "section": "Cooking Process",
+            "approximate_time": "15-25s",
+            "purpose": "Demonstrate the quick, no-oil-fume one-pot cooking method (boil, mix, simmer)."
+          },
+          {
+            "section": "Final Result & Call to Action",
+            "approximate_time": "25-30s",
+            "purpose": "Reveal the final appetizing dish and tie into weight loss/healthy eating hashtags."
+          }
+        ],
+        "value_proposition": "A quick, delicious, and healthy one-pot meal that requires no heavy cooking equipment or oil, perfect for students and office workers in small living spaces.",
+        "emotional_trigger": "Craving for comforting, flavorful food late at night without the guilt of heavy calories or cleaning up greasy dishes.",
+        "retention_devices": [
+          "Fast pacing and rhythmic editing",
+          "Humorous persona introduction ('Meal God')",
+          "Appetizing visual layers of ingredients coming together in a small pot"
+        ],
+        "cta": "Check out how I lost weight through my meals (#好奇我怎么瘦的可以看我的饭)",
+        "why_it_may_work": [
+          "Extremely relatable to students and renters ('dorms/宿舍党') with limited cooking facilities.",
+          "Solves the pain point of oil smoke ('没有油烟味').",
+          "Low barrier to entry for ingredients and cooking skills."
+        ],
+        "remake_difficulty": "LOW",
+        "localization_potential": "HIGH",
+        "vietnamese_angle": {
+          "concept": "Adapt for Vietnamese students and office workers living in rented rooms (phòng trọ) using local ingredients like miến/bún, tomatoes, mushrooms, and a secret satế/chấm sauce.",
+          "suggested_hook": "Đứa nào ở phòng trọ mà thèm ăn đêm, không có bếp phức tạp thì bơi hết vào đây! Món miến trộn một nồi không khói mỡ cực đỉnh.",
+          "notes": "Keep the energetic pacing and focus on convenience, low cost, and no oil fumes which is a huge plus for small Vietnamese rented kitchens."
+        },
+        "risks": {
+          "copyright_dependency": "LOW",
+          "personality_dependency": "MEDIUM",
+          "product_dependency": "LOW",
+          "context_dependency": "LOW"
+        },
+        "_meta": {
+          "analyzed_at": "2026-09-21T03:46:36.239184+00:00",
+          "model": "gemini-3.5-flash-lite",
+          "provider": "compatible"
+        }
+      }
+    },
+    {
+      "rank": null,
+      "platform": "bilibili",
+      "content_id": "117058578750960",
+      "title": "如果做饭可以不开火，6个免流汗的适夏料理",
+      "creator": "泡厨房的顾小胖",
+      "url": "http://www.bilibili.com/video/av117058578750960",
+      "radar_score": 80.07,
+      "radar_confidence": 0.85,
+      "radar_breakdown": {
+        "freshness": 80.38,
+        "engagement": 78.69,
+        "creator": 92.02
+      },
+      "media_status": "ALREADY_EXISTS",
+      "transcript_status": "CACHED",
+      "intelligence": {
+        "topic": "Food & Cooking",
+        "subtopic": "No-fire summer lazy meals & kitchen hacks",
+        "hook": {
+          "text": "恭喜我 搬家了 裝修的苦我是吃夠了 這個月開荒累的是筋疲力盡又汗留甲背 所以今天我們就做點不開火 不流汗的試下料理 放鬆一下",
+          "type": "Relatable Pain Point / Situation",
+          "first_seconds": 3
+        },
+        "content_format": {
+          "type": "Listicle / Compilation",
+          "presentation_style": "Vlog-style cooking tutorial with integrated sponsored product showcase"
+        },
+        "structure": [
+          {
+            "section": "Introduction",
+            "approximate_time": "0:00 - 0:15",
+            "purpose": "Hook viewers with moving exhaustion and introduce the no-fire summer meal concept."
+          },
+          {
+            "section": "Recipe 1: Microwave Vermicelli with Beef & Veggies",
+            "approximate_time": "0:15 - 0:55",
+            "purpose": "Demonstrate a quick, one-bowl microwave meal requiring zero stove heat."
+          },
+          {
+            "section": "Recipe 2: Rice Cooker One-Pot Chicken, Meat Patties & Corn",
+            "approximate_time": "0:55 - 1:40",
+            "purpose": "Showcase maximum efficiency using a rice cooker to make multiple dishes simultaneously."
+          },
+          {
+            "section": "Recipe 3: 3-Minute Tuna Rice Bowl",
+            "approximate_time": "1:40 - 2:10",
+            "purpose": "Provide an ultra-fast fitness/quick meal option with a clever dressing hack."
+          },
+          {
+            "section": "Sponsor Integration: Roborock Vacuum Cleaner",
+            "approximate_time": "2:10 - 3:15",
+            "purpose": "Natural transition to cleaning up kitchen mess after cooking, highlighting features like steam and pet hair care."
+          },
+          {
+            "section": "Recipe 4: Microwave Buldak Udon",
+            "approximate_time": "3:15 - 3:55",
+            "purpose": "Indulgent, cheesy microwave noodle dish for cheese and spicy lovers."
+          },
+          {
+            "section": "Recipe 5 & 6: Green Bean Soup & Soy Milk Pudding Hacks",
+            "approximate_time": "3:55 - 4:50",
+            "purpose": "Summer dessert hacks focusing on texture tricks (freezing green beans, pudding powder shortcut)."
+          },
+          {
+            "section": "Outro",
+            "approximate_time": "4:50 - End",
+            "purpose": "Warm sign-off about the new home and community engagement."
+          }
+        ],
+        "value_proposition": "Practical, sweat-free summer recipes using simple appliances (microwave, rice cooker) combined with smart home maintenance tips.",
+        "emotional_trigger": "Empathy for summer heat exhaustion and kitchen fatigue; desire for easy, low-effort lifestyle hacks.",
+        "retention_devices": [
+          "Rapid pacing moving from one dish to another without dead air",
+          "Visually satisfying close-up textures of food (Q-skin, melting cheese, soft desserts)",
+          "Natural mid-roll product integration disguised as a moving cleanup necessity"
+        ],
+        "cta": "Buy ingredients/gadgets and try out the recipes; comment and stay tuned for new home updates.",
+        "why_it_may_work": [
+          "Directly targets seasonal discomfort (summer heat and kitchen sweat)",
+          "Uses household appliances everyone owns (microwave, rice cooker) lowering barrier to entry",
+          "Blends multiple short recipes into a fast-paced compilation format that holds attention"
+        ],
+        "remake_difficulty": "MEDIUM",
+        "localization_potential": "HIGH",
+        "vietnamese_angle": {
+          "concept": "Adapt for Vietnamese hot season ('mùa nóng nực') using familiar local ingredients like phở khô, mì tôm, rice cooker, and microwave hacks.",
+          "suggested_hook": "Trời nóng bức thế này mà phải đứng trước bếp lửa nấu ăn chắc xỉu! Hôm nay mình làm mấy món không cần bật bếp, siêu nhanh gọn cho mấy đứa lười.",
+          "notes": "Replace ingredients like specific Chinese sauces with standard Vietnamese pantry staples (nước mắm, dầu hào, tương ớt) and feature local convenience foods."
+        },
+        "risks": {
+          "copyright_dependency": "LOW",
+          "personality_dependency": "MEDIUM",
+          "product_dependency": "HIGH",
+          "context_dependency": "MEDIUM"
+        },
+        "_meta": {
+          "analyzed_at": "2026-09-21T03:50:49.141415+00:00",
+          "model": "gemini-3.5-flash-lite",
+          "provider": "compatible"
+        }
+      }
+    },
+    {
+      "rank": null,
+      "platform": "bilibili",
+      "content_id": "116245336759183",
+      "title": "专治挑食，家长必学系列之无敌小孩菜",
+      "creator": "泡厨房的顾小胖",
+      "url": "http://www.bilibili.com/video/av116245336759183",
+      "radar_score": 77.07,
+      "radar_confidence": 0.85,
+      "radar_breakdown": {
+        "freshness": 36.71,
+        "engagement": 99.79,
+        "creator": 92.02
+      },
+      "media_status": "ALREADY_EXISTS",
+      "transcript_status": "CACHED",
+      "intelligence": {
+        "topic": "Food & Cooking",
+        "subtopic": "Kid-friendly / Picky eater recipes",
+        "hook": {
+          "text": "朋友向我求助 孩子挑食怎麼辦 好像也不能怪孩子 這菜要我也吃不下",
+          "type": "Pain Point & Empathy Hook",
+          "first_seconds": 3
+        },
+        "content_format": {
+          "type": "Recipe Compilation / Cooking Tutorial",
+          "presentation_style": "Voiceover with fast-paced cooking demonstrations, focusing on practical tips and flavor upgrades."
+        },
+        "structure": [
+          {
+            "section": "Introduction",
+            "approximate_time": "0:00 - 0:15",
+            "purpose": "Address the universal parenting pain point of picky eaters and introduce the theme of kid-friendly sweet/savory dishes."
+          },
+          {
+            "section": "Dish 1: Cheese Tomato Scrambled Eggs",
+            "approximate_time": "0:15 - 1:05",
+            "purpose": "Showcase a familiar dish upgraded with cheese and sweet flavor profile for kids."
+          },
+          {
+            "section": "Dish 2: Pineapple Shrimp Balls (Air Fryer Alternative)",
+            "approximate_time": "1:05 - 2:05",
+            "purpose": "Demonstrate a crispy fried favorite with a health-conscious air fryer tip."
+          },
+          {
+            "section": "Dish 3: Sweet & Sour Chicken",
+            "approximate_time": "2:05 - 2:45",
+            "purpose": "Provide a nostalgic sweet-and-sour recipe suitable for adults and kids alike."
+          },
+          {
+            "section": "Dish 4: Enhanced Curry Rice",
+            "approximate_time": "2:45 - 3:30",
+            "purpose": "Elevate instant curry cubes with secret ingredients like milk and dark chocolate."
+          },
+          {
+            "section": "Dish 5: Glass-skin Crispy Chicken Wings",
+            "approximate_time": "3:30 - 4:15",
+            "purpose": "Teach an oil-free, air-fryer technique for ultra-crispy skin."
+          },
+          {
+            "section": "Dish 6: Sweet & Sour Shredded Pork (Kid version)",
+            "approximate_time": "4:15 - 5:10",
+            "purpose": "Adapt a classic spicy dish into a sweet, non-spicy version for children."
+          },
+          {
+            "section": "Outro",
+            "approximate_time": "5:10 - End",
+            "purpose": "Wrap up the series, offering encouragement to parents."
+          }
+        ],
+        "value_proposition": "Practical, delicious, and upgraded recipes specifically designed to solve picky eating habits in children while satisfying adult cravings too.",
+        "emotional_trigger": "Empathy for struggling parents (\"not the kid's fault, even I wouldn't want to eat adult food\") combined with childhood food nostalgia.",
+        "retention_devices": [
+          "Fast-paced editing with multiple mini-recipes in one video",
+          "Secret ingredient reveals (e.g., adding dark chocolate to curry, mozzarella on tomato eggs)",
+          "Practical kitchen hacks (e.g., freezing tomatoes to make them melt faster, air fryer shortcuts)"
+        ],
+        "cta": "Hope this solves your worries, let me know if you need more ideas so kids can eat without stress!",
+        "why_it_may_work": [
+          "Targets a massive, highly engaged demographic: parents dealing with picky eaters.",
+          "High visual satisfaction with cheese pulls, crispy textures, and rich sauces.",
+          "Practical hacks (air fryer options, secret flavor boosters) provide high save-and-share value."
+        ],
+        "remake_difficulty": "MEDIUM",
+        "localization_potential": "HIGH",
+        "vietnamese_angle": {
+          "concept": "Món ngon trị dứt chứng kén ăn của con: Biến tấu 5 món ăn vặt thành bữa chính siêu dính cơm cho bé",
+          "suggested_hook": "Con lười ăn, chê cơm nhà? Mẹ thử ngay 5 món này xem, đảm bảo vét sạch nồi cơm!",
+          "notes": "Adapt the recipes using local Vietnamese ingredients or flavors kids love (e.g., sweet & sour tamarind sauce, local herbs, or cheese-infused dishes popular among Gen Z/Alpha in Vietnam)."
+        },
+        "risks": {
+          "copyright_dependency": "LOW",
+          "personality_dependency": "LOW",
+          "product_dependency": "LOW",
+          "context_dependency": "LOW"
+        },
+        "_meta": {
+          "analyzed_at": "2026-09-21T03:53:51.240537+00:00",
+          "model": "gemini-3.5-flash-lite",
+          "provider": "compatible"
+        }
+      }
+    },
+    {
+      "rank": null,
+      "platform": "bilibili",
+      "content_id": "1756414622",
+      "title": "第一次下厨必看，刻在中国人基因里的人生家常菜，我能吃一辈子",
+      "creator": "泡厨房的顾小胖",
+      "url": "http://www.bilibili.com/video/av1756414622",
+      "radar_score": 76.82,
+      "radar_confidence": 0.85,
+      "radar_breakdown": {
+        "freshness": 36.71,
+        "engagement": 99.37,
+        "creator": 92.02
+      },
+      "media_status": "ALREADY_EXISTS",
+      "transcript_status": "CACHED",
+      "intelligence": {
+        "topic": "Home Cooking",
+        "subtopic": "Basic Home-Cooked Dishes for Beginners",
+        "hook": {
+          "text": "作为博主网红美食师工作，但镜头一关，简单重复才是生活。今天是我想做，却一直不敢做的主题，人生家常菜……",
+          "type": "Relatable Pain Point & Contrast",
+          "first_seconds": 3
+        },
+        "content_format": {
+          "type": "Compilation / Masterclass Tutorial",
+          "presentation_style": "Fast-paced, humorous, practical ASMR cooking demonstration with voiceover"
+        },
+        "structure": [
+          {
+            "section": "Introduction",
+            "approximate_time": "0:00 - 0:30",
+            "purpose": "Establish creator credibility and address the anxiety of cooking basic dishes."
+          },
+          {
+            "section": "Dish 1: Tomato Scrambled Eggs",
+            "approximate_time": "0:30 - 1:20",
+            "purpose": "Teach the ultimate comfort food with tips on rich soup and fluffy eggs."
+          },
+          {
+            "section": "Dish 2: Stir-fried Bok Choy",
+            "approximate_time": "1:20 - 2:00",
+            "purpose": "Showcase high-heat technique for simple greens."
+          },
+          {
+            "section": "Dish 3: Shredded Potatoes",
+            "approximate_time": "2:00 - 2:45",
+            "purpose": "Demonstrate knife skills and fast stir-frying for crisp texture."
+          },
+          {
+            "section": "Dish 4: Steamed Egg Custard",
+            "approximate_time": "2:45 - 3:20",
+            "purpose": "Provide the exact water-to-egg ratio for a smooth, bubble-free result."
+          },
+          {
+            "section": "Dish 5: Cola Chicken Wings",
+            "approximate_time": "3:20 - 4:10",
+            "purpose": "Highlight the easiest meat dish for beginners using cola as a shortcut."
+          },
+          {
+            "section": "Dish 6: Minced Pork with Vermicelli",
+            "approximate_time": "4:10 - 5:00",
+            "purpose": "Teach savory, flavorful pan-fried noodle dishes."
+          },
+          {
+            "section": "Dish 7: Stir-fried Pork with Chili",
+            "approximate_time": "5:00 - 6:00",
+            "purpose": "Demonstrate dry-frying chili peppers for authentic wok aroma."
+          },
+          {
+            "section": "Dish 8: Boiled & Steamed Shrimp",
+            "approximate_time": "6:00 - 7:00",
+            "purpose": "Simplify seafood preparation with exact timing."
+          },
+          {
+            "section": "Dish 9: Seaweed Egg Drop Soup",
+            "approximate_time": "7:00 - 7:40",
+            "purpose": "Conclude with a quick, comforting 4-minute soup."
+          },
+          {
+            "section": "Outro",
+            "approximate_time": "7:40 - 8:00",
+            "purpose": "Encourage beginners and wrap up the video."
+          }
+        ],
+        "value_proposition": "Master essential, foolproof home-cooked Chinese dishes that every beginner can actually replicate without fancy ingredients.",
+        "emotional_trigger": "Nostalgia, comfort, and the relief of overcoming cooking anxiety (\"Kitchen Imposter Syndrome\").",
+        "retention_devices": [
+          "Rapid-fire pacing shifting between dishes quickly",
+          "Practical pro-tips embedded in each recipe (e.g., exact water-to-egg ratio)",
+          "Relatable self-deprecating humor and anti-Michelin sentiment"
+        ],
+        "cta": "Encourage viewers to try making these dishes to survive without takeout, and follow for more easy recipes.",
+        "why_it_may_work": [
+          "Addresses a universal audience segment: absolute beginners and young people living alone who are intimidated by cooking.",
+          "High density of actionable, high-value tips within a single video instead of stretching one simple recipe.",
+          "Bypasses complex restaurant-style cooking in favor of ultimate comfort food classics."
+        ],
+        "remake_difficulty": "MEDIUM",
+        "localization_potential": "HIGH",
+        "vietnamese_angle": {
+          "concept": "Adapt the concept to 'Mâm cơm sinh viên/người ở trọ' featuring essential Vietnamese comfort dishes (Trứng chiên cà chua, Thịt kho tiêu, Rau muống xào tỏi, Canh rau ngót thịt băm).",
+          "suggested_hook": "Nấu ăn trên mạng thì sang chảnh, nhưng về nhà trọ bật bếp lên mới thấy… Cẩm nang 5 món cơm nhà dễ không tưởng cho ai mới tập tành bếp núc.",
+          "notes": "Keep the fast-paced, humorous tone. Focus on local budget-friendly ingredients available at any Vietnamese wet market."
+        },
+        "risks": {
+          "copyright_dependency": "LOW",
+          "personality_dependency": "MEDIUM",
+          "product_dependency": "LOW",
+          "context_dependency": "LOW"
+        },
+        "_meta": {
+          "analyzed_at": "2026-09-21T03:59:52.766926+00:00",
+          "model": "gemini-3.5-flash-lite",
+          "provider": "compatible"
+        }
+      }
+    },
+    {
+      "rank": null,
+      "platform": "bilibili",
+      "content_id": "117272756624085",
+      "title": "管理期美食低卡平替",
+      "creator": "TANK和嫂子",
+      "url": "http://www.bilibili.com/video/av117272756624085",
+      "radar_score": 76.63,
+      "radar_confidence": 0.8,
+      "radar_breakdown": {
+        "freshness": 92.19,
+        "engagement": 67.3
+      },
+      "media_status": "ALREADY_EXISTS",
+      "transcript_status": "CACHED",
+      "intelligence": {
+        "topic": "Diet & Weight Loss",
+        "subtopic": "Diet-friendly food substitutes and shared struggles of dieting",
+        "hook": {
+          "text": "我在减肥 平时我就喜欢吃点稿茶",
+          "type": "Relatable Pain Point / Internal Monologue",
+          "first_seconds": 3
+        },
+        "content_format": {
+          "type": "Sketch Comedy / Dialogue Skit",
+          "presentation_style": "Multi-character roleplay or conversational dialogue reflecting the inner conflict of people on a diet craving snacks"
+        },
+        "structure": [
+          {
+            "section": "The Diet Trap / Cravings",
+            "approximate_time": "0-10s",
+            "purpose": "Establish the universal struggle of dieting while craving favorite comfort foods (bubble tea, yogurt, chicken feet, salads, fruits)."
+          },
+          {
+            "section": "Justification & Escalation",
+            "approximate_time": "10-25s",
+            "purpose": "Comically escalate the mutual temptation between friends or the inner voice, giving into low-calorie or alternative treats."
+          },
+          {
+            "section": "Climax / Emotional Release",
+            "approximate_time": "25-30s",
+            "purpose": "Deliver the punchline about how hard dieting is and the ultimate surrender to eating."
+          }
+        ],
+        "value_proposition": "Validates the psychological struggle of sticking to a weight-loss diet while offering comfort through shared humor and low-calorie snack ideas.",
+        "emotional_trigger": "Empathy, humor, guilt-free indulgence, and shared camaraderie among dieters.",
+        "retention_devices": [
+          "Rapid-fire dialogue and echoing phrases ('我也是', '我也爱吃')",
+          "Relatable everyday snack items (bubble tea, yogurt, chicken feet, fruit)"
+        ],
+        "cta": "None explicit in transcript",
+        "why_it_may_work": [
+          "Extremely relatable content for anyone currently trying to lose weight.",
+          "Fast-paced conversational format keeps viewers engaged.",
+          "Easily adaptable to local snacking culture."
+        ],
+        "remake_difficulty": "LOW",
+        "localization_potential": "HIGH",
+        "vietnamese_angle": {
+          "concept": "Adapt into a relatable sketch about office workers or friends trying to maintain a 'shape đẹp' (good shape) while constantly tempted by popular Vietnamese street snacks like trà sữa, bánh tráng trộn, or chè dưỡng nhan.",
+          "suggested_hook": "Đứa nào hứa mồm đi giảm cân với tao đâu rồi? Tối nay làm ly trà sữa trân châu không đường hay gì?",
+          "notes": "Keep the energetic, conversational tone and mimic the comical back-and-forth dialogue style."
+        },
+        "risks": {
+          "copyright_dependency": "LOW",
+          "personality_dependency": "MEDIUM",
+          "product_dependency": "LOW",
+          "context_dependency": "LOW"
+        },
+        "_meta": {
+          "analyzed_at": "2026-09-21T04:00:13.463222+00:00",
+          "model": "gemini-3.5-flash-lite",
+          "provider": "compatible"
+        }
+      }
+    },
+    {
+      "rank": null,
+      "platform": "bilibili",
+      "content_id": "691055564",
+      "title": "十元贫穷料理再升级，十道大餐让你月底不再勒腰带",
+      "creator": "泡厨房的顾小胖",
+      "url": "http://www.bilibili.com/video/av691055564",
+      "radar_score": 76.58,
+      "radar_confidence": 0.85,
+      "radar_breakdown": {
+        "freshness": 36.71,
+        "engagement": 98.95,
+        "creator": 92.02
+      },
+      "media_status": "ALREADY_EXISTS",
+      "transcript_status": "CACHED",
+      "intelligence": {
+        "topic": "Budget cooking",
+        "subtopic": "Low-cost gourmet meals under tight budgets",
+        "hook": {
+          "text": "论十块钱在当今社会有多么渺小 不够一杯奶茶 勉强三颗生煎... 年轻人的贫穷生活总是格外艰难 所以我们的贫穷料理再次登场",
+          "type": "Relatable Pain Point / Financial Reality Check",
+          "first_seconds": 3
+        },
+        "content_format": {
+          "type": "Cooking/Food VLOG",
+          "presentation_style": "Humorous, fast-paced, first-person narrative voiceover with practical step-by-step demonstrations"
+        },
+        "structure": [
+          {
+            "section": "Hook & Intro",
+            "approximate_time": "0:00 - 0:15",
+            "purpose": "Highlight modern financial struggles and introduce the budget cooking series."
+          },
+          {
+            "section": "Recipe Compilation (Scallion Oil Noodles, Sour Soup Noodles, Bo Lazi, Tomato Dough Drop Soup, Egg Mochi, Egg Rice, Fried Vermicelli, Lazy Rice, Ham Tofu Hotpot, Mapo Tofu with Duck Blood)",
+            "approximate_time": "0:15 - 9:00",
+            "purpose": "Demonstrate 10 creative, ultra-low-cost dishes with engaging commentary and cooking tips."
+          },
+          {
+            "section": "Outro & Teaser",
+            "approximate_time": "9:00 - End",
+            "purpose": "Wrap up the video, offer words of encouragement for tight budgets, and tease the next episode."
+          }
+        ],
+        "value_proposition": "Show how to cook 10 delicious, satisfying, and creative meals on an extreme budget, proving that financial constraints don't mean sacrificing food quality or joy.",
+        "emotional_trigger": "Financial anxiety mixed with comfort food warmth and self-deprecating humor",
+        "retention_devices": [
+          "Rapid-fire recipe transitions",
+          "Humorous self-deprecating commentary ('I'm fat only because I digest well')",
+          "Satisfying ASMR cooking sounds and visual close-ups of food textures (egg yolks breaking, bubbling broth)"
+        ],
+        "cta": "If you like the budget cooking theme, it will continue as a recurring show. Stay tuned for the next episode!",
+        "why_it_may_work": [
+          "High economic resonance with young audiences facing rising living costs.",
+          "Practical yet creative recipes that go beyond basic instant noodles.",
+          "Strong entertainment value through witty narration and comforting visuals."
+        ],
+        "remake_difficulty": "MEDIUM",
+        "localization_potential": "HIGH",
+        "vietnamese_angle": {
+          "concept": "Món ngon cuối tháng: 10 món ăn 'sang chảnh' nhưng tốn chưa tới 20k, cứu đói ví tiền hẻo lánh",
+          "suggested_hook": "Lương chưa về mà ví đã sạch bay? Thử ngay 10 món ăn siêu rẻ, siêu ngon này để qua cơn đói tháng này nhé!",
+          "notes": "Adapt the recipes to local affordable Vietnamese ingredients like instant noodles, eggs, tofu, fermented pork roll (nem chua) or local greens, while keeping the witty, relatable tone of surviving the end of the month."
+        },
+        "risks": {
+          "copyright_dependency": "LOW",
+          "personality_dependency": "MEDIUM",
+          "product_dependency": "LOW",
+          "context_dependency": "LOW"
+        },
+        "_meta": {
+          "analyzed_at": "2026-09-21T04:06:37.417861+00:00",
+          "model": "gemini-3.5-flash-lite",
+          "provider": "compatible"
+        }
+      }
+    },
+    {
+      "rank": null,
+      "platform": "bilibili",
+      "content_id": "116854752417739",
+      "title": "吃的干净就是最懒人的料理法",
+      "creator": "泡厨房的顾小胖",
+      "url": "http://www.bilibili.com/video/av116854752417739",
+      "radar_score": 76.17,
+      "radar_confidence": 0.85,
+      "radar_breakdown": {
+        "freshness": 76.37,
+        "engagement": 74.47,
+        "creator": 92.02
+      },
+      "media_status": "ALREADY_EXISTS",
+      "transcript_status": "CACHED",
+      "intelligence": {
+        "topic": "Healthy and lazy cooking / Fitness meal prep",
+        "subtopic": "Quick and clean eating recipes for busy fitness enthusiasts",
+        "hook": {
+          "text": "朋友问我 我也想健康 但没时间做饭怎么办 嗯 又不是功课什么人间美味 想吃的健康不要太简单 不信 我证明给你看 健身人的水煮菜能有多简单",
+          "type": "Pain Point & Challenge",
+          "first_seconds": 3
+        },
+        "content_format": {
+          "type": "Talking Head & Recipe Tutorial",
+          "presentation_style": "Fast-paced, conversational voiceover with practical cooking demos and a seamless mid-roll native ad integration"
+        },
+        "structure": [
+          {
+            "section": "Hook & Quick Soup",
+            "approximate_time": "0-20s",
+            "purpose": "Address the time-poor healthy eating pain point and show a 5-minute beef hotpot soup."
+          },
+          {
+            "section": "Batch Prep (Rice Cooker)",
+            "approximate_time": "20-40s",
+            "purpose": "Demonstrate batch-cooking protein (braised meats) using a rice cooker for efficiency."
+          },
+          {
+            "section": "Native Ad Insertion",
+            "approximate_time": "40-60s",
+            "purpose": "Smooth transition from hair loss anxiety (common among fitness/busy people) to minoxidil foam product placement."
+          },
+          {
+            "section": "Quick Canned Goods & Steaming Recipes",
+            "approximate_time": "60-90s",
+            "purpose": "Provide quick meal ideas using canned tomatoes/tuna and waterless steaming techniques."
+          },
+          {
+            "section": "One-Pot Salmon Veggie Rice & Outro",
+            "approximate_time": "90-120s",
+            "purpose": "Showcase a complete meal-in-one rice cooker recipe and wrap up with lifestyle encouragement."
+          }
+        ],
+        "value_proposition": "Learn ultra-lazy, delicious, and clean-eating recipes tailored for fitness goals without spending hours in the kitchen.",
+        "emotional_trigger": "Relief from the pressure of healthy eating combined with the anxiety of hair loss and lack of time.",
+        "retention_devices": [
+          "Rapid-fire recipe transitions",
+          "Practical batch-cooking life hacks",
+          "Seamless natural transition into a sponsored product"
+        ],
+        "cta": "Check the pinned comment in the description for the product link (hair loss foam) and enjoy your meals.",
+        "why_it_may_work": [
+          "Directly targets young urbanites who want to stay fit and healthy but have zero time to cook.",
+          "Combines multiple bite-sized value hacks (soups, batch cooking, canned goods, waterless steaming) in one video.",
+          "Native advertising feels organic by linking fitness stress/lifestyle directly to hair loss care."
+        ],
+        "remake_difficulty": "MEDIUM",
+        "localization_potential": "HIGH",
+        "vietnamese_angle": {
+          "concept": "Adapt for Vietnamese office workers and gym-goers who want eat clean (eat clean/healthy) but find traditional prep too tedious, utilizing local ingredients like canned fish (cá mòi/cá ngừ), rice cookers, and quick air-fryer/one-pot methods.",
+          "suggested_hook": "Tập gym muốn ăn clean mà cứ sợ cực, không có thời gian nấu nướng? Để tôi chỉ bạn cách nấu đồ ăn healthy vừa nhác vừa ngon thế này!",
+          "notes": "Keep the fast cuts and local Vietnamese pantry equivalents (e.g., using fish sauce/local spices instead of complex Chinese bean pastes if needed, though keeping it simple is key)."
+        },
+        "risks": {
+          "copyright_dependency": "LOW",
+          "personality_dependency": "MEDIUM",
+          "product_dependency": "HIGH",
+          "context_dependency": "LOW"
+        },
+        "_meta": {
+          "analyzed_at": "2026-09-21T04:08:49.646361+00:00",
+          "model": "gemini-3.5-flash-lite",
+          "provider": "compatible"
+        }
+      }
+    },
+    {
+      "rank": null,
+      "platform": "bilibili",
+      "content_id": "1706621248",
+      "title": "一期带你学会煮饭，9道中国人都知道的人生家常菜 2.0",
+      "creator": "泡厨房的顾小胖",
+      "url": "http://www.bilibili.com/video/av1706621248",
+      "radar_score": 76.08,
+      "radar_confidence": 0.85,
+      "radar_breakdown": {
+        "freshness": 36.71,
+        "engagement": 98.1,
+        "creator": 92.02
+      },
+      "media_status": "ALREADY_EXISTS",
+      "transcript_status": "CACHED",
+      "intelligence": {
+        "topic": "Cooking & Home Recipes",
+        "subtopic": "Easy beginner-friendly Chinese home-cooked dishes (Part 2)",
+        "hook": {
+          "text": "尽得起时间才是经典板车不厌的才叫家常 好久不见 今天是人生家常菜2.0 还是那些中国人都熟悉的老味道 无聊 普通 但就是好吃",
+          "type": "Nostalgic / Relatable Statement",
+          "first_seconds": 0
+        },
+        "content_format": {
+          "type": "Tutorial / Cooking Guide",
+          "presentation_style": "Voiceover with practical, down-to-earth cooking demonstrations and simplified techniques"
+        },
+        "structure": [
+          {
+            "section": "Introduction & Rice Cooking",
+            "approximate_time": "0:00 - 0:45",
+            "purpose": "Hook the audience and explain the foundation of a good meal: how to cook rice properly"
+          },
+          {
+            "section": "Quick Vegetarian Dishes",
+            "approximate_time": "0:45 - 2:30",
+            "purpose": "Showcase easy dishes like chives with eggs and hand-torn cabbage with simplified steps"
+          },
+          {
+            "section": "Classic Meat Dishes (Simplified)",
+            "approximate_time": "2:30 - 6:30",
+            "purpose": "Break down intimidating dishes like shredded pork with green peppers, boiled pork slices, braised pork belly, and sweet and sour ribs into foolproof steps"
+          },
+          {
+            "section": "Tofu & Soup",
+            "approximate_time": "6:30 - End",
+            "purpose": "Cover comfort food classics like Mapo Tofu and milky fish soup, ending with a warm concluding thought on home cooking"
+          }
+        ],
+        "value_proposition": "Teaches 9 essential, foolproof Chinese home-cooked dishes simplified for absolute beginners without sacrificing flavor.",
+        "emotional_trigger": "Nostalgia for home-cooked meals, relief from simplified cooking methods, and practical utility.",
+        "retention_devices": [
+          "Fast-paced transitions between 9 distinct dishes",
+          "Humorous and self-deprecating commentary ('刀工稀烂', '博主的尊严保证')",
+          "Practical hacks and troubleshooting tips for common cooking mistakes"
+        ],
+        "cta": "None explicitly stated in transcript (typical for short-form recipe videos focusing on watch time and saves).",
+        "why_it_may_work": [
+          "High utility value: viewers love saving easy recipe collections",
+          "Relatable and humorous tone lowers the barrier to entry for cooking",
+          "Pacing keeps viewers engaged through multiple dishes without feeling rushed"
+        ],
+        "remake_difficulty": "HIGH",
+        "localization_potential": "HIGH",
+        "vietnamese_angle": {
+          "concept": "Adapt into '9 món ăn gia đình Việt Nam kinh điển nhưng phiên bản siêu dễ cho Gen Z' (9 classic Vietnamese home dishes simplified for Gen Z beginners).",
+          "suggested_hook": "Nấu ăn không khó như bạn nghĩ! 9 món cơm nhà đơn giản nhưng 'tốn cơm' nhất mà ai cũng phải biết làm.",
+          "notes": "Replace Chinese staples like Mapo Tofu and Braised Pork Belly with Vietnamese equivalents like Thịt kho tàu, Canh chua, Rau muống xào tỏi, but keep the humorous, simplified, anti-perfectionist tutorial style."
+        },
+        "risks": {
+          "copyright_dependency": "LOW",
+          "personality_dependency": "MEDIUM",
+          "product_dependency": "LOW",
+          "context_dependency": "LOW"
+        },
+        "_meta": {
+          "analyzed_at": "2026-09-21T04:13:37.138346+00:00",
+          "model": "gemini-3.5-flash-lite",
+          "provider": "compatible"
+        }
+      }
+    },
+    {
+      "rank": null,
+      "platform": "bilibili",
+      "content_id": "116523184167908",
+      "title": "自律必备，6个无敌蘸水拯救天下水煮菜",
+      "creator": "泡厨房的顾小胖",
+      "url": "http://www.bilibili.com/video/av116523184167908",
+      "radar_score": 75.83,
+      "radar_confidence": 0.85,
+      "radar_breakdown": {
+        "freshness": 36.71,
+        "engagement": 97.68,
+        "creator": 92.02
+      },
+      "media_status": "ALREADY_EXISTS",
+      "transcript_status": "CACHED",
+      "intelligence": {
+        "topic": "Healthy eating / Diet recipes",
+        "subtopic": "6 dipping sauce recipes for boiled/plain diet food",
+        "hook": {
+          "text": "最近吃腻了水煮菜 但又不想吃的太命苦 於是我就做了六個化無聊為神奇的萬能蘸水",
+          "type": "Pain Point Hook",
+          "first_seconds": 3
+        },
+        "content_format": {
+          "type": "Recipe / Food Tutorial",
+          "presentation_style": "Fast-paced voiceover with clear step-by-step cooking demonstrations and humorous self-commentary"
+        },
+        "structure": [
+          {
+            "section": "Hook & Introduction",
+            "approximate_time": "0-10s",
+            "purpose": "Address the boredom of eating plain boiled vegetables during fitness/dieting and introduce the 6 dipping sauces solution."
+          },
+          {
+            "section": "Sauce 1: Iced Lime Tea Dipping Sauce",
+            "approximate_time": "10-25s",
+            "purpose": "Provide a refreshing, sweet-and-sour summer option using tea and lime."
+          },
+          {
+            "section": "Sauce 2: Guizhou Dry Chili Dipping Sauce",
+            "approximate_time": "25-45s",
+            "purpose": "Introduce a spicy, smoky regional flavor using air-fried and crushed ingredients."
+          },
+          {
+            "section": "Sauce 3: Roasted Tomato & Chili Dipping Sauce",
+            "approximate_time": "45-60s",
+            "purpose": "Offer an easy pan-roasted, smoky-sweet alternative for handling difficult ingredients."
+          },
+          {
+            "section": "Sauce 4: Thai Style Dipping Sauce",
+            "approximate_time": "60-75s",
+            "purpose": "Deliver a zesty, seafood-friendly sour and spicy option with fish sauce and lemon."
+          },
+          {
+            "section": "Sauce 5: Upgraded Shacha Dipping Sauce",
+            "approximate_time": "75-90s",
+            "purpose": "Showcase a rich, restaurant-style meat pairing option using peanut sauce and shacha."
+          },
+          {
+            "section": "Sauce 6: Low-Calorie Soy Milk Spicy Meat Sauce",
+            "approximate_time": "90-110s",
+            "purpose": "Provide a high-satisfaction, low-calorie meaty sauce made with soy milk instead of oil."
+          },
+          {
+            "section": "Outro & CTA",
+            "approximate_time": "110-120s",
+            "purpose": "Encourage healthy eating without guilt and wrap up the video."
+          }
+        ],
+        "value_proposition": "Transforms boring, miserable diet food (boiled vegetables) into craveable, flavorful meals through 6 creative, easy-to-make dipping sauces.",
+        "emotional_trigger": "Relief and excitement (solving the diet fatigue pain point with delicious, guilt-free solutions)",
+        "retention_devices": [
+          "Rapid-fire pacing moving quickly from one sauce to the next",
+          "Humorous commentary (e.g., '魂已经走了有一会' when tasting spicy sauce)",
+          "Visual variety across 6 distinct culinary styles (tea-infused, spicy, roasted, Thai, shacha, soy milk meat sauce)"
+        ],
+        "cta": "祝大家爽吃不胖 下期再見 (Wishing everyone satisfying eating without gaining weight, see you next time)",
+        "why_it_may_work": [
+          "Directly targets a massive pain point for fitness enthusiasts and people on weight-loss diets (eating plain boiled food is miserable)",
+          "High utility and save-worthiness (6 distinct recipes in one short video)",
+          "Engaging persona with witty narration that keeps viewers entertained throughout the fast-paced tutorial"
+        ],
+        "remake_difficulty": "MEDIUM",
+        "localization_potential": "HIGH",
+        "vietnamese_angle": {
+          "concept": "6 loại nước chấm 'cứu rỗi' món ăn eat-clean luộc nhạt nhẽo cho người đang giảm cân",
+          "suggested_hook": "Đang ăn kiêng rau luộc khổ sở quá hả? Để tôi cứu mấy bạn với 6 loại sốt chấm thần thánh này, ăn rau luộc ngon như ăn lẩu!",
+          "notes": "Adapt the sauces to local Vietnamese taste preferences (e.g., keeping Thai style, fish sauce-based options, or adding a lime-chili-salt variation that Vietnamese fitness lifestyle audiences love)."
+        },
+        "risks": {
+          "copyright_dependency": "LOW",
+          "personality_dependency": "MEDIUM",
+          "product_dependency": "LOW",
+          "context_dependency": "LOW"
+        },
+        "_meta": {
+          "analyzed_at": "2026-09-21T04:15:08.876013+00:00",
+          "model": "gemini-3.5-flash-lite",
+          "provider": "compatible"
+        }
+      }
+    },
+    {
+      "rank": null,
+      "platform": "bilibili",
+      "content_id": "314007733",
+      "title": "新手下厨关于调料收藏这一个就够了，15个必买调料做9个家常味道，手把手教你炸厨房",
+      "creator": "泡厨房的顾小胖",
+      "url": "http://www.bilibili.com/video/av314007733",
+      "radar_score": 75.33,
+      "radar_confidence": 0.85,
+      "radar_breakdown": {
+        "freshness": 36.71,
+        "engagement": 96.84,
+        "creator": 92.02
+      },
+      "media_status": "ALREADY_EXISTS",
+      "transcript_status": "CACHED",
+      "intelligence": {
+        "topic": "Culinary & Cooking Education",
+        "subtopic": "Essential condiments guide and master sauce recipes for beginners",
+        "hook": {
+          "text": "今天的主題非常簡單 新手炸廚房第一課 調料 不是每個做飯的都要當大廚...",
+          "type": "Problem-solution / Pain-point hook targeting kitchen beginners",
+          "first_seconds": 3
+        },
+        "content_format": {
+          "type": "Educational / Tutorial",
+          "presentation_style": "Practical, humorous voiceover with structured step-by-step demonstrations and ingredient breakdowns."
+        },
+        "structure": [
+          {
+            "section": "Introduction & Pantry Essentials",
+            "approximate_time": "0:00 - 1:30",
+            "purpose": "Introduce the 15 essential condiments for beginners and explain their basic functions."
+          },
+          {
+            "section": "Master Sauce 1 & 2: Sweet-Savory Glaze & Quick Sour Soup",
+            "approximate_time": "1:30 - 2:40",
+            "purpose": "Demonstrate practical, everyday quick sauces for fried eggs, rice, noodles, and dumplings."
+          },
+          {
+            "section": "Master Sauce 3 & 4: Tangy Sweet-Sour (Ketchup-based) & Yuxiang Sauce",
+            "approximate_time": "2:40 - 4:45",
+            "purpose": "Showcase crowd-pleasing classic flavor profiles paired with fried shrimp and shredded pork."
+          },
+          {
+            "section": "Master Sauce 5 & 6: Refreshing Cold-Dress Sauce & Cantonese Baiqie/Steam Sauce",
+            "approximate_time": "4:45 - 6:30",
+            "purpose": "Provide lighter, diet-friendly options for cold dishes and steamed seafood/chicken."
+          },
+          {
+            "section": "Master Sauce 7 & 8: Mala (Spicy-Numbing) Mix & Rich Braised Sauce (Shandong-style / Street Food Sauce)",
+            "approximate_time": "6:30 - 9:30",
+            "purpose": "Deliver indulgent heavy-flavor solutions for banquets, potato stews, and street-food style scallion pancake sauce."
+          },
+          {
+            "section": "Conclusion & Encouragement",
+            "approximate_time": "9:30 - End",
+            "purpose": "Encourage beginners to trust their palate and tease the next episode on spices."
+          }
+        ],
+        "value_proposition": "Simplifies kitchen seasoning for complete beginners by boiling down complex recipes into 15 essential condiments and 8 master sauce formulas.",
+        "emotional_trigger": "Relatability and self-deprecation regarding 'destroying the kitchen' (炸厨房), combined with the satisfaction of easily making delicious food.",
+        "retention_devices": [
+          "Fast-paced transitions between theory (condiments) and application (dishes)",
+          "Humorous metaphors and engaging storytelling ('the soul of Chinese cooking', 'attracting human cubs')",
+          "Clear categorical breakdowns that reduce cognitive overload for beginners"
+        ],
+        "cta": "Encourages viewers to taste, experiment, make mistakes, and stay tuned for the next episode on spices.",
+        "why_it_may_work": [
+          "Solves a genuine, high-friction pain point for young people learning to cook (too many obscure condiments, fear of failure).",
+          "Actionable framework: instead of teaching single dishes, it teaches 'master sauce formulas' that can be applied to anything.",
+          "Engaging, high-energy delivery style with strong comedic timing."
+        ],
+        "remake_difficulty": "HIGH",
+        "localization_potential": "HIGH",
+        "vietnamese_angle": {
+          "concept": "Adapt the 15 essential Chinese condiments and master sauces into a Vietnamese kitchen context using local pantry staples (nước mắm, hạt nêm, mắm tôm, đường thốt nốt, tắc/quất, etc.) to teach young Vietnamese Gen Z how to cook standard family meals or trending street food at home.",
+          "suggested_hook": "Nấu ăn không khó, nhưng tại sao bạn cứ 'phá bếp'? Bí kíp 15 loại gia vị cơ bản và 8 sốt thần thánh giúp bạn nấu món nào cũng ngon như ngoài hàng!",
+          "notes": "Replace region-specific Chinese sauces (like specific doubanjiang brands) with easily accessible Vietnamese alternatives or clearly explain how to source them at Asian supermarkets in Vietnam."
+        },
+        "risks": {
+          "copyright_dependency": "LOW",
+          "personality_dependency": "MEDIUM",
+          "product_dependency": "LOW",
+          "context_dependency": "LOW"
+        },
+        "_meta": {
+          "analyzed_at": "2026-09-21T04:20:58.558141+00:00",
+          "model": "gemini-3.5-flash-lite",
+          "provider": "compatible"
+        }
+      }
+    }
+  ]
+}

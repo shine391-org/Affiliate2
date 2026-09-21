@@ -1,0 +1,32 @@
+{
+  "content_id": "1706621248",
+  "platform": "bilibili",
+  "title": "一期带你学会煮饭，9道中国人都知道的人生家常菜 2.0",
+  "creator_name": "泡厨房的顾小胖",
+  "creator_id": "474803476",
+  "canonical_url": "http://www.bilibili.com/video/av1706621248",
+  "publish_time": 1724988600,
+  "publish_time_iso": "2024-08-30T03:30:00+00:00",
+  "latest_metrics": {
+    "views": 6344696,
+    "likes": 198717,
+    "comments": 3736,
+    "shares": null,
+    "favorites": 334453
+  },
+  "snapshot_count": 1,
+  "radar_total_score": 76.08,
+  "radar_confidence": 0.85,
+  "radar_breakdown": {
+    "freshness": 36.71,
+    "engagement": 98.1,
+    "creator": 92.02
+  },
+  "pipeline_run_at": "2026-09-21T04:23:25.287558+00:00",
+  "media": {
+    "status": "ALREADY_EXISTS",
+    "meta": {
+      "size": 18724498
+    }
+  }
+}

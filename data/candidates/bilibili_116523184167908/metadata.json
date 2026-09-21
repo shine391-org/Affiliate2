@@ -1,0 +1,32 @@
+{
+  "content_id": "116523184167908",
+  "platform": "bilibili",
+  "title": "自律必备，6个无敌蘸水拯救天下水煮菜",
+  "creator_name": "泡厨房的顾小胖",
+  "creator_id": "474803476",
+  "canonical_url": "http://www.bilibili.com/video/av116523184167908",
+  "publish_time": 1778054400,
+  "publish_time_iso": "2026-05-06T08:00:00+00:00",
+  "latest_metrics": {
+    "views": 6347184,
+    "likes": 128191,
+    "comments": 766,
+    "shares": null,
+    "favorites": 238332
+  },
+  "snapshot_count": 1,
+  "radar_total_score": 75.83,
+  "radar_confidence": 0.85,
+  "radar_breakdown": {
+    "freshness": 36.71,
+    "engagement": 97.68,
+    "creator": 92.02
+  },
+  "pipeline_run_at": "2026-09-21T04:23:25.293563+00:00",
+  "media": {
+    "status": "ALREADY_EXISTS",
+    "meta": {
+      "size": 6130602
+    }
+  }
+}

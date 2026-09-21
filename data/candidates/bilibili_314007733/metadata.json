@@ -1,0 +1,32 @@
+{
+  "content_id": "314007733",
+  "platform": "bilibili",
+  "title": "新手下厨关于调料收藏这一个就够了，15个必买调料做9个家常味道，手把手教你炸厨房",
+  "creator_name": "泡厨房的顾小胖",
+  "creator_id": "474803476",
+  "canonical_url": "http://www.bilibili.com/video/av314007733",
+  "publish_time": 1685003919,
+  "publish_time_iso": "2023-05-25T08:38:39+00:00",
+  "latest_metrics": {
+    "views": 4500711,
+    "likes": 236155,
+    "comments": 3501,
+    "shares": null,
+    "favorites": 383176
+  },
+  "snapshot_count": 1,
+  "radar_total_score": 75.33,
+  "radar_confidence": 0.85,
+  "radar_breakdown": {
+    "freshness": 36.71,
+    "engagement": 96.84,
+    "creator": 92.02
+  },
+  "pipeline_run_at": "2026-09-21T04:23:25.300565+00:00",
+  "media": {
+    "status": "ALREADY_EXISTS",
+    "meta": {
+      "size": 23034856
+    }
+  }
+}

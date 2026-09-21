@@ -1,0 +1,32 @@
+{
+  "content_id": "116245336759183",
+  "platform": "bilibili",
+  "title": "专治挑食，家长必学系列之无敌小孩菜",
+  "creator_name": "泡厨房的顾小胖",
+  "creator_id": "474803476",
+  "canonical_url": "http://www.bilibili.com/video/av116245336759183",
+  "publish_time": 1773826200,
+  "publish_time_iso": "2026-03-18T09:30:00+00:00",
+  "latest_metrics": {
+    "views": 11540627,
+    "likes": 215691,
+    "comments": 3399,
+    "shares": null,
+    "favorites": 443393
+  },
+  "snapshot_count": 1,
+  "radar_total_score": 77.07,
+  "radar_confidence": 0.85,
+  "radar_breakdown": {
+    "freshness": 36.71,
+    "engagement": 99.79,
+    "creator": 92.02
+  },
+  "pipeline_run_at": "2026-09-21T04:23:25.252319+00:00",
+  "media": {
+    "status": "ALREADY_EXISTS",
+    "meta": {
+      "size": 10920748
+    }
+  }
+}

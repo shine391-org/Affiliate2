@@ -1,0 +1,32 @@
+{
+  "content_id": "1756414622",
+  "platform": "bilibili",
+  "title": "第一次下厨必看，刻在中国人基因里的人生家常菜，我能吃一辈子",
+  "creator_name": "泡厨房的顾小胖",
+  "creator_id": "474803476",
+  "canonical_url": "http://www.bilibili.com/video/av1756414622",
+  "publish_time": 1722571200,
+  "publish_time_iso": "2024-08-02T04:00:00+00:00",
+  "latest_metrics": {
+    "views": 9529298,
+    "likes": 374400,
+    "comments": 7208,
+    "shares": null,
+    "favorites": 575003
+  },
+  "snapshot_count": 1,
+  "radar_total_score": 76.82,
+  "radar_confidence": 0.85,
+  "radar_breakdown": {
+    "freshness": 36.71,
+    "engagement": 99.37,
+    "creator": 92.02
+  },
+  "pipeline_run_at": "2026-09-21T04:23:25.259319+00:00",
+  "media": {
+    "status": "ALREADY_EXISTS",
+    "meta": {
+      "size": 19297567
+    }
+  }
+}

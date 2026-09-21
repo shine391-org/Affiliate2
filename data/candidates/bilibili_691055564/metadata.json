@@ -1,0 +1,32 @@
+{
+  "content_id": "691055564",
+  "platform": "bilibili",
+  "title": "十元贫穷料理再升级，十道大餐让你月底不再勒腰带",
+  "creator_name": "泡厨房的顾小胖",
+  "creator_id": "474803476",
+  "canonical_url": "http://www.bilibili.com/video/av691055564",
+  "publish_time": 1670578953,
+  "publish_time_iso": "2022-12-09T09:42:33+00:00",
+  "latest_metrics": {
+    "views": 9211134,
+    "likes": 374362,
+    "comments": 8516,
+    "shares": null,
+    "favorites": 433380
+  },
+  "snapshot_count": 1,
+  "radar_total_score": 76.58,
+  "radar_confidence": 0.85,
+  "radar_breakdown": {
+    "freshness": 36.71,
+    "engagement": 98.95,
+    "creator": 92.02
+  },
+  "pipeline_run_at": "2026-09-21T04:23:25.272558+00:00",
+  "media": {
+    "status": "ALREADY_EXISTS",
+    "meta": {
+      "size": 24479341
+    }
+  }
+}
