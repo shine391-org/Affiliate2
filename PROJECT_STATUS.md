@@ -1,8 +1,8 @@
 # PROJECT_STATUS.md
 
-## Trạng thái tổng thể: **PHASE 3.2 IN PROGRESS** 🚧
+## Trạng thái tổng thể: **PHASE 3.3 IN PROGRESS** 🚧
 
-Phase 1/2/3.1 đã hoàn thành. Hiện đang thực hiện Phase 3.2 — Controlled Vietnamese Remake Pilot.
+Phase 1/2/3.1/3.2 đã hoàn thành. Hiện đang thực hiện Phase 3.3 — Human Review Console.
 
 ---
 
@@ -17,13 +17,29 @@ Phase 1/2/3.1 đã hoàn thành. Hiện đang thực hiện Phase 3.2 — Contro
 
 ---
 
-## Phase 3.2 — Controlled Vietnamese Remake Pilot (IN PROGRESS 🚧)
+## Phase 3.2 — Controlled Vietnamese Remake Pilot (COMPLETE ✅)
 
-Mục tiêu: Biến 3 candidate thật thành 3 Vietnamese remake prototype để human review.
+3/3 candidate pilot đã render thành Vietnamese prototype để human review. Tất cả output 1080x1920, Vietnamese Edge TTS + Vietnamese burned subtitles. Commit `541d720`.
 
 Pilot A: Douyin #7653466619146170234 (one-pot recipe, 26s)
 Pilot B: Bilibili #117272756624085 (diet skit, ~29s)
-Pilot C: Bilibili #116523184167908 (listicle, ~2min → condensed 35-60s)
+Pilot C: Bilibili #116523184167908 (201.6s → 55.0s condensed)
+
+---
+
+## Phase 3.3 — Human Review Console (IN PROGRESS 🚧)
+
+Kiến trúc: dùng documented ViralMint overlay seam, không fork dashboard và không tạo app React thứ hai.
+
+- Backend overlay: `viralmint_overlay/` — review API + SQLite `content_reviews`
+- Frontend overlay: `overlay/frontend/` — `/review` Review Queue trong ViralMint UI
+- Sync/build: `scripts/sync_review_overlay.py`
+- Hai checkpoint: candidate review và rendered-remake review
+- 3 prototype hiện tại seed `REMAKE_REVIEW`; candidate còn lại seed `REVIEW_PENDING`
+- Human actions persist: approve/reject/rework + note
+- Local source/final MP4 được stream trực tiếp, không duplicate media
+- Không AI call trong review; không publishing trong phase này
+- Chi tiết: `docs/REVIEW_CONSOLE.md`
 
 ---
 
@@ -74,4 +90,4 @@ Generic AI provider:     ADAPTER
 
 ## Trạng thái hiện tại
 
-**PHASE 3.2 IN PROGRESS** — 3 Vietnamese remake prototype đang được sản xuất.
+**PHASE 3.3 IN PROGRESS** — Human Review Console đã implement trên feature branch, chờ local integration/build verification trước khi merge.
