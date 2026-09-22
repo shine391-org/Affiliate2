@@ -13,5 +13,8 @@ except ImportError:
 if plugins is not None:
     # Import failures inside our own router should surface instead of being
     # mistaken for "ViralMint is not installed".
-    from .api.review import router
-    plugins.register_router(router)
+    from .api.review import router as review_router
+    from .api.publish import router as publish_router
+
+    plugins.register_router(review_router)
+    plugins.register_router(publish_router)
