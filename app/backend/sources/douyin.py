@@ -91,15 +91,55 @@ class DouyinProvider:
                 "--remote-debugging-port=9222 and log in to Douyin."
             )
 
+        # A CDP browser can expose several reusable contexts. Do not stop at
+        # the first Douyin tab: it may be logged out while a later context is
+        # authenticated. Check every existing Douyin page first and prefer a
+        # context whose session is actually valid.
+        first_douyin_page = None
+        contexts_without_douyin_page = []
         for context in contexts:
-            for page in context.pages:
-                if "douyin.com" in (page.url or ""):
+            douyin_pages = [
+                page for page in context.pages
+                if "douyin.com" in (page.url or "")
+            ]
+            if not douyin_pages:
+                contexts_without_douyin_page.append(context)
+                continue
+            if first_douyin_page is None:
+                first_douyin_page = (context, douyin_pages[0])
+            for page in douyin_pages:
+                try:
+                    logged_in, _, _ = await DouyinProvider._session_state(context, page)
+                except Exception:
+                    logged_in = False
+                if logged_in:
                     return context, page, False
 
-        context = contexts[0]
-        page = await context.new_page()
-        await page.goto(DOUYIN_HOST, wait_until="domcontentloaded", timeout=60_000)
-        return context, page, True
+        # A context can still carry valid Douyin cookies/local storage without
+        # currently having a Douyin tab open. Probe those reusable contexts
+        # before concluding AUTH_REQUIRED. This opens pages only inside the
+        # already-running browser; it never launches a new browser/login flow.
+        for context in contexts_without_douyin_page:
+            page = await context.new_page()
+            try:
+                await page.goto(DOUYIN_HOST, wait_until="domcontentloaded", timeout=60_000)
+                logged_in, _, _ = await DouyinProvider._session_state(context, page)
+                if logged_in:
+                    return context, page, True
+            except Exception:
+                pass
+            await page.close()
+
+        # Preserve the existing caller contract for a visible logged-out
+        # Douyin page. search() will perform the final session check and return
+        # AUTH_REQUIRED, but only after all reusable contexts were examined.
+        if first_douyin_page is not None:
+            context, page = first_douyin_page
+            return context, page, False
+
+        raise PermissionError(
+            "No authenticated Douyin session found in any reusable CDP context."
+        )
 
     @staticmethod
     async def _session_state(context, page) -> tuple[bool, dict[str, str], str | None]:
