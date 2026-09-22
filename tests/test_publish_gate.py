@@ -12,7 +12,7 @@ from viralmint_overlay.publish_service import (
     launch_publish,
     mark_tiktok_posted,
 )
-from viralmint_overlay.publish_store import PublishStore
+from viralmint_overlay.publish_store import PublishStore, PublishValidationError
 from viralmint_overlay.review_store import REMAKE_STAGE, ReviewStore
 
 
@@ -229,3 +229,41 @@ def test_facebook_reel_rejects_low_frame_rate(monkeypatch, tmp_path):
     ok, reason, _ = facebook_reel_eligibility(video)
     assert ok is False
     assert "23 FPS" in reason
+
+
+
+def test_only_one_active_publish_per_candidate_platform(tmp_path):
+    _, store = _root(tmp_path)
+    first = store.create_publication(
+        "douyin",
+        "123",
+        "youtube",
+        title="T1",
+        caption="C1",
+        privacy="private",
+        status="PUBLISHING",
+    )
+    assert first > 0
+
+    with pytest.raises(PublishValidationError, match="already running"):
+        store.create_publication(
+            "douyin",
+            "123",
+            "youtube",
+            title="T2",
+            caption="C2",
+            privacy="private",
+            status="PUBLISHING",
+        )
+
+    store.finish_publication(first, status="FAILED", error_message="test")
+    second = store.create_publication(
+        "douyin",
+        "123",
+        "youtube",
+        title="T3",
+        caption="C3",
+        privacy="private",
+        status="PUBLISHING",
+    )
+    assert second > first
