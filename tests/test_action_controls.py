@@ -11,6 +11,7 @@ from viralmint_overlay.action_service import (
     resolve_requested_action,
 )
 from viralmint_overlay.review_store import ReviewStore
+from src.radar.remake.adaptation import _build_adaptation_prompt
 
 
 def _detail(
@@ -167,3 +168,21 @@ def test_review_store_records_latest_action(tmp_path):
     assert latest["job_id"] == "job-2"
     assert latest["action"] == "rerender"
     assert latest["params"]["target_duration"] == "35-60s"
+
+
+
+def test_rework_note_is_injected_into_creative_prompt():
+    prompt = _build_adaptation_prompt(
+        {
+            "topic": "Food",
+            "content_format": {},
+            "hook": {},
+            "structure": [],
+            "vietnamese_angle": {},
+        },
+        {"segments": [{"text": "source"}]},
+        "20-35s",
+        review_note="Hook đang chậm, vào món sớm hơn.",
+    )
+    assert "Hook đang chậm, vào món sớm hơn." in prompt
+    assert "HUMAN REWORK FEEDBACK" in prompt
