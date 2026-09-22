@@ -56,8 +56,10 @@ C1–C4 are implemented but are **not QA PASS** until the independent QA agent r
 Focused starting point from the `app/` directory:
 
 ```powershell
-python -m pytest -q tests/test_download_options.py tests/test_phase_c_media_quality.py tests/test_phase_c_render_quality.py tests/test_ai_provider.py tests/test_phase_c_localization_profiles.py tests/test_phase_c_localization_timeline.py
+python -m pytest -q tests/test_download_options.py tests/test_phase_c_media_quality.py tests/test_phase_c_render_quality.py tests/test_ai_provider.py tests/test_analyzer.py tests/test_phase_c_localization_profiles.py tests/test_phase_c_localization_timeline.py
 npm --prefix frontend run build
+cd ..
+python -m pytest -q tests/test_intel.py
 ```
 
 Also smoke the Settings API/UI for:
@@ -68,6 +70,8 @@ Also smoke the Settings API/UI for:
 - localization profile create/update/default/delete
 - upgraded SQLite database receives the two additive JSON columns
 - a real download with default quality records actual source media metadata
+- retained legacy Bilibili intelligence fetch selects the highest-bandwidth usable DASH stream while C12 parity is pending
+- creator/auto subtitle transcript rows still run intelligence without retranscribing
 
 Do not infer runtime PASS from the implementation commits alone.
 
