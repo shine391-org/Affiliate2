@@ -2,65 +2,89 @@
 
 ## Overall status: CONSOLIDATION IN PROGRESS
 
-The previous MVP phases produced useful functionality, but the architecture accumulated duplicate plumbing between Affiliate2, ViralMint and MediaCrawler. A full code audit on the synchronized workspace concluded that ViralMint should become the single application foundation and Affiliate2 should retain only its differentiated domain layers.
+Phase A is complete and merged into the synchronized consolidation baseline.
 
-## Source baselines
+### Phase A — COMPLETE ✅
 
-- Immutable workspace snapshot: `workspace-sync-2026-09`
-- Snapshot commit: `15a6800f4ea78d0809e2400ec39f308910d36360`
-- Active Phase A branch: `consolidation-phase-a-app-baseline`
-- Canonical runnable source during Phase A: `app/`
-- ViralMint forensic reference: `vendor/viralmint/`
-- MediaCrawler donor/reference: `vendor/mediacrawler/`
+Merge commit:
+`fbd1a6fec8949bf72098261c57d731a3c484c868`
 
-## Consolidation Phase A — Application baseline
+Validated:
 
-Status: **IMPLEMENTATION IN PROGRESS**
+- canonical application source established under `app/`
+- source parity repaired
+- frontend build PASS
+- focused backend/API regression 60/60 PASS
+- dev mode PASS
+- hot reload PASS
+- stable local mode PASS
+- stop-script process safety PASS
 
-Scope:
+The full project suite is intentionally reserved for milestone/CI QA rather than every implementation iteration.
 
-- Promote the captured ViralMint working tree to `app/`.
-- Preserve behavior; no product refactor in this phase.
-- Keep legacy Affiliate2 modules reachable through the existing overlay/import seams.
-- Add standard project/agent documentation.
-- Add Windows-native bootstrap/dev/stable/stop launch scripts.
-- Establish `app/` as the only place new application-runtime changes should land.
-- Keep `vendor/*` immutable.
+---
 
-QA contract: `docs/QA_PHASE_A.md`.
+## Phase B — Sources + Radar Integration — IN PROGRESS 🚧
 
-## Audited target ownership
+Branch:
+`consolidation-phase-b-sources-radar`
 
-**Reuse ViralMint:** application shell, jobs/WebSocket progress, Library, downloader/yt-dlp, Whisper, FFmpeg, captions, TTS abstraction, Clip Studio, common upload and metric-collection plumbing.
+Goal:
 
-**Keep/port Affiliate2:** repeated Radar metric snapshots, ranking/learning, Vietnamese localization quality, domain intelligence, human review semantics, publish approval gate, performance intelligence.
+Move real Douyin/Bilibili source discovery and Affiliate2 Radar into the canonical application.
 
-**Port selectively from MediaCrawler:** real Douyin platform client/auth/CDP behavior and Bilibili capabilities where stronger than the current direct provider. Do not retain MediaCrawler as a second runtime application.
+Planned sequence:
 
-## Known architectural debt to remove in later phases
+1. app-native provider contract
+2. real Bilibili provider
+3. real Douyin provider using selectively ported platform logic
+4. Radar observation/ranking bridge
+5. Scout integration
 
-- Douyin subprocess → JSONL → Radar bridge.
-- Custom Affiliate2 downloader in `src/radar/intel/media.py`.
-- Duplicate faster-whisper wrapper in `src/radar/intel/transcribe.py`.
-- Direct provider HTTP plumbing in Affiliate2 intelligence.
-- Legacy overlay sync/copy architecture.
-- Separate raw-sqlite review/publish/performance store after native DB migration.
-- Duplicate YouTube upload/metrics collection.
-- Legacy Creative Remake timestamp semantics.
+Hard rules:
 
-## Critical known product gap
+- no silent cross-platform fallback
+- no long-term MediaCrawler subprocess/JSONL contract
+- no second dashboard/job system
+- content and creator identity remain platform-scoped
+- creator outlier uses the creator's own historical baseline
 
-Legacy Creative Remake is not considered production-quality:
+See:
+`docs/PHASE_B.md`
+`docs/QA_PHASE_B.md`
 
-- prompt sees only the first 30 transcript segments,
-- generated `reuse_plan.source_segments` / reorder intent is not consumed,
-- output section timestamps are incorrectly reused as source-video cut timestamps,
-- fallback may use the entire source instead of failing a bad creative plan.
+---
 
-Do not extend this legacy behavior. It will be superseded by Creative Remake HQ after the foundation migrations.
+## Later phases
 
-## Previous phase history
+### Phase C — Media + Intelligence convergence
 
-Phase 1 OSS validation, Phase 2 Radar, Phase 3.1 intelligence, Phase 3.2 remake pilot and Phase 3.3 human review were completed. Phase 3.4/3.5/4 functionality exists in the synchronized branch but is being consolidated before final end-to-end QA/merge.
+- ViralMint downloader becomes default.
+- Remove duplicate Radar downloader.
+- ViralMint Whisper becomes sole transcription implementation.
+- Merge Affiliate2 domain intelligence into the canonical analysis flow.
 
-The historical implementation remains recoverable from Git history and the immutable workspace snapshot.
+### Phase D — Translate HQ + Smart Cut
+
+- contextual Vietnamese translation
+- timing-aware block TTS
+- Clip Studio for Smart Cut
+
+### Phase E — Creative Remake HQ
+
+- full transcript + visual shot map
+- source-shot mapping
+- storyboard human approval
+- source/output timeline separation
+
+### Phase F — Review / Publish / Performance native migration
+
+- remove overlay copy/sync architecture after parity
+- reuse app upload/metrics plumbing
+- keep Affiliate2 approval/learning semantics
+
+### Phase G — DB convergence + final cleanup
+
+- migrate to one canonical application DB
+- remove dead duplicate code only after verified parity
+- milestone/full QA

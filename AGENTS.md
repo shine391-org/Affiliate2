@@ -14,10 +14,10 @@ The project is distribution-first. Affiliate monetization comes later, after rep
 
 The immutable source snapshot is branch `workspace-sync-2026-09`.
 
-Active implementation branch for the application baseline:
-`consolidation-phase-a-app-baseline`.
+Active implementation branch:
+`consolidation-phase-b-sources-radar`.
 
-Canonical application source on the active branch is:
+Phase A is complete. Canonical application source is:
 
 `app/`
 
@@ -30,6 +30,8 @@ Reference snapshots remain:
 - `src/radar/` — current Affiliate2 Radar/intelligence/remake implementation; still active for legacy paths until ported.
 
 Do not add new runtime code under `vendor/`.
+
+Current Phase B scope is source-provider + Radar integration only. Read `docs/PHASE_B.md` and `docs/QA_PHASE_B.md` before changing provider/Scout/Radar code.
 
 ## Architecture direction
 
