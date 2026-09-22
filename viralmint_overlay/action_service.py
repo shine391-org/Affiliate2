@@ -38,6 +38,10 @@ class ActionValidationError(ValueError):
     pass
 
 
+class ActionCancelled(RuntimeError):
+    pass
+
+
 def _candidate_key(platform: str, content_id: str) -> str:
     return f"{platform}_{content_id}"
 
@@ -54,6 +58,7 @@ def _normalize_params(action: str, params: dict[str, Any] | None) -> dict[str, A
     p["voice_id"] = voice_id
 
     if action == "translate":
+        p.pop("target_duration", None)
         translate_mode = p.get("translate_mode") or "full_dub"
         if translate_mode not in VALID_TRANSLATE_MODES:
             raise ActionValidationError(f"Unsupported translate mode: {translate_mode}")
@@ -61,6 +66,9 @@ def _normalize_params(action: str, params: dict[str, Any] | None) -> dict[str, A
         p["caption_style"] = "viral"
         p["target_language"] = "Vietnamese"
     elif action == "remake":
+        p.pop("translate_mode", None)
+        p.pop("caption_style", None)
+        p.pop("target_language", None)
         target_duration = p.get("target_duration") or "20-35s"
         if target_duration not in VALID_DURATIONS:
             raise ActionValidationError(f"Unsupported target duration: {target_duration}")
@@ -174,8 +182,11 @@ async def latest_action_snapshot(store: ReviewStore, platform: str, content_id: 
 
 
 async def _progress(job_id: str, pct: float, step: str) -> None:
-    from backend.agents.job_helper import update_job_status
+    from backend.agents.job_helper import job_cancelled, update_job_status
     from backend.core.ws_manager import ws_manager
+
+    if await job_cancelled(job_id):
+        raise ActionCancelled("Action cancelled by user")
 
     await update_job_status(
         job_id,
@@ -184,6 +195,14 @@ async def _progress(job_id: str, pct: float, step: str) -> None:
         current_step=step,
     )
     await ws_manager.send_progress(job_id, pct, step, "local")
+
+
+async def _validate_final(path: Path) -> None:
+    from backend.services.output_validator import validate_output
+
+    verdict = await validate_output(path, {"audio": True})
+    if not verdict.ok:
+        raise RuntimeError(f"Output validation failed: {verdict.message()}")
 
 
 def _safe_remove_tree(path: Path) -> None:
@@ -395,6 +414,10 @@ async def _execute_action(
                 root, platform, content_id, staging_dir, params, review_note, job_id
             )
 
+        staged_final = staging_dir / "final.mp4"
+        await _progress(job_id, 93, "Validating final video...")
+        await _validate_final(staged_final)
+
         _write_manifest(
             staging_dir,
             action=resolved_action,
@@ -438,6 +461,11 @@ async def _execute_action(
             },
             "local",
         )
+    except ActionCancelled:
+        _safe_remove_tree(staging_dir)
+        _safe_remove_tree(backup)
+        # DELETE /api/jobs/{id} already set the canonical status to cancelled.
+        return
     except Exception as exc:
         _safe_remove_tree(staging_dir)
         _safe_remove_tree(backup)
