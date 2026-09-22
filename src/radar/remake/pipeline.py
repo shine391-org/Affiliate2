@@ -136,6 +136,7 @@ async def run_remake_pipeline(
     voice_id: str = DEFAULT_VOICE_MALE,
     use_cache: bool = True,
     review_note: str | None = None,
+    output_dir_override: Path | None = None,
 ) -> RemakeResult:
     """Run the full remake pipeline for a candidate.
 
@@ -145,12 +146,13 @@ async def run_remake_pipeline(
         voice_id: Edge TTS voice ID
         use_cache: Use cached adaptation if available
         review_note: Optional human feedback for REWORK; forces a fresh adaptation.
+        output_dir_override: Optional staging directory for atomic rerenders.
 
     Returns:
         RemakeResult with paths and status
     """
     candidate_dir = CANDIDATES_DIR / candidate_id
-    output_dir = REMAKES_DIR / candidate_id
+    output_dir = output_dir_override or (REMAKES_DIR / candidate_id)
 
     result = RemakeResult(
         candidate_id=candidate_id,
