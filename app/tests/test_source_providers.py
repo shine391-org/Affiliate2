@@ -31,6 +31,16 @@ def test_provider_result_rejects_cross_platform_rows():
         )
 
 
+def test_bilibili_zero_views_do_not_fall_through_to_another_metric():
+    provider = BilibiliProvider()
+    item = provider._normalize_item(
+        {"aid": 9, "play": 0, "video_review": 999, "danmaku": 0},
+        "zero",
+    )
+    assert item["views"] == 0
+    assert item["comments"] == 0
+
+
 def test_bilibili_normalizes_real_platform_identity():
     provider = BilibiliProvider()
     item = provider._normalize_item(
@@ -181,3 +191,42 @@ async def test_scout_surfaces_bilibili_auth_required_without_fallback():
             await agent._scout_platform("bilibili", "AI", None)
 
     assert exc.value.status == ProviderStatus.AUTH_REQUIRED
+
+
+@pytest.mark.asyncio
+async def test_scout_normalizes_platform_names_to_lowercase(monkeypatch):
+    agent = ScoutAgent()
+    seen = []
+
+    async def fake_platform(platform, niche, user_settings=None, user_id="local"):
+        seen.append(platform)
+        return []
+
+    monkeypatch.setattr(agent, "_scout_platform", fake_platform)
+    monkeypatch.setattr(agent, "_enrich_with_outlier_scores", AsyncMock())
+    monkeypatch.setattr(agent, "_save_results", AsyncMock(return_value=([], 0)))
+
+    class _FakeResult:
+        def scalar_one_or_none(self):
+            return None
+
+    class _FakeDB:
+        async def execute(self, *args, **kwargs):
+            return _FakeResult()
+
+    class _FakeCM:
+        async def __aenter__(self):
+            return _FakeDB()
+        async def __aexit__(self, *args):
+            return False
+
+    with patch("backend.agents.scout.AsyncSessionLocal", return_value=_FakeCM()), \
+         patch("backend.agents.scout.update_job_status", new=AsyncMock()), \
+         patch("backend.agents.scout.ws_manager") as ws, \
+         patch("backend.core.ai_retry.ai_refine_search", new=AsyncMock(return_value=None)):
+        ws.send_progress = AsyncMock()
+        ws.send_constraint_warning = AsyncMock()
+        ws.send = AsyncMock()
+        await agent.run("job-lowercase", "AI", ["BILIBILI"])
+
+    assert seen == ["bilibili"]

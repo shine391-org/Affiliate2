@@ -89,6 +89,14 @@ def _image_url(value: Any) -> str:
     return url
 
 
+def _first_present(raw: dict, *keys: str) -> Any:
+    """Return the first explicitly present, non-None field without treating 0 as missing."""
+    for key in keys:
+        if key in raw and raw[key] is not None:
+            return raw[key]
+    return None
+
+
 class BilibiliProvider:
     platform = "bilibili"
     name = "bilibili-public-search"
@@ -126,11 +134,11 @@ class BilibiliProvider:
             "author_url": f"https://space.bilibili.com/{mid}" if mid else "",
             "creator_id": mid or None,
             "thumbnail_url": _image_url(raw.get("pic") or raw.get("thumbnail")),
-            "views": _metric_int(raw.get("play") or raw.get("video_review")),
+            "views": _metric_int(_first_present(raw, "play", "video_review")),
             "likes": _metric_int(raw.get("like")),
-            "comments": _metric_int(raw.get("danmaku") or raw.get("video_danmaku")),
-            "shares": _metric_int(raw.get("share") or raw.get("share_count")),
-            "favorites": _metric_int(raw.get("favorites") or raw.get("collect_count")),
+            "comments": _metric_int(_first_present(raw, "danmaku", "video_danmaku")),
+            "shares": _metric_int(_first_present(raw, "share", "share_count")),
+            "favorites": _metric_int(_first_present(raw, "favorites", "collect_count")),
             "duration_seconds": _duration_seconds(raw.get("duration")),
             "upload_date": upload_date,
             "source_keyword": query,

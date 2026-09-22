@@ -151,8 +151,9 @@ class ScoutAgent:
         for p in platforms:
             p = str(p).strip()
             if p and p.lower() not in seen:
-                seen.add(p.lower())
-                cleaned.append(p)
+                normalized = p.lower()
+                seen.add(normalized)
+                cleaned.append(normalized)
         if len(cleaned) > MAX_PLATFORMS_PER_SCOUT:
             logger.warning("SCOUT platform list capped %d → %d (dropped: %s)",
                            len(cleaned), MAX_PLATFORMS_PER_SCOUT,
