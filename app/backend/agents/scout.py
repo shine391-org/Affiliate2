@@ -388,6 +388,20 @@ class ScoutAgent:
             )
             if provider_result.status == ProviderStatus.SUCCESS:
                 return provider_result.items
+
+            try:
+                from backend.affiliate.radar.service import record_source_run
+                await asyncio.to_thread(
+                    record_source_run,
+                    platform,
+                    niche,
+                    provider_result.status.value,
+                    records_raw=len(provider_result.items),
+                    error=provider_result.error,
+                )
+            except Exception as radar_err:  # noqa: BLE001
+                logger.warning("Radar source-run recording skipped (non-fatal): %s", radar_err)
+
             if provider_result.status == ProviderStatus.EMPTY:
                 return []
             raise SourceProviderError(
