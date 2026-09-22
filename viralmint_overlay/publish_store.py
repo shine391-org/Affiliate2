@@ -50,6 +50,7 @@ class PublishStore:
                     source_platform TEXT NOT NULL,
                     content_id      TEXT NOT NULL,
                     platform        TEXT NOT NULL,
+                    job_id          TEXT,
                     status          TEXT NOT NULL,
                     title           TEXT,
                     caption         TEXT,
@@ -138,6 +139,7 @@ class PublishStore:
         content_id: str,
         platform: str,
         *,
+        job_id: str | None = None,
         title: str | None,
         caption: str | None,
         privacy: str | None = None,
@@ -148,16 +150,17 @@ class PublishStore:
             cur = conn.execute(
                 """
                 INSERT INTO content_publications(
-                    source_platform, content_id, platform, status,
+                    source_platform, content_id, platform, job_id, status,
                     title, caption, privacy,
                     created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     source_platform,
                     content_id,
                     platform,
+                    job_id,
                     status,
                     title,
                     caption,
@@ -202,7 +205,7 @@ class PublishStore:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, platform, status, title, caption, privacy,
+                SELECT id, platform, job_id, status, title, caption, privacy,
                        external_id, external_url, error_message,
                        created_at, updated_at, published_at
                 FROM content_publications
@@ -219,7 +222,7 @@ class PublishStore:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT id, platform, status, title, caption, privacy,
+                SELECT id, platform, job_id, status, title, caption, privacy,
                        external_id, external_url, error_message,
                        created_at, updated_at, published_at
                 FROM content_publications
