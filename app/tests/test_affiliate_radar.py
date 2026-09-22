@@ -1,10 +1,13 @@
 """Focused tests for the Phase-B app-native Radar bridge."""
 from __future__ import annotations
 
+import math
 import sqlite3
 
 from backend.affiliate.radar.service import (
     CREATOR_BASELINE_MIN_HISTORY,
+    _engagement_total,
+    _legacy_velocity_score,
     _velocity_per_hour,
     get_signals_for_keys,
     observe_scout_rows,
@@ -157,18 +160,34 @@ def test_velocity_uses_controlled_snapshot_interval_without_real_wait():
     assert signal["radar_velocity_per_hour"] is not None
     assert signal["radar_velocity_per_hour"] > 0
 
-def test_velocity_preserves_legacy_relative_growth_semantics():
-    snapshots = [
+def test_velocity_preserves_legacy_scoring_semantics_exactly():
+    positive = [
         {"captured_at": "2026-09-22T00:00:00Z", "views": 100},
         {"captured_at": "2026-09-22T01:00:00Z", "views": 300},
     ]
-    assert _velocity_per_hour(snapshots) == 2.0
+    assert _velocity_per_hour(positive) == 2.0
+    assert _legacy_velocity_score(positive) == math.log1p(2.0)
 
     zero_baseline = [
         {"captured_at": "2026-09-22T00:00:00Z", "views": 0},
         {"captured_at": "2026-09-22T02:00:00Z", "views": 120},
     ]
     assert _velocity_per_hour(zero_baseline) == 60.0
+    assert _legacy_velocity_score(zero_baseline) == math.log1p(120) / 2
+
+    no_growth = [
+        {"captured_at": "2026-09-22T00:00:00Z", "views": 100},
+        {"captured_at": "2026-09-22T01:00:00Z", "views": 90},
+    ]
+    assert _velocity_per_hour(no_growth) == 0.0
+    assert _legacy_velocity_score(no_growth) == 0.0
+
+    favorites_only = [
+        {"captured_at": "2026-09-22T00:00:00Z", "views": 100, "favorites": 0},
+        {"captured_at": "2026-09-22T01:00:00Z", "views": 100, "favorites": 99999},
+    ]
+    assert _velocity_per_hour(favorites_only) == 0.0
+    assert _legacy_velocity_score(favorites_only) == 0.0
 
 
 def test_refined_native_success_records_actual_source_keyword_per_platform():
@@ -193,4 +212,118 @@ def test_refined_native_success_records_actual_source_keyword_per_platform():
         ("bilibili", "home workout women", "SUCCESS"),
         ("douyin", "居家健身", "SUCCESS"),
     ]
+
+def test_engagement_metric_sets_match_legacy_platform_rules():
+    douyin = {
+        "platform": "douyin",
+        "views": 1_000_000,
+        "likes": 10,
+        "comments": 2,
+        "shares": 3,
+        "favorites": 500_000,
+    }
+    bilibili = {
+        "platform": "bilibili",
+        "views": 100,
+        "likes": 10,
+        "comments": 2,
+        "shares": 999,
+        "favorites": 999,
+    }
+    assert _engagement_total(douyin) == 15
+    assert _engagement_total(bilibili) == 112
+
+
+def test_velocity_ranking_uses_legacy_score_not_log_of_hourly_delta(monkeypatch):
+    from backend.affiliate.radar import service
+
+    conn = _conn()
+    a = _row("bilibili", "slow-big", views=0, likes=0)
+    b = _row("bilibili", "fast-small", views=0, likes=0)
+    observe_scout_rows([a, b], "seed", conn)
+    observe_scout_rows([
+        _row("bilibili", "slow-big", views=1000, likes=0),
+        _row("bilibili", "fast-small", views=20, likes=0),
+    ], "later", conn)
+
+    ids = {
+        row["content_id"]: [x["id"] for x in conn.execute(
+            "SELECT id FROM metric_snapshots WHERE platform='bilibili' AND content_id=? ORDER BY id",
+            (row["content_id"],),
+        ).fetchall()]
+        for row in [{"content_id": "slow-big"}, {"content_id": "fast-small"}]
+    }
+    conn.execute(
+        "UPDATE metric_snapshots SET captured_at='2026-09-22T00:00:00Z' WHERE id=?",
+        (ids["slow-big"][0],),
+    )
+    conn.execute(
+        "UPDATE metric_snapshots SET captured_at='2026-09-22T10:00:00Z' WHERE id=?",
+        (ids["slow-big"][1],),
+    )
+    conn.execute(
+        "UPDATE metric_snapshots SET captured_at='2026-09-22T00:00:00Z' WHERE id=?",
+        (ids["fast-small"][0],),
+    )
+    conn.execute(
+        "UPDATE metric_snapshots SET captured_at='2026-09-22T00:30:00Z' WHERE id=?",
+        (ids["fast-small"][1],),
+    )
+    conn.commit()
+
+    monkeypatch.setattr(
+        service,
+        "WEIGHTS",
+        {"freshness": 0.0, "engagement": 0.0, "velocity": 1.0, "creator": 0.0},
+    )
+    signals = get_signals_for_keys(
+        [("bilibili", "slow-big"), ("bilibili", "fast-small")],
+        conn,
+    )
+    assert signals[("bilibili", "fast-small")]["radar_score"] > signals[("bilibili", "slow-big")]["radar_score"]
+
+
+def test_douyin_engagement_ranking_ignores_views_and_favorites(monkeypatch):
+    from backend.affiliate.radar import service
+
+    conn = _conn()
+    low = _row("douyin", "high-views-low-eng", views=1_000_000, likes=1)
+    low["favorites"] = 1_000_000
+    low["radar_metrics"]["favorites"] = 1_000_000
+    high = _row("douyin", "low-views-high-eng", views=10, likes=100)
+    observe_scout_rows([low, high], "eng", conn)
+
+    monkeypatch.setattr(
+        service,
+        "WEIGHTS",
+        {"freshness": 0.0, "engagement": 1.0, "velocity": 0.0, "creator": 0.0},
+    )
+    signals = get_signals_for_keys(
+        [("douyin", "high-views-low-eng"), ("douyin", "low-views-high-eng")],
+        conn,
+    )
+    assert signals[("douyin", "low-views-high-eng")]["radar_score"] > signals[("douyin", "high-views-low-eng")]["radar_score"]
+
+
+def test_content_source_keyword_preserves_first_discovery_provenance():
+    conn = _conn()
+    first = _row("bilibili", "provenance")
+    first["source_keyword"] = "first query"
+    observe_scout_rows([first], "fallback", conn)
+
+    second = _row("bilibili", "provenance", views=200)
+    second["source_keyword"] = "later query"
+    observe_scout_rows([second], "fallback", conn)
+
+    content_keyword = conn.execute(
+        "SELECT source_keyword FROM content WHERE platform='bilibili' AND content_id='provenance'"
+    ).fetchone()[0]
+    run_keywords = [
+        row[0]
+        for row in conn.execute(
+            "SELECT keyword FROM source_runs WHERE platform='bilibili' ORDER BY id"
+        ).fetchall()
+    ]
+    assert content_keyword == "first query"
+    assert run_keywords == ["first query", "later query"]
 
