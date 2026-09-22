@@ -14,8 +14,8 @@
       "coded_width": 1080,
       "coded_height": 1920,
       "has_b_frames": 2,
-      "sample_aspect_ratio": "5248:5247",
-      "display_aspect_ratio": "328:583",
+      "sample_aspect_ratio": "1:1",
+      "display_aspect_ratio": "9:16",
       "pix_fmt": "yuv420p",
       "level": 40,
       "color_range": "tv",
@@ -32,12 +32,12 @@
       "time_base": "1/15360",
       "start_pts": 0,
       "start_time": "0.000000",
-      "duration_ts": 1218560,
-      "duration": "79.333333",
-      "bit_rate": "1422951",
+      "duration_ts": 2845696,
+      "duration": "185.266667",
+      "bit_rate": "824784",
       "bits_per_raw_sample": "8",
-      "nb_frames": "2380",
-      "extradata_size": 55,
+      "nb_frames": "5558",
+      "extradata_size": 51,
       "disposition": {
         "default": 1,
         "dub": 0,
@@ -86,10 +86,10 @@
       "time_base": "1/44100",
       "start_pts": 0,
       "start_time": "0.000000",
-      "duration_ts": 3503166,
-      "duration": "79.436871",
-      "bit_rate": "127621",
-      "nb_frames": "3423",
+      "duration_ts": 8174654,
+      "duration": "185.366304",
+      "bit_rate": "127601",
+      "nb_frames": "7985",
       "extradata_size": 5,
       "disposition": {
         "default": 1,
@@ -119,23 +119,23 @@
     }
   ],
   "format": {
-    "filename": "E:\\Affiliate ver 1\\storage\\tools\\out\\45cfe977-8b69-4772-81b9-eecfba690b4c.mp4",
+    "filename": "E:\\Affiliate ver 1\\storage\\tools\\out\\6419e32d-d518-462d-9983-751ce1fbb363.mp4",
     "nb_streams": 2,
     "nb_programs": 0,
     "nb_stream_groups": 0,
     "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
     "format_long_name": "QuickTime / MOV",
     "start_time": "0.000000",
-    "duration": "79.436871",
-    "size": "15464601",
-    "bit_rate": "1557422",
+    "duration": "185.366304",
+    "size": "22258525",
+    "bit_rate": "960628",
     "probe_score": 100,
     "tags": {
       "major_brand": "isom",
       "minor_version": "512",
       "compatible_brands": "isomiso2avc1mp41",
       "encoder": "Lavf63.1.101",
-      "comment": "vid:v0d00fg10000d1o19cnog65pk88obd2g"
+      "comment": "vid:v0300fg10000d1n74nvog65kgrak3lfg"
     }
   }
 }

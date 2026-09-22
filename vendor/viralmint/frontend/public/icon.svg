@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0D9F6E"/>
+      <stop offset="100%" style="stop-color:#059669"/>
+    </linearGradient>
+    <linearGradient id="filmFace" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#3ECFA0"/>
+      <stop offset="100%" style="stop-color:#47C99B"/>
+    </linearGradient>
+    <linearGradient id="filmCurve" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#5ED4AE"/>
+      <stop offset="50%" style="stop-color:#A8D8C8"/>
+      <stop offset="100%" style="stop-color:#D0EAE0"/>
+    </linearGradient>
+    <linearGradient id="filmInner" x1="0%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" style="stop-color:#B8DDD0"/>
+      <stop offset="100%" style="stop-color:#E8F4EF"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded square background -->
+  <rect width="512" height="512" rx="108" fill="url(#bg)"/>
+
+  <!-- Film reel icon (centered) -->
+  <g transform="translate(256, 270)">
+    <!-- Back curved section (the cylinder curve visible on right) -->
+    <ellipse cx="50" cy="-10" rx="95" ry="85" fill="none" stroke="#1a1a1a" stroke-width="20"/>
+    <ellipse cx="50" cy="-10" rx="95" ry="85" fill="url(#filmCurve)" stroke="#1a1a1a" stroke-width="8"/>
+
+    <!-- Inner ellipse (hole of the reel) -->
+    <ellipse cx="50" cy="-10" rx="65" ry="55" fill="url(#filmInner)" stroke="#1a1a1a" stroke-width="6"/>
+
+    <!-- Film strip border - top sprocket rail -->
+    <path d="M-140,-95 Q-100,-115 -30,-120 Q40,-125 100,-105"
+          stroke="#1a1a1a" stroke-width="18" fill="none" stroke-linecap="round"/>
+
+    <!-- Film strip border - bottom sprocket rail (connects to ellipse) -->
+    <path d="M-140,15 Q-100,-5 -30,-10 Q40,-15 100,-5"
+          stroke="#1a1a1a" stroke-width="18" fill="none" stroke-linecap="round"/>
+
+    <!-- Film strip face (green front panel) -->
+    <path d="M-135,-85 Q-95,-105 -25,-110 Q45,-115 105,-98 L105,0 Q45,-12 -25,-5 Q-95,2 -135,18 Z"
+          fill="url(#filmFace)" stroke="#1a1a1a" stroke-width="5"/>
+
+    <!-- Sprocket holes - top row -->
+    <rect x="-115" y="-96" width="14" height="11" rx="2" fill="white" opacity="0.95"/>
+    <rect x="-85" y="-104" width="14" height="11" rx="2" fill="white" opacity="0.95"/>
+    <rect x="-55" y="-110" width="14" height="11" rx="2" fill="white" opacity="0.95"/>
+    <rect x="-25" y="-113" width="14" height="11" rx="2" fill="white" opacity="0.95"/>
+    <rect x="5" y="-113" width="14" height="11" rx="2" fill="white" opacity="0.95"/>
+    <rect x="35" y="-112" width="14" height="11" rx="2" fill="white" opacity="0.95"/>
+    <rect x="65" y="-108" width="14" height="11" rx="2" fill="white" opacity="0.95"/>
+    <rect x="90" y="-102" width="14" height="11" rx="2" fill="white" opacity="0.95"/>
+
+    <!-- Sprocket holes - bottom row -->
+    <rect x="-115" y="4" width="14" height="11" rx="2" fill="white" opacity="0.95"/>
+    <rect x="-85" y="-2" width="14" height="11" rx="2" fill="white" opacity="0.95"/>
+    <rect x="-55" y="-7" width="14" height="11" rx="2" fill="white" opacity="0.95"/>
+    <rect x="-25" y="-10" width="14" height="11" rx="2" fill="white" opacity="0.95"/>
+    <rect x="5" y="-11" width="14" height="11" rx="2" fill="white" opacity="0.95"/>
+    <rect x="35" y="-10" width="14" height="11" rx="2" fill="white" opacity="0.95"/>
+    <rect x="65" y="-8" width="14" height="11" rx="2" fill="white" opacity="0.95"/>
+    <rect x="90" y="-4" width="14" height="11" rx="2" fill="white" opacity="0.95"/>
+
+    <!-- Sprocket holes on the curved part (right side of ellipse) -->
+    <rect x="125" y="-75" width="11" height="14" rx="2" fill="white" opacity="0.85" transform="rotate(15,130,-68)"/>
+    <rect x="135" y="-50" width="11" height="14" rx="2" fill="white" opacity="0.85" transform="rotate(5,140,-43)"/>
+    <rect x="138" y="-25" width="11" height="14" rx="2" fill="white" opacity="0.85"/>
+    <rect x="135" y="0" width="11" height="14" rx="2" fill="white" opacity="0.85"/>
+    <rect x="128" y="25" width="11" height="14" rx="2" fill="white" opacity="0.85" transform="rotate(-10,133,32)"/>
+    <rect x="115" y="48" width="11" height="14" rx="2" fill="white" opacity="0.85" transform="rotate(-20,120,55)"/>
+    <rect x="95" y="65" width="11" height="14" rx="2" fill="white" opacity="0.85" transform="rotate(-35,100,72)"/>
+  </g>
+</svg>

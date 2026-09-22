@@ -1,5 +1,5 @@
 {
-  "job_id": "45cfe977-8b69-4772-81b9-eecfba690b4c",
+  "job_id": "6419e32d-d518-462d-9983-751ce1fbb363",
   "provider": "compatible",
   "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
   "model": "gemini-3.5-flash-lite",
@@ -8,16 +8,16 @@
   "voice_id": "vi-VN-HoaiMyNeural",
   "secondary_voice_tested": "vi-VN-NamMinhNeural",
   "source": {
-    "resolution": "1312x1080",
-    "header_duration": 933.326009,
-    "playable_duration": 79.5
+    "resolution": "780x720",
+    "header_duration": 575.088005,
+    "playable_duration": 185.43
   },
   "final_output": {
-    "file": "E:\\Affiliate ver 1\\storage\\tools\\out\\45cfe977-8b69-4772-81b9-eecfba690b4c.mp4",
+    "file": "E:\\Affiliate ver 1\\storage\\tools\\out\\6419e32d-d518-462d-9983-751ce1fbb363.mp4",
     "resolution": "1080x1920",
     "exact_9x16": true,
-    "duration": 79.436871,
-    "duration_ratio_vs_actual": 0.999,
+    "duration": 185.366304,
+    "duration_ratio_vs_actual": 1.0,
     "duration_acceptable": true,
     "caption_frame_evidence": "data\\evidence\\viralmint\\vietnamese_caption_evidence.jpg"
   },

@@ -1,0 +1,76 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+venv/
+.venv/
+
+# Environment
+.env
+
+# Database
+viralmint.db
+viralmint.db-wal
+viralmint.db-shm
+
+# Storage
+storage/
+
+# The other DATA_DIR runtime dirs that land at the repo root on a plain
+# `python run.py` (no VIRALMINT_DATA_DIR set). storage/ and the db were
+# already ignored; these showed up as untracked noise the moment anyone ran
+# the app from a checkout.
+#   logs/          — rotating backend logs
+#   whisper-cache/ — HF_HOME for the faster-whisper model downloads
+#   cache/         — settings.CACHE_DIR, if configured
+/logs/
+/whisper-cache/
+/cache/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Serverless
+.serverless/
+.esbuild/
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+
+# IDE / tooling
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo
+.DS_Store
+
+# Build artifacts
+*.log
+*.pid
+
+# Desktop bundle outputs (PyInstaller + vendored binaries fetched at build time)
+desktop/scripts/vendor/
+desktop/dist/
+desktop/release/
+
+# desktop/build/ holds SOURCE assets for the packaged build. The broad `build/`
+# rule near the top of this file also matches desktop/build/, which silently
+# kept icon.png + the macOS entitlements out of git — so a fresh checkout (CI)
+# had no icon and build-app.sh aborted. Re-include the source inputs here; the
+# generated icon.icns / icon.ico stay ignored as build outputs.
+!desktop/build/
+desktop/build/*
+!desktop/build/icon.png
+!desktop/build/entitlements.mac.plist
+
+# macOS Finder cruft from unzipped archives
+__MACOSX/
+.AppleDouble
+.LSOverride

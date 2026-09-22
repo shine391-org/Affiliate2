@@ -123,10 +123,11 @@ async def run_e2e_translation_pipeline():
         "target_language": "Vietnamese",
         "mode": "full_dub",
         "voice_id": "vi-VN-HoaiMyNeural",
-        "caption_style": "viral"
+        "caption_style": "viral",
+        "target_aspect": "9:16",
     })
     job_id = job.id
-    print(f"Created Job {job_id} for Vietnamese full dub...")
+    print(f"Created Job {job_id} for Vietnamese full dub (explicit target_aspect='9:16')...")
 
     status = "unknown"
     error_msg = None
@@ -142,7 +143,8 @@ async def run_e2e_translation_pipeline():
             voice_id="vi-VN-HoaiMyNeural",
             caption_style="viral",
             emoji_style="moderate",
-            user_id="local"
+            user_id="local",
+            target_aspect="9:16",
         )
     except Exception as e:
         print(f"Exception during pipeline execution: {e}")

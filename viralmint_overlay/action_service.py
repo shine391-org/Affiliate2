@@ -299,12 +299,9 @@ async def _run_translate(
     work.mkdir(parents=True, exist_ok=True)
 
     await _progress(job_id, 8, "Transcribing source audio...")
-    from backend.services.whisper_service import whisper_service, job_download_notice
+    from backend.services.whisper_service import whisper_service
 
-    tx = await whisper_service.transcribe(
-        str(source),
-        on_download=job_download_notice(job_id, "local"),
-    )
+    tx = await whisper_service.transcribe(str(source))
     segments = tx.get("segments", [])
     if not segments:
         raise RuntimeError("No speech detected — nothing to translate.")

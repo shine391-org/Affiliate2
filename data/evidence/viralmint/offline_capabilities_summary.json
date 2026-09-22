@@ -1,7 +1,7 @@
 {
   "whisper_transcription": {
     "verdict": "PASS",
-    "latency_s": 7.85,
+    "latency_s": 5.51,
     "segments_count": 8,
     "text_preview": "这些词你可能都听说过 但是我问大家 你真的能准确地说出其中每个概念的确切含意吗 这期视频我们不准那些续头八脑的商业概念 我们就从最底层的工程式脚出发 一个一个的把这些概念拆开 揉碎 讲清楚 看完这期视"
   },
@@ -12,12 +12,15 @@
     "size_bytes": 1222065
   },
   "captions": {
-    "verdict": "FAIL",
-    "error": "[WinError 2] The system cannot find the file specified: 'data\\\\evidence\\\\viralmint\\\\renders\\\\test_offline_captioned.mp4'"
+    "verdict": "PASS",
+    "latency_s": 4.38,
+    "ass_file": "E:\\Affiliate ver 1\\storage\\tmp\\captions_079e0880.ass",
+    "captioned_video": "data\\evidence\\viralmint\\renders\\test_offline_captioned.mp4",
+    "size_bytes": 1185883
   },
   "local_media_import": {
     "verdict": "PASS",
-    "saved_id": "5f3e3395-ed05-4712-b3d5-3d19a36d76ce",
+    "saved_id": "ba889530-f2a1-44e8-b136-9ed68793b77e",
     "storage_path": "data\\samples\\bilibili_sample1.mp4"
   }
 }
