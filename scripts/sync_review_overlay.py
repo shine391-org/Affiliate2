@@ -37,23 +37,43 @@ def sync(force: bool = False) -> None:
     page_dst = VIRALMINT / "frontend" / "src" / "plugins" / "review" / "ReviewQueue.jsx"
     page_dst.parent.mkdir(parents=True, exist_ok=True)
 
-    # Remove old .js stub if present (Vite resolves .js before .jsx)
+    # Vite resolves index.js before index.jsx, so the upstream OSS stub must be
+    # removed after we stage the JSX plugin registry. But never delete a custom
+    # index.js silently: downstream ViralMint installs may already use the plugin seam.
     old_js = VIRALMINT / "frontend" / "src" / "plugins" / "index.js"
+
+    def _registry_kind(path: Path) -> str:
+        if not path.exists():
+            return "missing"
+        text = path.read_text(encoding="utf-8")
+        if (
+            "export const pluginRoutes = []" in text
+            and "export const pluginNavItems = []" in text
+        ):
+            return "stub"
+        if "CONTENT_ENGINE_REVIEW_OVERLAY" in text:
+            return "ours"
+        return "custom"
+
+    old_js_kind = _registry_kind(old_js)
+    jsx_kind = _registry_kind(plugin_dst)
+
+    conflicts = []
+    if old_js_kind == "custom":
+        conflicts.append("frontend/src/plugins/index.js")
+    if jsx_kind == "custom":
+        conflicts.append("frontend/src/plugins/index.jsx")
+
+    if conflicts and not force:
+        joined = ", ".join(conflicts)
+        raise SystemExit(
+            f"Custom ViralMint plugin registry detected at {joined}. "
+            "Refusing to overwrite/delete it; merge overlay/frontend/plugins.jsx "
+            "manually or rerun with --force only after reviewing the conflict."
+        )
+
     if old_js.exists():
         old_js.unlink()
-
-    existing = plugin_dst.read_text(encoding="utf-8") if plugin_dst.exists() else ""
-    is_stub = (
-        "export const pluginRoutes = []" in existing
-        and "export const pluginNavItems = []" in existing
-    )
-    is_ours = "CONTENT_ENGINE_REVIEW_OVERLAY" in existing
-    if existing and not (is_stub or is_ours or force):
-        raise SystemExit(
-            "frontend/src/plugins/index.jsx has custom plugin content. "
-            "Refusing to overwrite it; merge overlay/frontend/plugins.jsx manually "
-            "or rerun with --force after reviewing."
-        )
 
     shutil.copy2(plugin_src, plugin_dst)
     shutil.copy2(page_src, page_dst)
