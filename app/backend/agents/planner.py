@@ -1039,9 +1039,14 @@ class PlannerAgent:
     async def _check_and_start_scout(self, action: dict, user_settings, user_id: str):
         """Start a scout job. Unavailable platforms are skipped gracefully."""
         niche = action.get("niche", "")
+        raw_platforms = action.get("platforms", ["youtube"])
+        if isinstance(raw_platforms, str):
+            raw_platforms = [raw_platforms]
+        elif not isinstance(raw_platforms, (list, tuple)):
+            raw_platforms = []
         platforms = [
             str(platform).strip().lower()
-            for platform in action.get("platforms", ["youtube"])
+            for platform in raw_platforms
             if str(platform).strip()
         ] or ["youtube"]
 
