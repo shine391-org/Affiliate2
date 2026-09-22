@@ -66,33 +66,6 @@ def _optional_metric_int(value: Any) -> int | None:
         return None
 
 
-def _metric_int(value: Any) -> int:
-    """Best-effort Bilibili metric coercion for Scout cards.
-
-    Radar's canonical snapshot layer preserves unavailable metrics separately;
-    Scout's existing schema expects integers, so unavailable values are 0 here.
-    """
-    if value is None or value == "" or value == "--":
-        return 0
-    if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, (int, float)):
-        return max(int(value), 0)
-
-    text = str(value).strip().lower().replace(",", "")
-    multipliers = {"万": 10_000, "亿": 100_000_000, "k": 1_000, "m": 1_000_000}
-    for suffix, multiplier in multipliers.items():
-        if text.endswith(suffix):
-            try:
-                return max(int(float(text[:-len(suffix)]) * multiplier), 0)
-            except ValueError:
-                return 0
-    try:
-        return max(int(float(text)), 0)
-    except ValueError:
-        return 0
-
-
 def _duration_seconds(value: Any) -> int | None:
     if value is None or value == "":
         return None
@@ -387,7 +360,7 @@ class BilibiliProvider:
                 provider=self.name,
             )
 
-        page_size = min(30, max(1, min(limit, 30)))
+        page_size = max(1, min(limit, 30))
         raw_items: list[dict] = []
 
         try:
@@ -456,7 +429,7 @@ class BilibiliProvider:
                 provider=self.name,
             )
 
-        page_size = min(50, max(1, min(limit, 20)))
+        page_size = max(1, min(limit, 20))
         raw_items: list[dict] = []
 
         try:
