@@ -309,3 +309,59 @@ async def test_creator_history_registry_dispatches(monkeypatch):
         )
     history.assert_awaited_once_with("123", creator_name="name", limit=5)
     assert result.platform == "bilibili"
+
+
+@pytest.mark.asyncio
+async def test_bilibili_code_zero_risk_voucher_is_not_false_empty():
+    provider = BilibiliProvider()
+
+    class Response:
+        status_code = 200
+        def raise_for_status(self):
+            return None
+        def json(self):
+            return {"code": 0, "data": {"v_voucher": "challenge-token"}}
+
+    class Client:
+        async def get(self, *args, **kwargs):
+            return Response()
+
+    with pytest.raises(PermissionError, match="risk-control"):
+        await provider._fetch_page(Client(), "AI", 1, 10)
+
+
+@pytest.mark.asyncio
+async def test_bilibili_code_zero_unexpected_envelope_is_error_not_empty():
+    provider = BilibiliProvider()
+
+    class Response:
+        status_code = 200
+        def raise_for_status(self):
+            return None
+        def json(self):
+            return {"code": 0, "data": {"unexpected": True}}
+
+    class Client:
+        async def get(self, *args, **kwargs):
+            return Response()
+
+    with pytest.raises(RuntimeError, match="missing data.result"):
+        await provider._fetch_page(Client(), "AI", 1, 10)
+
+
+@pytest.mark.asyncio
+async def test_bilibili_normal_empty_result_remains_empty():
+    provider = BilibiliProvider()
+
+    class Response:
+        status_code = 200
+        def raise_for_status(self):
+            return None
+        def json(self):
+            return {"code": 0, "data": {"result": []}}
+
+    class Client:
+        async def get(self, *args, **kwargs):
+            return Response()
+
+    assert await provider._fetch_page(Client(), "AI", 1, 10) == []
