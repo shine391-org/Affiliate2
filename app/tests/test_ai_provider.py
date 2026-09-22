@@ -15,7 +15,7 @@ import pytest
 from backend.core import ai_provider as ap
 from backend.core.ai_provider import (
     AIClient, AIProvider, PROVIDER_DEFAULTS, get_ai_client,
-    _resolve_user_provider_and_key,
+    _resolve_user_provider_and_key, compatible_base_url, make_ai_client,
 )
 from backend.core.crypto import encrypt
 from backend.core.exceptions import AIKeyMissingError
@@ -52,25 +52,26 @@ def test_aiclient_honors_explicit_model():
 # ── _resolve_user_provider_and_key ─────────────────────────────────────────
 
 def test_resolve_none_when_no_settings():
-    assert _resolve_user_provider_and_key(None) == (None, None)
+    assert _resolve_user_provider_and_key(None) == (None, None, None, None)
 
 
 def test_resolve_none_when_provider_or_key_missing():
     s = SimpleNamespace(ai_provider="", ai_api_key_encrypted="x")
-    assert _resolve_user_provider_and_key(s) == (None, None)
+    assert _resolve_user_provider_and_key(s) == (None, None, None, None)
     s2 = SimpleNamespace(ai_provider="anthropic", ai_api_key_encrypted=None)
-    assert _resolve_user_provider_and_key(s2) == (None, None)
+    assert _resolve_user_provider_and_key(s2) == (None, None, None, None)
 
 
 def test_resolve_none_when_provider_invalid():
     s = SimpleNamespace(ai_provider="not-a-provider", ai_api_key_encrypted=encrypt("k"))
-    assert _resolve_user_provider_and_key(s) == (None, None)
+    assert _resolve_user_provider_and_key(s) == (None, None, None, None)
 
 
 def test_resolve_decrypts_valid_settings():
     s = SimpleNamespace(ai_provider="OpenAI", ai_api_key_encrypted=encrypt("secret-key"))
-    provider, key = _resolve_user_provider_and_key(s)
+    provider, key, model, base_url = _resolve_user_provider_and_key(s)
     assert provider == AIProvider.OPENAI and key == "secret-key"
+    assert model is None and base_url is None
 
 
 # ── get_ai_client resolution order ─────────────────────────────────────────
@@ -146,3 +147,34 @@ async def test_chat_stream_dispatches_to_openai_impl():
     with patch.object(c, "_openai_stream", _fake_openai):
         chunks = [t async for t in c.chat_stream([{"role": "user", "content": "q"}])]
     assert chunks == ["x"] and seen.get("hit")
+
+
+def test_local_provider_needs_no_api_key_and_uses_preset_url():
+    s = SimpleNamespace(
+        ai_provider="ollama",
+        ai_api_key_encrypted=None,
+        ai_model="qwen3:8b",
+        ai_base_url=None,
+    )
+    provider, key, model, base_url = _resolve_user_provider_and_key(s)
+    assert provider == AIProvider.COMPATIBLE
+    assert key == "local"
+    assert model == "qwen3:8b"
+    assert base_url == "http://localhost:11434/v1"
+
+
+def test_compatible_base_url_prefers_explicit_override():
+    assert compatible_base_url("ollama", "http://127.0.0.1:9999/v1/") == "http://127.0.0.1:9999/v1"
+
+
+def test_make_local_client_requires_model_but_not_key():
+    c = make_ai_client("lmstudio", model="local-model")
+    assert c.provider == AIProvider.COMPATIBLE
+    assert c.api_key == "local"
+    assert c.model == "local-model"
+    assert c.base_url == "http://localhost:1234/v1"
+
+
+def test_make_compatible_client_requires_base_url():
+    with pytest.raises(ValueError, match="Base URL"):
+        make_ai_client("compatible", model="x")

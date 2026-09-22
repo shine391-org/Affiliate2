@@ -11,7 +11,7 @@ from sqlalchemy import select
 
 from backend.database import AsyncSessionLocal
 from backend.models.user_settings import UserSettings
-from backend.core.crypto import encrypt
+from backend.core.crypto import encrypt, decrypt_safe
 from backend.core.http_utils import get_user_agent
 from backend.config import settings as app_settings
 
@@ -25,6 +25,7 @@ class SettingsResponse(BaseModel):
     # AI provider preference (BYOK)
     ai_provider: str = "openai"
     ai_model: Optional[str] = None
+    ai_base_url: Optional[str] = None
     ai_api_key_set: bool = False  # masked — never returns the actual key
 
     # Service API keys (BYOK) — booleans only, never the plaintext key
@@ -58,6 +59,7 @@ class SettingsUpdate(BaseModel):
     # AI provider preference (BYOK)
     ai_provider: Optional[str] = None
     ai_model: Optional[str] = None
+    ai_base_url: Optional[str] = None
     ai_api_key: Optional[str] = None  # plaintext on input — encrypted before storage
 
     # Service API keys (BYOK) — plaintext on input, encrypted before storage.
@@ -95,6 +97,7 @@ async def get_settings():
     return SettingsResponse(
         ai_provider=s.ai_provider or "openai",
         ai_model=s.ai_model,
+        ai_base_url=s.ai_base_url,
         ai_api_key_set=bool(s.ai_api_key_encrypted),
         youtube_api_key_set=bool(s.youtube_api_key_encrypted),
         douyin_cookie_set=bool(s.douyin_cookie_encrypted),
@@ -133,6 +136,8 @@ async def update_settings(update: SettingsUpdate):
             s.ai_provider = update.ai_provider
         if update.ai_model is not None:
             s.ai_model = update.ai_model or None
+        if update.ai_base_url is not None:
+            s.ai_base_url = update.ai_base_url.strip() or None
         if update.ai_api_key is not None:
             # Empty string clears the stored key; otherwise encrypt + store
             s.ai_api_key_encrypted = encrypt(update.ai_api_key) if update.ai_api_key else None
@@ -171,6 +176,78 @@ async def update_settings(update: SettingsUpdate):
 
 
 # ── OAuth endpoints ──────────────────────────────────────────────────────────
+
+
+class AIProbeRequest(BaseModel):
+    provider: str
+    model: Optional[str] = None
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+
+
+async def _probe_key(body: AIProbeRequest) -> str:
+    if body.api_key is not None:
+        return body.api_key.strip()
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(UserSettings).where(UserSettings.user_id == "local")
+        )
+        s = result.scalar_one_or_none()
+    return decrypt_safe(s.ai_api_key_encrypted) if s and s.ai_api_key_encrypted else ""
+
+
+@router.post("/settings/ai/models")
+async def discover_ai_models(body: AIProbeRequest):
+    """Discover models from OpenAI/OpenRouter/OpenAI-compatible endpoints."""
+    from backend.core.ai_provider import (
+        COMPATIBLE_PRESETS, compatible_base_url, list_openai_compatible_models,
+    )
+
+    provider = (body.provider or "").lower().strip()
+    if provider == "openai":
+        base_url = "https://api.openai.com/v1"
+    elif provider == "openrouter":
+        base_url = "https://openrouter.ai/api/v1"
+    elif provider in COMPATIBLE_PRESETS or provider == "compatible":
+        base_url = compatible_base_url(provider, body.base_url)
+    else:
+        raise HTTPException(status_code=400, detail="Model discovery is not supported for this provider.")
+
+    if not base_url:
+        raise HTTPException(status_code=400, detail="Base URL is required.")
+    key = await _probe_key(body)
+    if provider in {"openai", "openrouter"} and not key:
+        raise HTTPException(status_code=400, detail="API key is required.")
+
+    try:
+        models = await list_openai_compatible_models(base_url, key)
+        return {"ok": True, "models": models}
+    except Exception as exc:
+        logger.warning("AI model discovery failed: %s", exc)
+        raise HTTPException(status_code=400, detail=f"Model discovery failed: {str(exc)[:200]}")
+
+
+@router.post("/settings/ai/test")
+async def test_ai_connection(body: AIProbeRequest):
+    """Test the exact provider/base/model values the user is editing."""
+    from backend.core.ai_provider import make_ai_client
+
+    key = await _probe_key(body)
+    try:
+        client = make_ai_client(
+            provider_name=body.provider,
+            api_key=key,
+            model=body.model,
+            base_url=body.base_url,
+        )
+        reply = await client.chat(
+            messages=[{"role": "user", "content": "Reply with exactly OK."}],
+            max_tokens=8,
+        )
+        return {"ok": True, "response": (reply or "").strip()[:80]}
+    except Exception as exc:
+        logger.warning("AI connection test failed: %s", exc)
+        raise HTTPException(status_code=400, detail=f"Connection failed: {str(exc)[:200]}")
 
 
 @router.get("/settings/youtube-auth")

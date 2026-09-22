@@ -3,7 +3,7 @@
 """
 AI client factory — BYOK (Bring Your Own Key).
 
-Supports Anthropic, OpenAI, and OpenRouter. Keys come from `.env`
+Supports Anthropic, OpenAI, OpenRouter, and OpenAI-compatible cloud/local endpoints. Keys come from `.env`
 (system-wide default) or per-user `UserSettings` (overrides env). No
 cloud-managed keys.
 
@@ -29,6 +29,21 @@ class AIProvider(str, Enum):
     OPENAI = "openai"
     OPENROUTER = "openrouter"
     COMPATIBLE = "compatible"
+
+
+# UI presets only. Runtime stays ONE OpenAI-compatible implementation.
+# Keeping aliases out of AIProvider avoids branching the actual client for
+# products that expose the same /v1 contract.
+COMPATIBLE_PRESETS = {
+    "ollama": "http://localhost:11434/v1",
+    "lmstudio": "http://localhost:1234/v1",
+    "vllm": "http://localhost:8000/v1",
+}
+
+
+def compatible_base_url(provider_name: str, explicit: str | None = None) -> str | None:
+    value = (explicit or COMPATIBLE_PRESETS.get((provider_name or "").lower().strip()) or "").strip()
+    return value.rstrip("/") or None
 
 
 PROVIDER_DEFAULTS = {
@@ -179,10 +194,58 @@ class AIClient:
                 yield delta
 
 
+async def list_openai_compatible_models(base_url: str, api_key: str = "") -> list[str]:
+    """List model IDs from an OpenAI-compatible /models endpoint."""
+    import openai
+
+    client = openai.AsyncOpenAI(
+        api_key=(api_key or "local"),
+        base_url=base_url.rstrip("/"),
+        timeout=20.0,
+    )
+    page = await client.models.list()
+    ids = {str(item.id).strip() for item in (page.data or []) if getattr(item, "id", None)}
+    return sorted(x for x in ids if x)[:500]
+
+
+def make_ai_client(
+    provider_name: str,
+    api_key: str = "",
+    model: str | None = None,
+    base_url: str | None = None,
+) -> AIClient:
+    """Build one canonical client from Settings-form values.
+
+    Ollama/LM Studio/vLLM are presets over the same compatible transport, not
+    separate providers. Local compatible servers may legitimately use no key.
+    """
+    name = (provider_name or "").lower().strip()
+    if name in COMPATIBLE_PRESETS or name == AIProvider.COMPATIBLE.value:
+        resolved_base = compatible_base_url(name, base_url)
+        if not resolved_base:
+            raise ValueError("Base URL is required for an OpenAI-compatible provider.")
+        if not (model or "").strip():
+            raise ValueError("Model ID is required for an OpenAI-compatible provider.")
+        return AIClient(
+            provider=AIProvider.COMPATIBLE,
+            api_key=(api_key or "local"),
+            model=model.strip(),
+            base_url=resolved_base,
+        )
+
+    try:
+        provider = AIProvider(name)
+    except ValueError as exc:
+        raise ValueError(f"Unknown AI provider: {provider_name}") from exc
+    if not api_key:
+        raise AIKeyMissingError(f"API key is required for {name}.")
+    return AIClient(provider=provider, api_key=api_key, model=model, base_url=base_url)
+
+
 # ── Factory ───────────────────────────────────────────────────────────────────
 
 def _resolve_user_provider_and_key(user_settings) -> tuple[Optional[AIProvider], Optional[str], Optional[str], Optional[str]]:
-    """Read provider preference, decrypted API key, model and base_url from UserSettings, if set."""
+    """Resolve stored settings onto the canonical runtime provider."""
     if not user_settings:
         return None, None, None, None
 
@@ -190,12 +253,23 @@ def _resolve_user_provider_and_key(user_settings) -> tuple[Optional[AIProvider],
     encrypted_key = getattr(user_settings, "ai_api_key_encrypted", None)
     base_url = getattr(user_settings, "ai_base_url", None)
     model = getattr(user_settings, "ai_model", None)
-    if not provider_str or not encrypted_key:
+    if not provider_str:
         return None, None, None, None
+
+    if provider_str in COMPATIBLE_PRESETS or provider_str == AIProvider.COMPATIBLE.value:
+        api_key = decrypt_safe(encrypted_key) if encrypted_key else ""
+        return (
+            AIProvider.COMPATIBLE,
+            api_key or "local",
+            model or None,
+            compatible_base_url(provider_str, base_url),
+        )
 
     try:
         provider = AIProvider(provider_str)
     except ValueError:
+        return None, None, None, None
+    if not encrypted_key:
         return None, None, None, None
 
     api_key = decrypt_safe(encrypted_key) or ""
@@ -220,8 +294,9 @@ def get_ai_client(user_settings=None, **_kwargs) -> AIClient:
     # 1. User-configured BYOK
     user_provider, user_key, u_model, u_base_url = _resolve_user_provider_and_key(user_settings)
     if user_provider and user_key:
-        return AIClient(
-            provider=user_provider,
+        raw_name = (getattr(user_settings, "ai_provider", None) or user_provider.value)
+        return make_ai_client(
+            provider_name=raw_name,
             api_key=user_key,
             model=u_model or user_model,
             base_url=u_base_url,

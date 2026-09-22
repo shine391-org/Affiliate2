@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
-  Box, Stack, Typography, Alert, TextField, Button, FormControl, InputLabel,
-  Select, MenuItem, IconButton, InputAdornment, Chip, Dialog, DialogTitle,
-  DialogContent, DialogActions,
+  Alert, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle,
+  FormControl, IconButton, InputAdornment, InputLabel, MenuItem, Select, Stack,
+  TextField, Typography,
 } from "@mui/material"
 import VisibilityIcon from "@mui/icons-material/VisibilityOutlined"
 import VisibilityOffIcon from "@mui/icons-material/VisibilityOffOutlined"
@@ -13,84 +13,139 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircleOutline"
 import http from "../../api/http"
 import useAppStore from "../../store/appStore"
 
-const PROVIDER_LABEL = {
-  anthropic: "Anthropic (Claude)",
-  openai: "OpenAI (GPT)",
-  openrouter: "OpenRouter (Claude / GPT / Gemini / Llama)",
+const PROVIDERS = {
+  anthropic: { label: "Anthropic (Claude)", keyRequired: true, placeholder: "sk-ant-..." },
+  openai: { label: "OpenAI (GPT)", keyRequired: true, placeholder: "sk-..." },
+  openrouter: { label: "OpenRouter", keyRequired: true, placeholder: "sk-or-..." },
+  ollama: { label: "Ollama (local)", baseUrl: "http://localhost:11434/v1" },
+  lmstudio: { label: "LM Studio (local)", baseUrl: "http://localhost:1234/v1" },
+  vllm: { label: "vLLM (local)", baseUrl: "http://localhost:8000/v1" },
+  compatible: { label: "Custom OpenAI-compatible" },
 }
 
-const KEY_PLACEHOLDER = {
-  anthropic: "sk-ant-...",
-  openai: "sk-...",
-  openrouter: "sk-or-...",
-}
-
-const KEY_HINT = {
-  anthropic: "Get yours at console.anthropic.com → API Keys",
-  openai: "Get yours at platform.openai.com → API Keys",
-  openrouter: "One key, every model — get yours at openrouter.ai/keys",
+const isCompatible = (provider) => ["ollama", "lmstudio", "vllm", "compatible"].includes(provider)
+const savedReady = (settings) => {
+  const provider = settings?.ai_provider || "openai"
+  const meta = PROVIDERS[provider] || PROVIDERS.openai
+  if (meta.keyRequired) return !!settings?.ai_api_key_set
+  const base = settings?.ai_base_url || meta.baseUrl
+  return !!(base && settings?.ai_model)
 }
 
 export default function AIProviderSection({ settings, updateSettings }) {
   const showSnackbar = useAppStore((s) => s.showSnackbar)
-
-  const [provider, setProvider] = useState(settings?.ai_provider || "openai")
+  const initialProvider = settings?.ai_provider || "openai"
+  const [provider, setProvider] = useState(initialProvider)
   const [model, setModel] = useState(settings?.ai_model || "")
+  const [baseUrl, setBaseUrl] = useState(settings?.ai_base_url || PROVIDERS[initialProvider]?.baseUrl || "")
   const [apiKey, setApiKey] = useState("")
   const [showKey, setShowKey] = useState(false)
   const [registry, setRegistry] = useState({})
+  const [discovered, setDiscovered] = useState([])
   const [saving, setSaving] = useState(false)
-  const [editing, setEditing] = useState(!settings?.ai_api_key_set)
+  const [probing, setProbing] = useState(false)
+  const [editing, setEditing] = useState(!savedReady(settings))
   const [confirmRemove, setConfirmRemove] = useState(false)
 
-  // Sync local state when settings change (e.g. after save).
-  // If no key is set (cleared elsewhere or never set), force into edit mode
-  // so the form is visible. handleSave / handleRemove own toggling out.
   useEffect(() => {
-    if (settings) {
-      setProvider(settings.ai_provider || "openai")
-      setModel(settings.ai_model || "")
-      if (!settings.ai_api_key_set) setEditing(true)
-    }
-  }, [settings?.ai_provider, settings?.ai_model, settings?.ai_api_key_set])
+    if (!settings) return
+    const p = settings.ai_provider || "openai"
+    setProvider(p)
+    setModel(settings.ai_model || "")
+    setBaseUrl(settings.ai_base_url || PROVIDERS[p]?.baseUrl || "")
+    if (!savedReady(settings)) setEditing(true)
+  }, [settings?.ai_provider, settings?.ai_model, settings?.ai_base_url, settings?.ai_api_key_set])
 
-  // Fetch model registry once
   useEffect(() => {
     http.get("/api/config/model_registry")
       .then(({ data }) => setRegistry(data?.value || {}))
       .catch(() => {})
   }, [])
 
-  const availableModels = registry[provider]?.models || []
+  const meta = PROVIDERS[provider] || PROVIDERS.compatible
   const defaultModel = registry[provider]?.default_model || ""
   const effectiveModel = model || defaultModel
+  const suggestions = useMemo(
+    () => [...new Set([...(registry[provider]?.models || []), ...discovered])],
+    [registry, provider, discovered],
+  )
+  const keyIsSet = !!settings?.ai_api_key_set
+  const connected = savedReady(settings)
+
+  const probePayload = () => ({
+    provider,
+    model: effectiveModel.trim() || null,
+    base_url: isCompatible(provider) ? (baseUrl.trim() || null) : null,
+    ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
+  })
+
+  const handleProviderChange = (next) => {
+    setProvider(next)
+    setModel("")
+    setDiscovered([])
+    setBaseUrl(PROVIDERS[next]?.baseUrl || "")
+  }
 
   const handleSave = async () => {
-    const hasNewKey = apiKey.trim().length > 0
-    if (!hasNewKey && !settings?.ai_api_key_set) {
+    const hasNewKey = !!apiKey.trim()
+    if (meta.keyRequired && !hasNewKey && !keyIsSet) {
       showSnackbar("Paste your API key first", "warning")
       return
     }
+    if (!effectiveModel.trim()) {
+      showSnackbar("Enter or discover a model ID", "warning")
+      return
+    }
+    if (isCompatible(provider) && !baseUrl.trim()) {
+      showSnackbar("Base URL is required", "warning")
+      return
+    }
+
     setSaving(true)
     try {
-      // Always send the model that's actually displayed in the dropdown.
-      // If the user switched providers, `model` was reset to "" and `effectiveModel`
-      // resolves to the new provider's default — that's what they saw and what we save.
       const updates = {
         ai_provider: provider,
-        ai_model: effectiveModel || "",  // empty string clears stale model
+        ai_model: effectiveModel.trim(),
+        ai_base_url: isCompatible(provider) ? baseUrl.trim() : "",
       }
-      if (hasNewKey) {
-        updates.ai_api_key = apiKey.trim()
-      }
+      if (hasNewKey) updates.ai_api_key = apiKey.trim()
       await updateSettings(updates)
       setApiKey("")
       setEditing(false)
-      showSnackbar(hasNewKey ? "API key saved" : "Provider updated", "success")
-    } catch (e) {
-      // updateSettings already shows a snackbar on error
+      showSnackbar("AI provider saved", "success")
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleDiscover = async () => {
+    setProbing(true)
+    try {
+      const { data } = await http.post("/api/settings/ai/models", probePayload())
+      const models = data?.models || []
+      setDiscovered(models)
+      if (!model && models.length === 1) setModel(models[0])
+      showSnackbar(models.length ? `Found ${models.length} models` : "No models returned", models.length ? "success" : "warning")
+    } catch (err) {
+      showSnackbar(err.response?.data?.detail || "Model discovery failed", "error")
+    } finally {
+      setProbing(false)
+    }
+  }
+
+  const handleTest = async () => {
+    if (!effectiveModel.trim()) {
+      showSnackbar("Enter or discover a model ID first", "warning")
+      return
+    }
+    setProbing(true)
+    try {
+      await http.post("/api/settings/ai/test", probePayload())
+      showSnackbar("Connection OK", "success")
+    } catch (err) {
+      showSnackbar(err.response?.data?.detail || "Connection failed", "error")
+    } finally {
+      setProbing(false)
     }
   }
 
@@ -101,142 +156,96 @@ export default function AIProviderSection({ settings, updateSettings }) {
       await updateSettings({ ai_api_key: "" })
       setApiKey("")
       setEditing(true)
-      showSnackbar("API key removed — falling back to .env (if configured)", "info")
-    } catch (e) {
-      // handled in updateSettings
+      showSnackbar("Stored API key removed", "info")
     } finally {
       setSaving(false)
     }
   }
 
-  const keyIsSet = !!settings?.ai_api_key_set
-
-  // ── Connected state: key already configured, not editing ────────────────────
-  if (!editing && keyIsSet) {
+  if (!editing && connected) {
     return (
       <Stack spacing={2}>
-        <Alert
-          severity="success"
-          variant="outlined"
-          icon={<CheckCircleIcon fontSize="small" />}
-        >
+        <Alert severity="success" variant="outlined" icon={<CheckCircleIcon fontSize="small" />}>
           <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-            <Typography variant="body2" sx={{ fontWeight: 600 }}>
-              Personal API key configured
-            </Typography>
-            <Chip
-              size="small"
-              label={PROVIDER_LABEL[settings.ai_provider] || settings.ai_provider}
-              color="primary"
-              variant="outlined"
-              sx={{ fontWeight: 500 }}
-            />
-            {settings.ai_model && (
-              <Chip
-                size="small"
-                label={`model: ${settings.ai_model}`}
-                variant="outlined"
-              />
-            )}
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>AI provider configured</Typography>
+            <Chip size="small" label={PROVIDERS[settings.ai_provider]?.label || settings.ai_provider} color="primary" variant="outlined" />
+            {settings.ai_model && <Chip size="small" label={`model: ${settings.ai_model}`} variant="outlined" />}
           </Stack>
-          <Typography variant="caption" sx={{ color: "text.secondary", display: "block", mt: 0.75 }}>
-            Stored encrypted on your machine. Sent only to the provider when chatting / generating.
-          </Typography>
+          {settings.ai_base_url && (
+            <Typography variant="caption" sx={{ color: "text.secondary", display: "block", mt: 0.75 }}>
+              {settings.ai_base_url}
+            </Typography>
+          )}
         </Alert>
         <Stack direction="row" spacing={1.5}>
-          <Button
-            variant="contained"
-            startIcon={<EditIcon />}
-            onClick={() => { setEditing(true); setApiKey("") }}
-            disabled={saving}
-          >
-            Update
-          </Button>
-          <Button
-            variant="outlined"
-            color="error"
-            startIcon={<DeleteIcon />}
-            onClick={() => setConfirmRemove(true)}
-            disabled={saving}
-          >
-            Remove
-          </Button>
-        </Stack>
-
-        <Dialog open={confirmRemove} onClose={() => setConfirmRemove(false)} maxWidth="xs" fullWidth>
-          <DialogTitle>Remove API key?</DialogTitle>
-          <DialogContent>
-            <Typography variant="body2">
-              This deletes the encrypted key from your local database. ViralMint will fall back to
-              the {PROVIDER_LABEL[settings.ai_provider]} key in your <code>.env</code> file (if set).
-              If neither is configured, AI features will stop working until you add a new key.
-            </Typography>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setConfirmRemove(false)}>Cancel</Button>
-            <Button color="error" variant="contained" onClick={handleRemove}>
+          <Button variant="contained" startIcon={<EditIcon />} onClick={() => setEditing(true)} disabled={saving}>Update</Button>
+          {keyIsSet && (
+            <Button variant="outlined" color="error" startIcon={<DeleteIcon />} onClick={() => setConfirmRemove(true)} disabled={saving}>
               Remove key
             </Button>
+          )}
+        </Stack>
+        <Dialog open={confirmRemove} onClose={() => setConfirmRemove(false)} maxWidth="xs" fullWidth>
+          <DialogTitle>Remove API key?</DialogTitle>
+          <DialogContent><Typography variant="body2">This deletes the encrypted key from the local database.</Typography></DialogContent>
+          <DialogActions>
+            <Button onClick={() => setConfirmRemove(false)}>Cancel</Button>
+            <Button color="error" variant="contained" onClick={handleRemove}>Remove key</Button>
           </DialogActions>
         </Dialog>
       </Stack>
     )
   }
 
-  // ── Editing state: form for provider/model/key ──────────────────────────────
   return (
     <Stack spacing={2}>
       <Typography variant="body2" color="text.secondary">
-        Bring your own Anthropic, OpenAI, or OpenRouter API key. Keys are encrypted (AES-256) before
-        storage and never leave your machine except when calling the provider directly. OpenRouter
-        is a unified gateway — one key, access to Claude / GPT / Gemini / Llama / Mistral.
+        Use a cloud provider or a local OpenAI-compatible server. Model IDs are editable; the registry is only a suggestion list.
       </Typography>
 
       <FormControl size="small" fullWidth>
         <InputLabel>Provider</InputLabel>
-        <Select
-          value={provider}
-          label="Provider"
-          onChange={(e) => { setProvider(e.target.value); setModel("") }}
-          disabled={saving}
-        >
-          <MenuItem value="anthropic">Anthropic (Claude)</MenuItem>
-          <MenuItem value="openai">OpenAI (GPT)</MenuItem>
-          <MenuItem value="openrouter">OpenRouter (Claude / GPT / Gemini / Llama)</MenuItem>
+        <Select value={provider} label="Provider" onChange={(e) => handleProviderChange(e.target.value)} disabled={saving || probing}>
+          {Object.entries(PROVIDERS).map(([id, item]) => <MenuItem key={id} value={id}>{item.label}</MenuItem>)}
         </Select>
       </FormControl>
 
-      <FormControl size="small" fullWidth>
-        <InputLabel>Model</InputLabel>
-        <Select
-          value={effectiveModel}
-          label="Model"
-          onChange={(e) => setModel(e.target.value)}
-          disabled={saving || availableModels.length === 0}
-        >
-          {availableModels.map((m) => (
-            <MenuItem key={m} value={m}>
-              {m}
-              {m === defaultModel && (
-                <Typography component="span" variant="caption" sx={{ ml: 1, color: "text.secondary" }}>
-                  (default)
-                </Typography>
-              )}
-            </MenuItem>
-          ))}
-        </Select>
-      </FormControl>
+      {isCompatible(provider) && (
+        <TextField
+          label="Base URL"
+          size="small"
+          fullWidth
+          value={baseUrl}
+          onChange={(e) => setBaseUrl(e.target.value)}
+          placeholder={meta.baseUrl || "http://localhost:8000/v1"}
+          disabled={saving || probing}
+        />
+      )}
 
       <TextField
-        label="API key"
+        label="Model ID"
+        size="small"
+        fullWidth
+        value={effectiveModel}
+        onChange={(e) => setModel(e.target.value)}
+        placeholder="e.g. qwen3:14b or provider/model"
+        disabled={saving || probing}
+        inputProps={{ list: "ai-model-suggestions" }}
+        helperText="Type any model ID, or discover models from supported endpoints."
+      />
+      <datalist id="ai-model-suggestions">
+        {suggestions.map((m) => <option key={m} value={m} />)}
+      </datalist>
+
+      <TextField
+        label={meta.keyRequired ? "API key" : "API key (optional)"}
         type={showKey ? "text" : "password"}
         size="small"
         fullWidth
         value={apiKey}
         onChange={(e) => setApiKey(e.target.value)}
-        placeholder={keyIsSet ? "(leave empty to keep existing key)" : KEY_PLACEHOLDER[provider]}
-        helperText={KEY_HINT[provider]}
-        disabled={saving}
+        placeholder={keyIsSet ? "(leave empty to keep existing key)" : (meta.placeholder || "optional for local servers")}
+        disabled={saving || probing}
         autoComplete="off"
         InputProps={{
           endAdornment: (
@@ -249,24 +258,18 @@ export default function AIProviderSection({ settings, updateSettings }) {
         }}
       />
 
-      <Stack direction="row" spacing={1.5}>
-        <Button
-          variant="contained"
-          startIcon={<SaveIcon />}
-          onClick={handleSave}
-          disabled={saving || (!apiKey.trim() && !keyIsSet)}
-        >
+      <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+        <Button variant="outlined" onClick={handleDiscover} disabled={saving || probing || provider === "anthropic"}>
+          {probing ? "Checking…" : "Discover models"}
+        </Button>
+        <Button variant="outlined" onClick={handleTest} disabled={saving || probing}>
+          Test connection
+        </Button>
+        <Box sx={{ flex: 1 }} />
+        {connected && <Button variant="text" onClick={() => setEditing(false)} disabled={saving || probing}>Cancel</Button>}
+        <Button variant="contained" startIcon={<SaveIcon />} onClick={handleSave} disabled={saving || probing}>
           {saving ? "Saving…" : "Save"}
         </Button>
-        {keyIsSet && (
-          <Button
-            variant="outlined"
-            onClick={() => { setEditing(false); setApiKey("") }}
-            disabled={saving}
-          >
-            Cancel
-          </Button>
-        )}
       </Stack>
     </Stack>
   )
