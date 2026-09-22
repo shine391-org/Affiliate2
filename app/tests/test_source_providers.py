@@ -13,7 +13,7 @@ from backend.sources import (
     fetch_creator_history,
     has_source_provider,
 )
-from backend.sources.bilibili import BilibiliProvider, _duration_seconds, _metric_int
+from backend.sources.bilibili import BilibiliProvider, _duration_seconds, _optional_metric_int
 
 
 def test_bilibili_is_app_native_provider():
@@ -77,15 +77,15 @@ def test_bilibili_normalizes_real_platform_identity():
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        (None, 0),
-        ("--", 0),
+        (None, None),
+        ("--", None),
         ("1,234", 1234),
         ("1.5万", 15000),
         ("2k", 2000),
     ],
 )
 def test_bilibili_metric_coercion(raw, expected):
-    assert _metric_int(raw) == expected
+    assert _optional_metric_int(raw) == expected
 
 
 @pytest.mark.parametrize(
