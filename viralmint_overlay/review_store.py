@@ -91,6 +91,18 @@ class ReviewStore:
                     ON content_reviews(status);
                 CREATE INDEX IF NOT EXISTS idx_content_reviews_content
                     ON content_reviews(platform, content_id);
+
+                CREATE TABLE IF NOT EXISTS content_actions (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id      TEXT NOT NULL UNIQUE,
+                    platform    TEXT NOT NULL,
+                    content_id  TEXT NOT NULL,
+                    action      TEXT NOT NULL,
+                    params_json TEXT,
+                    created_at  TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_content_actions_content
+                    ON content_actions(platform, content_id, id DESC);
                 """
             )
 
@@ -242,6 +254,60 @@ class ReviewStore:
         assert review is not None
         return review
 
+    def record_action(
+        self,
+        job_id: str,
+        platform: str,
+        content_id: str,
+        action: str,
+        params: dict | None = None,
+    ) -> dict:
+        """Record the ViralMint job that owns a human-triggered content action."""
+        self._validate_identity(platform, content_id)
+        if action not in {"translate", "remake", "rerender"}:
+            raise ReviewValidationError(f"Unsupported action: {action}")
+        now = utc_now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO content_actions
+                    (job_id, platform, content_id, action, params_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    job_id,
+                    platform,
+                    content_id,
+                    action,
+                    json.dumps(params or {}, ensure_ascii=False),
+                    now,
+                ),
+            )
+        return self.latest_action(platform, content_id) or {}
+
+    def latest_action(self, platform: str, content_id: str) -> dict | None:
+        self._validate_identity(platform, content_id)
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT job_id, platform, content_id, action, params_json, created_at
+                FROM content_actions
+                WHERE platform=? AND content_id=?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (platform, content_id),
+            ).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        try:
+            result["params"] = json.loads(result.pop("params_json") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            result["params"] = {}
+            result.pop("params_json", None)
+        return result
+
     @staticmethod
     def _risk_summary(intel: dict) -> list[str]:
         risks = (intel or {}).get("risks") or {}
@@ -355,6 +421,8 @@ class ReviewStore:
                 "transcript": _read_json(cdir / "transcript.json", {}),
                 "adaptation": _read_json(rdir / "adaptation.json", {}),
                 "segment_plan": _read_json(rdir / "segment_plan.json", {}),
+                "action_manifest": _read_json(rdir / "action_manifest.json", {}),
+                "latest_action": self.latest_action(platform, content_id),
             }
         )
         return detail
