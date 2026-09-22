@@ -85,6 +85,13 @@ def _snapshot_engagement(row: dict) -> float:
 
 
 def _velocity_per_hour(snapshots: list[dict]) -> float | None:
+    """Return legacy-compatible engagement growth per hour.
+
+    With a positive baseline this is relative growth/hour:
+    (last - first) / first / elapsed_hours.
+    A zero baseline cannot produce a relative rate, so preserve the legacy
+    fallback to absolute engagement growth/hour.
+    """
     if len(snapshots) < 2:
         return None
     first, last = snapshots[0], snapshots[-1]
@@ -93,8 +100,14 @@ def _velocity_per_hour(snapshots: list[dict]) -> float | None:
     elapsed = (t2 - t1).total_seconds()
     if elapsed < VELOCITY_MIN_INTERVAL_SECONDS:
         return None
-    delta = max(_snapshot_engagement(last) - _snapshot_engagement(first), 0.0)
-    return round(delta / (elapsed / 3600.0), 3)
+
+    first_engagement = _snapshot_engagement(first)
+    last_engagement = _snapshot_engagement(last)
+    delta = max(last_engagement - first_engagement, 0.0)
+    elapsed_hours = elapsed / 3600.0
+    if first_engagement > 0:
+        return round((delta / first_engagement) / elapsed_hours, 6)
+    return round(delta / elapsed_hours, 3)
 
 
 def record_source_run(
@@ -141,7 +154,7 @@ def observe_scout_rows(rows: list[dict], niche: str, conn: sqlite3.Connection | 
     conn = conn or get_conn()
     captured_at = _now_iso()
     seen: set[tuple[str, str]] = set()
-    per_platform: dict[str, dict[str, int]] = {}
+    per_source: dict[tuple[str, str], dict[str, int]] = {}
 
     try:
         for row in rows:
@@ -151,7 +164,11 @@ def observe_scout_rows(rows: list[dict], niche: str, conn: sqlite3.Connection | 
             if platform not in SUPPORTED_PLATFORMS or not content_id or key in seen:
                 continue
             seen.add(key)
-            stats = per_platform.setdefault(platform, {"observed": 0, "new": 0, "updated": 0})
+            source_keyword = str(row.get("source_keyword") or niche).strip() or niche
+            stats = per_source.setdefault(
+                (platform, source_keyword),
+                {"observed": 0, "new": 0, "updated": 0},
+            )
 
             existing = conn.execute(
                 "SELECT id FROM content WHERE platform=? AND content_id=?",
@@ -164,7 +181,7 @@ def observe_scout_rows(rows: list[dict], niche: str, conn: sqlite3.Connection | 
                 row.get("title"),
                 row.get("description"),
                 _publish_timestamp(row.get("upload_date")),
-                row.get("source_keyword") or niche,
+                source_keyword,
             )
             if existing is None:
                 conn.execute(
@@ -204,7 +221,7 @@ def observe_scout_rows(rows: list[dict], niche: str, conn: sqlite3.Connection | 
             )
             stats["observed"] += 1
 
-        for platform, stats in per_platform.items():
+        for (platform, keyword), stats in per_source.items():
             conn.execute(
                 """INSERT INTO source_runs
                 (platform, keyword, started_at, finished_at, status,
@@ -212,7 +229,7 @@ def observe_scout_rows(rows: list[dict], niche: str, conn: sqlite3.Connection | 
                 VALUES (?,?,?,?,?,?,?,?,?)""",
                 (
                     platform,
-                    niche,
+                    keyword,
                     captured_at,
                     captured_at,
                     "SUCCESS",
@@ -224,9 +241,9 @@ def observe_scout_rows(rows: list[dict], niche: str, conn: sqlite3.Connection | 
             )
         conn.commit()
         return {
-            "observed": sum(v["observed"] for v in per_platform.values()),
-            "new": sum(v["new"] for v in per_platform.values()),
-            "updated": sum(v["updated"] for v in per_platform.values()),
+            "observed": sum(v["observed"] for v in per_source.values()),
+            "new": sum(v["new"] for v in per_source.values()),
+            "updated": sum(v["updated"] for v in per_source.values()),
             "captured_at": captured_at,
         }
     finally:
