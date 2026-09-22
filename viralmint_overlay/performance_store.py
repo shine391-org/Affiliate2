@@ -19,6 +19,12 @@ class PerformanceStore:
         self.root = (project_root or find_project_root()).resolve()
         self.db_path = (db_path or (self.root / "data" / "radar.db")).resolve()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Metrics reference Phase 3.5 publication rows. Ensure that parent
+        # schema exists even if the operator opens Performance before Publish Gate.
+        from .publish_store import PublishStore
+
+        PublishStore(db_path=self.db_path, project_root=self.root)
         self._init_schema()
 
     def _connect(self) -> sqlite3.Connection:
