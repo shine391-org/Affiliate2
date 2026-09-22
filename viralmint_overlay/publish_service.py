@@ -357,6 +357,7 @@ def _publish_facebook_sync(
                 "description": description,
                 "title": title,
             },
+            headers=graph_headers,
         )
         finish.raise_for_status()
         result = finish.json()
