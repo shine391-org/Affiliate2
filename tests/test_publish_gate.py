@@ -216,3 +216,16 @@ def test_youtube_credentials_are_not_required_for_manual_tiktok(tmp_path):
         external_url="https://tiktok.com/@x/video/2",
     )
     assert result["status"] == "PUBLISHED"
+
+
+
+def test_facebook_reel_rejects_low_frame_rate(monkeypatch, tmp_path):
+    video = tmp_path / "final.mp4"
+    video.write_bytes(b"x")
+    monkeypatch.setattr(
+        "viralmint_overlay.publish_service.probe_video",
+        lambda _: {"width": 1080, "height": 1920, "duration": 30.0, "size": 1, "frame_rate": "20/1"},
+    )
+    ok, reason, _ = facebook_reel_eligibility(video)
+    assert ok is False
+    assert "23 FPS" in reason
