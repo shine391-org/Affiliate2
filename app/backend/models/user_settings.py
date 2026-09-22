@@ -44,6 +44,7 @@ class UserSettings(Base, TimestampMixin):
     # ── Video generation ───────────────────────────────
     preferred_voice_id = Column(String(100), nullable=True)  # Provider-specific voice ID
     whisper_quality = Column(String(20), default="balanced")  # fast|balanced|accurate|best
+    localization_profiles_json = Column(Text, nullable=True)   # Phase-C saved profiles; one JSON payload, not a new table
 
     # ── TTS Provider ───────────────────────────────────
     tts_provider = Column(String(20), default="edge_tts")  # edge_tts|openai_tts

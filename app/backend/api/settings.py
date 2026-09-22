@@ -7,6 +7,8 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import Optional
+
+from backend.core.localization import LocalizationProfile
 from sqlalchemy import select
 
 from backend.database import AsyncSessionLocal
@@ -248,6 +250,79 @@ async def test_ai_connection(body: AIProbeRequest):
     except Exception as exc:
         logger.warning("AI connection test failed: %s", exc)
         raise HTTPException(status_code=400, detail=f"Connection failed: {str(exc)[:200]}")
+
+
+@router.get("/settings/localization-profiles")
+async def get_localization_profiles():
+    from backend.core.localization import load_profile_store
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(UserSettings).where(UserSettings.user_id == "local")
+        )
+        s = result.scalar_one_or_none()
+    store = load_profile_store(s.localization_profiles_json if s else None)
+    return store.model_dump()
+
+
+@router.post("/settings/localization-profiles")
+async def save_localization_profile(profile: "LocalizationProfile"):
+    from backend.core.localization import load_profile_store, upsert_profile
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(UserSettings).where(UserSettings.user_id == "local")
+        )
+        s = result.scalar_one_or_none()
+        if not s:
+            s = UserSettings(user_id="local")
+            db.add(s)
+        store = load_profile_store(s.localization_profiles_json)
+        try:
+            store = upsert_profile(store, profile)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        s.localization_profiles_json = store.model_dump_json()
+        await db.commit()
+    return store.model_dump()
+
+
+@router.delete("/settings/localization-profiles/{profile_id}")
+async def remove_localization_profile(profile_id: str):
+    from backend.core.localization import delete_profile, load_profile_store
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(UserSettings).where(UserSettings.user_id == "local")
+        )
+        s = result.scalar_one_or_none()
+        if not s:
+            return load_profile_store(None).model_dump()
+        store = delete_profile(load_profile_store(s.localization_profiles_json), profile_id)
+        s.localization_profiles_json = store.model_dump_json()
+        await db.commit()
+    return store.model_dump()
+
+
+@router.post("/settings/localization-profiles/{profile_id}/default")
+async def make_default_localization_profile(profile_id: str):
+    from backend.core.localization import load_profile_store, set_default_profile
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(UserSettings).where(UserSettings.user_id == "local")
+        )
+        s = result.scalar_one_or_none()
+        if not s:
+            raise HTTPException(status_code=404, detail="Localization profile not found")
+        store = load_profile_store(s.localization_profiles_json)
+        try:
+            store = set_default_profile(store, profile_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Localization profile not found")
+        s.localization_profiles_json = store.model_dump_json()
+        await db.commit()
+    return store.model_dump()
 
 
 @router.get("/settings/youtube-auth")
