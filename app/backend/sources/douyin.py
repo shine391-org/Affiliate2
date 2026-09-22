@@ -267,6 +267,8 @@ class DouyinProvider:
             raise RuntimeError(f"Douyin API status {status_code}: {message}")
         if "data" not in payload:
             raise RuntimeError("Douyin search response missing data")
+        if payload["data"] is not None and not isinstance(payload["data"], list):
+            raise RuntimeError("Douyin search data is not a list")
         return payload
 
     def _normalize_aweme(self, aweme: dict, query: str) -> dict | None:
