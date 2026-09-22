@@ -2,10 +2,16 @@
 
 ## Status
 
-**STARTED**
+**STARTED — C0 COMPLETE**
 
 Branch:
 `phase-c-media-ai-hq-localization`
+
+C0 donor/source audit:
+`docs/PHASE_C_C0_DONOR_AUDIT.md`
+
+Next implementation gate:
+**C1 — Media Quality Foundation**
 
 ## Product goal
 
@@ -38,31 +44,20 @@ Phase C therefore establishes those contracts once.
 
 ## Scope
 
-### C0 — Donor/source audit and decision matrix
+### C0 — Donor/source audit and decision matrix — COMPLETE ✅
 
-Before substantial implementation, inspect the current app path and relevant donor/reference source.
+Audit:
+`docs/PHASE_C_C0_DONOR_AUDIT.md`
 
-For each capability record:
+C0 established these implementation rules:
 
-- current Affiliate2 implementation
-- donor/reference
-- decision: KEEP / ADAPT / REIMPLEMENT / REJECT
-- license
-- reason
-- expected files/contracts affected
-
-Required reference set:
-
-- YouDub
-- SmartSub
-- VideoLingo
-- pyVideoTrans
-- OpenCreator
-- faster-whisper
-- WhisperX when alignment evidence requires it
-- MoneyPrinterTurbo only for future composition context
-
-Do not clone these as runtime sub-applications.
+- do not vendor donor applications
+- reuse existing dependencies before adding new ones
+- keep faster-whisper as the initial canonical ASR
+- gate WhisperX behind real-media evidence
+- keep the existing AI/TTS/job abstractions and repair their missing wiring
+- reimplement the minimum timed-dubbing logic inside Affiliate2 rather than importing a donor timing engine
+- keep MoneyPrinterTurbo out of Phase-C runtime
 
 ### C1 — Media quality foundation
 
@@ -171,9 +166,9 @@ Requirements:
 - no hidden downgrade
 - preserve timestamps needed for downstream timing
 - no duplicate ASR passes for consumers that can share transcript data
-- benchmark current path before adding WhisperX or another alignment dependency
+- benchmark current faster-whisper path before adding WhisperX or another alignment dependency
 
-The decision to add word-level alignment must be evidence-based from real localization samples.
+The decision to add word-level alignment dependencies must be evidence-based from real localization samples.
 
 ### C6 — Translation engine
 
@@ -230,6 +225,8 @@ source audio
 ```
 
 Expose only useful controls such as dub/background gain and preserve-background behavior. Do not build a DAW.
+
+C0 decision: keep the separation contract open, but do not add Demucs before a real-media quality gate demonstrates that the added dependency is required.
 
 ### C9 — Automation + batch
 
