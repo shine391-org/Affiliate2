@@ -52,3 +52,17 @@ class SourceProvider(Protocol):
 
     async def search(self, query: str, limit: int = 15) -> SourceProviderResult:
         ...
+
+
+class CreatorHistoryProvider(Protocol):
+    platform: str
+    name: str
+
+    async def creator_history(
+        self,
+        creator_id: str,
+        *,
+        creator_name: str = "",
+        limit: int = 30,
+    ) -> SourceProviderResult:
+        ...

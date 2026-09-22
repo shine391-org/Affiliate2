@@ -27,3 +27,19 @@ async def search_source_provider(
     if provider is None:
         raise ValueError(f"No app-native source provider registered for {platform!r}")
     return await provider.search(query, limit=limit)
+
+
+async def fetch_creator_history(
+    platform: str,
+    creator_id: str,
+    *,
+    creator_name: str = "",
+    limit: int = 30,
+) -> SourceProviderResult:
+    provider = get_source_provider(platform)
+    if provider is None:
+        raise ValueError(f"No app-native source provider registered for {platform!r}")
+    history = getattr(provider, "creator_history", None)
+    if history is None:
+        raise ValueError(f"Provider {platform!r} does not support creator history")
+    return await history(creator_id, creator_name=creator_name, limit=limit)

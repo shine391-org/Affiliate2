@@ -10,6 +10,7 @@ from backend.sources import (
     ProviderStatus,
     SourceProviderError,
     SourceProviderResult,
+    fetch_creator_history,
     has_source_provider,
 )
 from backend.sources.bilibili import BilibiliProvider, _duration_seconds, _metric_int
@@ -230,3 +231,81 @@ async def test_scout_normalizes_platform_names_to_lowercase(monkeypatch):
         await agent.run("job-lowercase", "AI", ["BILIBILI"])
 
     assert seen == ["bilibili"]
+
+
+@pytest.mark.asyncio
+async def test_bilibili_creator_history_normalizes_real_records(monkeypatch):
+    provider = BilibiliProvider()
+
+    async def fake_keys(client):
+        return ("a" * 32, "b" * 32)
+
+    async def fake_page(client, creator_id, page, page_size, wbi_keys):
+        if page > 1:
+            return []
+        return [
+            {
+                "aid": 77,
+                "bvid": "BVcreator77",
+                "mid": creator_id,
+                "author": "Creator",
+                "title": "Older video",
+                "description": "desc",
+                "created": 1700000000,
+                "play": 1234,
+                "video_review": 25,
+                "length": "05:00",
+                "pic": "//i0.hdslb.com/creator.jpg",
+            }
+        ]
+
+    monkeypatch.setattr(provider, "_get_wbi_keys", fake_keys)
+    monkeypatch.setattr(provider, "_fetch_creator_page", fake_page)
+
+    result = await provider.creator_history("999", creator_name="Creator", limit=10)
+    assert result.status == ProviderStatus.SUCCESS
+    assert len(result.items) == 1
+    row = result.items[0]
+    assert row["platform"] == "bilibili"
+    assert row["creator_id"] == "999"
+    assert row["video_id"] == "77"
+    assert row["views"] == 1234
+    assert row["comments"] == 25
+    assert row["duration_seconds"] == 300
+    assert row["source_keyword"] == "creator:999"
+
+
+@pytest.mark.asyncio
+async def test_bilibili_creator_access_failure_is_explicit(monkeypatch):
+    provider = BilibiliProvider()
+
+    async def blocked(client):
+        raise PermissionError("risk control -352")
+
+    monkeypatch.setattr(provider, "_get_wbi_keys", blocked)
+    result = await provider.creator_history("999", limit=10)
+    assert result.status == ProviderStatus.AUTH_REQUIRED
+    assert "-352" in (result.error or "")
+
+
+@pytest.mark.asyncio
+async def test_creator_history_registry_dispatches(monkeypatch):
+    fake = SourceProviderResult(
+        platform="bilibili",
+        query="creator:123",
+        status=ProviderStatus.SUCCESS,
+        items=[],
+        provider="test",
+    )
+    with patch(
+        "backend.sources.bilibili.BilibiliProvider.creator_history",
+        new=AsyncMock(return_value=fake),
+    ) as history:
+        result = await fetch_creator_history(
+            "bilibili",
+            "123",
+            creator_name="name",
+            limit=5,
+        )
+    history.assert_awaited_once_with("123", creator_name="name", limit=5)
+    assert result.platform == "bilibili"

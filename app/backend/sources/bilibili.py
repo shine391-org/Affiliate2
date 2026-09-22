@@ -8,7 +8,10 @@ from __future__ import annotations
 import asyncio
 import html
 import re
+import time
+import urllib.parse
 from datetime import datetime
+from hashlib import md5
 from typing import Any
 
 import httpx
@@ -16,6 +19,8 @@ import httpx
 from .base import ProviderStatus, SourceProviderResult
 
 BILIBILI_SEARCH_URL = "https://api.bilibili.com/x/web-interface/wbi/search/type"
+BILIBILI_NAV_URL = "https://api.bilibili.com/x/web-interface/nav"
+BILIBILI_CREATOR_URL = "https://api.bilibili.com/x/space/wbi/arc/search"
 
 _HEADERS = {
     "User-Agent": (
@@ -31,6 +36,13 @@ _HEADERS = {
 
 _ACCESS_CODES = {-101, -352, -412}
 _TAG_RE = re.compile(r"<[^>]+>")
+
+_MIXIN_KEY_ENC_TAB = [
+    46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35,
+    27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13,
+    37, 48, 7, 16, 24, 55, 40, 61, 26, 17, 0, 1, 60, 51, 30, 4,
+    22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36, 20, 34, 44, 52,
+]
 
 
 def _clean_text(value: Any) -> str:
@@ -97,6 +109,25 @@ def _first_present(raw: dict, *keys: str) -> Any:
     return None
 
 
+def _extract_wbi_key(url: str) -> str:
+    return str(url or "").rsplit("/", 1)[-1].split(".", 1)[0]
+
+
+def _wbi_sign(params: dict, img_key: str, sub_key: str) -> dict:
+    mixin = img_key + sub_key
+    salt = "".join(mixin[i] for i in _MIXIN_KEY_ENC_TAB)[:32]
+    signed = dict(params)
+    signed["wts"] = int(time.time())
+    signed = dict(sorted(signed.items()))
+    signed = {
+        key: "".join(ch for ch in str(value) if ch not in "!'()*")
+        for key, value in signed.items()
+    }
+    query = urllib.parse.urlencode(signed)
+    signed["w_rid"] = md5((query + salt).encode()).hexdigest()
+    return signed
+
+
 class BilibiliProvider:
     platform = "bilibili"
     name = "bilibili-public-search"
@@ -144,6 +175,54 @@ class BilibiliProvider:
             "source_keyword": query,
         }
 
+    def _normalize_creator_item(
+        self,
+        raw: dict,
+        creator_id: str,
+        creator_name: str,
+    ) -> dict | None:
+        aid = raw.get("aid")
+        bvid = str(raw.get("bvid") or "").strip()
+        video_id = str(aid or bvid or "").strip()
+        if not video_id:
+            return None
+
+        mid = str(raw.get("mid") or creator_id or "").strip()
+        publish_ts = raw.get("created")
+        upload_date = None
+        try:
+            if publish_ts not in (None, ""):
+                upload_date = datetime.utcfromtimestamp(int(publish_ts))
+        except (TypeError, ValueError, OSError):
+            upload_date = None
+
+        video_url = (
+            f"https://www.bilibili.com/video/{bvid}"
+            if bvid
+            else f"https://www.bilibili.com/video/av{video_id}"
+        )
+        return {
+            "platform": self.platform,
+            "requested_platform": self.platform,
+            "video_id": video_id,
+            "video_url": video_url,
+            "embed_url": None,
+            "title": _clean_text(raw.get("title")),
+            "description": _clean_text(raw.get("description"))[:500],
+            "author": _clean_text(raw.get("author") or creator_name),
+            "author_url": f"https://space.bilibili.com/{mid}" if mid else "",
+            "creator_id": mid or None,
+            "thumbnail_url": _image_url(raw.get("pic")),
+            "views": _metric_int(raw.get("play")),
+            "likes": 0,
+            "comments": _metric_int(raw.get("video_review")),
+            "shares": 0,
+            "favorites": 0,
+            "duration_seconds": _duration_seconds(raw.get("length")),
+            "upload_date": upload_date,
+            "source_keyword": f"creator:{creator_id}",
+        }
+
     async def _fetch_page(
         self,
         client: httpx.AsyncClient,
@@ -181,6 +260,140 @@ class BilibiliProvider:
 
         result = payload.get("data", {}).get("result", [])
         return result if isinstance(result, list) else []
+
+    async def _get_wbi_keys(self, client: httpx.AsyncClient) -> tuple[str, str]:
+        response = await client.get(BILIBILI_NAV_URL, timeout=15)
+        if response.status_code in (401, 403, 412, 429):
+            raise PermissionError(
+                f"Bilibili nav HTTP {response.status_code}; session/access may be required"
+            )
+        response.raise_for_status()
+        payload = response.json()
+        data = payload.get("data") or {}
+        wbi = data.get("wbi_img") or {}
+        img_key = _extract_wbi_key(wbi.get("img_url"))
+        sub_key = _extract_wbi_key(wbi.get("sub_url"))
+        if not img_key or not sub_key:
+            code = payload.get("code")
+            if code in _ACCESS_CODES:
+                raise PermissionError(
+                    f"Bilibili nav API code {code}: {payload.get('message') or 'access restriction'}"
+                )
+            raise RuntimeError("Bilibili nav response did not contain WBI keys")
+        return img_key, sub_key
+
+    async def _fetch_creator_page(
+        self,
+        client: httpx.AsyncClient,
+        creator_id: str,
+        page: int,
+        page_size: int,
+        wbi_keys: tuple[str, str],
+    ) -> list[dict]:
+        params = _wbi_sign(
+            {
+                "mid": creator_id,
+                "pn": page,
+                "ps": page_size,
+                "order": "pubdate",
+            },
+            wbi_keys[0],
+            wbi_keys[1],
+        )
+        response = await client.get(BILIBILI_CREATOR_URL, params=params, timeout=30)
+        if response.status_code in (401, 403, 412, 429):
+            raise PermissionError(
+                f"Bilibili creator HTTP {response.status_code}; session/access may be required"
+            )
+        response.raise_for_status()
+        payload = response.json()
+        code = payload.get("code")
+        if code in _ACCESS_CODES:
+            raise PermissionError(
+                f"Bilibili creator API code {code}: {payload.get('message') or 'access/risk-control restriction'}"
+            )
+        if code != 0:
+            raise RuntimeError(
+                f"Bilibili creator API code {code}: {payload.get('message') or 'unknown error'}"
+            )
+        videos = payload.get("data", {}).get("list", {}).get("vlist", [])
+        return videos if isinstance(videos, list) else []
+
+    async def creator_history(
+        self,
+        creator_id: str,
+        *,
+        creator_name: str = "",
+        limit: int = 30,
+    ) -> SourceProviderResult:
+        creator_id = str(creator_id or "").strip()
+        query = f"creator:{creator_id}"
+        if not creator_id or limit <= 0:
+            return SourceProviderResult(
+                platform=self.platform,
+                query=query,
+                status=ProviderStatus.EMPTY,
+                provider=self.name,
+            )
+
+        page_size = min(30, max(1, min(limit, 30)))
+        raw_items: list[dict] = []
+
+        try:
+            async with httpx.AsyncClient(headers=_HEADERS, follow_redirects=True) as client:
+                keys = await self._get_wbi_keys(client)
+                page = 1
+                while len(raw_items) < limit:
+                    page_items = await self._fetch_creator_page(
+                        client,
+                        creator_id,
+                        page,
+                        page_size,
+                        keys,
+                    )
+                    if not page_items:
+                        break
+                    raw_items.extend(page_items)
+                    if len(page_items) < page_size:
+                        break
+                    page += 1
+                    if len(raw_items) < limit:
+                        await asyncio.sleep(0.5)
+        except PermissionError as exc:
+            return SourceProviderResult(
+                platform=self.platform,
+                query=query,
+                status=ProviderStatus.AUTH_REQUIRED,
+                error=str(exc),
+                provider=self.name,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return SourceProviderResult(
+                platform=self.platform,
+                query=query,
+                status=ProviderStatus.ERROR,
+                error=f"{type(exc).__name__}: {exc}",
+                provider=self.name,
+            )
+
+        items: list[dict] = []
+        seen: set[str] = set()
+        for raw in raw_items:
+            item = self._normalize_creator_item(raw, creator_id, creator_name)
+            if not item or item["video_id"] in seen:
+                continue
+            seen.add(item["video_id"])
+            items.append(item)
+            if len(items) >= limit:
+                break
+
+        return SourceProviderResult(
+            platform=self.platform,
+            query=query,
+            status=ProviderStatus.SUCCESS if items else ProviderStatus.EMPTY,
+            items=items,
+            provider=self.name,
+        )
 
     async def search(self, query: str, limit: int = 15) -> SourceProviderResult:
         query = str(query or "").strip()
