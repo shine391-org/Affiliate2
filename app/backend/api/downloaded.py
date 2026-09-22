@@ -108,6 +108,7 @@ async def list_downloaded(
                 "category": v.category,
                 "duration_seconds": v.duration_seconds,
                 "file_size_mb": v.file_size_mb,
+                "media_metadata": _safe_json(v.media_metadata_json, {}),
                 "created_at": v.created_at.isoformat() if v.created_at else None,
             })
 
@@ -192,6 +193,7 @@ async def get_downloaded(video_id: str):
             "category": video.category,
             "duration_seconds": video.duration_seconds,
             "file_size_mb": video.file_size_mb,
+            "media_metadata": _safe_json(video.media_metadata_json, {}),
             "created_at": video.created_at.isoformat() if video.created_at else None,
         }
 

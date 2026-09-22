@@ -72,6 +72,7 @@ async def init_db():
         _cols: dict[str, set[str]] = {}
         # Idempotent column additions for SQLite (no Alembic)
         await _add_column_if_missing(conn, "downloaded_videos", "transcript_segments_json", "TEXT", existing=_cols)
+        await _add_column_if_missing(conn, "downloaded_videos", "media_metadata_json", "TEXT", existing=_cols)
         # Job heartbeat (zombie-sweep staleness signal — see models/job.py)
         await _add_column_if_missing(conn, "jobs", "updated_at", "DATETIME", existing=_cols)
         await _add_column_if_missing(conn, "generated_videos", "source_type", "VARCHAR(30)", existing=_cols)

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (c) 2025-2026 ViralMint Contributors
 """Shared video utility functions — used across multiple services."""
+import json
 import logging
 import math
 import subprocess
@@ -31,6 +32,80 @@ def probe_duration(file_path: Path | str, default: float = 0.0) -> float:
     except Exception:
         return default
 
+
+
+def probe_media_details(file_path: Path | str) -> dict:
+    """Return actual stream/container properties for a media file.
+
+    One ffprobe call, JSON output, no guessed defaults. Unknown fields remain
+    None so QA can distinguish "not measured" from a real zero.
+    """
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "quiet",
+                "-show_entries",
+                "stream=codec_type,codec_name,width,height,avg_frame_rate,bit_rate:"
+                "format=duration,bit_rate,format_name",
+                "-of", "json",
+                str(file_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode != 0:
+            return {}
+        payload = json.loads(result.stdout or "{}")
+    except Exception:
+        return {}
+
+    streams = payload.get("streams") if isinstance(payload, dict) else []
+    streams = streams if isinstance(streams, list) else []
+    video = next((s for s in streams if s.get("codec_type") == "video"), {})
+    audio = next((s for s in streams if s.get("codec_type") == "audio"), {})
+    fmt = payload.get("format") if isinstance(payload, dict) else {}
+    fmt = fmt if isinstance(fmt, dict) else {}
+
+    def _int(value):
+        try:
+            n = int(value)
+            return n if n >= 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    def _float(value):
+        try:
+            n = float(value)
+            return n if math.isfinite(n) and n >= 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    def _fps(value):
+        if not value or value in ("0/0", "N/A"):
+            return None
+        try:
+            num, den = str(value).split("/", 1)
+            den_f = float(den)
+            if den_f == 0:
+                return None
+            n = float(num) / den_f
+            return round(n, 3) if math.isfinite(n) and n > 0 else None
+        except (TypeError, ValueError):
+            return _float(value)
+
+    stream_bitrate = _int(video.get("bit_rate"))
+    format_bitrate = _int(fmt.get("bit_rate"))
+    return {
+        "width": _int(video.get("width")),
+        "height": _int(video.get("height")),
+        "fps": _fps(video.get("avg_frame_rate")),
+        "video_codec": video.get("codec_name") or None,
+        "audio_codec": audio.get("codec_name") or None,
+        "bitrate_bps": format_bitrate or stream_bitrate,
+        "duration_seconds": _float(fmt.get("duration")),
+        "container": fmt.get("format_name") or None,
+    }
 
 def probe_media(file_path: Path | str) -> tuple[int, int, float]:
     """Get (width, height, duration_seconds) in ONE ffprobe call.

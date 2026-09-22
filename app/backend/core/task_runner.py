@@ -500,6 +500,7 @@ async def _download_single_video_to_db(job_id: str, url: str, title: str, user_i
             chapters_json=json.dumps(chapters) if chapters else None,
             tags_json=json.dumps(tags) if tags else None,
             category=category,
+            media_metadata_json=json.dumps(dl_result.get("media_metadata") or {}),
         )
         db.add(dv)
         await db.commit()
@@ -508,6 +509,7 @@ async def _download_single_video_to_db(job_id: str, url: str, title: str, user_i
             "id": dv.id,
             "title": dv.title,
             "height": dl_result.get("height"),
+            "media_metadata": dl_result.get("media_metadata") or {},
             "requested_quality": dl_result.get("requested_quality"),
             "ext": (Path(dl_result["video_path"]).suffix.lstrip(".").lower() or None)
                    if dl_result.get("video_path") else None,

@@ -7,12 +7,10 @@ now reachable from several surfaces — the Video Download tool page, the batch
 endpoint, and every internal caller that passes nothing. The tests below encode
 the two properties that make that safe:
 
-  1. NO OPTIONS == THE OLD PATH. Anything that makes `normalize(None)` return
-     a non-empty dict, or `format_chain(None)` return a list, silently changes
-     what every pre-existing caller downloads.
-  2. A QUALITY CAP CANNOT CAUSE A HARD FAILURE. Every ladder ends in the
-     unconstrained rungs, so a source with nothing at the requested height
-     yields a bigger file rather than an error.
+  1. NO OPTIONS == THE CANONICAL DEFAULT PATH. `format_chain(None)` stays a
+     sentinel so every caller shares ytdlp_service.FORMAT_FALLBACK_CHAIN.
+  2. DEFAULT QUALITY IS BEST-FIRST. An explicit quality selection is a hard
+     maximum height and never escapes to an uncapped rung.
 """
 
 import pytest
@@ -20,8 +18,8 @@ import pytest
 from backend.services import download_options as dlo
 
 
-class TestDefaultPathUntouched:
-    """The properties that keep existing callers byte-identical."""
+class TestDefaultPath:
+    """Unspecified quality uses the shared best-first downloader ladder."""
 
     @pytest.mark.parametrize("empty", [None, {}, "", 0, [], "nonsense", 42])
     def test_normalize_of_nothing_is_empty(self, empty):
@@ -33,10 +31,7 @@ class TestDefaultPathUntouched:
         # FORMAT_FALLBACK_CHAIN". A list here would silently swap the ladder.
         assert dlo.format_chain(empty) is None
 
-    def test_format_chain_none_is_not_a_quality_ladder(self):
-        # The default chain and the built ladders are similar but NOT
-        # identical; returning one for an unspecified quality would be a
-        # behaviour change disguised as a no-op.
+    def test_format_chain_none_is_not_a_fixed_quality_ladder(self):
         assert dlo.format_chain({}) is not dlo.QUALITY_LADDERS["720p"]
 
     @pytest.mark.parametrize("empty", [None, {}])
@@ -53,18 +48,13 @@ class TestDefaultPathUntouched:
 
 
 class TestQualityLadders:
-    def test_every_ladder_ends_unconstrained(self):
-        # The safety property: a cap degrades, never fails.
-        for name, ladder in dlo.QUALITY_LADDERS.items():
-            assert ladder[-1] == "best", f"{name} ladder must end uncapped"
-            assert len(ladder) >= 2, f"{name} needs a fallback rung"
-
-    def test_capped_ladders_lead_with_their_cap(self):
+    def test_capped_ladders_never_escape_their_cap(self):
         for name, ladder in dlo.QUALITY_LADDERS.items():
             if name == "best":
                 continue
             height = name.removesuffix("p")
-            assert f"height<={height}" in ladder[0], f"{name} must lead with its own cap"
+            assert ladder
+            assert all(f"height<={height}" in rung for rung in ladder)
 
     def test_best_has_no_cap_anywhere(self):
         assert not any("height<=" in rung for rung in dlo.QUALITY_LADDERS["best"])

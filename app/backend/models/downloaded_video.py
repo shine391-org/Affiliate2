@@ -39,6 +39,7 @@ class DownloadedVideo(Base):
     chapters_json = Column(Text, nullable=True)   # [{"start": 0, "end": 15, "title": "Hook"}, ...]
     tags_json = Column(Text, nullable=True)       # ["tag1", "tag2", ...] — creator's SEO tags
     category = Column(String(100), nullable=True) # YouTube category (e.g. "Education", "Entertainment")
+    media_metadata_json = Column(Text, nullable=True)  # Actual ffprobe evidence: resolution/fps/codecs/bitrate/duration/container
 
     duration_seconds = Column(Integer, nullable=True)
     file_size_mb = Column(Float, nullable=True)

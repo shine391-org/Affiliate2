@@ -521,9 +521,15 @@ def _is_permanent_error(error_str: str) -> bool:
 # Format fallback chain — progressively simpler format selections.
 # Some videos have limited formats (e.g. live streams, premieres, shorts).
 FORMAT_FALLBACK_CHAIN = [
-    "bestvideo[height<=720]+bestaudio/best[height<=720]/best",  # Primary: 720p merged
-    "bestvideo+bestaudio/best",                                  # Any quality merged
-    "best",                                                       # Single best stream
+    # Quality-first: preserve the best eligible source before trying any
+    # compatibility fallback. Phase C deliberately removes the old 720p-first
+    # default because every downstream encode starts from these pixels.
+    "bestvideo+bestaudio/best",
+    "best",
+    # Recovery only: rare extractor/merge edge cases can reject the
+    # unconstrained selector while a conventional bounded stream still works.
+    "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
+    "bestvideo[height<=720]+bestaudio/best[height<=720]",
 ]
 
 
@@ -598,7 +604,7 @@ async def download_video(
     Download a video using yt-dlp.
     Returns: {"video_path": Path, "audio_path": Path|None, "duration": int, "file_size_mb": float,
               "subtitles": list|None, "chapters": list|None, "tags": list|None, "category": str|None,
-              "height": int|None, "requested_quality": str|None, "kept_subtitle_paths": list,
+              "height": int|None, "media_metadata": dict, "requested_quality": str|None, "kept_subtitle_paths": list,
               "option_postprocessors_dropped": bool}
     Raises: RateLimitError, VideoUnavailableError, DownloadError
 
@@ -919,6 +925,14 @@ async def download_video(
 
         file_size_mb = video_path.stat().st_size / (1024 * 1024) if video_path and video_path.exists() else 0
 
+        # Probe the file that actually landed on disk. yt-dlp's envelope can
+        # differ after merge/remux/fallback, while Phase-C QA compares source
+        # and final media properties from the bytes we really own.
+        media_metadata = {}
+        if video_path and video_path.exists():
+            from backend.services.video_utils import probe_media_details
+            media_metadata = probe_media_details(video_path)
+
         return {
             "video_path": str(video_path) if video_path else None,
             "audio_path": str(audio_path) if audio_path and audio_path.exists() else None,
@@ -938,11 +952,10 @@ async def download_video(
             "chapters": chapters,
             "tags": tags,
             "category": category,
-            # What the user actually GOT vs what they asked for. A quality cap
-            # degrades to the uncapped rungs rather than failing, so these two
-            # can legitimately disagree — the UI reports the difference instead
-            # of implying the request was honoured.
-            "height": info.get("height"),
+            # What actually landed on disk. Explicit quality choices are hard
+            # ceilings in Phase C; the default path is source-best-first.
+            "height": media_metadata.get("height") or info.get("height"),
+            "media_metadata": media_metadata,
             "requested_quality": _opts.get("quality"),
             "kept_subtitle_paths": kept_subtitle_paths,
             # True when a postprocessing failure forced the embed extras

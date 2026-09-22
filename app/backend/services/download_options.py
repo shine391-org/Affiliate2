@@ -13,17 +13,13 @@ every caller takes the same road.
 
 THE SAFETY PROPERTY THAT SHAPES EVERYTHING BELOW
 `normalize(None)` and `normalize({})` return {}, and `format_chain(None)`
-returns None, which callers MUST treat as "use the existing
-FORMAT_FALLBACK_CHAIN unchanged". A caller that passes no options gets a
-byte-identical download to what shipped before this module existed. Options
-are strictly opt-in; nothing here can regress the default path.
+returns None, which callers MUST treat as "use the canonical default download
+ladder". Phase C intentionally changes that ladder to source-best-first.
 
-The second property: a quality request must never turn a download that would
-have worked into a failure. Every capped ladder therefore ENDS in the same
-unconstrained rungs the default chain uses. If a source has nothing at or
-below the requested cap, the user gets a larger file rather than an error —
-and `download_video` reports the height it actually delivered so the UI can
-say so instead of quietly implying the cap was honoured.
+An explicit quality choice is a real maximum height, not a hint. A user who
+selects 1080p must not silently receive 1440p/2160p merely because a fallback
+rung escaped the cap. The selector still chooses the best available stream AT
+OR BELOW the requested ceiling.
 
 NOT HANDLED HERE, ON PURPOSE
 There is no "audio only" or "subtitles only" quality. `download_video`
@@ -40,9 +36,9 @@ import re
 
 # Requested max height → the ladder of yt-dlp format selectors to try.
 #
-# Each ladder is capped rungs first, then the unconstrained tail so a cap can
-# never cause an outright failure (see module docstring). "best" has no capped
-# rung at all — it IS the uncapped tail.
+# "best" is the source-quality path. Explicit heights are hard ceilings:
+# yt-dlp picks the best stream at-or-below that height, including a combined
+# stream fallback, but never escapes upward to an uncapped rung.
 #
 # Note these deliberately do NOT restate `format_sort`: that lives in
 # `_yt_dlp_base_opts()` and applies uniformly. Format SELECTORS gate
@@ -51,11 +47,11 @@ _UNCAPPED_TAIL = ["bestvideo+bestaudio/best", "best"]
 
 QUALITY_LADDERS: dict[str, list[str]] = {
     "best": list(_UNCAPPED_TAIL),
-    "2160p": ["bestvideo[height<=2160]+bestaudio/best[height<=2160]", *_UNCAPPED_TAIL],
-    "1440p": ["bestvideo[height<=1440]+bestaudio/best[height<=1440]", *_UNCAPPED_TAIL],
-    "1080p": ["bestvideo[height<=1080]+bestaudio/best[height<=1080]", *_UNCAPPED_TAIL],
-    "720p":  ["bestvideo[height<=720]+bestaudio/best[height<=720]",   *_UNCAPPED_TAIL],
-    "480p":  ["bestvideo[height<=480]+bestaudio/best[height<=480]",   *_UNCAPPED_TAIL],
+    "2160p": ["bestvideo[height<=2160]+bestaudio/best[height<=2160]"],
+    "1440p": ["bestvideo[height<=1440]+bestaudio/best[height<=1440]"],
+    "1080p": ["bestvideo[height<=1080]+bestaudio/best[height<=1080]"],
+    "720p":  ["bestvideo[height<=720]+bestaudio/best[height<=720]"],
+    "480p":  ["bestvideo[height<=480]+bestaudio/best[height<=480]"],
 }
 
 QUALITY_CHOICES = tuple(QUALITY_LADDERS)
@@ -138,11 +134,9 @@ def normalize(raw: dict | None) -> dict:
 def format_chain(options: dict | None) -> list[str] | None:
     """Format-selector ladder for these options, or None for the default.
 
-    None is meaningful: it tells `download_video` to use its module-level
-    FORMAT_FALLBACK_CHAIN untouched, which is what every pre-existing caller
-    gets. Do not "helpfully" return the 720p ladder here — that ladder is
-    similar to the default but not identical, and silently swapping it would
-    change behaviour for callers that asked for nothing.
+    None is meaningful: it tells `download_video` to use its canonical
+    source-best-first FORMAT_FALLBACK_CHAIN. Do not substitute a fixed-height
+    ladder for callers that asked for no cap.
     """
     opts = options or {}
     return QUALITY_LADDERS.get(opts.get("quality")) if opts.get("quality") else None
