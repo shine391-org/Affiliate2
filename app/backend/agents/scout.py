@@ -251,6 +251,14 @@ class ScoutAgent:
                         if retry_result and not isinstance(retry_result, Exception):
                             result = retry_result
                             logger.info(f"AI-refined search found {len(result)} results on {platform}")
+                except SourceProviderError as retry_err:
+                    logger.warning("Refined native scout failed for %s: %s", platform, retry_err)
+                    await ws_manager.send_constraint_warning(
+                        constraint=f"{platform}_provider_{retry_err.status.value.lower()}",
+                        message=str(retry_err),
+                        severity="warning",
+                        user_id=user_id,
+                    )
                 except Exception as retry_err:
                     logger.debug(f"AI search refinement retry failed for {platform}: {retry_err}")
 
