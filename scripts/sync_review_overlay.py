@@ -48,8 +48,10 @@ def sync(force: bool = False) -> None:
 
     plugin_src = ROOT / "overlay" / "frontend" / "plugins.jsx"
     page_src = ROOT / "overlay" / "frontend" / "review" / "ReviewQueue.jsx"
+    controls_src = ROOT / "overlay" / "frontend" / "review" / "ActionControls.jsx"
     plugin_dst = VIRALMINT / "frontend" / "src" / "plugins" / "index.jsx"
     page_dst = VIRALMINT / "frontend" / "src" / "plugins" / "review" / "ReviewQueue.jsx"
+    controls_dst = VIRALMINT / "frontend" / "src" / "plugins" / "review" / "ActionControls.jsx"
     page_dst.parent.mkdir(parents=True, exist_ok=True)
 
     # Vite resolves index.js before index.jsx, so the upstream OSS stub must be
@@ -79,7 +81,8 @@ def sync(force: bool = False) -> None:
 
     shutil.copy2(plugin_src, plugin_dst)
     shutil.copy2(page_src, page_dst)
-    print("Review overlay synced into tools/ViralMint")
+    shutil.copy2(controls_src, controls_dst)
+    print("Review/action overlay synced into tools/ViralMint")
 
 
 def build_frontend() -> None:
