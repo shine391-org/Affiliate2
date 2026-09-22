@@ -192,3 +192,22 @@ def test_local_preset_never_reuses_stored_cloud_secret():
     assert key == "local"
     assert model == "qwen3:8b"
     assert base_url == "http://localhost:11434/v1"
+
+
+def test_env_compatible_local_can_run_without_api_key():
+    with patch.multiple(
+        ap.settings,
+        AI_PROVIDER="compatible",
+        AI_BASE_URL="http://localhost:11434/v1",
+        AI_API_KEY="",
+        AI_MODEL="qwen3:8b",
+        GEMINI_API_KEY="",
+        ANTHROPIC_API_KEY="",
+        OPENAI_API_KEY="",
+        OPENROUTER_API_KEY="",
+    ):
+        c = get_ai_client(None)
+    assert c.provider == AIProvider.COMPATIBLE
+    assert c.api_key == "local"
+    assert c.model == "qwen3:8b"
+    assert c.base_url == "http://localhost:11434/v1"

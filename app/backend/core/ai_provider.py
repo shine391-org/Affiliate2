@@ -330,16 +330,14 @@ def get_ai_client(user_settings=None, **_kwargs) -> AIClient:
             or os.getenv("AI_MODEL", "")
         ).strip() or None
 
-        if not api_key:
-            raise AIKeyMissingError(
-                "GEMINI_API_KEY REQUIRED: No AI_API_KEY or GEMINI_API_KEY configured for compatible provider."
-            )
         if not base_url:
             raise ValueError("AI_BASE_URL is required when AI_PROVIDER=compatible.")
+        if not model:
+            raise ValueError("AI_MODEL is required when AI_PROVIDER=compatible.")
 
         return AIClient(
             provider=AIProvider.COMPATIBLE,
-            api_key=api_key,
+            api_key=api_key or "local",
             model=model,
             base_url=base_url,
         )
