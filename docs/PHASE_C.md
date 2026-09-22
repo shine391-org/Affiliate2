@@ -53,11 +53,14 @@ C0 established these implementation rules:
 
 - do not vendor donor applications
 - reuse existing dependencies before adding new ones
-- keep faster-whisper as the initial canonical ASR
-- gate WhisperX behind real-media evidence
+- keep faster-whisper as the initial canonical ASR and propagate the requested quality to real call sites
+- gate WhisperX behind real-media timing/multi-speaker evidence; promote it if the baseline cannot pass
 - keep the existing AI/TTS/job abstractions and repair their missing wiring
-- reimplement the minimum timed-dubbing logic inside Affiliate2 rather than importing a donor timing engine
+- reimplement only the timed-dubbing behavior Affiliate2 needs, but do not simplify away measured duration, alignment, safe fitting or quality-required retiming
+- keep audio separation and video retiming benchmark-gated, not permanently excluded
+- treat Edge TTS as a baseline/fallback rather than a guaranteed quality target
 - keep MoneyPrinterTurbo out of Phase-C runtime
+- apply Ponytail to architecture size only: a deferred capability becomes required when the defined quality gate fails
 
 ### C1 — Media quality foundation
 
@@ -168,7 +171,7 @@ Requirements:
 - no duplicate ASR passes for consumers that can share transcript data
 - benchmark current faster-whisper path before adding WhisperX or another alignment dependency
 
-The decision to add word-level alignment dependencies must be evidence-based from real localization samples.
+The current faster-whisper path already provides word timestamps. Phase C first validates those timestamps and fixes call-site quality routing. If real localization samples show material alignment or multi-speaker failures, forced alignment/diarization support becomes required even if that adds dependency complexity.
 
 ### C6 — Translation engine
 
@@ -181,7 +184,7 @@ Translation should consider:
 - speaker where useful
 - target spoken duration
 
-Initial implementation should remain simpler than a full multi-agent translation system but must be materially stronger than an isolated generic "translate this sentence" prompt.
+Initial implementation should remain simpler than a full multi-agent translation system but must be materially stronger than an isolated generic "translate this sentence" prompt. If one contextual structured pass repeatedly fails semantic, naturalness or timing-fit QA, add the smallest bounded refinement/adaptation pass required to pass.
 
 Custom prompt/instructions live in the saved profile/advanced surface.
 
@@ -203,6 +206,8 @@ Timing resolution order:
 3. safe TTS-rate adjustment
 4. borrow available local silence within configured tolerance
 5. otherwise mark explicit exception
+
+Start without video retiming. If representative samples still produce systematic overflow or unnatural speech after the safe steps above, bounded video retiming is promoted into Phase C rather than accepting poor output for simplicity.
 
 Do not distort speech arbitrarily to force every block into the original duration.
 
@@ -226,7 +231,7 @@ source audio
 
 Expose only useful controls such as dub/background gain and preserve-background behavior. Do not build a DAW.
 
-C0 decision: keep the separation contract open, but do not add Demucs before a real-media quality gate demonstrates that the added dependency is required.
+C0 decision: keep the separation contract independent of a specific library and benchmark the simple path first. On speech+music/ambient samples, if source-speech bleed or background damage is perceptually unacceptable, separation becomes required in Phase C; Demucs is the primary reference, not a forbidden dependency.
 
 ### C9 — Automation + batch
 

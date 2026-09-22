@@ -6,6 +6,8 @@ Phase C changes quality-critical shared media/AI contracts. QA must validate bot
 
 A playable MP4, successful HTTP response or green unit suite is not sufficient by itself.
 
+Ponytail/YAGNI may reduce architecture, dependencies and code paths, but may not reduce this quality bar. If a simple baseline repeatedly fails representative real-media QA, the next proven capability (for example forced alignment, a refinement pass, bounded video retiming, source separation or a better TTS provider) must be implemented rather than waived as "too complex".
+
 ## Test policy
 
 Use the repository tiered-test policy.
@@ -86,6 +88,8 @@ Run the broad/full suite before Phase-C merge because shared media/AI infrastruc
 - configured quality maps to the intended actual model
 - failure/downgrade is explicit
 - timestamps remain monotonic
+- current faster-whisper word timestamps are evaluated on real speech/timing samples
+- if those timestamps materially fail alignment or multi-speaker acceptance, the Phase-C implementation adds the smallest proven forced-alignment/diarization capability
 - no duplicate pass is made when an existing canonical transcript is valid
 
 ### Translation
@@ -94,6 +98,7 @@ Run the broad/full suite before Phase-C merge because shared media/AI infrastruc
 - segment order/identity is preserved
 - malformed provider responses fail explicitly
 - target-duration context is available to the translation/adaptation path
+- if the initial contextual pass repeatedly fails semantic/naturalness/timing-fit review, a bounded refinement/adaptation pass is added rather than accepting systematic low quality
 
 ### Dubbing/timing
 
@@ -102,6 +107,7 @@ Run the broad/full suite before Phase-C merge because shared media/AI infrastruc
 - timing resolution follows configured policy
 - safe rate limits are enforced
 - unresolved overflow becomes NEEDS_REVIEW rather than silent distortion/truncation
+- if overflow/unnatural rate is systematic across the representative acceptance set, bounded video retiming or another proven fitting step is implemented instead of classifying the whole problem away as NEEDS_REVIEW
 - final audio block placement follows resolved timeline
 - captions use resolved final timing
 
@@ -110,6 +116,8 @@ Run the broad/full suite before Phase-C merge because shared media/AI infrastruc
 - background preservation path works on supported media
 - gain/mix policy is deterministic
 - missing separation output is explicit and handled according to documented policy
+- speech+music/ambient samples are listened to for source-speech bleed and background damage
+- if the simple mix path cannot preserve acceptable ambience while suppressing/replacing source speech, source separation becomes a Phase-C requirement
 - no accidental total replacement/truncation of desired source ambience
 
 ### Render
@@ -118,6 +126,7 @@ Run the broad/full suite before Phase-C merge because shared media/AI infrastruc
 - final duration is plausible relative to the resolved timeline
 - video/audio streams are valid
 - caption/render stages do not silently add unnecessary lossy intermediate encoding when a single final encode is possible
+- when an intermediate is required for correctness/timing, prefer stream-copy or a lossless/high-quality intermediate rather than forcing a brittle one-pass graph
 
 ### Automation/batch/QC
 
@@ -185,6 +194,7 @@ For each final acceptance sample explicitly inspect:
 - obvious ASR omissions/hallucinations absent
 - dub starts/stops plausibly against the speaker/content
 - no severe speech-rate distortion
+- the configured TTS voice is publishable for the target language; a merely functional fallback voice is not enough
 - captions match final speech timing
 - background/music/ambience remains usable
 - no obvious clipping
