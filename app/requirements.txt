@@ -1,0 +1,125 @@
+# Web
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+python-multipart==0.0.32
+# websockets is a uvicorn[standard] extra — nothing here imports it directly,
+# so the pin exists only to keep the WS transport reproducible.
+websockets==17.1
+
+# DB
+sqlalchemy[asyncio]==2.0.52
+aiosqlite==0.22.1
+alembic==1.19.1
+
+# Security
+cryptography>=50.0.1,<51
+python-dotenv==1.2.3
+pydantic-settings==2.15.0
+
+# AI providers
+# Majors, and the caps are the load-bearing part: both SDKs ship breaking
+# changes on a major, so the ceiling stays one major above the floor and moves
+# deliberately. The floors are the versions this tree is tested against, not
+# the oldest that might work — a self-hosted install should not silently
+# resolve to an SDK nobody here has run.
+#
+# Verified against the three call sites in backend/core/ai_provider.py:
+# `AsyncAnthropic(api_key=)` + `messages.stream(model, max_tokens, system,
+# messages)`, and `AsyncOpenAI(api_key, timeout, base_url, default_headers)` +
+# `chat.completions.create(model, messages, stream, max_tokens |
+# max_completion_tokens)`. All present in anthropic 1.2.0 / openai 3.6.0.
+#
+# Both also need httpx >=0.28 (older SDKs passed a `proxies` kwarg httpx 0.28
+# removed); neonize requires httpx >=0.28.1 transitively, so httpx cannot be
+# pinned down anyway.
+anthropic>=1.2.0,<2.0
+openai>=3.6.0,<4.0
+
+# Scout
+google-api-python-client==2.199.0
+google-auth-oauthlib==1.4.1
+pytrends==4.9.2
+
+# Download — yt-dlp + curl-cffi for browser TLS impersonation.
+#
+# yt-dlp floor: versions below 2026.7 miss current extractor fixes AND —
+# the sharp edge — an OLD Python's pip resolves an unbounded "yt-dlp" to
+# an ancient release (macOS system python3 is 3.9, for which "latest" is
+# a 2025.10 build that can't use curl-cffi ≥0.10 and fails on modern
+# YouTube). The floor makes such an install fail loudly instead of
+# producing a silently-broken downloader. Upgrade freely above it.
+#
+# curl-cffi: floor >=0.15 — DO NOT relax it. 0.14's streaming path submits
+# `perform` to an internal executor and resets the same libcurl easy handle
+# from a done-callback while the calling thread is still parsing the
+# response; two threads on one handle SIGABRT the whole backend process — no
+# traceback, no failing test, process gone. TikTok's extractor forces
+# impersonate=True, so it runs on every TikTok probe and download. Measured
+# upstream: 0.14.0 aborted 4 of 6 concurrent-probe runs, 0.15.0 aborted 0 of
+# 14. The old <0.15 cap was for yt-dlp <= 2026.04, whose request-handler API
+# 0.15 broke; our floor is 2026.7.4, where it is fine.
+# Optional at runtime: the service degrades to urllib's fingerprint if it's
+# missing/incompatible (see ytdlp_service._IMPERSONATE_TARGET).
+yt-dlp>=2026.7.4
+curl-cffi>=0.15
+
+# Transcription
+faster-whisper
+
+# Video generation
+# This used to be `moviepy==1.0.3`, which nothing imported — it was four
+# majors stale and kept only because the PyInstaller spec collects
+# `imageio_ffmpeg` (moviepy's dependency) to bundle a static ffmpeg per
+# platform. Depend on that DIRECTLY instead: dropping moviepy without this
+# line would have produced a packaged app with no ffmpeg, which no test can
+# see because the source tree finds ffmpeg on PATH.
+# Verified: imageio-ffmpeg 0.6.0 ships a working ffmpeg 7.1.
+# (ffprobe is NOT included — desktop/scripts/fetch-ffprobe.sh vendors it.)
+imageio-ffmpeg>=0.6.0
+
+# Pillow >=12.2 closes 6 CVEs (CVE-2026-25990 / 40192 / 42308–11) found by
+# pip-audit on 2026-05-26. The Image.ANTIALIAS monkeypatch that used to live
+# in backend/main.py went with moviepy — it existed solely because moviepy
+# 1.0.3 used constants Pillow 11 removed. Nothing in the tree, and nothing in
+# a resolved install, references them any more.
+Pillow>=12.2.0,<13.0
+
+# Multi-TTS providers
+edge-tts>=6.1.0
+
+# TikTok upload (cookie fallback)
+tiktok-uploader>=1.2.0
+playwright>=1.59.0
+
+# HTTP
+# httpx>=0.28.1 because neonize requires it transitively (see comment above the
+# anthropic/openai pins). Old python-telegram-bot==21.6 wanted httpx~=0.27 — bumped
+# to 22.x which supports httpx 0.28+. Don't downgrade either pin without retesting
+# fresh installs end-to-end.
+httpx>=0.28.1,<1.0
+aiohttp>=3.14.0,<4  # CVE-2026-34993, CVE-2026-47265
+
+# (`python-jose` was removed 2026-08-31: nothing in the tree imports it — this
+# variant has no JWT of its own, it is BYOK against provider APIs — and it was
+# the only path to `ecdsa`, which carries PYSEC-2026-1325 (Minerva timing
+# attack on P-256) with NO fixed version available. Removing the unused
+# dependency is the fix; there is nothing to upgrade to.)
+
+# Messaging channels
+python-telegram-bot>=22.0,<23.0
+# WhatsApp via neonize (Python bindings to Go's whatsmeow). Optional —
+# the WhatsApp channel reports `installed: false` if neonize isn't installed.
+neonize>=0.3.16
+# Discord via gateway WebSocket (one bot token, DMs). Optional.
+discord.py>=2.3.0
+# Slack via Socket Mode (xoxb- bot token + xapp- app-level token). Optional.
+slack-sdk>=3.23.0
+
+# Desktop launcher (the system-tray UI in launcher.py — also the packaged-build
+# entry point, which re-invokes itself with --run-backend to run uvicorn).
+# pystray draws the tray icon; Pillow (pinned above) renders it. Per-OS tray
+# backends: macOS → pyobjc (AppKit/Foundation, also sets the Dock icon);
+# Linux → python-xlib (pystray's Xorg backend); Windows uses ctypes (no dep).
+pystray>=0.19.5
+pyobjc-framework-Cocoa>=10.0 ; sys_platform == "darwin"
+python-xlib>=0.33 ; sys_platform == "linux"

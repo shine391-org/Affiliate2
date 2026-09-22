@@ -1,31 +1,86 @@
-# AI Content Distribution Engine
+# Affiliate2 — AI Content Distribution Engine
 
-Hệ thống phân phối nội dung tự động dựa trên AI theo luồng:
+Affiliate2 is a local-first content engine built around one application foundation: ViralMint, extended with Affiliate2's Radar, Vietnamese localization/remake workflow, human review, publishing gates and performance learning.
+
+## Product loop
 
 ```
 Source Discovery
-  → Tìm content/format đang tăng trưởng (Douyin, Bilibili, Xiaohongshu, Kuaishou)
-  → Crawl metadata & video gốc
-  → Phân tích hook, topic, format, structure
-  → Việt hóa & chuyển thể kịch bản (Vietnamese adaptation)
-  → Lồng tiếng (TTS) & Subtitles
-  → Render video dọc (9:16)
-  → Human review
-  → Publish (TikTok, Facebook Reels, YouTube Shorts)
-  → Đo lường performance
-  → Học format thắng & tối ưu hóa quy trình
+  → Radar observations/ranking
+  → Download + Library
+  → Transcript + Content Intelligence
+  → Translate/Dub OR Smart Cut OR Creative Remake HQ
+  → Human Review
+  → Publish
+  → Performance
+  → Learning
 ```
 
-## Giai đoạn 1: OSS Validation
+The project is currently in **architecture consolidation**. The goal is to stop maintaining duplicate downloader/transcription/media/job/UI plumbing and converge onto one application.
 
-Mục tiêu của giai đoạn này là kiểm chứng thực nghiệm hai mã nguồn mở chính:
-- **MediaCrawler**: Đánh giá khả năng tìm kiếm từ khóa, trích xuất dữ liệu bài viết/creator trên Douyin, Bilibili, Xiaohongshu, Kuaishou.
-- **ViralMint**: Đánh giá khả năng bóc băng (ASR), phân tích nội dung, chuyển ngữ, lồng tiếng (TTS), tạo phụ đề, render video 9:16 và tích hợp lập trình (API/MCP).
+## Repository layout during consolidation
 
-## Nguyên tắc cốt lõi
+```
+app/                    Canonical runnable application (ViralMint foundation)
+src/radar/              Existing Affiliate2 domain code; migrated incrementally
+overlay/                 Legacy frontend overlay source; temporary
+viralmint_overlay/       Legacy backend overlay source; temporary
+vendor/viralmint/        Immutable captured ViralMint baseline/reference
+vendor/mediacrawler/     Immutable MediaCrawler donor/reference snapshot
+docs/                    Architecture, development and QA contracts
+scripts/                 Native Windows launch/setup utilities
+```
 
-- **Local-first**: Ưu tiên chạy cục bộ, kiểm soát tài nguyên.
-- **SQLite trước**: Không sử dụng Redis, PostgreSQL hay Vector DB khi chưa có bottleneck thực tế.
-- **Không over-engineering**: Không xây dựng microservices hay giao diện dashboard trước khi CLI workflow hoạt động trơn tru.
-- **Không tự viết lại những gì OSS đã làm tốt**: Tận dụng tối đa và bọc adapter khi cần thiết.
-- **Dựa trên bằng chứng thực nghiệm**: Không tin tuyệt đối vào tài liệu/README, mọi capability đều phải qua kiểm thử thực tế.
+Do not develop new runtime features inside `vendor/`.
+
+## Run locally on Windows
+
+Prerequisites: Python 3.11+, Node.js 18+, FFmpeg. ImageMagick is recommended for all media features.
+
+First setup:
+
+```powershell
+.\scripts\bootstrap.ps1
+```
+
+Develop with Vite HMR + FastAPI reload:
+
+```powershell
+.\scripts\dev.ps1
+```
+
+For long-running render/transcription jobs, keep the backend stable while retaining frontend HMR:
+
+```powershell
+.\scripts\dev.ps1 -StableBackend
+```
+
+Run a built production-like local version:
+
+```powershell
+.\scripts\run.ps1
+```
+
+Stop processes started by these scripts:
+
+```powershell
+.\scripts\stop.ps1
+```
+
+Development UI: `http://localhost:5173`
+
+Stable local UI: `http://localhost:16888`
+
+## Current architectural decisions
+
+- ViralMint is the app shell and media engine.
+- ViralMint downloader/Library/Whisper/jobs/FFmpeg/TTS/captions/Clip Studio are preferred over duplicate Affiliate2 implementations.
+- MediaCrawler is used as source-provider donor/reference code, not as a second long-term application.
+- Bilibili must use real Bilibili discovery, never silent YouTube fallback.
+- Radar's repeated metric snapshots and domain ranking/learning stay Affiliate2-owned.
+- Smart Cut uses ViralMint Clip Studio semantics.
+- Creative Remake HQ will be rebuilt around source-shot mapping + storyboard approval.
+- Human approval remains mandatory before publishing.
+- Docker is not required for local operation.
+
+Read `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/CONSOLIDATION_PLAN.md` and `PROJECT_STATUS.md` before making changes.

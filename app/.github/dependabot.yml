@@ -1,0 +1,126 @@
+# Dependabot keeps our dependencies fresh — security patches arrive as
+# small focused PRs we can review and merge instead of rotting on a
+# vulnerable pinned version. Three ecosystems: pip (backend), npm
+# (frontend), and the GitHub Actions we run in CI.
+#
+# Strategy:
+#   - Bundle minor + patch updates per ecosystem into a single weekly
+#     PR (via `groups`) so reviewers see one digestible diff instead of
+#     a dozen overlapping ones.
+#   - Ignore major bumps for framework packages (React, MUI, Vite,
+#     SQLAlchemy, FastAPI, etc.) — those are coordinated upgrade
+#     projects, not a Dependabot one-liner.
+#   - Security updates ignore the schedule and ship immediately
+#     regardless of the rules below.
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps(py)"
+    labels:
+      - "dependencies"
+      - "python"
+    groups:
+      python-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # Framework / API-surface packages — major bumps require
+      # coordinated migration work, not a Dependabot PR.
+      - dependency-name: "fastapi"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "sqlalchemy"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "pydantic-settings"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "anthropic"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "openai"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "httpx"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "python-telegram-bot"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "neonize"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "discord.py"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "slack-sdk"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "moviepy"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Pillow"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps(js)"
+    labels:
+      - "dependencies"
+      - "javascript"
+    groups:
+      js-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # Framework / UI chain — major bumps are coordinated upgrade
+      # projects (React 18→19, MUI 7→9, Vite 5→8, react-router 6→7
+      # all break things).
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@mui/material"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@mui/icons-material"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@emotion/react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@emotion/styled"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@vitejs/plugin-react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-router-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "lucide-react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "zustand"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-markdown"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@tanstack/react-table"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 1
+    commit-message:
+      prefix: "deps(ci)"
+    labels:
+      - "dependencies"
+      - "ci"
+    groups:
+      ci-actions:
+        patterns:
+          - "*"
