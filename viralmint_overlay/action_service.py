@@ -191,28 +191,34 @@ def _safe_remove_tree(path: Path) -> None:
         shutil.rmtree(path, ignore_errors=True)
 
 
-def _prepare_output_dir(root: Path, candidate_key: str, job_id: str) -> tuple[Path, Path | None]:
-    """Move the old output aside so failed rerenders can be rolled back."""
+def _prepare_staging_dir(root: Path, candidate_key: str, job_id: str) -> tuple[Path, Path, Path]:
+    """Create an isolated staging dir so the current final remains reviewable."""
     remakes_root = root / "data" / "remakes"
     remakes_root.mkdir(parents=True, exist_ok=True)
-    output_dir = remakes_root / candidate_key
+    final_dir = remakes_root / candidate_key
+    staging = remakes_root / f".{candidate_key}.staging-{job_id[:8]}"
     backup = remakes_root / f".{candidate_key}.backup-{job_id[:8]}"
+    _safe_remove_tree(staging)
     _safe_remove_tree(backup)
-    if output_dir.exists():
-        output_dir.rename(backup)
-        return output_dir, backup
-    return output_dir, None
+    staging.mkdir(parents=True, exist_ok=True)
+    return final_dir, staging, backup
 
 
-def _rollback_output_dir(output_dir: Path, backup: Path | None) -> None:
-    _safe_remove_tree(output_dir)
-    if backup and backup.exists():
-        backup.rename(output_dir)
+def _promote_staging(staging: Path, final_dir: Path, backup: Path) -> None:
+    """Atomically-ish swap a successful staging directory into the live slot.
 
-
-def _commit_output_dir(backup: Path | None) -> None:
-    if backup:
-        _safe_remove_tree(backup)
+    The old final is moved, never copied. If the second rename fails, restore it.
+    """
+    had_old = final_dir.exists()
+    if had_old:
+        final_dir.rename(backup)
+    try:
+        staging.rename(final_dir)
+    except Exception:
+        if had_old and backup.exists() and not final_dir.exists():
+            backup.rename(final_dir)
+        raise
+    _safe_remove_tree(backup)
 
 
 def _write_manifest(
@@ -325,6 +331,7 @@ async def _run_creative_remake(
     root: Path,
     platform: str,
     content_id: str,
+    output_dir: Path,
     params: dict[str, Any],
     review_note: str | None,
     job_id: str,
@@ -342,15 +349,16 @@ async def _run_creative_remake(
         voice_id=params["voice_id"],
         use_cache=False,
         review_note=review_note,
+        output_dir_override=output_dir,
     )
     if not result.success or not result.final_path:
         reason = "; ".join(result.errors or result.warnings or ["unknown remake failure"])
         raise RuntimeError(f"Creative remake failed: {reason}")
 
     # Intermediate media is useful while rendering, not after human review begins.
-    output_dir = Path(result.final_path).parent
+    rendered_dir = Path(result.final_path).parent
     keep = {"final.mp4", "adaptation.json", "segment_plan.json", "action_manifest.json"}
-    for p in output_dir.iterdir():
+    for p in rendered_dir.iterdir():
         if p.is_file() and p.name not in keep and p.suffix.lower() in {".mp4", ".mp3", ".wav"}:
             try:
                 p.unlink()
@@ -375,29 +383,32 @@ async def _execute_action(
 
     root = store.root
     key = _candidate_key(platform, content_id)
-    output_dir, backup = _prepare_output_dir(root, key, job_id)
+    final_dir, staging_dir, backup = _prepare_staging_dir(root, key, job_id)
 
     try:
-        output_dir.mkdir(parents=True, exist_ok=True)
-
         if resolved_action == "translate":
-            final_path = await _run_translate(
-                root, platform, content_id, output_dir, params, job_id
+            await _run_translate(
+                root, platform, content_id, staging_dir, params, job_id
             )
         else:
-            final_path = await _run_creative_remake(
-                root, platform, content_id, params, review_note, job_id
+            await _run_creative_remake(
+                root, platform, content_id, staging_dir, params, review_note, job_id
             )
 
-        manifest_path = _write_manifest(
-            output_dir,
+        _write_manifest(
+            staging_dir,
             action=resolved_action,
             requested_action=requested_action,
             params=params,
             job_id=job_id,
             review_note=review_note,
         )
-        _commit_output_dir(backup)
+
+        await _progress(job_id, 96, "Promoting final for human review...")
+        _promote_staging(staging_dir, final_dir, backup)
+
+        final_path = final_dir / "final.mp4"
+        manifest_path = final_dir / "action_manifest.json"
 
         # Production always returns to human review; never auto-approve.
         store.set_decision(platform, content_id, REMAKE_STAGE, "REMAKE_REVIEW", None)
@@ -428,7 +439,8 @@ async def _execute_action(
             "local",
         )
     except Exception as exc:
-        _rollback_output_dir(output_dir, backup)
+        _safe_remove_tree(staging_dir)
+        _safe_remove_tree(backup)
         await update_job_status(
             job_id,
             "failed",
