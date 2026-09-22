@@ -211,10 +211,31 @@ def _safe_remove_tree(path: Path) -> None:
 
 
 def _prepare_staging_dir(root: Path, candidate_key: str, job_id: str) -> tuple[Path, Path, Path]:
-    """Create an isolated staging dir so the current final remains reviewable."""
+    """Create an isolated staging dir so the current final remains reviewable.
+
+    A prior process can die between the two directory renames used for promotion.
+    Recover that tiny crash window before starting new work.
+    """
     remakes_root = root / "data" / "remakes"
     remakes_root.mkdir(parents=True, exist_ok=True)
     final_dir = remakes_root / candidate_key
+
+    # No action is active when this function is called (launch_action checks it),
+    # so same-candidate hidden staging dirs are leftovers from interrupted jobs.
+    for stale in remakes_root.glob(f".{candidate_key}.staging-*"):
+        _safe_remove_tree(stale)
+
+    stale_backups = sorted(
+        remakes_root.glob(f".{candidate_key}.backup-*"),
+        key=lambda p: p.stat().st_mtime if p.exists() else 0,
+        reverse=True,
+    )
+    if not final_dir.exists() and stale_backups:
+        stale_backups[0].rename(final_dir)
+        stale_backups = stale_backups[1:]
+    for stale in stale_backups:
+        _safe_remove_tree(stale)
+
     staging = remakes_root / f".{candidate_key}.staging-{job_id[:8]}"
     backup = remakes_root / f".{candidate_key}.backup-{job_id[:8]}"
     _safe_remove_tree(staging)
