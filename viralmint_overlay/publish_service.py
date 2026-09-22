@@ -112,15 +112,30 @@ def probe_video(path: Path) -> dict[str, Any]:
     }
 
 
+def _frame_rate(value: str | None) -> float:
+    try:
+        if not value:
+            return 0.0
+        if "/" in value:
+            num, den = value.split("/", 1)
+            return float(num) / float(den)
+        return float(value)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return 0.0
+
+
 def facebook_reel_eligibility(path: Path) -> tuple[bool, str | None, dict[str, Any]]:
     info = probe_video(path)
     w, h, duration = info["width"], info["height"], info["duration"]
+    fps = _frame_rate(info.get("frame_rate"))
     if w < 540 or h < 960:
         return False, "Facebook Reel requires at least 540x960.", info
     if h <= 0 or abs((w / h) - (9 / 16)) > 0.02:
         return False, "Facebook Reel requires a 9:16 final video.", info
     if duration < 4 or duration > 60.5:
         return False, "Facebook Reel duration must be about 4–60 seconds.", info
+    if fps and fps < 23:
+        return False, "Facebook Reel requires at least 23 FPS.", info
     return True, None, info
 
 
