@@ -28,6 +28,9 @@ yarn-error.log*
 .playwright/
 playwright-report/
 
+# Local launcher state
+.runtime/
+
 # OS
 .DS_Store
 Thumbs.db
@@ -40,9 +43,4 @@ Thumbs.db
 douyin_cookies.txt
 .env
 data/*profile*/
-
-
-# Upstream cloned tools
-tools/
-storage/
 
