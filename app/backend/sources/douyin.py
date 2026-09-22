@@ -39,15 +39,6 @@ def _first_url(value: Any) -> str:
     return ""
 
 
-def _metric(value: Any) -> int:
-    if value is None or value == "":
-        return 0
-    try:
-        return max(int(value), 0)
-    except (TypeError, ValueError):
-        return 0
-
-
 def _optional_metric(value: Any) -> int | None:
     if value is None or value == "":
         return None
