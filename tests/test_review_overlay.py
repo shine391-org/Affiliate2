@@ -118,3 +118,41 @@ def test_detail_loads_cached_artifacts(tmp_path):
     detail = store.get_candidate_detail("douyin", "123")
     assert detail["metadata"]["ok"] is True
     assert detail["transcript"]["full_transcript"] == "hello"
+
+
+
+def test_sync_registry_classifier_preserves_custom_file(tmp_path):
+    """Custom ViralMint plugin registries must never be mistaken for removable stubs."""
+    import importlib.util
+
+    script_path = Path(__file__).resolve().parent.parent / "scripts" / "sync_review_overlay.py"
+    spec = importlib.util.spec_from_file_location("sync_review_overlay", script_path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+
+    missing = tmp_path / "missing.js"
+    assert module._registry_kind(missing) == "missing"
+
+    stub = tmp_path / "stub.js"
+    stub.write_text(
+        "export const pluginRoutes = []\nexport const pluginNavItems = []\n",
+        encoding="utf-8",
+    )
+    assert module._registry_kind(stub) == "stub"
+
+    ours = tmp_path / "ours.jsx"
+    ours.write_text(
+        "// CONTENT_ENGINE_REVIEW_OVERLAY\nexport const pluginRoutes = []\n",
+        encoding="utf-8",
+    )
+    assert module._registry_kind(ours) == "ours"
+
+    custom = tmp_path / "custom.js"
+    custom.write_text(
+        "export const pluginRoutes = [{ path: 'cron', element: Cron }]\n"
+        "export const pluginNavItems = [{ to: '/cron' }]\n",
+        encoding="utf-8",
+    )
+    assert module._registry_kind(custom) == "custom"
+    assert custom.exists()
