@@ -1,8 +1,8 @@
 # PROJECT_STATUS.md
 
-## Trạng thái tổng thể: **PHASE 3.5 IN PROGRESS** 🚧
+## Trạng thái tổng thể: **PHASE 4 IN PROGRESS** 🚧
 
-Phase 1/2/3.1/3.2/3.3 đã hoàn thành. Phase 3.4 đang chờ local QA; Phase 3.5 Publish Gate đã implement dạng stacked branch để QA sau Phase 3.4.
+Phase 1/2/3.1/3.2/3.3 đã hoàn thành. Phase 3.4/3.5/4 đã được implement theo stacked branches để QA end-to-end một lượt trước khi merge tuần tự.
 
 ---
 
@@ -78,6 +78,22 @@ Mục tiêu: biến final đã human APPROVED thành hành động publish riên
 
 ---
 
+## Phase 4 — Performance Feedback Loop (IN PROGRESS 🚧)
+
+Mục tiêu: khép kín MVP bằng dữ liệu performance sau publish.
+
+- Thêm SQLite `publication_metrics` append-only snapshots
+- Manual metrics cho TikTok / Facebook / YouTube
+- YouTube có thêm **Sync YouTube** qua official Data API statistics
+- Derived: engagement count, engagement rate, view velocity/hour
+- Join performance với Candidate Intelligence để quan sát theo topic / format / hook
+- Thêm page `/performance` trong ViralMint
+- Thêm `python radar.py performance` để export feedback JSON/Markdown
+- Không auto-tune Radar weights từ sample nhỏ
+- Chi tiết: `docs/PERFORMANCE_FEEDBACK.md`
+
+---
+
 ## Phase 2 — Radar (COMPLETE ✅)
 
 | Hạng mục | Trạng thái | Ghi chú |
@@ -125,4 +141,4 @@ Generic AI provider:     ADAPTER
 
 ## Trạng thái hiện tại
 
-**PHASE 3.5 IN PROGRESS** — Publish Gate đã implement trên stacked feature branch; Phase 3.4 vẫn phải QA/merge trước.
+**PHASE 4 IN PROGRESS** — Full MVP stack (3.4 + 3.5 + 4) đã implement; chờ end-to-end local QA một lượt rồi merge tuần tự.
