@@ -245,7 +245,11 @@ export default function ReviewQueue() {
       const refreshed = data?.candidates?.find(
         (c) => c.platform === detail.platform && c.content_id === detail.content_id,
       )
-      if (refreshed) await loadDetail(refreshed)
+      await loadDetail(refreshed || {
+        platform: detail.platform,
+        content_id: detail.content_id,
+        title: detail.title,
+      })
     }, 2000)
 
     return () => {
