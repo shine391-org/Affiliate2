@@ -1045,9 +1045,9 @@ class PlannerAgent:
         elif not isinstance(raw_platforms, (list, tuple)):
             raw_platforms = []
         platforms = [
-            str(platform).strip().lower()
+            platform.strip().lower()
             for platform in raw_platforms
-            if str(platform).strip()
+            if isinstance(platform, str) and platform.strip()
         ] or ["youtube"]
 
         ready_platforms = []
