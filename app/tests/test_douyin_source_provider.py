@@ -228,3 +228,141 @@ async def test_douyin_unusable_context_does_not_abort_remaining_contexts():
     assert created is True
     assert good_page.closed is False
 
+@pytest.mark.asyncio
+async def test_douyin_search_uses_ten_item_page_step_even_when_request_count_is_fifteen():
+    provider = DouyinProvider()
+    offsets = []
+
+    class Chromium:
+        async def connect_over_cdp(self, *args, **kwargs):
+            return object()
+
+    class Playwright:
+        chromium = Chromium()
+
+    class PlaywrightCM:
+        async def __aenter__(self):
+            return Playwright()
+
+        async def __aexit__(self, *args):
+            return False
+
+    context = object()
+    page = object()
+
+    async def fetch_page(
+        _context, _page, _cookies, _token, _query, offset, _search_id, count
+    ):
+        offsets.append((offset, count))
+        return {
+            "status_code": 0,
+            "data": [
+                {
+                    "aweme_info": {
+                        "aweme_id": str(i),
+                        "statistics": {},
+                        "video": {},
+                    }
+                }
+                for i in range(offset + 1, offset + 11)
+            ],
+            "extra": {"logid": f"log-{offset}"},
+        }
+
+    with patch("backend.sources.douyin.async_playwright", return_value=PlaywrightCM()), \
+         patch.object(
+             provider,
+             "_pick_context_and_page",
+             new=AsyncMock(return_value=(context, page, False)),
+         ), \
+         patch.object(
+             provider,
+             "_session_state",
+             new=AsyncMock(return_value=(True, {}, None)),
+         ), \
+         patch.object(provider, "_fetch_search_page", side_effect=fetch_page):
+        result = await provider.search("健身", limit=15)
+
+    assert result.status == ProviderStatus.SUCCESS
+    assert len(result.items) == 15
+    assert offsets == [(0, 15), (10, 15)]
+
+
+@pytest.mark.asyncio
+async def test_douyin_waf_status_2483_is_access_restriction():
+    provider = DouyinProvider()
+
+    class Response:
+        status = 200
+
+        async def text(self):
+            return '{"status_code":2483,"status_msg":"risk control"}'
+
+        async def json(self):
+            return {"status_code": 2483, "status_msg": "risk control", "data": []}
+
+    class Request:
+        async def get(self, *args, **kwargs):
+            return Response()
+
+    class Context:
+        request = Request()
+
+    class Page:
+        async def evaluate(self, *args, **kwargs):
+            return "Mozilla/5.0"
+
+    with pytest.raises(PermissionError, match="2483"):
+        await provider._fetch_search_page(
+            Context(), Page(), {}, None, "健身", 0, "", 15
+        )
+
+
+@pytest.mark.asyncio
+async def test_douyin_created_probe_page_is_closed_on_access_failure():
+    provider = DouyinProvider()
+
+    class Page:
+        closed = False
+
+        async def close(self):
+            self.closed = True
+
+    page = Page()
+    context = object()
+
+    class Chromium:
+        async def connect_over_cdp(self, *args, **kwargs):
+            return object()
+
+    class Playwright:
+        chromium = Chromium()
+
+    class PlaywrightCM:
+        async def __aenter__(self):
+            return Playwright()
+
+        async def __aexit__(self, *args):
+            return False
+
+    with patch("backend.sources.douyin.async_playwright", return_value=PlaywrightCM()), \
+         patch.object(
+             provider,
+             "_pick_context_and_page",
+             new=AsyncMock(return_value=(context, page, True)),
+         ), \
+         patch.object(
+             provider,
+             "_session_state",
+             new=AsyncMock(return_value=(True, {}, None)),
+         ), \
+         patch.object(
+             provider,
+             "_fetch_search_page",
+             new=AsyncMock(side_effect=PermissionError("risk control")),
+         ):
+        result = await provider.search("健身", limit=1)
+
+    assert result.status == ProviderStatus.AUTH_REQUIRED
+    assert page.closed is True
+
