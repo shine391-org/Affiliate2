@@ -334,6 +334,9 @@ export default function ReviewQueue() {
   const breakdown = detail?.radar_breakdown || {}
   const adaptation = detail?.adaptation || {}
   const va = adaptation?.vietnamese_adaptation || {}
+  const actionManifest = detail?.action_manifest || {}
+  const productionMode = actionManifest.action || (detail?.remake_exists ? "remake" : null)
+  const actionActive = ["pending", "running"].includes(actionJob?.status)
 
   return (
     <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 1700, mx: "auto" }}>
@@ -479,21 +482,45 @@ export default function ReviewQueue() {
                 {detail.remake_exists && (
                   <>
                     <Divider />
-                    <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>Rendered adaptation</Typography>
-                    <InfoBlock title="Vietnamese hook">{va.hook || "-"}</InfoBlock>
-                    <InfoBlock title="Vietnamese script">
-                      <Box sx={{ whiteSpace: "pre-wrap" }}>{va.script || "-"}</Box>
-                    </InfoBlock>
-                    <InfoBlock title="Localization changes">
-                      <Box component="pre" sx={{ whiteSpace: "pre-wrap", fontFamily: "inherit", m: 0 }}>
-                        {JSON.stringify(adaptation.localization_changes || {}, null, 2)}
-                      </Box>
-                    </InfoBlock>
-                    <InfoBlock title="Segment plan">
-                      <Box component="pre" sx={{ whiteSpace: "pre-wrap", fontFamily: "monospace", fontSize: "0.78rem", m: 0 }}>
-                        {JSON.stringify(detail.segment_plan || {}, null, 2)}
-                      </Box>
-                    </InfoBlock>
+                    <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
+                      <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>Rendered output</Typography>
+                      <Chip
+                        size="small"
+                        label={productionMode === "translate" ? "Translate / Dub" : "Creative Remake"}
+                        color="secondary"
+                        variant="outlined"
+                      />
+                    </Stack>
+
+                    {productionMode === "translate" ? (
+                      <>
+                        <InfoBlock title="Translation mode">
+                          {(actionManifest.params?.translate_mode || "full_dub") === "captions_only"
+                            ? "Vietnamese captions only — original audio preserved."
+                            : "Full Vietnamese dub + Vietnamese captions."}
+                        </InfoBlock>
+                        <InfoBlock title="Voice">
+                          {actionManifest.params?.voice_id || "Vietnamese Edge TTS"}
+                        </InfoBlock>
+                      </>
+                    ) : (
+                      <>
+                        <InfoBlock title="Vietnamese hook">{va.hook || "-"}</InfoBlock>
+                        <InfoBlock title="Vietnamese script">
+                          <Box sx={{ whiteSpace: "pre-wrap" }}>{va.script || "-"}</Box>
+                        </InfoBlock>
+                        <InfoBlock title="Localization changes">
+                          <Box component="pre" sx={{ whiteSpace: "pre-wrap", fontFamily: "inherit", m: 0 }}>
+                            {JSON.stringify(adaptation.localization_changes || {}, null, 2)}
+                          </Box>
+                        </InfoBlock>
+                        <InfoBlock title="Segment plan">
+                          <Box component="pre" sx={{ whiteSpace: "pre-wrap", fontFamily: "monospace", fontSize: "0.78rem", m: 0 }}>
+                            {JSON.stringify(detail.segment_plan || {}, null, 2)}
+                          </Box>
+                        </InfoBlock>
+                      </>
+                    )}
                   </>
                 )}
 
@@ -551,22 +578,22 @@ export default function ReviewQueue() {
 
                 {detail.remake_exists ? (
                   <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-                    <Button disabled={saving} variant="contained" color="success" onClick={() => saveDecision("remake", "APPROVED")}>
+                    <Button disabled={saving || actionActive} variant="contained" color="success" onClick={() => saveDecision("remake", "APPROVED")}>
                       Approve
                     </Button>
-                    <Button disabled={saving} variant="contained" color="warning" onClick={() => saveDecision("remake", "REWORK")}>
+                    <Button disabled={saving || actionActive} variant="contained" color="warning" onClick={() => saveDecision("remake", "REWORK")}>
                       Rework
                     </Button>
-                    <Button disabled={saving} variant="outlined" color="error" onClick={() => saveDecision("remake", "REJECTED")}>
+                    <Button disabled={saving || actionActive} variant="outlined" color="error" onClick={() => saveDecision("remake", "REJECTED")}>
                       Reject
                     </Button>
                   </Stack>
                 ) : (
                   <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-                    <Button disabled={saving} variant="contained" color="success" onClick={() => saveDecision("candidate", "APPROVED_FOR_REMAKE")}>
+                    <Button disabled={saving || actionActive} variant="contained" color="success" onClick={() => saveDecision("candidate", "APPROVED_FOR_REMAKE")}>
                       Approve for remake
                     </Button>
-                    <Button disabled={saving} variant="outlined" color="error" onClick={() => saveDecision("candidate", "REJECTED")}>
+                    <Button disabled={saving || actionActive} variant="outlined" color="error" onClick={() => saveDecision("candidate", "REJECTED")}>
                       Reject
                     </Button>
                   </Stack>
