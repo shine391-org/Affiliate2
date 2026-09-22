@@ -497,6 +497,10 @@ async def _download_single_video_to_db(job_id: str, url: str, title: str, user_i
             transcript=transcript,
             transcript_language=transcript_language,
             transcript_source=transcript_source,
+            transcript_segments_json=(
+                json.dumps(subtitles.get("segments") or [])
+                if subtitles and isinstance(subtitles, dict) else None
+            ),
             chapters_json=json.dumps(chapters) if chapters else None,
             tags_json=json.dumps(tags) if tags else None,
             category=category,

@@ -10,7 +10,7 @@ import json
 import re
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 _PROFILE_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
 MAX_LOCALIZATION_PROFILES = 20
@@ -164,3 +164,110 @@ def set_default_profile(
     if profile_id not in {p.id for p in store.profiles}:
         raise KeyError(profile_id)
     return LocalizationProfileStore(default_profile_id=profile_id, profiles=store.profiles)
+
+
+
+class LocalizationSegment(BaseModel):
+    """One source speech unit plus its independently resolved output timing."""
+
+    id: str
+    speaker_id: str | None = None
+
+    source_text: str
+    translated_text: str | None = None
+
+    source_start_ms: int = Field(ge=0)
+    source_end_ms: int = Field(ge=0)
+    target_start_ms: int | None = Field(default=None, ge=0)
+    target_end_ms: int | None = Field(default=None, ge=0)
+
+    tts_duration_ms: int | None = Field(default=None, ge=0)
+
+    translation_status: Literal["pending", "success", "failed", "untranslated"] = "pending"
+    timing_status: Literal["pending", "fit", "adjusted", "overflow"] = "pending"
+    qc_status: Literal["pending", "pass", "review", "fail"] = "pending"
+
+    # Source-language word timings remain useful for alignment/inspection, but
+    # they are never reused as target-language caption words.
+    source_words: list[dict] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_timeline(self):
+        if self.source_end_ms < self.source_start_ms:
+            raise ValueError("source_end_ms must be >= source_start_ms")
+        if (self.target_start_ms is None) != (self.target_end_ms is None):
+            raise ValueError("target start/end must be both set or both unset")
+        if (
+            self.target_start_ms is not None
+            and self.target_end_ms is not None
+            and self.target_end_ms < self.target_start_ms
+        ):
+            raise ValueError("target_end_ms must be >= target_start_ms")
+        return self
+
+
+class LocalizationTranscript(BaseModel):
+    text: str = ""
+    language: str | None = None
+    source: str | None = None
+    segments: list[LocalizationSegment] = Field(default_factory=list)
+
+
+def _seconds_to_ms(value) -> int:
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return 0
+    if seconds < 0:
+        return 0
+    return round(seconds * 1000)
+
+
+def localization_segments_from_source(raw_segments: list[dict] | None) -> list[LocalizationSegment]:
+    """Normalize Whisper/subtitle source segments without inventing target time.
+
+    Existing storage stays source-native for backward compatibility. C6+ calls
+    this once and works only with the explicit source/target coordinate model.
+    """
+    out: list[LocalizationSegment] = []
+    for index, raw in enumerate(raw_segments or []):
+        if not isinstance(raw, dict):
+            continue
+
+        # Already canonical: validate and keep it.
+        if "source_start_ms" in raw or "source_text" in raw:
+            out.append(LocalizationSegment.model_validate(raw))
+            continue
+
+        text = str(raw.get("text") or "").strip()
+        if not text:
+            continue
+        start_ms = _seconds_to_ms(raw.get("start"))
+        end_ms = _seconds_to_ms(raw.get("end"))
+        if end_ms < start_ms:
+            raise ValueError(f"Segment {index} has end before start")
+
+        out.append(LocalizationSegment(
+            id=str(raw.get("id") or f"seg-{index + 1:04d}"),
+            speaker_id=(str(raw["speaker_id"]) if raw.get("speaker_id") is not None else None),
+            source_text=text,
+            source_start_ms=start_ms,
+            source_end_ms=end_ms,
+            source_words=list(raw.get("words") or []),
+        ))
+    return out
+
+
+def localization_transcript_from_source(
+    *,
+    text: str | None,
+    language: str | None,
+    source: str | None,
+    raw_segments: list[dict] | None,
+) -> LocalizationTranscript:
+    return LocalizationTranscript(
+        text=(text or "").strip(),
+        language=language,
+        source=source,
+        segments=localization_segments_from_source(raw_segments),
+    )

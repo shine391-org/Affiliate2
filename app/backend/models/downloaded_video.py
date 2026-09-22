@@ -26,7 +26,7 @@ class DownloadedVideo(Base):
     transcript = Column(Text, nullable=True)
     transcript_language = Column(String(10), nullable=True)
     transcript_source = Column(String(20), nullable=True)  # "creator_subtitles" | "auto_subtitles" | "whisper" | "manual"
-    transcript_segments_json = Column(Text, nullable=True)  # Full Whisper [{start, end, text, words}]
+    transcript_segments_json = Column(Text, nullable=True)  # Raw source segments [{start,end,text,words}]; canonicalized by core.localization
 
     # AI-extracted insights (JSON stored as text)
     insights_json = Column(Text, nullable=True)

@@ -171,6 +171,14 @@ async def get_downloaded(video_id: str):
             except json.JSONDecodeError:
                 pass
 
+        from backend.core.localization import localization_transcript_from_source
+        localization_transcript = localization_transcript_from_source(
+            text=video.transcript,
+            language=video.transcript_language,
+            source=video.transcript_source,
+            raw_segments=_safe_json(video.transcript_segments_json, []),
+        )
+
         return {
             "id": video.id,
             "scout_result_id": video.scout_result_id,
@@ -182,6 +190,7 @@ async def get_downloaded(video_id: str):
             "transcript": video.transcript,
             "transcript_language": video.transcript_language,
             "transcript_source": video.transcript_source,
+            "localization_transcript": localization_transcript.model_dump(),
             "insights": insights,
             "insights_json": video.insights_json,
             "segment_analysis": _safe_json(video.segment_analysis_json),
