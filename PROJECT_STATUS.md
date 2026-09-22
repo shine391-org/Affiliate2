@@ -1,8 +1,8 @@
 # PROJECT_STATUS.md
 
-## Trạng thái tổng thể: **PHASE 3.4 IN PROGRESS** 🚧
+## Trạng thái tổng thể: **PHASE 3.5 IN PROGRESS** 🚧
 
-Phase 1/2/3.1/3.2/3.3 đã hoàn thành. Hiện đang thực hiện Phase 3.4 — Review Queue Action Controls.
+Phase 1/2/3.1/3.2/3.3 đã hoàn thành. Phase 3.4 đang chờ local QA; Phase 3.5 Publish Gate đã implement dạng stacked branch để QA sau Phase 3.4.
 
 ---
 
@@ -60,6 +60,24 @@ Mục tiêu: nối human approval với production thật ngay trong Review Queu
 
 ---
 
+## Phase 3.5 — Publish Gate (IN PROGRESS 🚧)
+
+Mục tiêu: biến final đã human APPROVED thành hành động publish riêng theo từng platform.
+
+- TikTok: manual only — **Download final + Copy caption + Mark posted URL**
+- Facebook Page Reel: one-click API publish sau khi local Page token được cấu hình
+- YouTube: OAuth connect + one-click upload
+- Approval KHÔNG tự publish; mỗi platform cần human click + confirmation
+- YouTube bắt buộc chọn privacy + audience trước upload
+- Facebook Reel preflight: 9:16, >=540x960, ~4–60s
+- Publish attempts lưu vào SQLite `content_publications`
+- YouTube OAuth token lưu local trong ignored `radar.db`
+- Dùng ViralMint Job model/dispatcher cho Facebook + YouTube upload
+- Không dùng TikTok API/cookie uploader trong MVP
+- Chi tiết: `docs/PUBLISH_GATE.md`
+
+---
+
 ## Phase 2 — Radar (COMPLETE ✅)
 
 | Hạng mục | Trạng thái | Ghi chú |
@@ -107,4 +125,4 @@ Generic AI provider:     ADAPTER
 
 ## Trạng thái hiện tại
 
-**PHASE 3.4 IN PROGRESS** — Action controls đã implement trên feature branch, chờ local integration QA trước khi merge.
+**PHASE 3.5 IN PROGRESS** — Publish Gate đã implement trên stacked feature branch; Phase 3.4 vẫn phải QA/merge trước.
