@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from .publish_store import PublishStore, PublishValidationError
+from .publish_store import PublishStore
 from .review_store import ReviewStore
 
 
@@ -216,8 +216,8 @@ def _youtube_credentials(store: PublishStore):
     if expiry:
         try:
             expiry_dt = datetime.fromisoformat(expiry)
-            if expiry_dt.tzinfo is None:
-                expiry_dt = expiry_dt.replace(tzinfo=timezone.utc)
+            if expiry_dt.tzinfo is not None:
+                expiry_dt = expiry_dt.astimezone(timezone.utc).replace(tzinfo=None)
         except ValueError:
             expiry_dt = None
 
@@ -245,6 +245,7 @@ def _youtube_credentials(store: PublishStore):
                 "scopes": list(creds.scopes or [YOUTUBE_SCOPE]),
                 "expiry": creds.expiry.isoformat() if creds.expiry else None,
             },
+            headers=graph_headers,
         )
     return creds
 
@@ -320,9 +321,11 @@ def _publish_facebook_sync(
 
     timeout = httpx.Timeout(120.0, connect=30.0)
     with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+        graph_headers = {"Authorization": f"Bearer {token}"}
         start = client.post(
             base,
-            params={"access_token": token, "upload_phase": "start"},
+            params={"upload_phase": "start"},
+            headers=graph_headers,
         )
         start.raise_for_status()
         payload = start.json()
@@ -348,7 +351,6 @@ def _publish_facebook_sync(
         finish = client.post(
             base,
             params={
-                "access_token": token,
                 "video_id": video_id,
                 "upload_phase": "finish",
                 "video_state": "PUBLISHED",
@@ -365,7 +367,8 @@ def _publish_facebook_sync(
         try:
             info = client.get(
                 f"{graph}/{video_id}",
-                params={"access_token": token, "fields": "permalink_url"},
+                params={"fields": "permalink_url"},
+                headers=graph_headers,
             )
             if info.is_success:
                 external_url = (info.json() or {}).get("permalink_url")
@@ -513,7 +516,16 @@ async def launch_publish(
 
     latest = publish_store.latest_publication(source_platform, content_id, target_platform)
     if latest and latest.get("status") == "PUBLISHING":
-        raise PublishActionError(f"{target_platform.title()} publish is already running.")
+        from .action_service import get_job_snapshot
+
+        snap = await get_job_snapshot(latest.get("job_id"))
+        if snap and snap.get("status") in {"pending", "running"}:
+            raise PublishActionError(f"{target_platform.title()} publish is already running.")
+        publish_store.finish_publication(
+            latest["id"],
+            status="FAILED",
+            error_message="Previous publish did not complete before backend restart.",
+        )
 
     from backend.agents.job_helper import create_job
     from backend.core.task_runner import dispatch
