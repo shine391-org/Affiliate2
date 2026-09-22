@@ -178,3 +178,17 @@ def test_make_local_client_requires_model_but_not_key():
 def test_make_compatible_client_requires_base_url():
     with pytest.raises(ValueError, match="Base URL"):
         make_ai_client("compatible", model="x")
+
+
+def test_local_preset_never_reuses_stored_cloud_secret():
+    s = SimpleNamespace(
+        ai_provider="ollama",
+        ai_api_key_encrypted=encrypt("SHOULD-NOT-LEAK"),
+        ai_model="qwen3:8b",
+        ai_base_url=None,
+    )
+    provider, key, model, base_url = _resolve_user_provider_and_key(s)
+    assert provider == AIProvider.COMPATIBLE
+    assert key == "local"
+    assert model == "qwen3:8b"
+    assert base_url == "http://localhost:11434/v1"

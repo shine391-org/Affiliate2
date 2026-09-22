@@ -26,6 +26,28 @@ TRANSITIONS = [
 ]
 
 
+# Shared H.264 quality vocabulary for Phase C. Keep it tiny: three profiles
+# cover preview, ordinary tools, and publishable localization output.
+RENDER_PROFILES = {
+    "draft": {"preset": "veryfast", "crf": 24},
+    "balanced": {"preset": "fast", "crf": 20},
+    "hq": {"preset": "medium", "crf": 18},
+}
+
+
+def video_encode_args(render_profile: str = "balanced") -> list[str]:
+    """FFmpeg H.264 args for a named quality profile."""
+    cfg = RENDER_PROFILES.get(render_profile)
+    if cfg is None:
+        raise ValueError(f"Unknown render profile: {render_profile}")
+    return [
+        "-c:v", "libx264",
+        "-preset", cfg["preset"],
+        "-crf", str(cfg["crf"]),
+        "-pix_fmt", "yuv420p",
+    ]
+
+
 async def stitch_clips(
     clip_paths: list[Path],
     output_path: Path = None,
@@ -1105,6 +1127,7 @@ async def convert_aspect_ratio(
     target_aspect: str = "16:9",
     method: str = "letterbox",
     output_path: Path = None,
+    render_profile: str = "balanced",
 ) -> Path:
     """
     Convert video between aspect ratios.
@@ -1167,7 +1190,7 @@ async def convert_aspect_ratio(
         common = [
             "ffmpeg", "-y", "-i", str(video_path),
             filter_flag, vf,
-            "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+            *video_encode_args(render_profile),
         ]
         # Audio is untouched by an aspect conversion — copy it instead of
         # paying a 128k AAC generation every pass. Chained tools stack these:

@@ -7,6 +7,7 @@ in the existing job/tool pipeline.
 from __future__ import annotations
 
 import json
+import math
 import re
 from typing import Literal
 
@@ -216,10 +217,10 @@ class LocalizationTranscript(BaseModel):
 def _seconds_to_ms(value) -> int:
     try:
         seconds = float(value)
-    except (TypeError, ValueError):
-        return 0
-    if seconds < 0:
-        return 0
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid source timestamp: {value!r}") from exc
+    if not math.isfinite(seconds) or seconds < 0:
+        raise ValueError(f"Invalid source timestamp: {value!r}")
     return round(seconds * 1000)
 
 

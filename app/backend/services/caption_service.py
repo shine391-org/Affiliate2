@@ -993,6 +993,7 @@ async def burn_captions(
     video_path: Path,
     ass_path: Path,
     output_path: Path = None,
+    render_profile: str = "balanced",
 ) -> Path:
     """Burn ASS captions into video using FFmpeg's libass filter."""
     global _ffmpeg_has_ass
@@ -1029,12 +1030,13 @@ async def burn_captions(
         # Escape path for FFmpeg filter (colons, backslashes, and quote for paths with spaces)
         escaped_ass = str(ass_path.resolve()).replace("\\", "/").replace(":", "\\:").replace("'", "'\\''")
 
+        from backend.services.ffmpeg_service import video_encode_args
         cmd = [
             "ffmpeg", "-y",
             "-i", str(video_path),
             "-vf", f"ass='{escaped_ass}'",
             "-c:a", "copy",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+            *video_encode_args(render_profile),
             str(output_path),
         ]
         try:

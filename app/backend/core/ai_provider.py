@@ -256,7 +256,16 @@ def _resolve_user_provider_and_key(user_settings) -> tuple[Optional[AIProvider],
     if not provider_str:
         return None, None, None, None
 
-    if provider_str in COMPATIBLE_PRESETS or provider_str == AIProvider.COMPATIBLE.value:
+    if provider_str in COMPATIBLE_PRESETS:
+        # Local presets must never inherit a stale cloud BYOK secret when the
+        # user switches providers. OpenAI SDK accepts a dummy local key.
+        return (
+            AIProvider.COMPATIBLE,
+            "local",
+            model or None,
+            compatible_base_url(provider_str, base_url),
+        )
+    if provider_str == AIProvider.COMPATIBLE.value:
         api_key = decrypt_safe(encrypted_key) if encrypted_key else ""
         return (
             AIProvider.COMPATIBLE,

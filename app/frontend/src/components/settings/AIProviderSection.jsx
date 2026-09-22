@@ -88,8 +88,9 @@ export default function AIProviderSection({ settings, updateSettings }) {
 
   const handleSave = async () => {
     const hasNewKey = !!apiKey.trim()
-    if (meta.keyRequired && !hasNewKey && !keyIsSet) {
-      showSnackbar("Paste your API key first", "warning")
+    const switchingProvider = provider !== (settings?.ai_provider || "openai")
+    if (meta.keyRequired && !hasNewKey && (!keyIsSet || switchingProvider)) {
+      showSnackbar("Paste the API key for this provider", "warning")
       return
     }
     if (!effectiveModel.trim()) {

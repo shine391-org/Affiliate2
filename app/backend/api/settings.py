@@ -133,9 +133,14 @@ async def update_settings(update: SettingsUpdate):
             s = UserSettings(user_id="local")
             db.add(s)
 
-        # AI provider preference (BYOK)
+        # AI provider preference (BYOK). One encrypted key is stored, so a
+        # provider switch without a replacement key MUST clear the old secret;
+        # otherwise an OpenAI key can be sent to Anthropic/a local endpoint.
         if update.ai_provider is not None:
-            s.ai_provider = update.ai_provider
+            new_provider = update.ai_provider.strip().lower()
+            if new_provider != (s.ai_provider or "").strip().lower() and update.ai_api_key is None:
+                s.ai_api_key_encrypted = None
+            s.ai_provider = new_provider
         if update.ai_model is not None:
             s.ai_model = update.ai_model or None
         if update.ai_base_url is not None:
@@ -190,12 +195,21 @@ class AIProbeRequest(BaseModel):
 async def _probe_key(body: AIProbeRequest) -> str:
     if body.api_key is not None:
         return body.api_key.strip()
+
+    provider = (body.provider or "").lower().strip()
+    if provider in {"ollama", "lmstudio", "vllm"}:
+        return ""
+
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             select(UserSettings).where(UserSettings.user_id == "local")
         )
         s = result.scalar_one_or_none()
-    return decrypt_safe(s.ai_api_key_encrypted) if s and s.ai_api_key_encrypted else ""
+    # A stored key only belongs to the stored provider. Never reuse it while
+    # probing a different endpoint/provider selected in the edit form.
+    if not s or (s.ai_provider or "").lower().strip() != provider:
+        return ""
+    return decrypt_safe(s.ai_api_key_encrypted) if s.ai_api_key_encrypted else ""
 
 
 @router.post("/settings/ai/models")
@@ -266,7 +280,7 @@ async def get_localization_profiles():
 
 
 @router.post("/settings/localization-profiles")
-async def save_localization_profile(profile: "LocalizationProfile"):
+async def save_localization_profile(profile: LocalizationProfile):
     from backend.core.localization import load_profile_store, upsert_profile
 
     async with AsyncSessionLocal() as db:

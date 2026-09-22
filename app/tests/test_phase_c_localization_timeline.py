@@ -87,3 +87,11 @@ def test_transcript_wraps_same_source_segments_without_retranscribing():
     assert tx.text == "hello world"
     assert tx.language == "en"
     assert [s.id for s in tx.segments] == ["seg-0001", "seg-0002"]
+
+
+@pytest.mark.parametrize("bad", [None, "bad", -0.1, float("nan"), float("inf")])
+def test_invalid_source_timestamp_fails_instead_of_becoming_zero(bad):
+    with pytest.raises(ValueError, match="Invalid source timestamp"):
+        localization_segments_from_source([
+            {"start": bad, "end": 1.0, "text": "bad timestamp"}
+        ])
