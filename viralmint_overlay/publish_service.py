@@ -241,7 +241,6 @@ def _youtube_credentials(store: PublishStore):
                 "scopes": list(creds.scopes or [YOUTUBE_SCOPE]),
                 "expiry": creds.expiry.isoformat() if creds.expiry else None,
             },
-            headers=graph_headers,
         )
     return creds
 
