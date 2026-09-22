@@ -330,6 +330,20 @@ export default function ReviewQueue() {
     }
   }
 
+  const cancelAction = async () => {
+    if (!actionJob?.job_id) return
+    setActionBusy(true)
+    setError("")
+    try {
+      await http.delete(`/api/jobs/${encodeURIComponent(actionJob.job_id)}`)
+      await loadActionStatus(detail)
+    } catch (e) {
+      setError(e.response?.data?.detail || "Could not cancel action.")
+    } finally {
+      setActionBusy(false)
+    }
+  }
+
   const mediaSrc = (kind) => detail
     ? `/api/review/media/${kind}/${encodeURIComponent(detail.platform)}/${encodeURIComponent(detail.content_id)}`
     : ""
@@ -550,6 +564,7 @@ export default function ReviewQueue() {
                     job={actionJob}
                     busy={actionBusy}
                     onRun={() => runAction(actionType)}
+                    onCancel={cancelAction}
                   />
                 )}
 
@@ -568,6 +583,7 @@ export default function ReviewQueue() {
                     job={actionJob}
                     busy={actionBusy}
                     onRun={() => runAction("rerender")}
+                    onCancel={cancelAction}
                   />
                 )}
 
