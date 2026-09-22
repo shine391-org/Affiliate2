@@ -9,6 +9,7 @@ Agent 1: Smart Chat/Planner
 - Handles direct URL downloads
 - Proactively prompts for missing credentials
 """
+import asyncio
 import re
 import json
 import logging
@@ -29,7 +30,7 @@ You have memory across sessions and know what the user was working on before.
 
 You can do ANYTHING related to video content strategy:
 
-1. **Scout** — Find trending videos across ANY platform. YouTube, TikTok, Douyin have dedicated APIs (richer results). ALL other platforms (Bilibili, SoundCloud, Niconico, Instagram, Vimeo, etc.) are searched dynamically — no API key needed. You can put ANY platform name in the platforms list and it just works.
+1. **Scout** — Find trending videos across ANY platform. YouTube, TikTok, Douyin, and Bilibili have dedicated/native search paths. Other supported platforms may use yt-dlp dynamic search. Never describe a YouTube cross-post search as native Bilibili discovery.
 2. **Download ANY video from ANY platform** — 1000+ sites supported via yt-dlp. You NEVER refuse a download request. If a user gives you a URL, you download it — period.
 3. **Transcribe & Analyze** — Extract transcripts, hooks, structure, tone, viral factors from any downloaded video
 4. **Generate original videos** — Script → AI voice → AI visuals → captions → finished MP4
@@ -857,26 +858,36 @@ class PlannerAgent:
             await self._followup(user_id, "No scout results found yet. Try scouting a niche first!")
             return
 
-        # Group by platform and send
+        payload = [{
+            "id": r.id,
+            "platform": r.platform,
+            "video_id": r.video_id,
+            "title": r.title,
+            "author": r.author,
+            "author_url": r.author_url,
+            "views": r.views,
+            "likes": r.likes,
+            "comments": r.comments,
+            "shares": r.shares,
+            "duration_seconds": r.duration_seconds,
+            "upload_date": r.upload_date.isoformat() if r.upload_date else None,
+            "virality_score": r.virality_score,
+            "views_per_hour": r.views_per_hour,
+            "outlier_score": r.outlier_score,
+            "thumbnail_url": r.thumbnail_url,
+            "video_url": r.video_url,
+            "embed_url": r.embed_url,
+        } for r in results]
+
+        try:
+            from backend.affiliate.radar.service import enrich_scout_payload
+            payload = await asyncio.to_thread(enrich_scout_payload, payload)
+        except Exception as exc:
+            logger.warning("Chat scout Radar enrichment skipped (non-fatal): %s", exc)
+
         platforms = {}
-        for r in results:
-            platforms.setdefault(r.platform, []).append({
-                "id": r.id,
-                "platform": r.platform,
-                "video_id": r.video_id,
-                "title": r.title,
-                "author": r.author,
-                "author_url": r.author_url,
-                "views": r.views,
-                "likes": r.likes,
-                "comments": r.comments,
-                "duration_seconds": r.duration_seconds,
-                "upload_date": r.upload_date.isoformat() if r.upload_date else None,
-                "virality_score": r.virality_score,
-                "thumbnail_url": r.thumbnail_url,
-                "video_url": r.video_url,
-                "embed_url": r.embed_url,
-            })
+        for item in payload:
+            platforms.setdefault(item["platform"], []).append(item)
 
         for platform, items in platforms.items():
             await ws_manager.send({
@@ -1023,18 +1034,21 @@ class PlannerAgent:
                 or (us and us.tiktok_cookie_encrypted)
             ),
         },
-        "douyin": {
-            "check": lambda us: (
-                bool(settings.TIKHUB_API_KEY)
-                or (us and us.douyin_cookie_encrypted)
-            ),
-        },
     }
 
     async def _check_and_start_scout(self, action: dict, user_settings, user_id: str):
         """Start a scout job. Unavailable platforms are skipped gracefully."""
         niche = action.get("niche", "")
-        platforms = action.get("platforms", ["youtube"])
+        raw_platforms = action.get("platforms", ["youtube"])
+        if isinstance(raw_platforms, str):
+            raw_platforms = [raw_platforms]
+        elif not isinstance(raw_platforms, (list, tuple)):
+            raw_platforms = []
+        platforms = [
+            platform.strip().lower()
+            for platform in raw_platforms
+            if isinstance(platform, str) and platform.strip()
+        ] or ["youtube"]
 
         ready_platforms = []
         skipped = []

@@ -48,7 +48,8 @@ export default function DataTable({ results, onSelect, onDownload, onDelete, sel
     { key: "views", label: "Views", width: "10%" },
     { key: "likes", label: "Likes", width: "8%" },
     { key: "comments", label: "Comments", width: "8%" },
-    { key: "virality_score", label: "Score", width: "8%" },
+    { key: "virality_score", label: "Viral", width: "7%" },
+    { key: "radar_score", label: "Radar", width: "7%" },
     { key: "upload_date", label: "Uploaded", width: "10%" },
     { key: "_actions", label: "Actions", width: "18%", sortable: false },
   ]
@@ -109,6 +110,19 @@ export default function DataTable({ results, onSelect, onDownload, onDelete, sel
                   color={(r.virality_score || 0) >= 70 ? "success" : (r.virality_score || 0) >= 40 ? "warning" : "error"}
                   sx={{ fontWeight: 700, fontSize: "0.75rem" }}
                 />
+              </TableCell>
+              <TableCell>
+                {r.radar_score == null ? "—" : (
+                  <Tooltip title={`Radar confidence: ${Math.round((r.radar_confidence || 0) * 100)}%`} arrow>
+                    <Chip
+                      label={Number(r.radar_score).toFixed(1)}
+                      size="small"
+                      color={r.radar_score >= 70 ? "success" : r.radar_score >= 45 ? "warning" : "default"}
+                      variant="outlined"
+                      sx={{ fontWeight: 700, fontSize: "0.75rem" }}
+                    />
+                  </Tooltip>
+                )}
               </TableCell>
               <TableCell sx={{ fontSize: "0.8rem", color: "text.secondary", whiteSpace: "nowrap" }}>
                 {r.upload_date

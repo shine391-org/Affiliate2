@@ -34,6 +34,29 @@ function OutlierChip({ score }) {
   return <Chip label={label} size="small" color={color} variant="outlined" sx={{ fontWeight: 700, fontSize: "0.65rem", height: 22 }} />
 }
 
+function RadarChip({ score, confidence }) {
+  if (score == null) return null
+  const color = score >= 70 ? "success" : score >= 45 ? "warning" : "default"
+  const pct = confidence == null ? "" : ` · ${Math.round(confidence * 100)}% conf`
+  return (
+    <Tooltip title={`Longitudinal Radar score${pct}`} arrow>
+      <Chip label={`Radar ${Number(score).toFixed(0)}`} size="small" color={color}
+        variant="outlined" sx={{ fontWeight: 700, fontSize: "0.65rem", height: 22 }} />
+    </Tooltip>
+  )
+}
+
+function CreatorOutlierChip({ ratio }) {
+  if (ratio == null || ratio < 1.5) return null
+  return (
+    <Tooltip title="Performance vs this creator's own historical median" arrow>
+      <Chip label={`Creator ${Number(ratio).toFixed(1)}x`} size="small"
+        color={ratio >= 4 ? "error" : ratio >= 2 ? "warning" : "info"}
+        variant="outlined" sx={{ fontSize: "0.65rem", height: 22 }} />
+    </Tooltip>
+  )
+}
+
 function formatViews(n) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
@@ -215,6 +238,8 @@ export default function CardGrid({ results, onSelect, onDownload, onDelete, sele
                       ...(isNews && { borderColor: "warning.main", color: "warning.main" }) }} />
                   {!isNews && <VPHChip vph={r.views_per_hour} />}
                   {!isNews && <OutlierChip score={r.outlier_score} />}
+                  {!isNews && <RadarChip score={r.radar_score} confidence={r.radar_confidence} />}
+                  {!isNews && <CreatorOutlierChip ratio={r.radar_creator_outlier} />}
                   {isNews && newsDesc?.word_count > 0 && (
                     <Chip label={`${newsDesc.word_count} words`} size="small" variant="outlined" sx={{ fontSize: "0.6rem", height: 20 }} />
                   )}

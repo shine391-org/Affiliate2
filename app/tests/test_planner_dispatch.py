@@ -358,3 +358,108 @@ class TestDispatchRobustness:
     def test_a_wizard_action_with_no_id_is_inert(self, bus):
         self._run({"type": "start_wizard"})
         assert bus["sent"] == []
+
+
+class TestPhaseBPlannerIntegration:
+    def test_douyin_is_not_blocked_by_legacy_api_key_or_cookie_gate(self):
+        assert "douyin" not in PlannerAgent._CREDENTIAL_PLATFORMS
+
+    def test_bilibili_is_not_credential_gated(self):
+        assert "bilibili" not in PlannerAgent._CREDENTIAL_PLATFORMS
+
+
+@pytest.mark.asyncio
+async def test_string_platform_payload_is_treated_as_one_platform(bus, monkeypatch):
+    from types import SimpleNamespace
+
+    seen = {}
+
+    async def fake_create_job(job_type, user_id, input_data):
+        seen.update(input_data)
+        return SimpleNamespace(id="job-string-platform")
+
+    monkeypatch.setattr("backend.agents.job_helper.create_job", fake_create_job)
+
+    await PlannerAgent()._check_and_start_scout(
+        {"niche": "健身", "platforms": "Douyin"},
+        None,
+        "local",
+    )
+
+    assert seen["platforms"] == ["douyin"]
+
+
+@pytest.mark.asyncio
+async def test_douyin_scout_starts_without_legacy_credentials(bus):
+    agent = PlannerAgent()
+    await agent._check_and_start_scout(
+        {"niche": "健身", "platforms": ["Douyin"]},
+        None,
+        "local",
+    )
+    started = [m for m in bus["sent"] if m.get("type") == "job_started"]
+    assert started
+    assert "douyin" in started[-1]["message"].lower()
+    assert "unavailable" not in json.dumps(bus["sent"]).lower()
+
+
+@pytest.mark.asyncio
+async def test_show_scout_results_replays_radar_enrichment(bus, monkeypatch):
+    class Row:
+        id = "row1"
+        platform = "bilibili"
+        video_id = "BV1"
+        title = "test"
+        author = "creator"
+        author_url = "https://space.bilibili.com/1"
+        views = 100
+        likes = 10
+        comments = 2
+        shares = 1
+        duration_seconds = 30
+        upload_date = None
+        virality_score = 55
+        views_per_hour = None
+        outlier_score = None
+        thumbnail_url = ""
+        video_url = "https://www.bilibili.com/video/BV1"
+        embed_url = None
+
+    class ScalarRows:
+        def all(self):
+            return [Row()]
+
+    class Result:
+        def scalars(self):
+            return ScalarRows()
+
+    class DB:
+        async def execute(self, query):
+            return Result()
+
+    class CM:
+        async def __aenter__(self):
+            return DB()
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr("backend.database.AsyncSessionLocal", lambda: CM())
+
+    def enrich(rows):
+        rows[0]["radar_score"] = 88.0
+        rows[0]["radar_confidence"] = 0.8
+        rows[0]["radar_creator_outlier"] = 2.5
+        return rows
+
+    monkeypatch.setattr(
+        "backend.affiliate.radar.service.enrich_scout_payload",
+        enrich,
+    )
+
+    await PlannerAgent()._show_scout_results({}, "local")
+    messages = [m for m in bus["sent"] if m.get("type") == "scout_results"]
+    assert messages
+    item = messages[-1]["results"][0]
+    assert item["radar_score"] == 88.0
+    assert item["radar_confidence"] == 0.8
+    assert item["radar_creator_outlier"] == 2.5

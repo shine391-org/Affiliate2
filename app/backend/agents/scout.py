@@ -17,6 +17,12 @@ from backend.models.user_settings import UserSettings
 from backend.core.ws_manager import ws_manager
 from backend.agents.job_helper import update_job_status
 from backend.config import settings
+from backend.sources import (
+    ProviderStatus,
+    SourceProviderError,
+    has_source_provider,
+    search_source_provider,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,22 +31,23 @@ PLATFORM_LIMITS = {
     "youtube": 50,
     "tiktok": 30,
     "douyin": 30,
+    "bilibili": 30,
 }
 
 # Default limit for any platform not listed above
 DEFAULT_SEARCH_LIMIT = 15
 
-# Platforms that can be scouted via yt-dlp search (no API key needed)
-# Maps platform name → yt-dlp search prefix
-# Note: bilisearch requires cookies (412), so Bilibili falls back to ytsearch
+# Platforms that can be scouted via yt-dlp search (no API key needed).
+# App-native providers (currently Bilibili) are handled before this fallback.
+# Maps platform name → yt-dlp search prefix.
 YTDLP_SEARCH_PLATFORMS = {
     "soundcloud": "scsearch",
     "niconico": "nicosearch",
 }
 
-# Universal fallback: search YouTube for "{platform} {niche}" content
-# This catches Bilibili, Instagram, Vimeo, etc. — surprisingly effective
-# because creators often cross-post or discuss other platforms' content
+# Universal legacy fallback: search YouTube for "{platform} {niche}" content
+# for platforms without an app-native provider or yt-dlp search extractor.
+# Bilibili and Douyin never use this cross-platform fallback.
 FALLBACK_SEARCH_PREFIX = "ytsearch"
 
 # Hard cap on platforms per scout run — every entry costs a search (+ possible
@@ -144,8 +151,9 @@ class ScoutAgent:
         for p in platforms:
             p = str(p).strip()
             if p and p.lower() not in seen:
-                seen.add(p.lower())
-                cleaned.append(p)
+                normalized = p.lower()
+                seen.add(normalized)
+                cleaned.append(normalized)
         if len(cleaned) > MAX_PLATFORMS_PER_SCOUT:
             logger.warning("SCOUT platform list capped %d → %d (dropped: %s)",
                            len(cleaned), MAX_PLATFORMS_PER_SCOUT,
@@ -159,6 +167,7 @@ class ScoutAgent:
         fallback_platforms = [
             p for p in platforms
             if p not in ("youtube", "tiktok", "douyin")
+            and not has_source_provider(p)
             and p not in YTDLP_SEARCH_PLATFORMS
         ]
         if len(fallback_platforms) > 1:
@@ -200,13 +209,25 @@ class ScoutAgent:
             platform = platforms[i]
             if isinstance(result, Exception):
                 logger.warning(f"Scout failed for {platform}: {result}")
+                if isinstance(result, SourceProviderError):
+                    # Native provider failures are authoritative for that platform.
+                    # Do not "rescue" Bilibili with YouTube/AI results and pretend
+                    # the requested source succeeded.
+                    await ws_manager.send_constraint_warning(
+                        constraint=f"{platform}_provider_{result.status.value.lower()}",
+                        message=str(result),
+                        severity="warning",
+                        user_id=user_id,
+                    )
+                    continue
+
                 await ws_manager.send_constraint_warning(
                     constraint=f"{platform}_scout",
                     message=f"Scout failed for {platform}: {result}",
                     severity="warning",
                     user_id=user_id,
                 )
-                # AI fallback: try raw HTTP search when library-based approach throws
+                # Generic legacy fallback remains for non-provider platforms.
                 try:
                     fallback = await self._ai_raw_search_fallback(platform, niche, user_settings)
                     if fallback:
@@ -230,6 +251,14 @@ class ScoutAgent:
                         if retry_result and not isinstance(retry_result, Exception):
                             result = retry_result
                             logger.info(f"AI-refined search found {len(result)} results on {platform}")
+                except SourceProviderError as retry_err:
+                    logger.warning("Refined native scout failed for %s: %s", platform, retry_err)
+                    await ws_manager.send_constraint_warning(
+                        constraint=f"{platform}_provider_{retry_err.status.value.lower()}",
+                        message=str(retry_err),
+                        severity="warning",
+                        user_id=user_id,
+                    )
                 except Exception as retry_err:
                     logger.debug(f"AI search refinement retry failed for {platform}: {retry_err}")
 
@@ -240,6 +269,15 @@ class ScoutAgent:
             await ws_manager.send_progress(job_id, pct, f"Scouted {platform}", user_id)
 
         logger.info("SCOUT collected %d raw results from %d platforms", len(all_results), len(platforms))
+
+        # Affiliate2 Radar records repeated observations for native providers
+        # and enriches rows with longitudinal signals. Best-effort only:
+        # Radar must never discard already-collected Scout results.
+        try:
+            from backend.affiliate.radar.service import observe_and_enrich_scout_rows
+            await asyncio.to_thread(observe_and_enrich_scout_rows, all_results, niche)
+        except Exception as radar_err:  # noqa: BLE001
+            logger.warning("Radar observation/enrichment skipped (non-fatal): %s", radar_err)
 
         # Enrich YouTube results with real outlier detection (batch channel
         # baselines). Enrichment is a bonus, never a dependency — a bug here
@@ -350,19 +388,35 @@ class ScoutAgent:
             logger.warning("TikTok: no API key or cookie configured")
             return []
 
-        elif platform == "douyin":
-            if settings.TIKHUB_API_KEY:
-                from backend.services.tikhub_client import search_douyin
-                return await search_douyin(niche, settings.TIKHUB_API_KEY, PLATFORM_LIMITS["douyin"])
-            from backend.core.crypto import decrypt_safe
-            cookie = ""
-            if user_settings and user_settings.douyin_cookie_encrypted:
-                cookie = decrypt_safe(user_settings.douyin_cookie_encrypted)
-            if cookie:
-                from backend.services.tiktok_downloader_svc import scout_douyin_trending
-                return await scout_douyin_trending(cookie, niche, PLATFORM_LIMITS["douyin"])
-            logger.warning("Douyin: no API key or cookie configured")
-            return []
+        elif has_source_provider(platform):
+            provider_result = await search_source_provider(
+                platform,
+                niche,
+                limit=PLATFORM_LIMITS.get(platform, DEFAULT_SEARCH_LIMIT),
+            )
+            if provider_result.status == ProviderStatus.SUCCESS:
+                return provider_result.items
+
+            try:
+                from backend.affiliate.radar.service import record_source_run
+                await asyncio.to_thread(
+                    record_source_run,
+                    platform,
+                    niche,
+                    provider_result.status.value,
+                    records_raw=len(provider_result.items),
+                    error=provider_result.error,
+                )
+            except Exception as radar_err:  # noqa: BLE001
+                logger.warning("Radar source-run recording skipped (non-fatal): %s", radar_err)
+
+            if provider_result.status == ProviderStatus.EMPTY:
+                return []
+            raise SourceProviderError(
+                platform=platform,
+                status=provider_result.status,
+                message=provider_result.error or f"{platform} provider failed",
+            )
 
         else:
             # Generic fallback: use yt-dlp search if the platform supports it.
@@ -797,6 +851,11 @@ class ScoutAgent:
                     "virality_score": r.get("virality_score", 0),
                     "views_per_hour": r.get("views_per_hour"),
                     "outlier_score": r.get("outlier_score"),
+                    "radar_score": r.get("radar_score"),
+                    "radar_confidence": r.get("radar_confidence"),
+                    "radar_velocity_per_hour": r.get("radar_velocity_per_hour"),
+                    "radar_creator_outlier": r.get("radar_creator_outlier"),
+                    "radar_snapshot_count": r.get("radar_snapshot_count"),
                 })
             await db.commit()
         logger.info(
