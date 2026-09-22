@@ -5,6 +5,7 @@ from .service import (
     get_signals_for_keys,
     observe_and_enrich_scout_rows,
     observe_scout_rows,
+    record_source_run,
 )
 
 __all__ = [
@@ -12,4 +13,5 @@ __all__ = [
     "get_signals_for_keys",
     "observe_and_enrich_scout_rows",
     "observe_scout_rows",
+    "record_source_run",
 ]
