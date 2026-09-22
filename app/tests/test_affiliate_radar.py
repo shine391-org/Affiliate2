@@ -5,6 +5,7 @@ import sqlite3
 
 from backend.affiliate.radar.service import (
     CREATOR_BASELINE_MIN_HISTORY,
+    _velocity_per_hour,
     get_signals_for_keys,
     observe_scout_rows,
     record_source_run,
@@ -155,3 +156,41 @@ def test_velocity_uses_controlled_snapshot_interval_without_real_wait():
     signal = get_signals_for_keys([("bilibili", "velocity")], conn)[("bilibili", "velocity")]
     assert signal["radar_velocity_per_hour"] is not None
     assert signal["radar_velocity_per_hour"] > 0
+
+def test_velocity_preserves_legacy_relative_growth_semantics():
+    snapshots = [
+        {"captured_at": "2026-09-22T00:00:00Z", "views": 100},
+        {"captured_at": "2026-09-22T01:00:00Z", "views": 300},
+    ]
+    assert _velocity_per_hour(snapshots) == 2.0
+
+    zero_baseline = [
+        {"captured_at": "2026-09-22T00:00:00Z", "views": 0},
+        {"captured_at": "2026-09-22T02:00:00Z", "views": 120},
+    ]
+    assert _velocity_per_hour(zero_baseline) == 60.0
+
+
+def test_refined_native_success_records_actual_source_keyword_per_platform():
+    conn = _conn()
+    record_source_run("bilibili", "fitness", "EMPTY", conn=conn)
+
+    bili = _row("bilibili", "refined")
+    bili["source_keyword"] = "home workout women"
+    douyin = _row("douyin", "refined")
+    douyin["source_keyword"] = "居家健身"
+
+    observe_scout_rows([bili, douyin], "fitness", conn)
+
+    runs = [
+        tuple(row)
+        for row in conn.execute(
+            "SELECT platform, keyword, status FROM source_runs ORDER BY id"
+        ).fetchall()
+    ]
+    assert runs == [
+        ("bilibili", "fitness", "EMPTY"),
+        ("bilibili", "home workout women", "SUCCESS"),
+        ("douyin", "居家健身", "SUCCESS"),
+    ]
+
