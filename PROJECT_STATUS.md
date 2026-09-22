@@ -63,6 +63,17 @@ Build one canonical media/AI/localization path that can take a Radar candidate t
 
 Phase C absorbs the previous "Media + Intelligence" work and the Translate/Dub HQ foundation because those concerns share the same downloader, ASR, AI-provider, transcript, timeline, TTS and render contracts.
 
+Current implementation state:
+
+- C0 donor/source audit: COMPLETE
+- C1 media quality foundation: IMPLEMENTED / QA PENDING
+- C2 AI + local/OpenAI-compatible provider controls: IMPLEMENTED / QA PENDING
+- C3 Localization Profiles: IMPLEMENTED / QA PENDING
+- C4 canonical transcript/timeline contract: IMPLEMENTED / QA PENDING
+- next implementation gate: C5 ASR convergence
+
+C1–C4 intentionally reuse existing app/job/storage/provider primitives. Legacy Radar intelligence media/AI paths remain transitional until C12 parity; they are not new Phase-C runtime architecture.
+
 Primary outcomes:
 
 1. source-quality-aware canonical media ingestion

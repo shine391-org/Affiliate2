@@ -49,6 +49,28 @@ Include frontend production build and stable local runtime smoke.
 
 Run the broad/full suite before Phase-C merge because shared media/AI infrastructure is cross-cutting.
 
+## C1–C4 implementation handoff
+
+C1–C4 are implemented but are **not QA PASS** until the independent QA agent runs them.
+
+Focused starting point from the `app/` directory:
+
+```powershell
+python -m pytest -q tests/test_download_options.py tests/test_phase_c_media_quality.py tests/test_phase_c_render_quality.py tests/test_ai_provider.py tests/test_phase_c_localization_profiles.py tests/test_phase_c_localization_timeline.py
+npm --prefix frontend run build
+```
+
+Also smoke the Settings API/UI for:
+
+- switching cloud providers requires the new provider's key
+- switching cloud → Ollama/LM Studio/vLLM does not send/reuse the old cloud secret
+- compatible/local model discovery and connection-test failure/success states
+- localization profile create/update/default/delete
+- upgraded SQLite database receives the two additive JSON columns
+- a real download with default quality records actual source media metadata
+
+Do not infer runtime PASS from the implementation commits alone.
+
 ## Required automated assertions
 
 ### Media/source quality

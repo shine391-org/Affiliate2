@@ -2,7 +2,7 @@
 
 ## Status
 
-**STARTED — C0 COMPLETE**
+**STARTED — C0 COMPLETE; C1–C4 IMPLEMENTED / QA PENDING**
 
 Branch:
 `phase-c-media-ai-hq-localization`
@@ -11,7 +11,9 @@ C0 donor/source audit:
 `docs/PHASE_C_C0_DONOR_AUDIT.md`
 
 Next implementation gate:
-**C1 — Media Quality Foundation**
+**C5 — ASR Convergence**
+
+Independent QA should review C1–C4 before C5 is treated as a mergeable milestone.
 
 ## Product goal
 
@@ -62,7 +64,16 @@ C0 established these implementation rules:
 - keep MoneyPrinterTurbo out of Phase-C runtime
 - apply Ponytail to architecture size only: a deferred capability becomes required when the defined quality gate fails
 
-### C1 — Media quality foundation
+### C1 — Media quality foundation — IMPLEMENTED / QA PENDING
+
+Implementation:
+
+- default yt-dlp selection is source-best-first instead of 720p-first
+- explicit 2160/1440/1080/720/480 choices are hard maximum heights with fallback remaining inside the selected cap
+- actual on-disk source properties are probed with ffprobe and persisted as one JSON metadata payload
+- Draft / Balanced / HQ H.264 render profiles share one encoder-argument helper
+- aspect conversion and caption burn now use the shared render profile vocabulary; localization can request HQ without changing every legacy tool default
+- legacy `src/radar/intel/media.py` remains only because legacy Candidate Intelligence has not reached C12 parity; it is not the canonical Phase-C localization downloader and must be removed with that legacy pipeline after parity
 
 Requirements:
 
@@ -75,7 +86,17 @@ Requirements:
 - minimize repeated lossy video encodes
 - define Draft / Balanced / HQ render profiles
 
-### C2 — AI provider + local AI
+### C2 — AI provider + local AI — IMPLEMENTED / QA PENDING
+
+Implementation:
+
+- retained the existing `AIClient` and OpenAI-compatible transport; no LiteLLM/provider framework added
+- added Ollama / LM Studio / vLLM presets over that same compatible transport
+- added Base URL persistence, free-form model ID, model discovery and connection test
+- cloud/local provider switching clears stale stored credentials unless a replacement key is explicitly supplied
+- local presets never inherit a stale cloud secret
+- frontend registry is suggestions only, not an allowlist
+- the legacy intelligence AI path remains until C12 parity rather than being deleted early
 
 Complete one canonical provider layer.
 
@@ -101,7 +122,16 @@ Static model lists are suggestions, not hard gates.
 
 Remove the duplicate direct AI HTTP client only after feature parity.
 
-### C3 — Localization Profiles
+### C3 — Localization Profiles — IMPLEMENTED / QA PENDING
+
+Implementation:
+
+- profiles are validated Pydantic data and persisted as one JSON payload on `user_settings`; no new profile table was introduced
+- default `vi-affiliate-hq` profile uses best download quality, best ASR, HQ render and strict QC
+- profile CRUD/default-selection API is available
+- profile count, prompt length and glossary size are bounded
+- AI/TTS secrets are not duplicated into profiles
+- C9 will copy the effective profile into the existing Job input/config snapshot when localization jobs are introduced; that job-level snapshot is intentionally not a second persistence system
 
 A profile is reusable configuration, not per-video form state.
 
@@ -128,7 +158,16 @@ Initial translation presets:
 - Literal
 - Custom
 
-### C4 — Canonical transcript/timeline
+### C4 — Canonical transcript/timeline — IMPLEMENTED / QA PENDING
+
+Implementation:
+
+- `LocalizationSegment` has distinct source and target coordinates plus translation/timing/QC state
+- malformed, negative or non-finite source timestamps fail explicitly instead of becoming fake zero timestamps
+- source-language word timings remain source data and are never reused as target-language caption words
+- downloaded subtitle segments are now retained alongside subtitle text so a valid timed source transcript is not thrown away
+- existing raw Whisper/subtitle storage remains backward-compatible; C6+ canonicalizes it on entry rather than duplicating every historical transcript
+- no speculative public API surface or second segment table was added; target-language segment persistence attaches to the localization job/artifact path when C6/C9 introduces those jobs
 
 Create/normalize a durable localization segment contract.
 
