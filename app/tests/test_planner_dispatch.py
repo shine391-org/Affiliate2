@@ -369,6 +369,27 @@ class TestPhaseBPlannerIntegration:
 
 
 @pytest.mark.asyncio
+async def test_string_platform_payload_is_treated_as_one_platform(bus, monkeypatch):
+    from types import SimpleNamespace
+
+    seen = {}
+
+    async def fake_create_job(job_type, user_id, input_data):
+        seen.update(input_data)
+        return SimpleNamespace(id="job-string-platform")
+
+    monkeypatch.setattr("backend.agents.job_helper.create_job", fake_create_job)
+
+    await PlannerAgent()._check_and_start_scout(
+        {"niche": "健身", "platforms": "Douyin"},
+        None,
+        "local",
+    )
+
+    assert seen["platforms"] == ["douyin"]
+
+
+@pytest.mark.asyncio
 async def test_douyin_scout_starts_without_legacy_credentials(bus):
     agent = PlannerAgent()
     await agent._check_and_start_scout(
