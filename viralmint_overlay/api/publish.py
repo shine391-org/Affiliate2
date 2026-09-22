@@ -119,9 +119,11 @@ def youtube_callback(
     try:
         youtube_exchange_code(_publish_store(), state, code)
     except Exception as exc:
-        # Keep provider detail out of the HTML body; the local operator only
-        # needs a clear retry instruction.
-        raise HTTPException(status_code=400, detail=f"YouTube connect failed: {exc}") from exc
+        # Never echo OAuth provider details/tokens/codes into the browser.
+        raise HTTPException(
+            status_code=400,
+            detail="YouTube connect failed. Check OAuth client and redirect configuration, then retry.",
+        ) from exc
 
     return HTMLResponse(
         """
