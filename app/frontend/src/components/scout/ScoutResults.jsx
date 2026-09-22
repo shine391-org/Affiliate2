@@ -158,7 +158,9 @@ export default function ScoutResults({ results, onSelect, onRefresh }) {
                 </Stack>
               ) : (
                 <Typography variant="body2" sx={{ color: "text.secondary" }}>
-                  {selectedResult.author} &middot; {selectedResult.platform} &middot; <VisibilityIcon sx={{ fontSize: 14, verticalAlign: "middle", mr: 0.3 }} />{selectedResult.views?.toLocaleString()} &middot; Score: {selectedResult.virality_score}
+                  {selectedResult.author} &middot; {selectedResult.platform} &middot; <VisibilityIcon sx={{ fontSize: 14, verticalAlign: "middle", mr: 0.3 }} />{selectedResult.views?.toLocaleString()} &middot; Viral: {selectedResult.virality_score}
+                  {selectedResult.radar_score != null && ` · Radar: ${Number(selectedResult.radar_score).toFixed(1)}`}
+                  {selectedResult.radar_creator_outlier != null && ` · Creator: ${Number(selectedResult.radar_creator_outlier).toFixed(1)}x`}
                 </Typography>
               )}
             </Box>

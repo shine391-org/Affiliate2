@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (c) 2025-2026 ViralMint Contributors
 """REST /api/scout — start scouting + retrieve results."""
+import asyncio
 import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -56,35 +57,42 @@ async def get_scout_results(
             count_query = count_query.where(ScoutResult.job_id == job_id)
         total = (await db.execute(count_query)).scalar()
 
-    return {
-        "total": total,
-        "results": [
-            {
-                "id": r.id,
-                "platform": r.platform,
-                "video_id": r.video_id,
-                "video_url": r.video_url,
-                "embed_url": r.embed_url,
-                "title": r.title,
-                "description": r.description,
-                "author": r.author,
-                "author_url": r.author_url,
-                "thumbnail_url": r.thumbnail_url,
-                "views": r.views,
-                "likes": r.likes,
-                "comments": r.comments,
-                "shares": r.shares,
-                "duration_seconds": r.duration_seconds,
-                "upload_date": r.upload_date.isoformat() if r.upload_date else None,
-                "virality_score": r.virality_score,
-                "niche": r.niche,
-                "is_downloaded": r.is_downloaded,
-                "is_analyzed": r.is_analyzed,
-                "created_at": r.created_at.isoformat() if r.created_at else None,
-            }
-            for r in results
-        ],
-    }
+    payload = [
+        {
+            "id": r.id,
+            "platform": r.platform,
+            "video_id": r.video_id,
+            "video_url": r.video_url,
+            "embed_url": r.embed_url,
+            "title": r.title,
+            "description": r.description,
+            "author": r.author,
+            "author_url": r.author_url,
+            "thumbnail_url": r.thumbnail_url,
+            "views": r.views,
+            "likes": r.likes,
+            "comments": r.comments,
+            "shares": r.shares,
+            "duration_seconds": r.duration_seconds,
+            "upload_date": r.upload_date.isoformat() if r.upload_date else None,
+            "virality_score": r.virality_score,
+            "views_per_hour": r.views_per_hour,
+            "outlier_score": r.outlier_score,
+            "niche": r.niche,
+            "is_downloaded": r.is_downloaded,
+            "is_analyzed": r.is_analyzed,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in results
+    ]
+
+    try:
+        from backend.affiliate.radar.service import enrich_scout_payload
+        payload = await asyncio.to_thread(enrich_scout_payload, payload)
+    except Exception as exc:  # Radar is enrichment, not an API availability dependency.
+        logger.warning("Scout Radar API enrichment skipped: %s", exc)
+
+    return {"total": total, "results": payload}
 
 
 @router.get("/scout/results/{result_id}")
@@ -94,7 +102,7 @@ async def get_scout_result(result_id: str):
         r = result.scalar_one_or_none()
     if not r:
         raise HTTPException(status_code=404, detail="Scout result not found")
-    return {
+    payload = {
         "id": r.id,
         "platform": r.platform,
         "video_id": r.video_id,
@@ -103,13 +111,25 @@ async def get_scout_result(result_id: str):
         "title": r.title,
         "description": r.description,
         "author": r.author,
+        "author_url": r.author_url,
         "thumbnail_url": r.thumbnail_url,
         "views": r.views,
         "likes": r.likes,
         "comments": r.comments,
+        "shares": r.shares,
+        "duration_seconds": r.duration_seconds,
+        "upload_date": r.upload_date.isoformat() if r.upload_date else None,
         "virality_score": r.virality_score,
+        "views_per_hour": r.views_per_hour,
+        "outlier_score": r.outlier_score,
         "niche": r.niche,
     }
+    try:
+        from backend.affiliate.radar.service import enrich_scout_payload
+        payload = (await asyncio.to_thread(enrich_scout_payload, [payload]))[0]
+    except Exception as exc:
+        logger.warning("Scout Radar detail enrichment skipped: %s", exc)
+    return payload
 
 
 class DownloadRequest(BaseModel):
