@@ -73,16 +73,37 @@ Review Queue and Performance are especially important because they prove the exi
 
 Verify built SPA loads at `http://localhost:16888`.
 
-7. Existing tests
+7. Focused tests — REQUIRED
 
-Run the broadest practical test set supported by the local environment. At minimum record:
+Phase A is a source-parity / launcher baseline change. Do NOT run the ~2450-test full suite as a blocking check for every iteration.
 
-- exact pytest command,
-- test count/pass/fail,
-- frontend build result,
-- any tests skipped due to external auth/provider/runtime fixtures.
+Required automated checks:
 
-Do not convert an environment limitation into a fake PASS.
+```powershell
+pytest tests/test_api_tools_router.py tests/test_api_smoke.py
+```
+
+Also run any additional tests directly affected by a Phase A fix.
+
+Required non-pytest checks:
+
+- frontend production build,
+- backend startup/import,
+- dev UI smoke,
+- stable-mode UI smoke,
+- source parity.
+
+Full test suite — OPTIONAL / milestone only:
+
+Run the complete suite only when:
+- preparing the final consolidation merge/release,
+- shared core/database behavior changed,
+- focused tests expose a cross-cutting regression,
+- or CI/background execution is convenient.
+
+A long full-suite run is not a Phase A blocker when no broad runtime behavior was changed.
+
+Always record exactly what was run. Do not convert untested behavior into PASS.
 
 ## Failure conditions
 
