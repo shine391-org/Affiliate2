@@ -132,7 +132,13 @@ async def test_douyin_picks_logged_in_context_by_existing_page_not_context_zero(
     class Browser:
         contexts = [first, second]
 
-    context, page, created = await provider._pick_context_and_page(Browser())
+    with patch.object(
+        DouyinProvider,
+        "_session_state",
+        new=AsyncMock(return_value=(True, {"LOGIN_STATUS": "1"}, None)),
+    ):
+        context, page, created = await provider._pick_context_and_page(Browser())
+
     assert context is second
     assert page is second_page
     assert created is False
@@ -177,4 +183,48 @@ async def test_douyin_skips_logged_out_douyin_context_for_later_authenticated_on
     assert page is second_page
     assert created is False
     assert session_state.await_count == 2
+
+@pytest.mark.asyncio
+async def test_douyin_unusable_context_does_not_abort_remaining_contexts():
+    provider = DouyinProvider()
+
+    class Page:
+        def __init__(self, url=""):
+            self.url = url
+            self.closed = False
+
+        async def goto(self, *args, **kwargs):
+            self.url = "https://www.douyin.com/"
+
+        async def close(self):
+            self.closed = True
+
+    class BrokenContext:
+        pages = []
+
+        async def new_page(self):
+            raise RuntimeError("context closed")
+
+    good_page = Page()
+
+    class GoodContext:
+        pages = []
+
+        async def new_page(self):
+            return good_page
+
+    class Browser:
+        contexts = [BrokenContext(), GoodContext()]
+
+    with patch.object(
+        DouyinProvider,
+        "_session_state",
+        new=AsyncMock(return_value=(True, {"LOGIN_STATUS": "1"}, None)),
+    ):
+        context, page, created = await provider._pick_context_and_page(Browser())
+
+    assert isinstance(context, GoodContext)
+    assert page is good_page
+    assert created is True
+    assert good_page.closed is False
 
