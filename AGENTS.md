@@ -79,6 +79,12 @@ MediaCrawler is donor/reference code. Long-term it must not remain a second appl
 10. **Evidence-driven QA.**
     Passing unit tests is not proof of product behavior. Report exactly what was run, what output was inspected, and what was not tested.
 
+11. **Use tiered tests; do not run the full suite on every change.**
+    - Tier 1 — every small change: directly affected tests + import/build/smoke checks. Target: seconds to a few minutes.
+    - Tier 2 — phase/module gate: affected module/integration tests + relevant UI/runtime smoke. Target: a few minutes.
+    - Tier 3 — full suite: only before a major merge/release, after broad shared-core/DB changes, or when diagnosing cross-cutting regressions. Long full-suite runs should be background/CI work, never the default inner loop.
+    - A 20–30 minute suite is NOT required for a docs, source-parity, launcher, or narrowly scoped frontend fix when focused tests prove the changed surface.
+
 ## Branch/change protocol
 
 - Never develop directly on `workspace-sync-2026-09`; it is a snapshot baseline.
