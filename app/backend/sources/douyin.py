@@ -61,8 +61,8 @@ def _duration_seconds(value: Any) -> int | None:
         duration = int(value)
     except (TypeError, ValueError):
         return None
-    # Douyin aweme.video.duration is normally milliseconds.
-    return max(round(duration / 1000), 0) if duration > 1000 else max(duration, 0)
+    # Douyin aweme.video.duration is milliseconds, including exactly 1000ms.
+    return max(round(duration / 1000), 0)
 
 
 def _random_webid() -> str:
@@ -90,12 +90,13 @@ class DouyinProvider:
                 "CDP browser has no reusable context. Start Edge/Chrome with "
                 "--remote-debugging-port=9222 and log in to Douyin."
             )
+
+        for context in contexts:
+            for page in context.pages:
+                if "douyin.com" in (page.url or ""):
+                    return context, page, False
+
         context = contexts[0]
-
-        for page in context.pages:
-            if "douyin.com" in (page.url or ""):
-                return context, page, False
-
         page = await context.new_page()
         await page.goto(DOUYIN_HOST, wait_until="domcontentloaded", timeout=60_000)
         return context, page, True
