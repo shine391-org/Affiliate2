@@ -109,6 +109,9 @@ export default function PublishGate({ detail }) {
   const publish = async (platform) => {
     if (!title.trim()) return setError("Title is required before publishing.")
     if (platform === "youtube" && !audience) return setError("Choose the YouTube audience setting first.")
+    const target = platform === "youtube" ? "YouTube" : "Facebook Page"
+    const extra = platform === "youtube" ? " (" + privacy + ")" : ""
+    if (!window.confirm("Publish this approved final to " + target + extra + " now?")) return
     setError("")
     try {
       const url = "/api/publish/candidates/" + encodeURIComponent(detail.platform) + "/" + encodeURIComponent(detail.content_id)
