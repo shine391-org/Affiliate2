@@ -297,8 +297,20 @@ class BilibiliProvider:
                 f"Bilibili API code {code}: {payload.get('message') or 'unknown error'}"
             )
 
-        result = payload.get("data", {}).get("result", [])
-        return result if isinstance(result, list) else []
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            raise RuntimeError("Bilibili search returned an unexpected data envelope")
+
+        voucher = data.get("v_voucher") or payload.get("v_voucher")
+        if voucher:
+            raise PermissionError("Bilibili search returned a risk-control voucher/challenge")
+
+        if "result" not in data:
+            raise RuntimeError("Bilibili search response missing data.result")
+        result = data.get("result")
+        if not isinstance(result, list):
+            raise RuntimeError("Bilibili search data.result is not a list")
+        return result
 
     async def _get_wbi_keys(self, client: httpx.AsyncClient) -> tuple[str, str]:
         response = await client.get(BILIBILI_NAV_URL, timeout=15)
