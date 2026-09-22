@@ -18,7 +18,10 @@ def test_default_profile_is_hq_and_quality_first():
     profile = store.profiles[0]
     assert profile.id == store.default_profile_id
     assert profile.download_quality == "best"
+    assert profile.asr_provider == "faster_whisper"
+    assert profile.asr_model is None
     assert profile.asr_quality == "best"
+    assert profile.timing_policy == "safe_fit"
     assert profile.render_profile == "hq"
     assert profile.qc_profile == "strict"
 
@@ -73,3 +76,16 @@ def test_profile_rejects_unbounded_glossary():
 def test_corrupt_store_falls_back_instead_of_bricking_settings():
     assert load_profile_store("{not json").profiles
     assert load_profile_store(json.dumps({"profiles": []})).profiles
+
+
+def test_profile_accepts_explicit_asr_model_and_strict_timing():
+    profile = LocalizationProfile(
+        id="accurate-local",
+        name="Accurate Local",
+        asr_provider="faster_whisper",
+        asr_model="large-v3",
+        asr_quality="best",
+        timing_policy="strict",
+    )
+    assert profile.asr_model == "large-v3"
+    assert profile.timing_policy == "strict"

@@ -127,7 +127,7 @@ Remove the duplicate direct AI HTTP client only after feature parity.
 Implementation:
 
 - profiles are validated Pydantic data and persisted as one JSON payload on `user_settings`; no new profile table was introduced
-- default `vi-affiliate-hq` profile uses best download quality, best ASR, HQ render and strict QC
+- default `vi-affiliate-hq` profile uses best download quality, faster-whisper ASR with optional explicit model override, safe-fit timing, HQ render and strict QC
 - profile CRUD/default-selection API is available
 - profile count, prompt length and glossary size are bounded
 - AI/TTS secrets are not duplicated into profiles

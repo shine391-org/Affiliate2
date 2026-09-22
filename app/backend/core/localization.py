@@ -22,6 +22,8 @@ class LocalizationProfile(BaseModel):
     name: str
 
     download_quality: Literal["best", "2160p", "1440p", "1080p", "720p", "480p"] = "best"
+    asr_provider: Literal["faster_whisper"] = "faster_whisper"
+    asr_model: str | None = None
     asr_quality: Literal["fast", "balanced", "accurate", "best"] = "best"
 
     # None = inherit the global AI/TTS setting. This avoids duplicating keys or
@@ -39,6 +41,7 @@ class LocalizationProfile(BaseModel):
     tts_voice: str | None = None
     tts_rate_policy: Literal["auto", "natural", "strict"] = "auto"
 
+    timing_policy: Literal["safe_fit", "strict"] = "safe_fit"
     timing_tolerance_ms: int = Field(default=250, ge=0, le=2000)
     preserve_background: bool = True
     background_gain_db: float = Field(default=-6.0, ge=-40.0, le=6.0)
