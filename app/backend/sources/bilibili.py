@@ -50,6 +50,22 @@ def _clean_text(value: Any) -> str:
     return _TAG_RE.sub("", text).strip()
 
 
+def _optional_metric_int(value: Any) -> int | None:
+    if value is None or value == "" or value == "--":
+        return None
+    try:
+        if isinstance(value, str):
+            text = value.strip().lower().replace(",", "")
+            multipliers = {"万": 10_000, "亿": 100_000_000, "k": 1_000, "m": 1_000_000}
+            for suffix, multiplier in multipliers.items():
+                if text.endswith(suffix):
+                    return max(int(float(text[:-len(suffix)]) * multiplier), 0)
+            return max(int(float(text)), 0)
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return None
+
+
 def _metric_int(value: Any) -> int:
     """Best-effort Bilibili metric coercion for Scout cards.
 
@@ -153,6 +169,12 @@ class BilibiliProvider:
         except (TypeError, ValueError, OSError):
             upload_date = None
 
+        radar_views = _optional_metric_int(_first_present(raw, "play", "video_review"))
+        radar_likes = _optional_metric_int(raw.get("like"))
+        radar_comments = _optional_metric_int(_first_present(raw, "danmaku", "video_danmaku"))
+        radar_shares = _optional_metric_int(_first_present(raw, "share", "share_count"))
+        radar_favorites = _optional_metric_int(_first_present(raw, "favorites", "collect_count"))
+
         return {
             "platform": self.platform,
             "requested_platform": self.platform,
@@ -165,11 +187,18 @@ class BilibiliProvider:
             "author_url": f"https://space.bilibili.com/{mid}" if mid else "",
             "creator_id": mid or None,
             "thumbnail_url": _image_url(raw.get("pic") or raw.get("thumbnail")),
-            "views": _metric_int(_first_present(raw, "play", "video_review")),
-            "likes": _metric_int(raw.get("like")),
-            "comments": _metric_int(_first_present(raw, "danmaku", "video_danmaku")),
-            "shares": _metric_int(_first_present(raw, "share", "share_count")),
-            "favorites": _metric_int(_first_present(raw, "favorites", "collect_count")),
+            "views": radar_views or 0,
+            "likes": radar_likes or 0,
+            "comments": radar_comments or 0,
+            "shares": radar_shares or 0,
+            "favorites": radar_favorites or 0,
+            "radar_metrics": {
+                "views": radar_views,
+                "likes": radar_likes,
+                "comments": radar_comments,
+                "shares": radar_shares,
+                "favorites": radar_favorites,
+            },
             "duration_seconds": _duration_seconds(raw.get("duration")),
             "upload_date": upload_date,
             "source_keyword": query,
@@ -201,6 +230,9 @@ class BilibiliProvider:
             if bvid
             else f"https://www.bilibili.com/video/av{video_id}"
         )
+        radar_views = _optional_metric_int(raw.get("play"))
+        radar_comments = _optional_metric_int(raw.get("video_review"))
+
         return {
             "platform": self.platform,
             "requested_platform": self.platform,
@@ -213,11 +245,18 @@ class BilibiliProvider:
             "author_url": f"https://space.bilibili.com/{mid}" if mid else "",
             "creator_id": mid or None,
             "thumbnail_url": _image_url(raw.get("pic")),
-            "views": _metric_int(raw.get("play")),
+            "views": radar_views or 0,
             "likes": 0,
-            "comments": _metric_int(raw.get("video_review")),
+            "comments": radar_comments or 0,
             "shares": 0,
             "favorites": 0,
+            "radar_metrics": {
+                "views": radar_views,
+                "likes": None,
+                "comments": radar_comments,
+                "shares": None,
+                "favorites": None,
+            },
             "duration_seconds": _duration_seconds(raw.get("length")),
             "upload_date": upload_date,
             "source_keyword": f"creator:{creator_id}",

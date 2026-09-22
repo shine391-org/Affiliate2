@@ -262,6 +262,15 @@ class ScoutAgent:
 
         logger.info("SCOUT collected %d raw results from %d platforms", len(all_results), len(platforms))
 
+        # Affiliate2 Radar records repeated observations for native providers
+        # and enriches rows with longitudinal signals. Best-effort only:
+        # Radar must never discard already-collected Scout results.
+        try:
+            from backend.affiliate.radar.service import observe_and_enrich_scout_rows
+            await asyncio.to_thread(observe_and_enrich_scout_rows, all_results, niche)
+        except Exception as radar_err:  # noqa: BLE001
+            logger.warning("Radar observation/enrichment skipped (non-fatal): %s", radar_err)
+
         # Enrich YouTube results with real outlier detection (batch channel
         # baselines). Enrichment is a bonus, never a dependency — a bug here
         # must not fail a scout that already collected results (rule #10; a
@@ -820,6 +829,11 @@ class ScoutAgent:
                     "virality_score": r.get("virality_score", 0),
                     "views_per_hour": r.get("views_per_hour"),
                     "outlier_score": r.get("outlier_score"),
+                    "radar_score": r.get("radar_score"),
+                    "radar_confidence": r.get("radar_confidence"),
+                    "radar_velocity_per_hour": r.get("radar_velocity_per_hour"),
+                    "radar_creator_outlier": r.get("radar_creator_outlier"),
+                    "radar_snapshot_count": r.get("radar_snapshot_count"),
                 })
             await db.commit()
         logger.info(
