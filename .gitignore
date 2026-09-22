@@ -44,8 +44,3 @@ douyin_cookies.txt
 .env
 data/*profile*/
 
-# Upstream local clones retained only during migration.
-# Anchored to repo root so these rules do NOT match nested source
-# directories like app/frontend/src/pages/tools/.
-/tools/
-/storage/
