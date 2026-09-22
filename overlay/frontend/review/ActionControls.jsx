@@ -42,6 +42,7 @@ export default function ActionControls({
   job,
   busy,
   onRun,
+  onCancel,
 }) {
   const resolved = rerender ? (previousAction || "remake") : actionType
   const active = job && ["pending", "running"].includes(job.status)
@@ -139,15 +140,22 @@ export default function ActionControls({
             </Box>
           )}
 
-          <Button
-            variant="contained"
-            color={rerender ? "warning" : "primary"}
-            startIcon={rerender ? <ReplayOutlinedIcon /> : <PlayArrowOutlinedIcon />}
-            onClick={onRun}
-            disabled={active || busy}
-          >
-            {rerender ? "Rerender" : (resolved === "translate" ? "Run Translate / Dub" : "Run Creative Remake")}
-          </Button>
+          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+            <Button
+              variant="contained"
+              color={rerender ? "warning" : "primary"}
+              startIcon={rerender ? <ReplayOutlinedIcon /> : <PlayArrowOutlinedIcon />}
+              onClick={onRun}
+              disabled={active || busy}
+            >
+              {rerender ? "Rerender" : (resolved === "translate" ? "Run Translate / Dub" : "Run Creative Remake")}
+            </Button>
+            {active && onCancel && (
+              <Button variant="outlined" color="error" onClick={onCancel} disabled={busy}>
+                Cancel
+              </Button>
+            )}
+          </Stack>
         </Stack>
       </CardContent>
     </Card>
