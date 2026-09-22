@@ -25,6 +25,7 @@ import pytest
 
 from backend.agents.scout import MAX_PLATFORMS_PER_SCOUT, ScoutAgent, compute_virality_score
 from backend.database import init_db
+from backend.sources import ProviderStatus, SourceProviderError
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -204,6 +205,44 @@ class TestPartialFailure:
 
         _run(niche="enrich-fail", plats=["youtube"])
         assert asyncio.run(_saved_count("enrich-fail")) == 1
+
+
+class TestNativeRetryFailure:
+    def test_refined_native_provider_failure_is_reported(self, bus, monkeypatch):
+        calls = []
+
+        async def fake_scout_platform(self, platform, niche, user_settings, user_id="local"):
+            calls.append((platform, niche))
+            if niche == "fitness":
+                return []
+            raise SourceProviderError(
+                platform=platform,
+                status=ProviderStatus.AUTH_REQUIRED,
+                message="session expired",
+            )
+
+        async def refine(platform, niche, user_settings):
+            return "home workout"
+
+        monkeypatch.setattr(ScoutAgent, "_scout_platform", fake_scout_platform)
+        monkeypatch.setattr("backend.core.ai_retry.ai_refine_search", refine)
+        monkeypatch.setattr(
+            ScoutAgent,
+            "_enrich_with_outlier_scores",
+            lambda *args, **kwargs: _noop_async(),
+        )
+
+        _run(niche="fitness", plats=["douyin"])
+
+        assert calls == [("douyin", "fitness"), ("douyin", "home workout")]
+        assert any(
+            w["constraint"] == "douyin_provider_auth_required"
+            for w in bus["warnings"]
+        )
+
+
+async def _noop_async():
+    return None
 
 
 class TestEmptyResultRetry:
