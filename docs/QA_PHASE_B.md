@@ -74,3 +74,26 @@ Phase B is ready when:
 - Radar observations/ranking run from canonical app flow
 - Scout exposes the integrated results
 - focused QA passes
+
+
+## Combined final Phase-B gate
+
+Run B1–B5 as one QA pass after implementation is complete.
+
+Required focused automated tests should include:
+
+- `app/tests/test_source_providers.py`
+- `app/tests/test_douyin_source_provider.py`
+- `app/tests/test_affiliate_radar.py`
+- `app/tests/test_scout_radar_enrichment.py`
+- existing Scout regressions directly affected by provider dispatch
+
+Also require:
+
+- frontend production build
+- one real Bilibili keyword query if network permits
+- one real Douyin keyword query through the local authenticated CDP browser
+- repeated observation check proving snapshot append + velocity availability after sufficient interval/data
+- Scout API/UI smoke showing Radar fields for native-provider rows
+
+Do not run the whole project suite unless a focused failure suggests a cross-cutting regression.

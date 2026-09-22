@@ -45,9 +45,9 @@ YTDLP_SEARCH_PLATFORMS = {
     "niconico": "nicosearch",
 }
 
-# Universal fallback: search YouTube for "{platform} {niche}" content
-# This catches Bilibili, Instagram, Vimeo, etc. — surprisingly effective
-# because creators often cross-post or discuss other platforms' content
+# Universal legacy fallback: search YouTube for "{platform} {niche}" content
+# for platforms without an app-native provider or yt-dlp search extractor.
+# Bilibili and Douyin never use this cross-platform fallback.
 FALLBACK_SEARCH_PREFIX = "ytsearch"
 
 # Hard cap on platforms per scout run — every entry costs a search (+ possible

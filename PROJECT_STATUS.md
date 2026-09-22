@@ -37,9 +37,11 @@ Progress:
 
 1. app-native provider contract — IMPLEMENTED, QA PENDING
 2. real Bilibili keyword + creator-history provider — IMPLEMENTED, QA PENDING
-3. real Douyin provider using selectively ported platform logic — NEXT
-4. Radar observation/ranking bridge — PLANNED
-5. Scout integration of Radar signals — PLANNED
+3. real Douyin CDP provider — IMPLEMENTED, QA PENDING
+4. Radar observation/ranking bridge — IMPLEMENTED, QA PENDING
+5. Scout Radar signal/API/UI integration — IMPLEMENTED, QA PENDING
+
+Phase B implementation is now ready for ONE combined focused QA pass. No intermediate full-suite gate is required.
 
 Hard rules:
 

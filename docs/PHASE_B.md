@@ -42,7 +42,7 @@ Port selectively from MediaCrawler only where it is stronger.
 
 Do not copy its WebUI/store/global runtime.
 
-### B3 — Douyin provider
+### B3 — Douyin provider — IMPLEMENTED, QA PENDING
 
 Port only the platform-specific pieces required from the captured MediaCrawler implementation:
 
@@ -61,7 +61,7 @@ Affiliate2
 
 The target is an in-process provider callable by the application.
 
-### B4 — Radar observation/ranking bridge
+### B4 — Radar observation/ranking bridge — IMPLEMENTED, QA PENDING
 
 Keep Affiliate2's repeated snapshots.
 
@@ -74,7 +74,7 @@ Fix known identity/baseline issues while porting:
 - snapshot counts must be platform-scoped
 - creator outlier signal compares current content performance against that creator's own historical baseline
 
-### B5 — Scout integration
+### B5 — Scout integration — IMPLEMENTED, QA PENDING
 
 Scout is the visible discovery surface.
 
@@ -115,20 +115,32 @@ Full project suite is milestone/CI-only.
 
 ## Current checkpoint
 
-Implemented on the Phase B branch:
+Phase B implementation is complete and awaiting one combined focused QA pass.
+
+Implemented:
 
 - app-native provider contract and registry
-- explicit provider statuses: SUCCESS / EMPTY / AUTH_REQUIRED / ERROR
-- platform-identity invariant in provider results
-- real Bilibili keyword search using Bilibili API
-- real Bilibili creator-history path with WBI signing
-- Bilibili Scout dispatch uses the native provider
-- native-provider failures are surfaced explicitly and are not rescued with YouTube/AI cross-platform results
-- platform names are normalized to lowercase at the Scout boundary
-- focused provider tests added
+- explicit SUCCESS / EMPTY / AUTH_REQUIRED / ERROR provider status
+- real Bilibili keyword search
+- Bilibili creator-history path with WBI signing
+- real Douyin keyword discovery through the user's existing CDP browser session
+- no canonical MediaCrawler subprocess / JSONL integration
+- no native-provider cross-platform rescue: Douyin/Bilibili failures remain explicit
+- platform names normalized at the Scout boundary
+- app-native Radar observation service using the transitional radar.db
+- content identity scoped by (platform, content_id)
+- creator identity scoped by (platform, creator_id)
+- snapshot counts scoped by platform + content
+- observed velocity from repeated snapshots
+- creator outlier compares the current content with that creator's own same-platform historical median
+- Radar score/confidence/velocity/creator-outlier enrichment in Scout API and live result payload
+- Radar signal chips/column in Scout UI
+- focused tests added for Bilibili, Douyin and Radar behavior
 
-Not yet implemented:
+Phase B intentionally still does NOT:
+- replace the downloader
+- migrate Radar into the ViralMint application DB
+- remove legacy source files before parity is proven
+- change Translate/Remake/Review/Publish/Performance behavior
 
-- Douyin app-native provider
-- Radar bridge into canonical app
-- Scout Radar fields/UI
+One combined Phase-B QA pass should now validate all B1–B5 together.
