@@ -20,6 +20,7 @@ Every platform searcher, the AI retry helper and the WS layer are stubbed.
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -229,7 +230,7 @@ class TestNativeRetryFailure:
         monkeypatch.setattr(
             ScoutAgent,
             "_enrich_with_outlier_scores",
-            lambda *args, **kwargs: _noop_async(),
+            AsyncMock(),
         )
 
         _run(niche="fitness", plats=["douyin"])
@@ -239,10 +240,6 @@ class TestNativeRetryFailure:
             w["constraint"] == "douyin_provider_auth_required"
             for w in bus["warnings"]
         )
-
-
-async def _noop_async():
-    return None
 
 
 class TestEmptyResultRetry:
