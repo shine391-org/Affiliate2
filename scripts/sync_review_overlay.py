@@ -18,6 +18,21 @@ ROOT = Path(__file__).resolve().parents[1]
 VIRALMINT = ROOT / "tools" / "ViralMint"
 
 
+def _registry_kind(path: Path) -> str:
+    """Classify a ViralMint frontend plugin registry without mutating it."""
+    if not path.exists():
+        return "missing"
+    text = path.read_text(encoding="utf-8")
+    if (
+        "export const pluginRoutes = []" in text
+        and "export const pluginNavItems = []" in text
+    ):
+        return "stub"
+    if "CONTENT_ENGINE_REVIEW_OVERLAY" in text:
+        return "ours"
+    return "custom"
+
+
 def sync(force: bool = False) -> None:
     if not (VIRALMINT / "backend" / "core" / "plugins.py").exists():
         raise SystemExit("ViralMint clone not found at tools/ViralMint")
@@ -41,19 +56,6 @@ def sync(force: bool = False) -> None:
     # removed after we stage the JSX plugin registry. But never delete a custom
     # index.js silently: downstream ViralMint installs may already use the plugin seam.
     old_js = VIRALMINT / "frontend" / "src" / "plugins" / "index.js"
-
-    def _registry_kind(path: Path) -> str:
-        if not path.exists():
-            return "missing"
-        text = path.read_text(encoding="utf-8")
-        if (
-            "export const pluginRoutes = []" in text
-            and "export const pluginNavItems = []" in text
-        ):
-            return "stub"
-        if "CONTENT_ENGINE_REVIEW_OVERLAY" in text:
-            return "ours"
-        return "custom"
 
     old_js_kind = _registry_kind(old_js)
     jsx_kind = _registry_kind(plugin_dst)
