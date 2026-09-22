@@ -17,6 +17,12 @@ from backend.models.user_settings import UserSettings
 from backend.core.ws_manager import ws_manager
 from backend.agents.job_helper import update_job_status
 from backend.config import settings
+from backend.sources import (
+    ProviderStatus,
+    SourceProviderError,
+    has_source_provider,
+    search_source_provider,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,14 +31,15 @@ PLATFORM_LIMITS = {
     "youtube": 50,
     "tiktok": 30,
     "douyin": 30,
+    "bilibili": 30,
 }
 
 # Default limit for any platform not listed above
 DEFAULT_SEARCH_LIMIT = 15
 
-# Platforms that can be scouted via yt-dlp search (no API key needed)
-# Maps platform name → yt-dlp search prefix
-# Note: bilisearch requires cookies (412), so Bilibili falls back to ytsearch
+# Platforms that can be scouted via yt-dlp search (no API key needed).
+# App-native providers (currently Bilibili) are handled before this fallback.
+# Maps platform name → yt-dlp search prefix.
 YTDLP_SEARCH_PLATFORMS = {
     "soundcloud": "scsearch",
     "niconico": "nicosearch",
@@ -159,6 +166,7 @@ class ScoutAgent:
         fallback_platforms = [
             p for p in platforms
             if p not in ("youtube", "tiktok", "douyin")
+            and not has_source_provider(p)
             and p not in YTDLP_SEARCH_PLATFORMS
         ]
         if len(fallback_platforms) > 1:
@@ -200,13 +208,25 @@ class ScoutAgent:
             platform = platforms[i]
             if isinstance(result, Exception):
                 logger.warning(f"Scout failed for {platform}: {result}")
+                if isinstance(result, SourceProviderError):
+                    # Native provider failures are authoritative for that platform.
+                    # Do not "rescue" Bilibili with YouTube/AI results and pretend
+                    # the requested source succeeded.
+                    await ws_manager.send_constraint_warning(
+                        constraint=f"{platform}_provider_{result.status.value.lower()}",
+                        message=str(result),
+                        severity="warning",
+                        user_id=user_id,
+                    )
+                    continue
+
                 await ws_manager.send_constraint_warning(
                     constraint=f"{platform}_scout",
                     message=f"Scout failed for {platform}: {result}",
                     severity="warning",
                     user_id=user_id,
                 )
-                # AI fallback: try raw HTTP search when library-based approach throws
+                # Generic legacy fallback remains for non-provider platforms.
                 try:
                     fallback = await self._ai_raw_search_fallback(platform, niche, user_settings)
                     if fallback:
@@ -363,6 +383,22 @@ class ScoutAgent:
                 return await scout_douyin_trending(cookie, niche, PLATFORM_LIMITS["douyin"])
             logger.warning("Douyin: no API key or cookie configured")
             return []
+
+        elif has_source_provider(platform):
+            provider_result = await search_source_provider(
+                platform,
+                niche,
+                limit=PLATFORM_LIMITS.get(platform, DEFAULT_SEARCH_LIMIT),
+            )
+            if provider_result.status == ProviderStatus.SUCCESS:
+                return provider_result.items
+            if provider_result.status == ProviderStatus.EMPTY:
+                return []
+            raise SourceProviderError(
+                platform=platform,
+                status=provider_result.status,
+                message=provider_result.error or f"{platform} provider failed",
+            )
 
         else:
             # Generic fallback: use yt-dlp search if the platform supports it.
