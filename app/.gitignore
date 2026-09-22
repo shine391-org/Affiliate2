@@ -2,8 +2,6 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
-dist/
-build/
 *.egg
 venv/
 .venv/
@@ -16,8 +14,9 @@ viralmint.db
 viralmint.db-wal
 viralmint.db-shm
 
-# Storage
-storage/
+# Storage (generated runtime media cache)
+# Anchored to app root; do NOT match nested source dirs.
+/storage/
 
 # The other DATA_DIR runtime dirs that land at the repo root on a plain
 # `python run.py` (no VIRALMINT_DATA_DIR set). storage/ and the db were
