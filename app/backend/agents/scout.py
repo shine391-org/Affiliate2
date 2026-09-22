@@ -371,20 +371,6 @@ class ScoutAgent:
             logger.warning("TikTok: no API key or cookie configured")
             return []
 
-        elif platform == "douyin":
-            if settings.TIKHUB_API_KEY:
-                from backend.services.tikhub_client import search_douyin
-                return await search_douyin(niche, settings.TIKHUB_API_KEY, PLATFORM_LIMITS["douyin"])
-            from backend.core.crypto import decrypt_safe
-            cookie = ""
-            if user_settings and user_settings.douyin_cookie_encrypted:
-                cookie = decrypt_safe(user_settings.douyin_cookie_encrypted)
-            if cookie:
-                from backend.services.tiktok_downloader_svc import scout_douyin_trending
-                return await scout_douyin_trending(cookie, niche, PLATFORM_LIMITS["douyin"])
-            logger.warning("Douyin: no API key or cookie configured")
-            return []
-
         elif has_source_provider(platform):
             provider_result = await search_source_provider(
                 platform,

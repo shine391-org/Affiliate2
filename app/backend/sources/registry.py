@@ -10,6 +10,10 @@ def get_source_provider(platform: str) -> SourceProvider | None:
         from .bilibili import BilibiliProvider
 
         return BilibiliProvider()
+    if platform == "douyin":
+        from .douyin import DouyinProvider
+
+        return DouyinProvider()
     return None
 
 
