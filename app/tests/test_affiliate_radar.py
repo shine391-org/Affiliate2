@@ -7,6 +7,7 @@ from backend.affiliate.radar.service import (
     CREATOR_BASELINE_MIN_HISTORY,
     get_signals_for_keys,
     observe_scout_rows,
+    record_source_run,
 )
 from backend.affiliate.radar.store import DDL
 
@@ -112,3 +113,45 @@ def test_creator_baseline_unavailable_without_enough_other_content():
         ("bilibili", "current")
     ]
     assert signal["radar_creator_outlier"] is None
+
+
+def test_provider_non_success_run_is_persisted():
+    conn = _conn()
+    record_source_run(
+        "douyin",
+        "健身",
+        "AUTH_REQUIRED",
+        error="CDP login required",
+        conn=conn,
+    )
+    row = conn.execute(
+        "SELECT platform, keyword, status, records_raw, error FROM source_runs"
+    ).fetchone()
+    assert tuple(row[:4]) == ("douyin", "健身", "AUTH_REQUIRED", 0)
+    assert "login required" in row["error"]
+
+
+def test_velocity_uses_controlled_snapshot_interval_without_real_wait():
+    conn = _conn()
+    observe_scout_rows([_row("bilibili", "velocity", views=100, likes=10)], "v1", conn)
+    observe_scout_rows([_row("bilibili", "velocity", views=300, likes=30)], "v2", conn)
+
+    ids = [
+        row["id"] for row in conn.execute(
+            "SELECT id FROM metric_snapshots WHERE platform='bilibili' AND content_id='velocity' ORDER BY id"
+        ).fetchall()
+    ]
+    assert len(ids) == 2
+    conn.execute(
+        "UPDATE metric_snapshots SET captured_at='2026-09-22T00:00:00Z' WHERE id=?",
+        (ids[0],),
+    )
+    conn.execute(
+        "UPDATE metric_snapshots SET captured_at='2026-09-22T00:31:00Z' WHERE id=?",
+        (ids[1],),
+    )
+    conn.commit()
+
+    signal = get_signals_for_keys([("bilibili", "velocity")], conn)[("bilibili", "velocity")]
+    assert signal["radar_velocity_per_hour"] is not None
+    assert signal["radar_velocity_per_hour"] > 0
