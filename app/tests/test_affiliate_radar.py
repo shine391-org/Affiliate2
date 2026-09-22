@@ -23,7 +23,7 @@ def _conn():
     return conn
 
 
-def _row(platform, video_id, creator_id="creator", views=100, likes=10):
+def _row(platform, video_id, creator_id="creator", views=100, likes=10, comments=1):
     return {
         "platform": platform,
         "video_id": video_id,
@@ -33,13 +33,13 @@ def _row(platform, video_id, creator_id="creator", views=100, likes=10):
         "title": video_id,
         "views": views,
         "likes": likes,
-        "comments": 1,
+        "comments": comments,
         "shares": 0,
         "favorites": 0,
         "radar_metrics": {
             "views": views,
             "likes": likes,
-            "comments": 1,
+            "comments": comments,
             "shares": 0,
             "favorites": 0,
         },
@@ -238,12 +238,12 @@ def test_velocity_ranking_uses_legacy_score_not_log_of_hourly_delta(monkeypatch)
     from backend.affiliate.radar import service
 
     conn = _conn()
-    a = _row("bilibili", "slow-big", views=0, likes=0)
-    b = _row("bilibili", "fast-small", views=0, likes=0)
+    a = _row("bilibili", "slow-big", views=0, likes=0, comments=0)
+    b = _row("bilibili", "fast-small", views=0, likes=0, comments=0)
     observe_scout_rows([a, b], "seed", conn)
     observe_scout_rows([
-        _row("bilibili", "slow-big", views=1000, likes=0),
-        _row("bilibili", "fast-small", views=20, likes=0),
+        _row("bilibili", "slow-big", views=1000, likes=0, comments=0),
+        _row("bilibili", "fast-small", views=20, likes=0, comments=0),
     ], "later", conn)
 
     ids = {
