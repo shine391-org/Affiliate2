@@ -1,8 +1,8 @@
 # PROJECT_STATUS.md
 
-## Trạng thái tổng thể: **PHASE 3.3 COMPLETE** ✅
+## Trạng thái tổng thể: **PHASE 3.4 IN PROGRESS** 🚧
 
-Phase 1/2/3.1/3.2/3.3 đã hoàn thành. Human Review Console đã được merge vào master.
+Phase 1/2/3.1/3.2/3.3 đã hoàn thành. Hiện đang thực hiện Phase 3.4 — Review Queue Action Controls.
 
 ---
 
@@ -40,6 +40,23 @@ Kiến trúc: dùng documented ViralMint overlay seam, không fork dashboard và
 - Local source/final MP4 được stream trực tiếp, không duplicate media
 - Không AI call trong review; không publishing trong phase này
 - Chi tiết: `docs/REVIEW_CONSOLE.md`
+
+---
+
+## Phase 3.4 — Review Queue Action Controls (IN PROGRESS 🚧)
+
+Mục tiêu: nối human approval với production thật ngay trong Review Queue, vẫn dùng ViralMint làm media engine.
+
+- `APPROVED_FOR_REMAKE` → **Translate / Dub** hoặc **Creative Remake**
+- `REWORK` → **Rerender**
+- Translate/Dub: Whisper → AI translation → Edge TTS optional → Vietnamese captions
+- Creative Remake: intelligence/transcript → fresh adaptation → segment plan → ViralMint render
+- Human REWORK note được đưa vào prompt khi rerender Creative Remake
+- Dùng ViralMint Job model + heavy-task dispatcher; không tạo job system thứ hai
+- Render vào staging trước, validate xong mới promote thành `final.mp4`
+- Failed/cancelled rerender không thay thế final hiện tại
+- Thành công luôn quay lại `REMAKE_REVIEW`, không auto-approve
+- Chi tiết: `docs/ACTION_CONTROLS.md`
 
 ---
 
@@ -90,4 +107,4 @@ Generic AI provider:     ADAPTER
 
 ## Trạng thái hiện tại
 
-**PHASE 3.3 COMPLETE** — Human Review Console đã QA PASS và merge vào master qua PR #1. Merge commit `e793e15`.
+**PHASE 3.4 IN PROGRESS** — Action controls đã implement trên feature branch, chờ local integration QA trước khi merge.
