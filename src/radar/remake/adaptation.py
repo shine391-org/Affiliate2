@@ -38,7 +38,12 @@ def _load_transcript(candidate_dir: Path) -> dict:
     return json.loads(tx_path.read_text(encoding="utf-8"))
 
 
-def _build_adaptation_prompt(intel: dict, transcript: dict, target_duration: str) -> str:
+def _build_adaptation_prompt(
+    intel: dict,
+    transcript: dict,
+    target_duration: str,
+    review_note: str | None = None,
+) -> str:
     """Build Gemini prompt for creative Vietnamese adaptation."""
     vietnamese_angle = intel.get("vietnamese_angle", {})
     suggested_hook = vietnamese_angle.get("suggested_hook", "")
@@ -86,6 +91,9 @@ Concept: {vietnamese_angle.get('concept', 'N/A')}
 Suggested Hook: {suggested_hook}
 Notes: {angle_notes}
 
+## HUMAN REWORK FEEDBACK
+{review_note.strip() if review_note else "(none — first render)"}
+
 ## TARGET
 - Target duration: {target_duration}
 - Language: Vietnamese (Tiếng Việt)
@@ -101,6 +109,7 @@ Notes: {angle_notes}
 5. Do NOT invent health/weight-loss claims
 6. Script must sound native — spoken Vietnamese short-form
 7. Optimize for 20-60 second vertical video
+8. If HUMAN REWORK FEEDBACK is present, explicitly correct that problem while preserving the strong parts of the previous concept
 
 Respond with JSON only — no markdown, no commentary. Schema:
 
@@ -214,6 +223,7 @@ async def generate_adaptation(
     output_dir: Path,
     target_duration: str = "20-35s",
     use_cache: bool = True,
+    review_note: str | None = None,
 ) -> dict:
     """Generate adaptation.json for a candidate.
 
@@ -222,6 +232,7 @@ async def generate_adaptation(
         output_dir: Path to output directory (data/remakes/<id>/)
         target_duration: Target duration string (e.g. "20-35s", "35-60s")
         use_cache: If True, return cached adaptation.json if it exists
+        review_note: Optional human REWORK feedback. Presence forces a fresh adaptation.
 
     Returns:
         adaptation dict
@@ -229,13 +240,13 @@ async def generate_adaptation(
     output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / "adaptation.json"
 
-    if use_cache and out_path.exists():
+    if use_cache and not review_note and out_path.exists():
         log.info("Using cached adaptation: %s", out_path)
         return json.loads(out_path.read_text(encoding="utf-8"))
 
     intel = _load_intelligence(candidate_dir)
     transcript = _load_transcript(candidate_dir)
-    prompt = _build_adaptation_prompt(intel, transcript, target_duration)
+    prompt = _build_adaptation_prompt(intel, transcript, target_duration, review_note=review_note)
 
     log.info("Calling Gemini for adaptation: %s", candidate_dir.name)
     adaptation = await _call_gemini(prompt)
