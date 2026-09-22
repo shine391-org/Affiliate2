@@ -13,7 +13,7 @@ from ..publish_service import (
     youtube_authorization_url,
     youtube_exchange_code,
 )
-from ..publish_store import PublishStore
+from ..publish_store import PublishStore, PublishValidationError
 from ..review_store import ReviewStore, ReviewValidationError
 
 router = APIRouter(prefix="/publish", tags=["content-publish"])
@@ -74,7 +74,7 @@ async def publish_candidate(
             privacy=request.privacy,
             made_for_kids=request.made_for_kids,
         )
-    except PublishActionError as exc:
+    except (PublishActionError, PublishValidationError) as exc:
         status = 409 if "already" in str(exc).lower() else 400
         raise HTTPException(status_code=status, detail=str(exc)) from exc
     except (ReviewValidationError, KeyError) as exc:
