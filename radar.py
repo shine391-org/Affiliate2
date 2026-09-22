@@ -381,6 +381,93 @@ def cmd_analyze(args) -> int:
     return 0 if summary["intelligence_errors"] == 0 else 2
 
 
+def cmd_performance(args) -> int:
+    """Export observed post-publication performance evidence (Phase 4)."""
+    from viralmint_overlay.performance_service import build_feedback_summary
+    from viralmint_overlay.performance_store import PerformanceStore
+    from viralmint_overlay.review_store import ReviewStore
+
+    summary = build_feedback_summary(PerformanceStore(), ReviewStore())
+    fmt = args.format or "json"
+
+    if fmt == "json":
+        output = json.dumps(summary, ensure_ascii=False, indent=2)
+    else:
+        lines = [
+            "# Performance Feedback",
+            "",
+            f"_Generated: {summary['generated_at']}_",
+            "",
+            f"Published posts: {summary['published_posts']}",
+            f"Posts with metrics: {summary['posts_with_metrics']}",
+            "",
+            "## Posts",
+            "",
+            "| Platform | Source | Title | Views | Likes | Comments | Shares | ER | Velocity/h |",
+            "|---|---|---|---:|---:|---:|---:|---:|---:|",
+        ]
+        for post in summary["posts"]:
+            latest = post.get("latest_metrics") or {}
+            derived = post.get("derived") or {}
+            er = derived.get("engagement_rate")
+            vel = derived.get("view_velocity_per_hour")
+            lines.append(
+                "| {platform} | {source_platform}:{content_id} | {title} | {views} | {likes} | "
+                "{comments} | {shares} | {er} | {vel} |".format(
+                    platform=post.get("platform") or "-",
+                    source_platform=post.get("source_platform") or "-",
+                    content_id=post.get("content_id") or "-",
+                    title=(post.get("title") or "-").replace("|", "\\|")[:60],
+                    views=latest.get("views") if latest.get("views") is not None else "-",
+                    likes=latest.get("likes") if latest.get("likes") is not None else "-",
+                    comments=latest.get("comments") if latest.get("comments") is not None else "-",
+                    shares=latest.get("shares") if latest.get("shares") is not None else "-",
+                    er=f"{er:.4f}" if er is not None else "-",
+                    vel=f"{vel:.1f}" if vel is not None else "-",
+                )
+            )
+
+        lines += ["", "## Observed patterns", ""]
+        if summary["patterns"]:
+            lines += [
+                "| Distribution platform | Dimension | Value | n | Avg views | Avg ER | Avg velocity/h |",
+                "|---|---|---|---:|---:|---:|---:|",
+            ]
+            for p in summary["patterns"]:
+                av = p.get("avg_views")
+                ae = p.get("avg_engagement_rate")
+                vv = p.get("avg_view_velocity_per_hour")
+                lines.append(
+                    "| {platform} | {dimension} | {value} | {n} | {views} | {er} | {vel} |".format(
+                        platform=p["platform"],
+                        dimension=p["dimension"],
+                        value=str(p["value"]).replace("|", "\\|"),
+                        n=p["sample_count"],
+                        views=f"{av:.1f}" if av is not None else "-",
+                        er=f"{ae:.4f}" if ae is not None else "-",
+                        vel=f"{vv:.1f}" if vv is not None else "-",
+                    )
+                )
+        else:
+            lines.append("No pattern evidence yet.")
+
+        lines += [
+            "",
+            "> Radar ranking weights were not changed automatically. This report is observed market evidence.",
+            "",
+        ]
+        output = "\n".join(lines)
+
+    if args.output:
+        out = Path(args.output)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(output, encoding="utf-8")
+        print(f"[radar] Performance feedback saved to {out}")
+    else:
+        print(output)
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -424,6 +511,13 @@ def main() -> int:
     p_ana.add_argument("--force", action="store_true",
                        help="Re-run even if cached intelligence.json exists")
 
+    # performance feedback subcommand
+    p_perf = sub.add_parser("performance", help="Show/export post-publication performance feedback")
+    p_perf.add_argument("--format", choices=["json", "markdown"], default="json",
+                        help="Output format (default: json)")
+    p_perf.add_argument("--output", type=str, default=None,
+                        help="Write output to file (optional)")
+
     # top subcommand
     p_top = sub.add_parser("top", help="Show top ranked candidates")
     p_top.add_argument("--platform", choices=["douyin", "bilibili"], default=None,
@@ -449,6 +543,8 @@ def main() -> int:
         return cmd_analyze(args)
     elif args.command == "top":
         return cmd_top(args)
+    elif args.command == "performance":
+        return cmd_performance(args)
     else:
         parser.print_help()
         return 1
