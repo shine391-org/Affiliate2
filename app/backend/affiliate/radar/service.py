@@ -50,12 +50,19 @@ def _metric_value(row: dict, name: str) -> int | None:
 
 
 def _engagement_total(row: dict) -> float:
+    """Legacy Radar engagement proxy before log normalization."""
+    platform = str(row.get("platform") or "").lower()
+    if platform == "douyin":
+        return float(
+            (row.get("likes") or 0)
+            + (row.get("comments") or 0)
+            + (row.get("shares") or 0)
+        )
+    # Legacy Bilibili ranking: views + likes + comments.
     return float(
         (row.get("views") or 0)
         + (row.get("likes") or 0)
         + (row.get("comments") or 0)
-        + (row.get("shares") or 0)
-        + (row.get("favorites") or 0)
     )
 
 
@@ -75,23 +82,17 @@ def _freshness_raw(publish_time: int | None, now_ts: float) -> float | None:
 
 
 def _snapshot_engagement(row: dict) -> float:
+    """Legacy velocity metric set: views + likes + comments + shares."""
     return float(
         (row.get("views") or 0)
         + (row.get("likes") or 0)
         + (row.get("comments") or 0)
         + (row.get("shares") or 0)
-        + (row.get("favorites") or 0)
     )
 
 
 def _velocity_per_hour(snapshots: list[dict]) -> float | None:
-    """Return legacy-compatible engagement growth per hour.
-
-    With a positive baseline this is relative growth/hour:
-    (last - first) / first / elapsed_hours.
-    A zero baseline cannot produce a relative rate, so preserve the legacy
-    fallback to absolute engagement growth/hour.
-    """
+    """Human-readable growth/hour used in the Scout payload."""
     if len(snapshots) < 2:
         return None
     first, last = snapshots[0], snapshots[-1]
@@ -108,6 +109,31 @@ def _velocity_per_hour(snapshots: list[dict]) -> float | None:
     if first_engagement > 0:
         return round((delta / first_engagement) / elapsed_hours, 6)
     return round(delta / elapsed_hours, 3)
+
+
+def _legacy_velocity_score(snapshots: list[dict]) -> float | None:
+    """Exact legacy Radar velocity signal used for percentile ranking."""
+    if len(snapshots) < 2:
+        return None
+    first, last = snapshots[0], snapshots[-1]
+    t1 = datetime.fromisoformat(first["captured_at"].replace("Z", "+00:00"))
+    t2 = datetime.fromisoformat(last["captured_at"].replace("Z", "+00:00"))
+    elapsed = (t2 - t1).total_seconds()
+    if elapsed < VELOCITY_MIN_INTERVAL_SECONDS:
+        return None
+
+    e1 = _snapshot_engagement(first)
+    e2 = _snapshot_engagement(last)
+    if e1 <= 0:
+        delta = e2 - e1
+        if delta <= 0:
+            return 0.0
+        return math.log1p(delta) / elapsed * 3600.0
+
+    growth_rate = (e2 - e1) / e1 / elapsed * 3600.0
+    if growth_rate <= 0:
+        return 0.0
+    return math.log1p(growth_rate)
 
 
 def record_source_run(
@@ -197,10 +223,10 @@ def observe_scout_rows(rows: list[dict], niche: str, conn: sqlite3.Connection | 
                 conn.execute(
                     """UPDATE content SET
                     canonical_url=?, creator_id=?, creator_name=?, title=?,
-                    description=?, publish_time=?, source_keyword=?,
+                    description=?, publish_time=?,
                     last_seen_at=?, updated_at=?
                     WHERE platform=? AND content_id=?""",
-                    (*values, captured_at, captured_at, platform, content_id),
+                    (*values[:-1], captured_at, captured_at, platform, content_id),
                 )
                 stats["updated"] += 1
 
@@ -346,10 +372,12 @@ def get_signals_for_keys(
             velocity_pairs = []
             for row in prows:
                 key = (platform, row["content_id"])
-                raw = _velocity_per_hour(_snapshots(conn, *key))
+                snapshots = _snapshots(conn, *key)
+                raw = _velocity_per_hour(snapshots)
+                score = _legacy_velocity_score(snapshots)
                 velocity_raw[key] = raw
-                if raw is not None:
-                    velocity_pairs.append((key, math.log1p(raw)))
+                if score is not None:
+                    velocity_pairs.append((key, score))
             velocity_values = [value for _, value in velocity_pairs]
 
             for row, value in zip(prows, engagement_values):
