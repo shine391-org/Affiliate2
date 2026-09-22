@@ -9,6 +9,7 @@ Agent 1: Smart Chat/Planner
 - Handles direct URL downloads
 - Proactively prompts for missing credentials
 """
+import asyncio
 import re
 import json
 import logging
@@ -857,26 +858,36 @@ class PlannerAgent:
             await self._followup(user_id, "No scout results found yet. Try scouting a niche first!")
             return
 
-        # Group by platform and send
+        payload = [{
+            "id": r.id,
+            "platform": r.platform,
+            "video_id": r.video_id,
+            "title": r.title,
+            "author": r.author,
+            "author_url": r.author_url,
+            "views": r.views,
+            "likes": r.likes,
+            "comments": r.comments,
+            "shares": r.shares,
+            "duration_seconds": r.duration_seconds,
+            "upload_date": r.upload_date.isoformat() if r.upload_date else None,
+            "virality_score": r.virality_score,
+            "views_per_hour": r.views_per_hour,
+            "outlier_score": r.outlier_score,
+            "thumbnail_url": r.thumbnail_url,
+            "video_url": r.video_url,
+            "embed_url": r.embed_url,
+        } for r in results]
+
+        try:
+            from backend.affiliate.radar.service import enrich_scout_payload
+            payload = await asyncio.to_thread(enrich_scout_payload, payload)
+        except Exception as exc:
+            logger.warning("Chat scout Radar enrichment skipped (non-fatal): %s", exc)
+
         platforms = {}
-        for r in results:
-            platforms.setdefault(r.platform, []).append({
-                "id": r.id,
-                "platform": r.platform,
-                "video_id": r.video_id,
-                "title": r.title,
-                "author": r.author,
-                "author_url": r.author_url,
-                "views": r.views,
-                "likes": r.likes,
-                "comments": r.comments,
-                "duration_seconds": r.duration_seconds,
-                "upload_date": r.upload_date.isoformat() if r.upload_date else None,
-                "virality_score": r.virality_score,
-                "thumbnail_url": r.thumbnail_url,
-                "video_url": r.video_url,
-                "embed_url": r.embed_url,
-            })
+        for item in payload:
+            platforms.setdefault(item["platform"], []).append(item)
 
         for platform, items in platforms.items():
             await ws_manager.send({
@@ -1023,18 +1034,16 @@ class PlannerAgent:
                 or (us and us.tiktok_cookie_encrypted)
             ),
         },
-        "douyin": {
-            "check": lambda us: (
-                bool(settings.TIKHUB_API_KEY)
-                or (us and us.douyin_cookie_encrypted)
-            ),
-        },
     }
 
     async def _check_and_start_scout(self, action: dict, user_settings, user_id: str):
         """Start a scout job. Unavailable platforms are skipped gracefully."""
         niche = action.get("niche", "")
-        platforms = action.get("platforms", ["youtube"])
+        platforms = [
+            str(platform).strip().lower()
+            for platform in action.get("platforms", ["youtube"])
+            if str(platform).strip()
+        ] or ["youtube"]
 
         ready_platforms = []
         skipped = []
