@@ -49,7 +49,7 @@ def test_douyin_normalization_preserves_platform_and_radar_nulls():
 
 @pytest.mark.parametrize(
     ("raw", "expected"),
-    [(321000, 321), (900, 900), (None, None), ("bad", None)],
+    [(321000, 321), (1000, 1), (900, 1), (None, None), ("bad", None)],
 )
 def test_douyin_duration(raw, expected):
     assert _duration_seconds(raw) == expected
@@ -107,3 +107,33 @@ async def test_scout_surfaces_douyin_auth_required():
         with pytest.raises(SourceProviderError) as exc:
             await agent._scout_platform("douyin", "test", None)
     assert exc.value.status == ProviderStatus.AUTH_REQUIRED
+
+
+@pytest.mark.asyncio
+async def test_douyin_picks_logged_in_context_by_existing_page_not_context_zero():
+    provider = DouyinProvider()
+
+    class Page:
+        def __init__(self, url):
+            self.url = url
+
+    class Context:
+        def __init__(self, pages):
+            self.pages = pages
+            self.new_page_called = False
+        async def new_page(self):
+            self.new_page_called = True
+            raise AssertionError("should reuse existing Douyin page")
+
+    first = Context([Page("https://example.com")])
+    second_page = Page("https://www.douyin.com/search/test")
+    second = Context([second_page])
+
+    class Browser:
+        contexts = [first, second]
+
+    context, page, created = await provider._pick_context_and_page(Browser())
+    assert context is second
+    assert page is second_page
+    assert created is False
+    assert first.new_page_called is False
