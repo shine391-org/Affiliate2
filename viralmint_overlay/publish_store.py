@@ -65,6 +65,9 @@ class PublishStore:
 
                 CREATE INDEX IF NOT EXISTS idx_publications_content
                     ON content_publications(source_platform, content_id, platform, id DESC);
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_publications_one_active
+                    ON content_publications(source_platform, content_id, platform)
+                    WHERE status='PUBLISHING';
                 """
             )
 
@@ -170,6 +173,13 @@ class PublishStore:
                 ),
             )
             return int(cur.lastrowid)
+
+    def set_publication_job(self, publication_id: int, job_id: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE content_publications SET job_id=?, updated_at=? WHERE id=?",
+                (job_id, utc_now(), publication_id),
+            )
 
     def finish_publication(
         self,
