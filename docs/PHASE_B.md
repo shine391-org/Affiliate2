@@ -144,3 +144,18 @@ Phase B intentionally still does NOT:
 - change Translate/Remake/Review/Publish/Performance behavior
 
 One combined Phase-B QA pass should now validate all B1–B5 together.
+
+
+## Post-review fixes before final QA
+
+The pre-QA code review identified and fixed these integration gaps:
+
+- Planner no longer credential-gates Douyin on legacy TikHub/cookie settings; the native provider owns CDP auth state.
+- Chat `show_scout_results` now applies the same Radar enrichment as REST/live Scout.
+- Bilibili distinguishes normal empty search results from code=0 risk-control or malformed envelopes.
+- Douyin searches all CDP browser contexts for an existing Douyin session instead of assuming context zero.
+- EMPTY / AUTH_REQUIRED / ERROR provider runs are persisted in Radar `source_runs`.
+- Douyin duration normalization treats the source field consistently as milliseconds.
+- Focused tests now cover controlled >30-minute Radar velocity without real-time waiting.
+
+Automatic Bilibili creator-history seeding is intentionally NOT enabled during keyword scouting. Calling creator-history for every discovered creator would multiply requests and increase risk-control pressure. Creator-relative Radar signals become available from accumulated history; an explicit bounded seeding policy can be added later if evidence shows it is needed.
