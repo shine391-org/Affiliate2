@@ -31,11 +31,16 @@ def sync(force: bool = False) -> None:
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
 
-    plugin_src = ROOT / "overlay" / "frontend" / "plugins.js"
+    plugin_src = ROOT / "overlay" / "frontend" / "plugins.jsx"
     page_src = ROOT / "overlay" / "frontend" / "review" / "ReviewQueue.jsx"
-    plugin_dst = VIRALMINT / "frontend" / "src" / "plugins" / "index.js"
+    plugin_dst = VIRALMINT / "frontend" / "src" / "plugins" / "index.jsx"
     page_dst = VIRALMINT / "frontend" / "src" / "plugins" / "review" / "ReviewQueue.jsx"
     page_dst.parent.mkdir(parents=True, exist_ok=True)
+
+    # Remove old .js stub if present (Vite resolves .js before .jsx)
+    old_js = VIRALMINT / "frontend" / "src" / "plugins" / "index.js"
+    if old_js.exists():
+        old_js.unlink()
 
     existing = plugin_dst.read_text(encoding="utf-8") if plugin_dst.exists() else ""
     is_stub = (
@@ -45,8 +50,8 @@ def sync(force: bool = False) -> None:
     is_ours = "CONTENT_ENGINE_REVIEW_OVERLAY" in existing
     if existing and not (is_stub or is_ours or force):
         raise SystemExit(
-            "frontend/src/plugins/index.js has custom plugin content. "
-            "Refusing to overwrite it; merge overlay/frontend/plugins.js manually "
+            "frontend/src/plugins/index.jsx has custom plugin content. "
+            "Refusing to overwrite it; merge overlay/frontend/plugins.jsx manually "
             "or rerun with --force after reviewing."
         )
 
