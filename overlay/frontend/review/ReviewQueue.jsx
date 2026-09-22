@@ -20,6 +20,7 @@ import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined"
 import RefreshIcon from "@mui/icons-material/RefreshOutlined"
 import OpenInNewIcon from "@mui/icons-material/OpenInNew"
 import http from "../../api/http"
+import ActionControls from "./ActionControls"
 
 const FILTERS = [
   "ALL",
@@ -146,6 +147,12 @@ export default function ReviewQueue() {
   const [saving, setSaving] = useState(false)
   const [note, setNote] = useState("")
   const [error, setError] = useState("")
+  const [actionType, setActionType] = useState("remake")
+  const [voiceId, setVoiceId] = useState("vi-VN-NamMinhNeural")
+  const [targetDuration, setTargetDuration] = useState("20-35s")
+  const [translateMode, setTranslateMode] = useState("full_dub")
+  const [actionJob, setActionJob] = useState(null)
+  const [actionBusy, setActionBusy] = useState(false)
 
   useEffect(() => {
     document.title = "Review Queue · ViralMint"
@@ -167,6 +174,23 @@ export default function ReviewQueue() {
     }
   }, [filter])
 
+  const loadActionStatus = useCallback(async (candidate) => {
+    if (!candidate) {
+      setActionJob(null)
+      return null
+    }
+    try {
+      const { data } = await http.get(
+        `/api/review/candidates/${encodeURIComponent(candidate.platform)}/${encodeURIComponent(candidate.content_id)}/action`
+      )
+      setActionJob(data.action || null)
+      return data.action || null
+    } catch {
+      setActionJob(null)
+      return null
+    }
+  }, [])
+
   const loadDetail = useCallback(async (candidate) => {
     if (!candidate) return
     setSelected(candidate)
@@ -179,12 +203,21 @@ export default function ReviewQueue() {
       setDetail(data)
       const activeReview = data.remake_exists ? data.remake_review : data.candidate_review
       setNote(activeReview?.note || "")
+
+      const manifest = data.action_manifest || {}
+      const params = manifest.params || {}
+      if (manifest.action === "translate" || manifest.action === "remake") setActionType(manifest.action)
+      if (params.voice_id) setVoiceId(params.voice_id)
+      if (params.target_duration) setTargetDuration(params.target_duration)
+      if (params.translate_mode) setTranslateMode(params.translate_mode)
+
+      await loadActionStatus(candidate)
     } catch (e) {
       setError(e.response?.data?.detail || "Could not load candidate detail.")
     } finally {
       setDetailLoading(false)
     }
-  }, [])
+  }, [loadActionStatus])
 
   useEffect(() => {
     loadQueue(filter).then((data) => {
@@ -199,6 +232,35 @@ export default function ReviewQueue() {
     })
     // selected intentionally excluded: changing a decision refreshes explicitly.
   }, [filter]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!detail || !["pending", "running"].includes(actionJob?.status)) return
+
+    let cancelled = false
+    const timer = setInterval(async () => {
+      const job = await loadActionStatus(detail)
+      if (cancelled || !job || ["pending", "running"].includes(job.status)) return
+
+      const data = await loadQueue(filter)
+      const refreshed = data?.candidates?.find(
+        (c) => c.platform === detail.platform && c.content_id === detail.content_id,
+      )
+      if (refreshed) await loadDetail(refreshed)
+    }, 2000)
+
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [
+    actionJob?.status,
+    detail?.platform,
+    detail?.content_id,
+    filter,
+    loadActionStatus,
+    loadDetail,
+    loadQueue,
+  ])
 
   const selectedKey = selected ? `${selected.platform}:${selected.content_id}` : null
 
@@ -239,6 +301,28 @@ export default function ReviewQueue() {
       setError(e.response?.data?.detail || "Could not save review decision.")
     } finally {
       setSaving(false)
+    }
+  }
+
+  const runAction = async (requestedAction) => {
+    if (!detail) return
+    setActionBusy(true)
+    setError("")
+    try {
+      const { data } = await http.post(
+        `/api/review/candidates/${encodeURIComponent(detail.platform)}/${encodeURIComponent(detail.content_id)}/action`,
+        {
+          action: requestedAction,
+          voice_id: voiceId,
+          target_duration: targetDuration,
+          translate_mode: translateMode,
+        },
+      )
+      setActionJob(data)
+    } catch (e) {
+      setError(e.response?.data?.detail || "Could not start production action.")
+    } finally {
+      setActionBusy(false)
     }
   }
 
@@ -421,6 +505,40 @@ export default function ReviewQueue() {
                 </details>
 
                 <Divider />
+
+                {!detail.remake_exists && detail.candidate_review?.status === "APPROVED_FOR_REMAKE" && (
+                  <ActionControls
+                    actionType={actionType}
+                    onActionType={setActionType}
+                    voiceId={voiceId}
+                    onVoiceId={setVoiceId}
+                    targetDuration={targetDuration}
+                    onTargetDuration={setTargetDuration}
+                    translateMode={translateMode}
+                    onTranslateMode={setTranslateMode}
+                    job={actionJob}
+                    busy={actionBusy}
+                    onRun={() => runAction(actionType)}
+                  />
+                )}
+
+                {detail.remake_exists && detail.remake_review?.status === "REWORK" && (
+                  <ActionControls
+                    rerender
+                    previousAction={detail.action_manifest?.action || "remake"}
+                    actionType={actionType}
+                    onActionType={setActionType}
+                    voiceId={voiceId}
+                    onVoiceId={setVoiceId}
+                    targetDuration={targetDuration}
+                    onTargetDuration={setTargetDuration}
+                    translateMode={translateMode}
+                    onTranslateMode={setTranslateMode}
+                    job={actionJob}
+                    busy={actionBusy}
+                    onRun={() => runAction("rerender")}
+                  />
+                )}
 
                 <TextField
                   label={detail.remake_exists ? "Review note (required for REWORK)" : "Review note"}
