@@ -15,6 +15,8 @@ if plugins is not None:
     # mistaken for "ViralMint is not installed".
     from .api.review import router as review_router
     from .api.publish import router as publish_router
+    from .api.performance import router as performance_router
 
     plugins.register_router(review_router)
     plugins.register_router(publish_router)
+    plugins.register_router(performance_router)
