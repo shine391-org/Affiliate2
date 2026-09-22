@@ -24,10 +24,14 @@ The full project suite is intentionally reserved for milestone/CI QA rather than
 
 ---
 
-## Phase B — Sources + Radar Integration — IN PROGRESS 🚧
+## Phase B — Sources + Radar Integration — COMPLETE ✅
+
+Status:
+
+QA PASS — merged via PR #6 (squash commit `d20ac9d`).
 
 Branch:
-`consolidation-phase-b-sources-radar`
+`consolidation-phase-b-sources-radar` (merged into `workspace-sync-2026-09`)
 
 Goal:
 
@@ -35,13 +39,13 @@ Move real Douyin/Bilibili source discovery and Affiliate2 Radar into the canonic
 
 Progress:
 
-1. app-native provider contract — IMPLEMENTED, QA PENDING
-2. real Bilibili keyword + creator-history provider — IMPLEMENTED, QA PENDING
-3. real Douyin CDP provider — IMPLEMENTED, QA PENDING
-4. Radar observation/ranking bridge — IMPLEMENTED, QA PENDING
-5. Scout Radar signal/API/UI integration — IMPLEMENTED, QA PENDING
+1. app-native provider contract — COMPLETE, QA PASS
+2. real Bilibili keyword + creator-history provider — COMPLETE, QA PASS
+3. real Douyin CDP provider — COMPLETE, QA PASS
+4. Radar observation/ranking bridge — COMPLETE, QA PASS
+5. Scout Radar signal/API/UI integration — COMPLETE, QA PASS
 
-Phase B implementation has passed code review fixes and is ready for ONE combined focused QA pass. No intermediate full-suite gate is required.
+Final QA evidence: focused suite 162 passed / 0 failed; frontend production build PASS; real Bilibili query PASS; real Douyin query via local Edge CDP PASS; Radar repeated observation/velocity PASS; Scout API/UI smoke PASS.
 
 Hard rules:
 
