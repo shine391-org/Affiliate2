@@ -26,6 +26,9 @@ DOUYIN_SEARCH_PATH = "/aweme/v1/web/general/search/single/"
 DEFAULT_CDP_URL = "http://127.0.0.1:9222"
 
 _ACCESS_HTTP = {401, 403, 412, 429}
+_ACCESS_API_STATUS = {-1, 8, 2483, 10000}
+DOUYIN_REQUEST_COUNT = 15
+DOUYIN_PAGE_STEP = 10
 
 
 def _first_url(value: Any) -> str:
@@ -268,9 +271,11 @@ class DouyinProvider:
         status_code = payload.get("status_code")
         if status_code not in (None, 0):
             message = payload.get("status_msg") or payload.get("message") or "Douyin API error"
-            if status_code in (-1, 8, 10000):
+            if status_code in _ACCESS_API_STATUS:
                 raise PermissionError(f"Douyin API status {status_code}: {message}")
             raise RuntimeError(f"Douyin API status {status_code}: {message}")
+        if "data" not in payload:
+            raise RuntimeError("Douyin search response missing data")
         return payload
 
     def _normalize_aweme(self, aweme: dict, query: str) -> dict | None:
@@ -387,7 +392,7 @@ class DouyinProvider:
                 seen: set[str] = set()
                 search_id = ""
                 offset = 0
-                count = min(15, max(1, limit))
+                count = DOUYIN_REQUEST_COUNT
 
                 while len(raw_awemes) < limit:
                     payload = await self._fetch_search_page(
@@ -424,8 +429,8 @@ class DouyinProvider:
                             break
 
                     search_id = str((payload.get("extra") or {}).get("logid") or search_id)
-                    offset += count
-                    if added_this_page == 0 or len(data) < count or len(raw_awemes) >= limit:
+                    offset += DOUYIN_PAGE_STEP
+                    if added_this_page == 0 or len(raw_awemes) >= limit:
                         break
                     await asyncio.sleep(0.4)
 
@@ -433,6 +438,11 @@ class DouyinProvider:
                     await created_page.close()
 
         except PermissionError as exc:
+            try:
+                if created_page:
+                    await created_page.close()
+            except Exception:
+                pass
             return SourceProviderResult(
                 platform=self.platform,
                 query=query,
