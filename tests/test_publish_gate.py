@@ -9,6 +9,7 @@ from viralmint_overlay.publish_service import (
     PublishActionError,
     default_publish_metadata,
     facebook_reel_eligibility,
+    launch_publish,
     mark_tiktok_posted,
 )
 from viralmint_overlay.publish_store import PublishStore
@@ -183,3 +184,35 @@ def test_tiktok_manual_post_rejects_non_tiktok_url(tmp_path):
             caption="C",
             external_url="https://example.com/not-tiktok",
         )
+
+
+
+@pytest.mark.asyncio
+async def test_api_publish_requires_final_approval_before_backend_job_import(tmp_path):
+    review, publish = _root(tmp_path)
+    with pytest.raises(PublishActionError, match="APPROVED"):
+        await launch_publish(
+            review,
+            publish,
+            "douyin",
+            "123",
+            "youtube",
+            title="T",
+            caption="C",
+            privacy="private",
+        )
+
+
+def test_youtube_credentials_are_not_required_for_manual_tiktok(tmp_path):
+    review, publish = _root(tmp_path)
+    review.set_decision("douyin", "123", REMAKE_STAGE, "APPROVED")
+    result = mark_tiktok_posted(
+        review,
+        publish,
+        "douyin",
+        "123",
+        title="T",
+        caption="C",
+        external_url="https://tiktok.com/@x/video/2",
+    )
+    assert result["status"] == "PUBLISHED"
