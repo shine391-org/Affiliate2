@@ -97,6 +97,44 @@ def _velocity_per_hour(snapshots: list[dict]) -> float | None:
     return round(delta / (elapsed / 3600.0), 3)
 
 
+def record_source_run(
+    platform: str,
+    keyword: str,
+    status: str,
+    *,
+    records_raw: int = 0,
+    error: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> None:
+    """Persist provider EMPTY/AUTH_REQUIRED/ERROR runs for operational history."""
+    own_conn = conn is None
+    conn = conn or get_conn()
+    now = _now_iso()
+    try:
+        conn.execute(
+            """INSERT INTO source_runs
+            (platform, keyword, started_at, finished_at, status,
+             records_raw, records_normalized, records_new, records_updated, error)
+            VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (
+                str(platform).lower(),
+                keyword,
+                now,
+                now,
+                status,
+                max(int(records_raw or 0), 0),
+                0,
+                0,
+                0,
+                (error or "")[:1000] or None,
+            ),
+        )
+        conn.commit()
+    finally:
+        if own_conn:
+            conn.close()
+
+
 def observe_scout_rows(rows: list[dict], niche: str, conn: sqlite3.Connection | None = None) -> dict:
     """Append one immutable observation per unique native-provider content row."""
     own_conn = conn is None
