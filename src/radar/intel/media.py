@@ -99,6 +99,14 @@ def _fetch_playinfo(client: httpx.Client, aid: str) -> Optional[dict]:
         return None
 
 
+def _best_bandwidth_stream(streams: list[dict]) -> Optional[dict]:
+    """Pick the highest-bandwidth DASH stream, not the smallest one."""
+    candidates = [s for s in streams if isinstance(s, dict) and s.get("baseUrl")]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda s: int(s.get("bandwidth") or 0))
+
+
 def _download_with_resume(
     client: httpx.Client, url: str, out: Path, max_retries: int = 5
 ) -> bool:
@@ -194,12 +202,11 @@ def fetch_media(platform: str, content_id: str, canonical_url: str) -> dict:
                     meta["reason"] = "no playinfo/DASH in video page"
                 else:
                     dash = pi["data"]["dash"]
-                    vids = sorted(dash.get("video", []), key=lambda v: v.get("bandwidth", 0))
-                    auds = sorted(dash.get("audio", []), key=lambda a: a.get("bandwidth", 0))
-                    if not vids or not auds:
+                    v = _best_bandwidth_stream(dash.get("video", []))
+                    a = _best_bandwidth_stream(dash.get("audio", []))
+                    if not v or not a:
                         meta["reason"] = "empty DASH streams"
                     else:
-                        v, a = vids[0], auds[0]
                         meta["quality_id"] = v.get("id")
                         meta["video_bandwidth"] = v.get("bandwidth")
                         tmp_v = cdir / "_video.m4s"

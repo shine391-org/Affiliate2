@@ -73,7 +73,7 @@ Implementation:
 - actual on-disk source properties are probed with ffprobe and persisted as one JSON metadata payload
 - Draft / Balanced / HQ H.264 render profiles share one encoder-argument helper
 - aspect conversion and caption burn now use the shared render profile vocabulary; localization can request HQ without changing every legacy tool default
-- legacy `src/radar/intel/media.py` remains only because legacy Candidate Intelligence has not reached C12 parity; it is not the canonical Phase-C localization downloader and must be removed with that legacy pipeline after parity
+- legacy `src/radar/intel/media.py` remains only because legacy Candidate Intelligence has not reached C12 parity; while retained, its Bilibili resolver now selects the highest-bandwidth usable DASH streams instead of the lowest; the file must still be removed with that legacy pipeline after parity
 
 Requirements:
 
@@ -167,6 +167,7 @@ Implementation:
 - source-language word timings remain source data and are never reused as target-language caption words
 - downloaded subtitle segments are now retained alongside subtitle text so a valid timed source transcript is not thrown away
 - existing raw Whisper/subtitle storage remains backward-compatible; C6+ canonicalizes it on entry rather than duplicating every historical transcript
+- Analyzer selection now keys on missing insights rather than missing transcript, so creator/auto subtitles are reused for intelligence instead of causing the row to be skipped
 - no speculative public API surface or second segment table was added; target-language segment persistence attaches to the localization job/artifact path when C6/C9 introduces those jobs
 
 Create/normalize a durable localization segment contract.

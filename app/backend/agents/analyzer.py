@@ -258,11 +258,13 @@ class AnalyzerAgent:
         # Get all downloaded videos from this job's downloads
         async with AsyncSessionLocal() as db:
             from backend.models.scout_result import ScoutResult
-            # Find downloaded videos that haven't been analyzed
+            # Find videos that still need AI analysis. A downloaded creator/
+            # auto subtitle is already a valid transcript and must be REUSED;
+            # filtering on transcript==None silently skipped those rows forever.
             result = await db.execute(
                 select(DownloadedVideo)
                 .where(DownloadedVideo.user_id == user_id)
-                .where(DownloadedVideo.transcript == None)
+                .where(DownloadedVideo.insights_json == None)
                 .order_by(DownloadedVideo.created_at.desc())
                 .limit(20)
             )

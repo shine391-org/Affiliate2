@@ -172,13 +172,18 @@ class TestAiCorrectTranscript:
 class TestAnalyzerRun:
     @pytest.mark.asyncio
     async def test_no_videos_early_return(self):
-        factory, _ = _session_cm([_result_scalars_all([])])
+        factory, session = _session_cm([_result_scalars_all([])])
         with patch.object(analyzer_mod, "AsyncSessionLocal", factory), \
              patch.object(analyzer_mod, "update_job_status", AsyncMock()) as ujs, \
              patch.object(analyzer_mod.ws_manager, "send_progress", AsyncMock()):
             await AnalyzerAgent().run(job_id="j1", user_id="local")
         # No videos → returns before touching job status.
         ujs.assert_not_called()
+        # Subtitle-backed transcripts still need intelligence extraction; the
+        # acquisition query must key on missing insights, not missing text.
+        sql = str(session.execute.await_args_list[0].args[0])
+        assert "insights_json IS NULL" in sql
+        assert "transcript IS NULL" not in sql
 
     @pytest.mark.asyncio
     async def test_subtitle_path_extracts_and_stores_insights(self):

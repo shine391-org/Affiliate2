@@ -20,7 +20,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from radar.intel.ai_analyze import _extract_json
-from radar.intel.media import _PLAYINFO_RE, _load_douyin_jsonl_records, candidate_dir, fetch_media
+from radar.intel.media import (
+    _PLAYINFO_RE, _best_bandwidth_stream, _load_douyin_jsonl_records,
+    candidate_dir, fetch_media,
+)
 from radar.intel.report import _risk_badge, build_report
 from radar.intel.pipeline import run_intelligence
 
@@ -68,6 +71,24 @@ def test_playinfo_regex():
 def test_playinfo_regex_none():
     html = '<script>window.__other__={}</script>'
     assert _PLAYINFO_RE.search(html) is None
+
+
+
+
+
+def test_bilibili_dash_prefers_highest_bandwidth():
+    streams = [
+        {"baseUrl": "low", "bandwidth": 500_000, "id": 64},
+        {"baseUrl": "high", "bandwidth": 5_000_000, "id": 80},
+        {"baseUrl": "mid", "bandwidth": 2_000_000, "id": 74},
+    ]
+    best = _best_bandwidth_stream(streams)
+    assert best["baseUrl"] == "high"
+    assert best["id"] == 80
+
+
+def test_bilibili_dash_ignores_unusable_entries():
+    assert _best_bandwidth_stream([{"bandwidth": 9_000_000}, None, {}]) is None
 
 
 # ---------------------------------------------------------------------------
