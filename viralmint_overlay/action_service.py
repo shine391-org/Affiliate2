@@ -506,7 +506,7 @@ async def launch_action(
     )
 
     from backend.agents.job_helper import create_job
-    from backend.core.task_runner import spawn_background
+    from backend.core.task_runner import dispatch
 
     job = await create_job(
         f"content:{resolved_action}",
@@ -530,7 +530,7 @@ async def launch_action(
         },
     )
 
-    spawn_background(
+    dispatch(
         _execute_action(
             job_id=job.id,
             store=store,
