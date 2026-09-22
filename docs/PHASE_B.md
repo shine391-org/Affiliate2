@@ -73,6 +73,11 @@ Fix known identity/baseline issues while porting:
 - creator identity is `(platform, creator_id)`
 - snapshot counts must be platform-scoped
 - creator outlier signal compares current content performance against that creator's own historical baseline
+- preserve legacy Radar engagement/velocity ranking semantics during migration:
+  - Douyin engagement = likes + comments + shares
+  - Bilibili engagement = views + likes + comments
+  - velocity = legacy views + likes + comments + shares growth signal; favorites do not affect velocity
+- preserve `content.source_keyword` as first-discovery provenance; `source_runs` is the authoritative per-run query history
 
 ### B5 — Scout integration — IMPLEMENTED, QA PENDING
 
@@ -157,5 +162,7 @@ The pre-QA code review identified and fixed these integration gaps:
 - EMPTY / AUTH_REQUIRED / ERROR provider runs are persisted in Radar `source_runs`.
 - Douyin duration normalization treats the source field consistently as milliseconds.
 - Focused tests now cover controlled >30-minute Radar velocity without real-time waiting.
+- Radar ranking parity is explicit: platform-specific engagement metrics and legacy velocity scoring are preserved.
+- Existing content keeps its first-discovery `source_keyword`; later queries are recorded in `source_runs` instead of overwriting provenance.
 
 Automatic Bilibili creator-history seeding is intentionally NOT enabled during keyword scouting. Calling creator-history for every discovered creator would multiply requests and increase risk-control pressure. Creator-relative Radar signals become available from accumulated history; an explicit bounded seeding policy can be added later if evidence shows it is needed.
