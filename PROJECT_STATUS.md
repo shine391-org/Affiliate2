@@ -41,7 +41,7 @@ Progress:
 4. Radar observation/ranking bridge — IMPLEMENTED, QA PENDING
 5. Scout Radar signal/API/UI integration — IMPLEMENTED, QA PENDING
 
-Phase B implementation is now ready for ONE combined focused QA pass. No intermediate full-suite gate is required.
+Phase B implementation has passed code review fixes and is ready for ONE combined focused QA pass. No intermediate full-suite gate is required.
 
 Hard rules:
 
