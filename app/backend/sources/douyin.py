@@ -121,25 +121,22 @@ class DouyinProvider:
         # already-running browser; it never launches a new browser/login flow.
         for context in contexts_without_douyin_page:
             page = None
+            selected = False
             try:
                 page = await context.new_page()
                 await page.goto(DOUYIN_HOST, wait_until="domcontentloaded", timeout=60_000)
                 logged_in, _, _ = await DouyinProvider._session_state(context, page)
                 if logged_in:
-                    try:
-                        setattr(page, "_affiliate2_selected_probe", True)
-                    except Exception:
-                        pass
+                    selected = True
                     return context, page, True
             except Exception:
                 # A closed/inaccessible reusable context must not abort scanning
                 # the remaining CDP contexts.
                 pass
             finally:
-                if page is not None:
+                if page is not None and not selected:
                     try:
-                        if not await DouyinProvider._is_selected_probe_page(context, page):
-                            await page.close()
+                        await page.close()
                     except Exception:
                         pass
 
@@ -153,11 +150,6 @@ class DouyinProvider:
         raise PermissionError(
             "No authenticated Douyin session found in any reusable CDP context."
         )
-
-    @staticmethod
-    async def _is_selected_probe_page(context, page) -> bool:
-        """Marker hook for probe-page cleanup; selected pages stay open."""
-        return bool(getattr(page, "_affiliate2_selected_probe", False))
 
     @staticmethod
     async def _session_state(context, page) -> tuple[bool, dict[str, str], str | None]:
