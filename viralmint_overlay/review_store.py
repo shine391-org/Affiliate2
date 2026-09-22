@@ -421,6 +421,7 @@ class ReviewStore:
                 "transcript": _read_json(cdir / "transcript.json", {}),
                 "adaptation": _read_json(rdir / "adaptation.json", {}),
                 "segment_plan": _read_json(rdir / "segment_plan.json", {}),
+                "translation": _read_json(rdir / "translation.json", {}),
                 "action_manifest": _read_json(rdir / "action_manifest.json", {}),
                 "latest_action": self.latest_action(platform, content_id),
             }
