@@ -15,7 +15,7 @@ Phase B is complete when:
 
 ## Scope
 
-### B1 — Provider contract
+### B1 — Provider contract — IMPLEMENTED, QA PENDING
 
 Create a small app-native provider boundary.
 
@@ -34,7 +34,7 @@ Rules:
 - platform auth/session behavior stays inside the provider
 - provider code must not own UI, DB schema, or job orchestration
 
-### B2 — Bilibili provider
+### B2 — Bilibili provider — IMPLEMENTED, QA PENDING
 
 Use the existing Affiliate2 direct Bilibili implementation as the first app-native provider because it already performs real search and creator-history/WBI behavior.
 
@@ -111,3 +111,24 @@ Use tiered tests.
 Phase-B inner-loop QA should run only affected provider/Radar tests plus focused Scout/API smoke checks.
 
 Full project suite is milestone/CI-only.
+
+
+## Current checkpoint
+
+Implemented on the Phase B branch:
+
+- app-native provider contract and registry
+- explicit provider statuses: SUCCESS / EMPTY / AUTH_REQUIRED / ERROR
+- platform-identity invariant in provider results
+- real Bilibili keyword search using Bilibili API
+- real Bilibili creator-history path with WBI signing
+- Bilibili Scout dispatch uses the native provider
+- native-provider failures are surfaced explicitly and are not rescued with YouTube/AI cross-platform results
+- platform names are normalized to lowercase at the Scout boundary
+- focused provider tests added
+
+Not yet implemented:
+
+- Douyin app-native provider
+- Radar bridge into canonical app
+- Scout Radar fields/UI

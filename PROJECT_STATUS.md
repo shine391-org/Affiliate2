@@ -33,13 +33,13 @@ Goal:
 
 Move real Douyin/Bilibili source discovery and Affiliate2 Radar into the canonical application.
 
-Planned sequence:
+Progress:
 
-1. app-native provider contract
-2. real Bilibili provider
-3. real Douyin provider using selectively ported platform logic
-4. Radar observation/ranking bridge
-5. Scout integration
+1. app-native provider contract — IMPLEMENTED, QA PENDING
+2. real Bilibili keyword + creator-history provider — IMPLEMENTED, QA PENDING
+3. real Douyin provider using selectively ported platform logic — NEXT
+4. Radar observation/ranking bridge — PLANNED
+5. Scout integration of Radar signals — PLANNED
 
 Hard rules:
 
