@@ -358,3 +358,11 @@ class TestDispatchRobustness:
     def test_a_wizard_action_with_no_id_is_inert(self, bus):
         self._run({"type": "start_wizard"})
         assert bus["sent"] == []
+
+
+class TestPhaseBPlannerIntegration:
+    def test_douyin_is_not_blocked_by_legacy_api_key_or_cookie_gate(self):
+        assert "douyin" not in PlannerAgent._CREDENTIAL_PLATFORMS
+
+    def test_bilibili_is_not_credential_gated(self):
+        assert "bilibili" not in PlannerAgent._CREDENTIAL_PLATFORMS
