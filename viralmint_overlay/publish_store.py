@@ -149,30 +149,37 @@ class PublishStore:
         status: str = "PUBLISHING",
     ) -> int:
         now = utc_now()
-        with self._connect() as conn:
-            cur = conn.execute(
-                """
-                INSERT INTO content_publications(
-                    source_platform, content_id, platform, job_id, status,
-                    title, caption, privacy,
-                    created_at, updated_at
+        try:
+            with self._connect() as conn:
+                cur = conn.execute(
+                    """
+                    INSERT INTO content_publications(
+                        source_platform, content_id, platform, job_id, status,
+                        title, caption, privacy,
+                        created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        source_platform,
+                        content_id,
+                        platform,
+                        job_id,
+                        status,
+                        title,
+                        caption,
+                        privacy,
+                        now,
+                        now,
+                    ),
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    source_platform,
-                    content_id,
-                    platform,
-                    job_id,
-                    status,
-                    title,
-                    caption,
-                    privacy,
-                    now,
-                    now,
-                ),
-            )
-            return int(cur.lastrowid)
+                return int(cur.lastrowid)
+        except sqlite3.IntegrityError as exc:
+            if status == "PUBLISHING":
+                raise PublishValidationError(
+                    f"{platform.title()} publish is already running."
+                ) from exc
+            raise
 
     def set_publication_job(self, publication_id: int, job_id: str) -> None:
         with self._connect() as conn:
