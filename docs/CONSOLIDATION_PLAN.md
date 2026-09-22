@@ -2,91 +2,263 @@
 
 ## Why this exists
 
-The workspace audit found useful Affiliate2 domain logic mixed with duplicated infrastructure already implemented more robustly in ViralMint. Continuing feature development before consolidation would increase maintenance cost and hide product-quality bugs.
+Affiliate2 combines differentiated discovery/Radar/business logic with useful OSS application/media plumbing. Consolidation exists to create one maintainable product without preserving duplicate infrastructure or low-quality defaults.
 
-The immutable baseline is `workspace-sync-2026-09`.
+The target is not "ViralMint plus patches". Affiliate2 is the product. Existing ViralMint/MediaCrawler code and other OSS projects are donors/references behind one canonical application.
 
 ## Phase A — Application baseline
 
-Status: **IMPLEMENTING**
+Status: **COMPLETE ✅**
 
-Deliverables:
+Delivered:
 
-- `app/` promoted from captured ViralMint tree.
-- Native Windows bootstrap/dev/run/stop scripts.
-- Current overlay behavior remains reachable.
-- Standard agent/architecture/QA documents.
-- No discovery/downloader/translate/remake behavior changes.
+- `app/` established as canonical runnable source
+- native Windows bootstrap/dev/run/stop
+- source parity repaired
+- focused backend/API, frontend and runtime QA passed
 
-Acceptance: `docs/QA_PHASE_A.md`.
+Acceptance:
+`docs/QA_PHASE_A.md`
 
 ## Phase B — Sources + Radar
 
+Status: **COMPLETE ✅ — QA PASS — MERGED**
+
+Delivered:
+
+- app-native provider contract
+- real Bilibili discovery + creator history
+- real Douyin CDP provider
+- repeated Radar observations
+- creator-baseline/identity fixes
+- Radar signal integration in Scout
+
+Merge:
+PR #6, squash commit `d20ac9d`
+
+Acceptance:
+`docs/PHASE_B.md`
+`docs/QA_PHASE_B.md`
+
+## Phase C — Media, AI & Automated HQ Localization
+
+Status: **STARTED 🚧**
+
+Detailed scope:
+`docs/PHASE_C.md`
+
+Acceptance:
+`docs/QA_PHASE_C.md`
+
+Phase C intentionally combines the old Media/Intelligence convergence work with the Translate/Dub HQ foundation. These concerns share the same media, ASR, provider, transcript, timeline, TTS and render contracts; splitting them would create rework.
+
+### C0 — donor/source audit and decision matrix
+
+For each capability, record current implementation, donor/reference, decision (keep/adapt/reimplement/reject), license and reason.
+
+Core references:
+
+- YouDub
+- SmartSub
+- VideoLingo
+- pyVideoTrans (algorithm reference; GPL caution)
+- OpenCreator
+- faster-whisper / WhisperX
+- MoneyPrinterTurbo only for later composition ideas, not as localization runtime
+
+### C1 — media quality foundation
+
+- canonical downloader becomes the default ingestion path
+- specialized provider media resolution only when required
+- prefer best/source-native quality instead of 720p-first defaults
+- persist source media properties
+- remove duplicate Radar downloader after parity
+- minimize repeated lossy video encoding
+- add Draft / Balanced / HQ render profiles
+
+### C2 — AI provider + local AI
+
+- one canonical AI-provider interface
+- cloud presets plus Ollama / LM Studio / vLLM / custom OpenAI-compatible
+- editable base URL, API key and model ID
+- dynamic/discoverable models when supported
+- test-connection path
+- static model registry is suggestion, not hard allowlist
+- remove duplicate direct AI HTTP client after parity
+
+### C3 — Localization Profiles
+
+Persist reusable automation configuration for:
+
+- source/download quality
+- ASR provider/model/quality
+- translation provider/model/preset/prompt/glossary
+- TTS provider/model/voice/rate policy
+- audio mixing
+- captions
+- render quality/aspect
+- timing policy
+- QC policy
+
+Profiles are configured once and reused across single or batch jobs.
+
+### C4 — canonical transcript/timeline model
+
+Use explicit source/output coordinates.
+
+At minimum, localization segments carry:
+
+- source text / translated text
+- source start/end
+- target start/end
+- speaker identity when available
+- TTS duration
+- translation/timing/QC status
+
+The same canonical transcript/timeline becomes reusable by intelligence, Smart Cut and Creative Remake.
+
+### C5 — ASR convergence
+
+- one canonical transcription path
+- profile/user quality choice must route to the actual model
+- no hidden "Best → small" downgrade
+- benchmark existing faster-whisper behavior versus optional alignment support such as WhisperX before adding dependencies
+- no duplicate transcription passes merely because multiple features need text
+
+### C6 — contextual Vietnamese translation
+
+- translate with full-context awareness
+- preserve/use glossary and terminology
+- support small initial preset set: Natural Vietnamese / Affiliate-Conversational / Literal / Custom
+- custom prompt is profile/advanced configuration, not a mandatory per-video step
+- translation should be aware of target spoken duration
+
+### C7 — HQ dubbing/timing engine
+
+- TTS per semantic/timed block, not one joined whole-video text
+- measure actual generated duration
+- timing policy: duration-aware rewrite/adaptation → safe rate adjustment → bounded silence borrowing → exception
+- compose blocks at timeline positions
+- final captions derive from resolved timed blocks
+- canonical TTS abstraction must be used
+
+### C8 — audio separation/mixing
+
+- preserve useful background/music/ambience
+- replace or attenuate source speech as appropriate
+- controlled dub/background gain
+- no default dry TTS replacement of the entire source soundtrack
+
+### C9 — automation + batch
+
+Happy path:
+
+```
+candidate + saved profile
+→ automatic pipeline
+→ QC
+→ review-ready output
+```
+
+Batch mode runs the same canonical pipeline through the existing job system. No Redis/Celery/second queue unless measured evidence later requires it.
+
+### C10 — automatic QC + exception queue
+
+Automatically detect/report issues such as:
+
+- bad/low source quality
+- ASR uncertainty
+- translation/timing overflow
+- missing/failed TTS blocks
+- render/media mismatches
+- clipping/loudness problems when measurable
+
+Only exceptions require manual intervention.
+
+### C11 — expert override
+
+Expert mode may edit/override transcript, translation, prompt, model, voice, timing, captions or render settings and rerun only affected stages.
+
+It must not be a second pipeline or a CapCut clone.
+
+### C12 — intelligence convergence
+
+Produce one canonical intelligence path from the same media/transcript/provider abstractions.
+
+Affiliate2-specific output may include:
+
+- content summary/hook/topic/product signals
+- Vietnamese angle/localization potential
+- translation/localization risk
+- remake potential/visual dependency
+- affiliate angle
+
+### C13 — real-media benchmark gate
+
+Phase C cannot pass solely on unit tests or playable MP4 files.
+
+Use representative real Douyin/Bilibili samples and inspect:
+
+- source/final media properties
+- ASR correctness
+- Vietnamese translation naturalness
+- terminology
+- TTS quality
+- timing/sync
+- captions
+- background preservation
+- visible quality loss
+- failure/exception behavior
+
+## Phase D — Smart Cut
+
 Status: PLANNED
 
-- Introduce app-native provider contract.
-- Port Douyin platform logic; remove subprocess + JSONL handoff.
-- Keep real Bilibili provider and enrich it selectively.
-- Persist repeated observations.
-- Repair creator-baseline/ranking identity semantics.
-- Integrate Radar scores into Scout result/review flow.
-
-## Phase C — Media + intelligence
-
-Status: PLANNED
-
-- ViralMint downloader becomes default.
-- Platform media resolver becomes fallback only.
-- Remove custom Radar downloader.
-- ViralMint Whisper becomes sole transcription service.
-- Remove duplicate direct AI HTTP client.
-- Produce one intelligence object with Affiliate2 domain fields.
-
-## Phase D — Translate HQ + Smart Cut
-
-Status: PLANNED
-
-- Contextual Vietnamese translation modes/presets.
-- Configurable model/provider/voice controls.
-- Timing-aware block TTS.
-- Captions derived from final timed blocks.
-- Rename/position short source extraction as Smart Cut.
-- Reuse Clip Studio range proposal/editing.
+- reuse Phase-C media/transcript/timeline
+- propose source ranges
+- allow bounded human edit/approval
+- retime/reorder source material
+- reuse Clip Studio where fit
+- no Creative Remake semantics hidden inside Smart Cut
 
 ## Phase E — Creative Remake HQ
 
 Status: PLANNED
 
-- Full transcript handling.
-- Shot/scene extraction.
-- Multimodal visual map.
-- VN creative beats.
-- explicit source shot mapping.
-- storyboard review.
-- renderer consumes approved source ranges/reorder.
-- no legacy first-N-seconds fallback.
+- full transcript + shot/scene map
+- multimodal visual understanding
+- Vietnamese creative beats
+- explicit source/other-material mapping
+- storyboard review
+- automated composition/render
+- preserve source/output coordinate separation
+- evaluate MoneyPrinterTurbo-style assembly patterns as donor/reference rather than a second application
 
 ## Phase F — Review / Publish / Performance native migration
 
 Status: PLANNED
 
-- Move overlay pages/API into canonical app.
-- Reuse app upload/auth plumbing.
-- Preserve publish approval gate and publication lineage.
-- Reuse metric collectors.
-- Keep Affiliate2 performance intelligence.
-- delete overlay sync only after parity.
+- move remaining overlay pages/API into canonical app
+- reuse app upload/auth/metrics plumbing
+- preserve publish approval gate and publication lineage
+- keep Affiliate2 performance intelligence
+- delete overlay sync only after parity
 
 ## Phase G — DB convergence + cleanup
 
 Status: PLANNED
 
-- Migrate second-DB tables incrementally.
-- Verify counts/relationships before removing old DB paths.
-- Remove dead duplicate modules/reference runtime glue.
-- Full local/provider QA.
-- Consolidated PR to master.
+- migrate transitional tables incrementally
+- verify counts/relationships before removing old paths
+- remove dead duplicate modules/reference runtime glue
+- milestone/full QA
 
-## Migration rule
+## Migration rules
 
-Every phase must leave the app runnable. No big-bang rewrite and no simultaneous rewrite of source providers, DB, UI and rendering semantics in one commit.
+1. Every phase leaves the app runnable.
+2. No big-bang rewrite.
+3. No second WebUI/job system/media app.
+4. Reuse canonical plumbing where adequate; replace quality-critical behavior only with evidence.
+5. Auto, batch and expert modes share one pipeline.
+6. Do not delete legacy paths before parity and migration evidence.
+7. Donor code reuse must be license-compatible and documented.

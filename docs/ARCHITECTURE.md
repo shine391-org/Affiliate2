@@ -5,88 +5,87 @@
 ```
                          Affiliate2
                              |
-                 ViralMint application foundation
+                 Canonical FastAPI + React app
                              |
-        +--------------------+--------------------+
-        |                    |                    |
-      Scout                Library              Tools
-        |                    |                    |
- Source Providers       DownloadedVideo      Media Engine
-        |                    |              FFmpeg/Whisper/
-        |                    |              TTS/Captions
-        v                    v                    |
-      Radar ----------> Intelligence              |
-        |                    |                    |
-        +-------------+------+--------------------+
-                      |
-        Translate / Smart Cut / Remake HQ
-                      |
-               Human Review Gates
-                      |
-                    Publish
-                      |
-                  Performance
-                      |
-                    Learn
+       +---------------------+----------------------+
+       |                     |                      |
+     Scout                 Library              Profiles
+       |                     |                      |
+Source Providers         Canonical Media       AI / ASR / TTS /
+       |                     |                 Quality / QC config
+       v                     v                      |
+     Radar ------------> Intelligence               |
+       |                     |                      |
+       +---------------------+----------------------+
+                             |
+                  Localization Pipeline
+        Download → ASR → Translate → Dub/Align
+             → Mix → Captions → Render → QC
+                             |
+                      Review / Exceptions
+                             |
+          +------------------+------------------+
+          |                                     |
+      Smart Cut                         Creative Remake HQ
+          |                                     |
+          +------------------+------------------+
+                             |
+                       Human approval
+                             |
+                           Publish
+                             |
+                        Performance
+                             |
+                           Learn
 ```
 
-## Canonical source during consolidation
+## Canonical source
 
 `app/` is the runnable application tree.
 
 `vendor/viralmint/` and `vendor/mediacrawler/` are immutable forensic/reference snapshots. Runtime changes must not be made there.
 
-Legacy `src/radar/`, `viralmint_overlay/` and `overlay/` remain temporarily because current behavior still reaches them. They are migrated incrementally, not deleted early.
+Legacy `src/radar/`, `viralmint_overlay/` and `overlay/` remain transitional until their behavior is migrated and verified.
 
-## Ownership boundaries
+## Product/OSS ownership boundary
 
-### ViralMint foundation
+Affiliate2 is the product.
 
-Prefer/reuse:
+ViralMint is the current application foundation and one donor for:
 
-- FastAPI application + React/Vite UI
-- Job model/dispatcher and WebSocket progress
-- Library + media lineage
-- yt-dlp downloader and retry/cookie/format handling
-- Whisper service
+- FastAPI + React/Vite
+- jobs/progress
+- Library/media lineage
+- downloader framework
 - FFmpeg/media utilities
+- ASR/Whisper abstraction
+- AI-provider abstraction
 - TTS abstraction
-- Caption engine
+- captions
 - Clip Studio
-- common upload/auth adapters
-- performance metric collection primitives
+- upload/auth/metrics primitives
 
-### Affiliate2 differentiated domain
+Inherited behavior is not automatically canonical when quality evidence shows it is inadequate.
 
-Keep/port:
+Other Phase-C references are used selectively:
 
-- repeated source metric observations
-- Radar ranking and learning
-- source-provider selection semantics
-- Vietnamese localization quality
-- localization/remake-specific intelligence
-- Creative Remake HQ planner and storyboard QC
-- candidate/final human approval semantics
-- publish gate
-- performance intelligence joined to topic/format/hook/localization/remake dimensions
+- YouDub — production localization/job/media patterns
+- SmartSub — provider/config, dubbing and exception-review patterns
+- VideoLingo — translation/subtitle intelligence
+- pyVideoTrans — synchronization algorithm reference; no casual GPL code copying
+- OpenCreator — automation + expert-workspace state pattern
+- faster-whisper / WhisperX — ASR/alignment references
+- MoneyPrinterTurbo — later automated creative composition reference
 
-### MediaCrawler donor code
+No donor remains a second runtime application.
 
-Use selectively for platform-specific capabilities, especially:
+## Discovery and Radar
 
-- Douyin authenticated/CDP session handling
-- Douyin real search/detail/creator integration
-- Bilibili WBI/auth/detail/media behavior when superior to current provider
+Scout is the visible discovery/orchestration surface.
 
-Do not keep its WebUI, DB/store, global config or whole crawler orchestration as a parallel application.
+A provider must return results from the requested platform. Silent semantic substitution is forbidden.
 
-## Discovery
-
-Scout is the UI/orchestration surface.
-
-A provider must return results from the platform the user requested. Silent semantic substitution is forbidden. In particular, Bilibili discovery cannot silently return YouTube cross-posts.
-
-Radar is not a competing Scout. Radar is the observation/ranking layer behind discovery:
+Radar is the observation/ranking layer behind discovery:
 
 ```
 provider result → normalized content → metric snapshot
@@ -98,35 +97,155 @@ provider result → normalized content → metric snapshot
                            candidate rank
 ```
 
-## Media ingestion
+Phase B completed native Bilibili/Douyin + Radar integration.
 
-Default:
+## Canonical media ingestion
+
+Target:
 
 ```
-canonical URL → ViralMint downloader → DownloadedVideo → Library
+canonical source URL
+        ↓
+canonical downloader
+        ↓
+best/source-native eligible media
+        ↓
+DownloadedVideo + media metadata
+        ↓
+Library
 ```
 
-Only if the generic downloader cannot retrieve an eligible source should a platform provider resolve specialized media streams.
+A platform provider resolves specialized media only when the canonical downloader cannot retrieve an eligible source.
 
-The legacy `src/radar/intel/media.py` implementation is scheduled for removal.
+The old 720p-first behavior is not a quality requirement. Phase C introduces explicit source/download quality policy and stores actual source properties.
 
-## Intelligence
+The legacy `src/radar/intel/media.py` path is removed only after parity is proven.
 
-Use one transcript and one provider abstraction.
+## Canonical AI/provider layer
 
-ViralMint supplies transcription and generic content analysis primitives. Affiliate2 extends the result with domain fields such as Vietnamese angle, localization potential, remake difficulty and dependency/risk signals.
+One provider abstraction serves intelligence and localization.
 
-Do not perform duplicate Whisper passes merely because two modules need the transcript.
+Configuration supports cloud and local/OpenAI-compatible endpoints through a common shape such as:
+
+```
+provider
+base_url
+api_key
+model_id
+```
+
+UI model registries are suggestions/presets, not hard allowlists.
+
+Provider-specific direct clients should not proliferate outside the canonical abstraction.
+
+## Canonical transcript/timeline
+
+One transcript should be reusable by:
+
+- content intelligence
+- localization
+- Smart Cut
+- Creative Remake
+
+Do not perform duplicate ASR passes merely because features are implemented in different modules.
+
+Source and output coordinates are explicit and distinct:
+
+```
+source_start_ms / source_end_ms
+target_start_ms / target_end_ms
+```
+
+A localization segment may additionally hold speaker, source/translated text, TTS duration and QC status.
+
+## Localization Profiles
+
+A saved profile supplies automation configuration:
+
+```
+download/source quality
+ASR provider/model/quality
+translation provider/model/preset/prompt/glossary
+TTS provider/model/voice/rate policy
+timing policy
+audio mix policy
+caption profile
+render profile
+QC profile
+```
+
+Profiles are used by single and batch jobs.
+
+## One localization pipeline
+
+Auto, batch and expert modes share one engine:
+
+```
+Media
+ ↓
+ASR
+ ↓
+Context/segmentation
+ ↓
+Translation
+ ↓
+Timed semantic blocks
+ ↓
+TTS per block
+ ↓
+Timing resolution
+ ↓
+Background/voice mix
+ ↓
+Captions from resolved timing
+ ↓
+Minimum-loss final render
+ ↓
+QC
+```
+
+### Auto mode
+
+```
+config = saved profile
+candidate → pipeline → QC → review
+```
+
+### Batch mode
+
+Runs the same pipeline for multiple candidates through the existing job infrastructure.
+
+### Expert mode
+
+```
+config = profile + job/segment overrides
+```
+
+Expert actions modify the same job state and rerun only affected stages where safe. There is no second manual media engine.
+
+## Quality policy
+
+Phase C treats technical validity and perceptual quality separately.
+
+Important rules:
+
+- prefer source-native/best eligible media before degrading
+- no hidden ASR/model downgrade
+- avoid repeated lossy encodes; combine visual operations into the final encode when practical
+- TTS is timing-aware and block-based
+- captions follow final resolved timing
+- preserve useful background/music/ambience
+- automatic QC surfaces exceptions instead of forcing manual inspection of every segment
 
 ## Production modes
 
 ### Translate / Dub
 
-Preserves source content. HQ path will translate with full-context awareness, build timing-aware semantic blocks, synthesize per block, fit durations, place blocks on the source timeline and derive captions from the same blocks.
+Preserve source meaning/content while producing a Vietnamese-localized version through the canonical localization pipeline.
 
 ### Smart Cut
 
-Shortens/repackages source material. Reuse Clip Studio's proposal + editable-range workflow.
+Shorten/repackage source material by selecting/retiming/reordering source ranges. Reuse Phase-C media/transcript/timeline and Clip Studio where fit.
 
 ### Creative Remake HQ
 
@@ -134,14 +253,14 @@ Not a synonym for Smart Cut.
 
 ```
 source
- → transcript
+ → canonical transcript
  → scene/shot map
  → creative VN script beats
- → beat ↔ source-shot mapping
+ → beat ↔ source/other-material mapping
  → storyboard
  → HUMAN APPROVAL
- → render/reorder
- → timed TTS/captions/audio
+ → automated composition
+ → timed voice/captions/audio
  → final review
 ```
 
@@ -149,21 +268,23 @@ Source-video timestamps and output-timeline timestamps must never share one ambi
 
 ## Persistence migration
 
-Transitional state may use both ViralMint SQLite and `data/radar.db`.
+Transitional state may use both application SQLite and `data/radar.db`.
 
 This is intentional while functionality is ported. Do not attempt a big-bang DB rewrite.
 
-Final target is one application DB containing source observations, review, publication and performance records alongside application entities.
+Final target is one application DB containing source observations, localization/review, publication and performance records alongside application entities.
 
 ## Runtime
 
 Primary environment is native Windows.
 
 Development:
+
 - FastAPI/Uvicorn on 16888
 - Vite HMR on 5173
 
 Stable local:
+
 - built frontend served by FastAPI on 16888
 
 Docker is not required.

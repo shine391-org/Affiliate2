@@ -1,8 +1,8 @@
 # PROJECT_STATUS.md
 
-## Overall status: CONSOLIDATION IN PROGRESS
+## Overall status: PHASE C STARTED
 
-Phase A is complete and merged into the synchronized consolidation baseline.
+Phase A and Phase B are complete and merged to `master`.
 
 ### Phase A — COMPLETE ✅
 
@@ -20,40 +20,31 @@ Validated:
 - stable local mode PASS
 - stop-script process safety PASS
 
-The full project suite is intentionally reserved for milestone/CI QA rather than every implementation iteration.
-
 ---
 
 ## Phase B — Sources + Radar Integration — COMPLETE ✅
 
-Status:
+Merged via PR #6.
 
-QA PASS — merged via PR #6 (squash commit `d20ac9d`).
+Squash commit:
+`d20ac9db86acc3dc83f2d7236610ec9cb1291485`
 
-Branch:
-`consolidation-phase-b-sources-radar` (merged into `workspace-sync-2026-09`)
+Phase-B closeout/docs commit:
+`ae30ebca156a0a286f920445e69adbddd8d6a018`
 
-Goal:
+Validated:
 
-Move real Douyin/Bilibili source discovery and Affiliate2 Radar into the canonical application.
+- app-native provider contract
+- real Bilibili keyword search + creator history
+- real Douyin discovery through Edge CDP
+- Radar repeated observations and velocity
+- creator-relative outlier semantics
+- Scout Radar API/UI integration
+- focused Phase-B suite: 162 passed / 0 failed
+- frontend production build PASS
+- real-provider/runtime smoke PASS
 
-Progress:
-
-1. app-native provider contract — COMPLETE, QA PASS
-2. real Bilibili keyword + creator-history provider — COMPLETE, QA PASS
-3. real Douyin CDP provider — COMPLETE, QA PASS
-4. Radar observation/ranking bridge — COMPLETE, QA PASS
-5. Scout Radar signal/API/UI integration — COMPLETE, QA PASS
-
-Final QA evidence: focused suite 162 passed / 0 failed; frontend production build PASS; real Bilibili query PASS; real Douyin query via local Edge CDP PASS; Radar repeated observation/velocity PASS; Scout API/UI smoke PASS.
-
-Hard rules:
-
-- no silent cross-platform fallback
-- no long-term MediaCrawler subprocess/JSONL contract
-- no second dashboard/job system
-- content and creator identity remain platform-scoped
-- creator outlier uses the creator's own historical baseline
+Phase B is closed. It must not be reopened unless a regression is discovered.
 
 See:
 `docs/PHASE_B.md`
@@ -61,33 +52,66 @@ See:
 
 ---
 
+## Phase C — Media, AI & Automated HQ Localization — STARTED 🚧
+
+Implementation branch:
+`phase-c-media-ai-hq-localization`
+
+Goal:
+
+Build one canonical media/AI/localization path that can take a Radar candidate to a review-ready Vietnamese video automatically, while retaining expert controls as optional overrides on the same pipeline.
+
+Phase C absorbs the previous "Media + Intelligence" work and the Translate/Dub HQ foundation because those concerns share the same downloader, ASR, AI-provider, transcript, timeline, TTS and render contracts.
+
+Primary outcomes:
+
+1. source-quality-aware canonical media ingestion
+2. one canonical AI/provider abstraction with cloud + local OpenAI-compatible support
+3. reusable Localization Profiles for automation
+4. one canonical transcript/timeline model with source/output coordinate separation
+5. configurable ASR quality with no hidden downgrade
+6. contextual Vietnamese translation with prompt/preset/glossary controls
+7. timing-aware block TTS rather than one whole-video TTS blob
+8. background/audio preservation and controlled mixing
+9. one-pass or minimum-loss final render path
+10. batch automation, QC and exception queue
+11. expert override/retry on the same job state
+12. one transcript/intelligence path reused by later Smart Cut and Creative Remake
+
+Phase-C acceptance requires real Douyin/Bilibili media, perceptual QA and measurable media/timing evidence. A valid MP4 alone is not a product-quality PASS.
+
+See:
+`docs/PHASE_C.md`
+`docs/QA_PHASE_C.md`
+
+---
+
 ## Later phases
 
-### Phase C — Media + Intelligence convergence
+### Phase D — Smart Cut
 
-- ViralMint downloader becomes default.
-- Remove duplicate Radar downloader.
-- ViralMint Whisper becomes sole transcription implementation.
-- Merge Affiliate2 domain intelligence into the canonical analysis flow.
-
-### Phase D — Translate HQ + Smart Cut
-
-- contextual Vietnamese translation
-- timing-aware block TTS
-- Clip Studio for Smart Cut
+- shorten/repackage source material
+- source-range proposal/editing
+- retime/reorder approved ranges
+- reuse canonical media, transcript and timeline from Phase C
+- keep Smart Cut distinct from Creative Remake
 
 ### Phase E — Creative Remake HQ
 
 - full transcript + visual shot map
-- source-shot mapping
+- VN creative beats
+- explicit source-shot/material mapping
 - storyboard human approval
+- automated creative assembly/render
 - source/output timeline separation
+- evaluate MoneyPrinterTurbo-style composition patterns without importing a second application
 
 ### Phase F — Review / Publish / Performance native migration
 
 - remove overlay copy/sync architecture after parity
 - reuse app upload/metrics plumbing
-- keep Affiliate2 approval/learning semantics
+- preserve approval/publication lineage
+- keep Affiliate2 performance-learning semantics
 
 ### Phase G — DB convergence + final cleanup
 

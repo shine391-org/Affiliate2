@@ -10,88 +10,151 @@ Source discovery → Radar ranking → content intelligence → Vietnamese local
 
 The project is distribution-first. Affiliate monetization comes later, after repeatable traffic.
 
-## Current consolidation state
+## Current state
 
-The immutable source snapshot is branch `workspace-sync-2026-09`.
-
-Active implementation branch:
-`consolidation-phase-b-sources-radar`.
-
-Phase A is complete. Canonical application source is:
+Canonical application source:
 
 `app/`
 
-`app/` is an exact promotion of the captured ViralMint working tree at the start of Phase A. It includes the existing Affiliate2 review/performance overlay that had already been synchronized into ViralMint.
+Completed:
 
-Reference snapshots remain:
+- Phase A — application baseline
+- Phase B — Sources + Radar, QA PASS, merged to `master`
 
-- `vendor/viralmint/` — forensic baseline; DO NOT edit.
-- `vendor/mediacrawler/` — donor/reference code; DO NOT edit.
-- `src/radar/` — current Affiliate2 Radar/intelligence/remake implementation; still active for legacy paths until ported.
+Current implementation branch:
+
+`phase-c-media-ai-hq-localization`
+
+Current scope:
+
+Phase C — Media, AI & Automated HQ Localization.
+
+Read before changing Phase-C code:
+
+- `docs/PHASE_C.md`
+- `docs/QA_PHASE_C.md`
+- `docs/ARCHITECTURE.md`
+- `docs/CONSOLIDATION_PLAN.md`
+
+Reference snapshots remain immutable:
+
+- `vendor/viralmint/` — forensic/reference baseline; DO NOT edit
+- `vendor/mediacrawler/` — donor/reference code; DO NOT edit
+- `src/radar/` — legacy/transitional Affiliate2 code until explicitly migrated
 
 Do not add new runtime code under `vendor/`.
 
-Current Phase B scope is source-provider + Radar integration only. Read `docs/PHASE_B.md` and `docs/QA_PHASE_B.md` before changing provider/Scout/Radar code.
-
 ## Architecture direction
 
-ViralMint is the application foundation: FastAPI, React/Vite, jobs, Library, downloader, Whisper, FFmpeg, captions, TTS, Clip Studio and common upload/metrics plumbing.
+Affiliate2 is the product. ViralMint is the current application foundation and a source of reusable plumbing, not a requirement to preserve weak defaults.
 
-Affiliate2 owns the domain-specific layers:
+Prefer/reuse canonical app capabilities when they are fit for purpose:
 
-- source-provider integration for real Douyin/Bilibili discovery,
-- Radar snapshots/ranking/learning,
-- Vietnamese localization quality,
-- Creative Remake HQ planning + storyboard QC,
-- human approval gates,
-- performance intelligence.
+- FastAPI + React/Vite shell
+- job/progress infrastructure
+- Library/media lineage
+- downloader framework
+- FFmpeg/media utilities
+- ASR/Whisper abstraction
+- AI-provider abstraction
+- TTS abstraction
+- caption primitives
+- Clip Studio
+- upload/auth/metrics plumbing
 
-MediaCrawler is donor/reference code. Long-term it must not remain a second application, second WebUI, second DB or subprocess pipeline.
+Quality-critical behavior may be replaced or extended when evidence shows the inherited implementation is inadequate.
+
+Phase-C research references include:
+
+- YouDub — production-oriented localization pipeline patterns
+- SmartSub — provider/config, dubbing workbench and exception-review patterns
+- VideoLingo — translation/subtitle intelligence patterns
+- pyVideoTrans — timing/synchronization algorithm reference; GPL code must not be copied casually
+- OpenCreator — automation + expert-workspace/state pattern
+- faster-whisper / WhisperX — ASR and alignment references
+- MoneyPrinterTurbo — later Creative Remake composition/reference, not the Phase-C localization engine
+
+Do not import these projects as cooperating mini-apps. Adapt only the capability needed behind Affiliate2's canonical interfaces.
 
 ## Non-negotiable engineering rules
 
-1. **Do not duplicate OSS plumbing that ViralMint already does well.**
-   Before adding downloader, Whisper, FFmpeg, TTS, job, Library, upload or metrics infrastructure, inspect `app/`.
+1. **One application, one canonical pipeline.**
+   Target is one FastAPI backend, one React frontend, one job system and eventually one SQLite database. Auto, batch and expert modes must call the same underlying pipeline.
 
-2. **One application, not cooperating mini-apps.**
-   Target is one FastAPI backend, one React frontend, one job system and eventually one SQLite database.
+2. **Reuse good plumbing; replace weak defaults with evidence.**
+   Do not duplicate canonical app infrastructure unnecessarily, but do not keep low-quality downloader, ASR, translation, dubbing or render behavior merely because it came from ViralMint.
 
-3. **Human approval stays a hard gate.**
-   No action may silently publish. Creative Remake HQ must have storyboard review before expensive final render.
+3. **Automation-first, not editor-first.**
+   The happy path is candidate + saved profile → automatic processing → QC → review-ready output. Transcript, prompt, timing and voice editing are optional expert overrides, not required steps.
 
-4. **Current legacy Creative Remake is not a production-quality reference.**
-   Its planner confuses output timeline timestamps with source-video timestamps and ignores generated reuse/reorder intent. Do not extend that semantic mistake.
+4. **Human approval remains a hard publish gate.**
+   No action may silently publish. Creative Remake HQ retains storyboard approval before expensive final render.
 
-5. **Smart Cut and Creative Remake are different products.**
-   - Smart Cut: select/retime/reorder source ranges; reuse ViralMint Clip Studio.
-   - Creative Remake HQ: transcript + visual map → VN script beats → source-shot mapping → storyboard → human approval → render.
+5. **Source and output timelines are distinct data types.**
+   Never reuse one ambiguous `start/end` field for both. Localization, Smart Cut and Creative Remake must preserve coordinate meaning explicitly.
 
-6. **Use ViralMint AI/provider and Whisper abstractions.**
-   Do not introduce direct provider-specific HTTP clients unless a capability cannot be expressed through the existing abstraction and the reason is documented.
+6. **Use canonical provider abstractions.**
+   Extend the app AI/ASR/TTS interfaces instead of adding scattered provider-specific HTTP clients. OpenAI-compatible local/cloud endpoints must remain possible.
 
-7. **Local-first / no overengineering.**
-   No Redis, PostgreSQL, vector DB, microservices, Kubernetes or Docker requirement without a measured bottleneck. SQLite remains the default.
+7. **No hidden quality downgrade or semantic fallback.**
+   Examples: requested Bilibili cannot become YouTube; "Best" ASR cannot silently run a smaller model; failed localization cannot silently become a different production mode.
 
-8. **No silent fallback that changes semantics.**
-   A requested Bilibili search must not quietly become YouTube results. A failed creative plan must not silently become “first N seconds”.
+8. **Do not create a second media engine for manual mode.**
+   Expert overrides change configuration/job state and rerun affected stages of the same pipeline.
 
-9. **Preserve source/output coordinate separation.**
-   Source media timestamps and output timeline timestamps are different data types in all remake planning.
+9. **Smart Cut and Creative Remake are different products.**
+   - Smart Cut: select/retime/reorder source ranges.
+   - Creative Remake HQ: understand source → create VN beats → map source/other material → storyboard approval → compose/render.
 
-10. **Evidence-driven QA.**
-    Passing unit tests is not proof of product behavior. Report exactly what was run, what output was inspected, and what was not tested.
+10. **Local-first / no overengineering.**
+    No Redis, PostgreSQL, vector DB, microservices, Kubernetes or Docker requirement without a measured bottleneck. SQLite remains the default.
 
-11. **Use tiered tests; do not run the full suite on every change.**
-    - Tier 1 — every small change: directly affected tests + import/build/smoke checks. Target: seconds to a few minutes.
-    - Tier 2 — phase/module gate: affected module/integration tests + relevant UI/runtime smoke. Target: a few minutes.
-    - Tier 3 — full suite: only before a major merge/release, after broad shared-core/DB changes, or when diagnosing cross-cutting regressions. Long full-suite runs should be background/CI work, never the default inner loop.
-    - A 20–30 minute suite is NOT required for a docs, source-parity, launcher, or narrowly scoped frontend fix when focused tests prove the changed surface.
+11. **Respect donor licenses.**
+    Reference algorithms and architecture may be studied. Code reuse must be license-compatible and documented. GPL/AGPL code is reference-only unless a deliberate licensing decision is made.
+
+12. **Evidence-driven QA.**
+    Passing unit tests or producing a playable MP4 is not proof of product quality. Report exactly what was run, what real output was inspected and what remains unverified.
+
+13. **Use tiered tests.**
+    - Tier 1 — directly affected tests + import/build/smoke
+    - Tier 2 — phase/module integration + relevant UI/runtime smoke
+    - Tier 3 — full suite only before major merge/release, broad shared-core/DB change or cross-cutting diagnosis
+
+## Phase-C hard boundaries
+
+Phase C includes:
+
+- canonical media ingestion and source-quality policy
+- AI/local-AI provider configuration
+- Localization Profiles
+- canonical transcript/timeline contracts
+- ASR-quality routing
+- contextual Vietnamese translation
+- timing-aware dubbing
+- audio/background mixing
+- minimum-loss final rendering
+- batch automation
+- QC + exception queue
+- expert overrides on the same job
+- intelligence convergence on the same media/transcript/provider path
+
+Phase C does not include:
+
+- lip-sync
+- avatar generation
+- a CapCut-like full editor
+- automatic publishing
+- performance-learning rewrites
+- generative B-roll system
+- Smart Cut implementation
+- Creative Remake HQ implementation
+- big-bang DB convergence
 
 ## Branch/change protocol
 
-- Never develop directly on `workspace-sync-2026-09`; it is a snapshot baseline.
+- Historical snapshot branches are not development targets.
 - Never push product work directly to `master`.
-- Work on a named implementation branch.
+- Work on the named implementation branch.
 - Keep commits scoped to one migration/capability.
 - Do not merge a phase until its QA checklist passes.
 - Do not rewrite historical snapshot/vendor commits.
@@ -113,7 +176,7 @@ Hot-reload development:
 .\scripts\dev.ps1
 ```
 
-Use stable backend during long Whisper/render jobs:
+Use stable backend during long ASR/render jobs:
 
 ```powershell
 .\scripts\dev.ps1 -StableBackend
@@ -137,12 +200,13 @@ See `docs/DEVELOPMENT.md`.
 
 An implementation report must include:
 
-- branch and commit SHA,
-- files changed,
-- behavior changed,
-- commands/tests actually run,
-- runtime/manual checks actually performed,
-- known gaps/blockers,
-- confirmation that no unrelated architecture was introduced.
+- branch and commit SHA
+- files changed
+- behavior changed
+- commands/tests actually run
+- runtime/manual checks actually performed
+- real-media evidence when the task affects media quality
+- known gaps/blockers
+- confirmation that no unrelated architecture was introduced
 
-Never say “tested” when only code was written or statically inspected.
+Never say "tested" when only code was written or statically inspected.
