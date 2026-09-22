@@ -137,3 +137,44 @@ async def test_douyin_picks_logged_in_context_by_existing_page_not_context_zero(
     assert page is second_page
     assert created is False
     assert first.new_page_called is False
+
+@pytest.mark.asyncio
+async def test_douyin_skips_logged_out_douyin_context_for_later_authenticated_one():
+    provider = DouyinProvider()
+
+    class Page:
+        def __init__(self, url):
+            self.url = url
+
+    class Context:
+        def __init__(self, pages):
+            self.pages = pages
+
+        async def new_page(self):
+            raise AssertionError("existing Douyin pages should be reused")
+
+    first_page = Page("https://www.douyin.com/search/first")
+    second_page = Page("https://www.douyin.com/search/second")
+    first = Context([first_page])
+    second = Context([second_page])
+
+    class Browser:
+        contexts = [first, second]
+
+    with patch.object(
+        DouyinProvider,
+        "_session_state",
+        new=AsyncMock(
+            side_effect=[
+                (False, {}, None),
+                (True, {"LOGIN_STATUS": "1"}, None),
+            ]
+        ),
+    ) as session_state:
+        context, page, created = await provider._pick_context_and_page(Browser())
+
+    assert context is second
+    assert page is second_page
+    assert created is False
+    assert session_state.await_count == 2
+
