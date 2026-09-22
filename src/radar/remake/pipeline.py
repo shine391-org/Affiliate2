@@ -135,6 +135,7 @@ async def run_remake_pipeline(
     target_duration: str = "20-35s",
     voice_id: str = DEFAULT_VOICE_MALE,
     use_cache: bool = True,
+    review_note: str | None = None,
 ) -> RemakeResult:
     """Run the full remake pipeline for a candidate.
 
@@ -143,6 +144,7 @@ async def run_remake_pipeline(
         target_duration: Target duration string
         voice_id: Edge TTS voice ID
         use_cache: Use cached adaptation if available
+        review_note: Optional human feedback for REWORK; forces a fresh adaptation.
 
     Returns:
         RemakeResult with paths and status
@@ -175,6 +177,7 @@ async def run_remake_pipeline(
                 output_dir=output_dir,
                 target_duration=target_duration,
                 use_cache=use_cache,
+                review_note=review_note,
             )
             result.adaptation_path = str(output_dir / "adaptation.json")
             result.platform = adaptation.get("platform", "")
