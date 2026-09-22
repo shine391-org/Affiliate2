@@ -7,6 +7,11 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from ..action_service import (
+    ActionValidationError,
+    launch_action,
+    latest_action_snapshot,
+)
 from ..review_store import (
     CANDIDATE_STAGE,
     REMAKE_STAGE,
@@ -21,6 +26,13 @@ class ReviewDecision(BaseModel):
     stage: Literal["candidate", "remake"]
     status: str
     note: str | None = None
+
+
+class ContentActionRequest(BaseModel):
+    action: Literal["translate", "remake", "rerender"]
+    voice_id: str | None = None
+    target_duration: Literal["20-35s", "35-60s"] | None = None
+    translate_mode: Literal["full_dub", "captions_only"] | None = None
 
 
 def _store() -> ReviewStore:
@@ -60,6 +72,47 @@ def save_decision(platform: str, content_id: str, decision: ReviewDecision):
             note=decision.note,
         )
         return {"ok": True, "review": review}
+    except ReviewValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Candidate not found") from exc
+
+
+@router.post("/candidates/{platform}/{content_id}/action")
+async def start_content_action(
+    platform: str,
+    content_id: str,
+    request: ContentActionRequest,
+):
+    store = _store()
+    try:
+        return await launch_action(
+            store,
+            platform,
+            content_id,
+            request.action,
+            {
+                "voice_id": request.voice_id,
+                "target_duration": request.target_duration,
+                "translate_mode": request.translate_mode,
+            },
+        )
+    except ActionValidationError as exc:
+        code = 409 if "already" in str(exc).lower() else 400
+        raise HTTPException(status_code=code, detail=str(exc)) from exc
+    except ReviewValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Candidate not found") from exc
+
+
+@router.get("/candidates/{platform}/{content_id}/action")
+async def content_action_status(platform: str, content_id: str):
+    store = _store()
+    try:
+        # Validate candidate identity/existence before exposing job references.
+        store.get_candidate_detail(platform, content_id)
+        return {"action": await latest_action_snapshot(store, platform, content_id)}
     except ReviewValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except KeyError as exc:
