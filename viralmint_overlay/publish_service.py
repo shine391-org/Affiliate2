@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from .publish_store import PublishStore
+from .publish_store import PublishStore, PublishValidationError
 from .review_store import ReviewStore
 
 
@@ -538,29 +538,40 @@ async def launch_publish(
             error_message="Previous publish did not complete before backend restart.",
         )
 
-    from backend.agents.job_helper import create_job
-    from backend.core.task_runner import dispatch
-
-    job = await create_job(
-        f"publish:{target_platform}",
-        "local",
-        {
-            "source_platform": source_platform,
-            "content_id": content_id,
-            "target_platform": target_platform,
-            "privacy": privacy,
-        },
-    )
     publication_id = publish_store.create_publication(
         source_platform,
         content_id,
         target_platform,
-        job_id=job.id,
+        job_id=None,
         title=title,
         caption=caption,
         privacy=privacy,
         status="PUBLISHING",
     )
+
+    from backend.agents.job_helper import create_job
+    from backend.core.task_runner import dispatch
+
+    try:
+        job = await create_job(
+            f"publish:{target_platform}",
+            "local",
+            {
+                "source_platform": source_platform,
+                "content_id": content_id,
+                "target_platform": target_platform,
+                "privacy": privacy,
+            },
+        )
+    except Exception:
+        publish_store.finish_publication(
+            publication_id,
+            status="FAILED",
+            error_message="Could not create ViralMint publish job.",
+        )
+        raise
+
+    publish_store.set_publication_job(publication_id, job.id)
     dispatch(
         _execute_publish(
             job_id=job.id,
