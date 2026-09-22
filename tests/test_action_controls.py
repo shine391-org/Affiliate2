@@ -7,6 +7,7 @@ import pytest
 
 from viralmint_overlay.action_service import (
     ActionValidationError,
+    _prepare_staging_dir,
     _promote_staging,
     resolve_requested_action,
 )
@@ -186,3 +187,21 @@ def test_rework_note_is_injected_into_creative_prompt():
     )
     assert "Hook đang chậm, vào món sớm hơn." in prompt
     assert "HUMAN REWORK FEEDBACK" in prompt
+
+
+
+def test_prepare_staging_recovers_backup_if_live_dir_missing(tmp_path):
+    remakes = tmp_path / "data" / "remakes"
+    remakes.mkdir(parents=True)
+    backup = remakes / ".douyin_123.backup-old"
+    backup.mkdir()
+    (backup / "final.mp4").write_bytes(b"old-final")
+
+    final_dir, staging, new_backup = _prepare_staging_dir(
+        tmp_path, "douyin_123", "abcdef123456"
+    )
+
+    assert (final_dir / "final.mp4").read_bytes() == b"old-final"
+    assert staging.exists()
+    assert not backup.exists()
+    assert new_backup.name.startswith(".douyin_123.backup-")
