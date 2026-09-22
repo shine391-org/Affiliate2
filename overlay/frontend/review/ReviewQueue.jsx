@@ -21,6 +21,7 @@ import RefreshIcon from "@mui/icons-material/RefreshOutlined"
 import OpenInNewIcon from "@mui/icons-material/OpenInNew"
 import http from "../../api/http"
 import ActionControls from "./ActionControls"
+import PublishGate from "./PublishGate"
 
 const FILTERS = [
   "ALL",
@@ -585,6 +586,10 @@ export default function ReviewQueue() {
                     onRun={() => runAction("rerender")}
                     onCancel={cancelAction}
                   />
+                )}
+
+                {detail.remake_exists && detail.remake_review?.status === "APPROVED" && (
+                  <PublishGate detail={detail} />
                 )}
 
                 <TextField
