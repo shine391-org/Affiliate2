@@ -3,7 +3,7 @@
 """REST /api/settings — user settings CRUD + credential testing + OAuth callbacks."""
 import logging
 from datetime import datetime
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import Optional
