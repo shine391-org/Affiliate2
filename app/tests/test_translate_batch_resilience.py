@@ -995,6 +995,79 @@ async def test_c7_targeted_regeneration_never_rewrites_reused_chunk(
 
 
 @pytest.mark.asyncio
+async def test_c7_resumed_reused_overlong_chunk_can_still_rewrite(
+    monkeypatch, tmp_path,
+):
+    tx = LocalizationTranscript(segments=[
+        LocalizationSegment(
+            id="s1",
+            speaker_id="A",
+            source_text="one",
+            translated_text="bản dịch dài",
+            source_start_ms=0,
+            source_end_ms=500,
+            translation_status="success",
+        )
+    ])
+    work = tmp_path / "work"
+    work.mkdir()
+    _seed_reusable_chunk(work, 1, "bản dịch dài", "A")
+
+    monkeypatch.setattr(ls, "_profile_ai_client", lambda *_: object())
+    monkeypatch.setattr(ls, "_tts_config", lambda *_: _runtime())
+
+    async def fake_duration(path):
+        return 2000
+
+    adapted = []
+    async def fake_adapt(ai, *, plan, chunk, segment_by_id, **kwargs):
+        adapted.append(chunk.id)
+        for idx in chunk.item_indexes:
+            plan[idx].spoken_text = "ngắn"
+            plan[idx].estimated_duration_ms = 200
+            segment_by_id[plan[idx].segment_id].translated_text = "ngắn"
+        return True
+
+    async def fake_generate(text, *, output_path, **kwargs):
+        output_path.write_bytes(b"fresh")
+        return 400
+
+    def fake_fit(source, destination, speed_factor):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b"fit")
+        return destination
+
+    def fake_compose(chunks, *, total_duration_ms, output_path):
+        output_path.write_bytes(b"wav")
+        return output_path
+
+    monkeypatch.setattr(ls, "_audio_duration_ms", fake_duration)
+    monkeypatch.setattr(ls, "_adapt_chunk_items", fake_adapt)
+    monkeypatch.setattr(ls, "_generate_tts_chunk", fake_generate)
+    monkeypatch.setattr(ls, "_fit_chunk_audio_sync", fake_fit)
+    monkeypatch.setattr(ls, "_compose_chunk_track_sync", fake_compose)
+    monkeypatch.setattr(
+        "backend.services.video_utils.probe_duration",
+        lambda *a, **k: 1.0,
+    )
+
+    result = await ls.synthesize_timed_dub(
+        tx,
+        source_media=tmp_path / "source.mp4",
+        target_language="Vietnamese",
+        profile=_profile(dub_rewrite_attempts=2, dub_speed_max=1.30),
+        user_settings=object(),
+        work_dir=work,
+        reuse_existing_chunks=True,
+    )
+
+    assert adapted == [1]
+    assert result.transcript.segments[0].translated_text == "ngắn"
+    assert (work / "chunk_0001.wav").read_bytes() == b"fresh"
+
+
+
+@pytest.mark.asyncio
 async def test_c7_stale_raw_chunk_identity_forces_regeneration(monkeypatch, tmp_path):
     tx = LocalizationTranscript(segments=[
         LocalizationSegment(
