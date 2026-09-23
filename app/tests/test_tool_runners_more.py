@@ -304,7 +304,7 @@ def test_unreadable_dimensions_still_reframe():
 @pytest.mark.asyncio
 class TestVoiceover:
     async def test_audio_only_success(self, terminal_spies, out_dir):
-        async def _gen(text, voice_id=None, output_path=None):
+        async def _gen(text, voice_id=None, output_path=None, speed=1.0):
             Path(output_path).write_bytes(b"x")
 
         with patch("backend.services.edge_tts_service.generate_voice",
@@ -654,6 +654,18 @@ class TestAutoZoom:
 
 @pytest.mark.asyncio
 class TestTranslate:
+    @pytest.fixture(autouse=True)
+    def configured_ai_binding(self, monkeypatch):
+        # Mock translation I/O also needs the persisted provider binding.
+        from types import SimpleNamespace
+        monkeypatch.setattr(
+            "backend.services.localization_service._profile_ai_client",
+            lambda *args: SimpleNamespace(
+                provider=SimpleNamespace(value="compatible"),
+                model="test-model", base_url="http://127.0.0.1:1234/v1",
+            ),
+        )
+
     async def test_no_speech_routes_to_fail(self, terminal_spies, out_dir, monkeypatch):
         from types import SimpleNamespace
         import backend.services.localization_stage_service as stage_service
