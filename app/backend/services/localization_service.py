@@ -119,13 +119,15 @@ def _profile_ai_client(user_settings, profile: LocalizationProfile):
     configured = (getattr(user_settings, "ai_provider", None) or "").strip().lower()
 
     if requested:
-        compatible_aliases = set(COMPATIBLE_PRESETS) | {"compatible"}
-        same_transport = (
-            ai.provider == AIProvider.COMPATIBLE
-            and requested in compatible_aliases
-            and configured in compatible_aliases
+        # A shared OpenAI-compatible protocol does NOT make Ollama, LM Studio
+        # and vLLM interchangeable endpoints. A profile naming a concrete
+        # preset must match the configured preset. Generic "compatible" means
+        # "use whichever compatible endpoint Settings currently owns".
+        generic_compatible = (
+            requested == "compatible"
+            and ai.provider == AIProvider.COMPATIBLE
         )
-        if requested != configured and requested != ai.provider.value and not same_transport:
+        if requested != configured and requested != ai.provider.value and not generic_compatible:
             raise ValueError(
                 f"Profile requests AI provider '{requested}', but Settings currently "
                 f"configure '{configured or ai.provider.value}'. Configure that provider first."
@@ -643,7 +645,8 @@ def _mix_dub_with_video_sync(
             f"[1:a]volume={dub_gain_db}dB[dub];"
             "[bg][dub]sidechaincompress=threshold=0.025:ratio=12:"
             "attack=15:release=220[ducked];"
-            "[ducked][dub]amix=inputs=2:duration=longest:normalize=0[mix]"
+            "[ducked][dub]amix=inputs=2:duration=longest:normalize=0,"
+            "alimiter=limit=0.95[mix]"
         )
         cmd += [
             "-filter_complex", fc,

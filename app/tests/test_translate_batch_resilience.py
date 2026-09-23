@@ -305,6 +305,7 @@ def test_c8_mix_ducks_source_and_stream_copies_video(monkeypatch, tmp_path):
     cmd_text = " ".join(captured["cmd"])
     assert got == out
     assert "sidechaincompress" in cmd_text
+    assert "alimiter=limit=0.95" in cmd_text
     assert "-c:v copy" in cmd_text
     assert "-b:a 192k" in cmd_text
 
@@ -390,3 +391,36 @@ async def test_c7_strict_timing_ignores_tolerance_borrow(monkeypatch, tmp_path):
             user_settings=object(),
             work_dir=tmp_path / "work",
         )
+
+
+def test_profile_named_compatible_preset_must_match_settings(monkeypatch):
+    from backend.core.ai_provider import AIProvider
+
+    fake_ai = SimpleNamespace(provider=AIProvider.COMPATIBLE, model="x")
+    monkeypatch.setattr(
+        "backend.core.ai_provider.get_ai_client",
+        lambda settings: fake_ai,
+    )
+    settings = SimpleNamespace(ai_provider="lmstudio")
+    with pytest.raises(ValueError, match="requests AI provider 'ollama'"):
+        ls._profile_ai_client(
+            settings,
+            _profile(translation_provider="ollama"),
+        )
+
+
+def test_generic_compatible_profile_can_use_current_compatible_endpoint(monkeypatch):
+    from backend.core.ai_provider import AIProvider
+
+    fake_ai = SimpleNamespace(provider=AIProvider.COMPATIBLE, model="old")
+    monkeypatch.setattr(
+        "backend.core.ai_provider.get_ai_client",
+        lambda settings: fake_ai,
+    )
+    settings = SimpleNamespace(ai_provider="lmstudio")
+    got = ls._profile_ai_client(
+        settings,
+        _profile(translation_provider="compatible", translation_model="new-model"),
+    )
+    assert got is fake_ai
+    assert got.model == "new-model"

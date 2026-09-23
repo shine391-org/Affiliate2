@@ -899,6 +899,11 @@ async def run_tool_translate(
             updates["caption_style"] = caption_style
         if target_aspect:
             updates["target_aspect"] = target_aspect
+        elif profile_id is None:
+            # Preserve the existing manual Translate-tool behavior: omitting
+            # target_aspect means "keep source geometry". Automation/C9 passes
+            # a profile_id and therefore uses the profile's target aspect.
+            updates["target_aspect"] = "source"
         if updates:
             profile = LocalizationProfile.model_validate({
                 **profile.model_dump(),
