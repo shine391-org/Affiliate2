@@ -181,3 +181,44 @@ async def test_word_level_speaker_id_survives_semantic_segmentation():
     got = await refine_semantic_cues_with_ai(tx, ai)
     assert [s.speaker_id for s in got.segments] == ["A", "B"]
     assert [s.source_text for s in got.segments] == ["hello there", "yes indeed"]
+
+
+
+@pytest.mark.asyncio
+async def test_word_tier_preserves_whisper_spacing_for_english_and_cjk():
+    from backend.services.semantic_segmentation import refine_semantic_cues_with_ai
+
+    en = LocalizationTranscript(
+        text="Hello world",
+        segments=[LocalizationSegment(
+            id="en", source_text="Hello world",
+            source_start_ms=0, source_end_ms=800,
+            source_words=[
+                {"word": "Hello", "start": 0.0, "end": 0.3},
+                {"word": " world", "start": 0.3, "end": 0.8},
+            ],
+        )],
+    )
+    got_en = await refine_semantic_cues_with_ai(
+        en, _GroupingAI('[{"ids":["w00001","w00002"]}]')
+    )
+    assert got_en.segments[0].source_text == "Hello world"
+
+    zh = LocalizationTranscript(
+        text="你好世界",
+        language="zh",
+        segments=[LocalizationSegment(
+            id="zh", source_text="你好世界",
+            source_start_ms=0, source_end_ms=800,
+            source_words=[
+                {"word": "你", "start": 0.0, "end": 0.2},
+                {"word": "好", "start": 0.2, "end": 0.4},
+                {"word": "世", "start": 0.4, "end": 0.6},
+                {"word": "界", "start": 0.6, "end": 0.8},
+            ],
+        )],
+    )
+    got_zh = await refine_semantic_cues_with_ai(
+        zh, _GroupingAI('[{"ids":["w00001","w00002","w00003","w00004"]}]')
+    )
+    assert got_zh.segments[0].source_text == "你好世界"

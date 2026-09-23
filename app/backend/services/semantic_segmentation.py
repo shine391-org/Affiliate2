@@ -166,12 +166,14 @@ def _timed_words(transcript: LocalizationTranscript) -> list[dict]:
                 continue
             start = _word_ms(raw, "start")
             end = _word_ms(raw, "end")
-            text = str(raw.get("word") or "").strip()
+            raw_text = str(raw.get("word") or "")
+            text = raw_text.strip()
             if start is None or end is None or end <= start or not text:
                 continue
             out.append({
                 "id": f"w{number:05d}",
                 "text": text,
+                "raw_text": raw_text,
                 "start_ms": start,
                 "end_ms": end,
                 "speaker_id": raw.get("speaker_id") or seg.speaker_id,
@@ -193,9 +195,11 @@ def _word_groups_to_segments(
         group = [by_id[word_id] for word_id in ids]
         speaker_ids = {w["speaker_id"] for w in group}
         speaker_id = next(iter(speaker_ids)) if len(speaker_ids) == 1 else None
-        # Word tokens from faster-whisper are often already whitespace-aware,
-        # but stripping/collapsing gives stable text across engines.
-        text = _collapse_ws(" ".join(w["text"] for w in group))
+        # Preserve the tokenizer's original whitespace. English Whisper words
+        # usually carry a leading space; Chinese/Japanese tokens usually do
+        # not. Joining stripped tokens with a forced space corrupts CJK source
+        # text into "你 好 世 界", which is avoidable translation noise.
+        text = _collapse_ws("".join(w.get("raw_text", w["text"]) for w in group))
         out.append(LocalizationSegment(
             id=f"sem-{start_group_index + offset:04d}",
             speaker_id=speaker_id,
