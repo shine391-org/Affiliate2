@@ -11,20 +11,21 @@ Failures mark status and continue; they never block the batch.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from .ai_analyze import analyze_candidate
-from .media import candidate_dir, fetch_media
-from .transcribe import transcribe
+from .ai_analyze import analyze_candidate_async
+from .media import candidate_dir, fetch_media_async
+from .transcribe import transcribe_async
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 
 
-def run_intelligence(
+async def run_intelligence_async(
     candidates: list[dict],
     force: bool = False,
     verbose: bool = True,
@@ -86,7 +87,7 @@ def run_intelligence(
         }
 
         # --- 2. media ---
-        media = fetch_media(platform, content_id, cand.get("canonical_url") or "")
+        media = await fetch_media_async(platform, content_id, cand.get("canonical_url") or "")
         entry["media_status"] = media["status"]
         if media["status"] == "SUCCESS":
             summary["media_downloaded"] += 1
@@ -114,7 +115,7 @@ def run_intelligence(
                 entry["transcript_status"] = "CACHED"
                 summary["transcripts"] += 1
             else:
-                tr = transcribe(media["path"], transcript_path)
+                tr = await transcribe_async(media["path"], transcript_path)
                 entry["transcript_status"] = tr["status"]
                 if tr["status"] == "SUCCESS":
                     transcript_data = tr["data"]
@@ -131,7 +132,7 @@ def run_intelligence(
 
         # --- 4. intelligence ---
         intel_path = cdir / "intelligence.json"
-        ai = analyze_candidate(metadata, transcript_data, intel_path, force=force)
+        ai = await analyze_candidate_async(metadata, transcript_data, intel_path, force=force)
         entry["intelligence_status"] = ai["status"]
         summary["model_calls"] += ai["model_stats"]["calls"]
         summary["model_retries"] += ai["model_stats"]["retries"]
@@ -152,3 +153,15 @@ def run_intelligence(
             )
 
     return summary
+
+
+
+def run_intelligence(
+    candidates: list[dict],
+    force: bool = False,
+    verbose: bool = True,
+) -> dict:
+    """Sync compatibility entrypoint; one event loop owns the whole batch."""
+    return asyncio.run(
+        run_intelligence_async(candidates, force=force, verbose=verbose)
+    )
