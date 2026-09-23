@@ -754,6 +754,63 @@ async def test_c7_valid_cached_duration_skips_raw_ffprobe(monkeypatch, tmp_path)
     assert result.max_fitted_speed_factor == 1.0
 
 
+@pytest.mark.asyncio
+async def test_c7_missing_cached_duration_probes_once_and_heals_sidecar(
+    monkeypatch, tmp_path,
+):
+    tx = LocalizationTranscript(segments=[
+        LocalizationSegment(
+            id="s1",
+            speaker_id="A",
+            source_text="one",
+            translated_text="ngắn",
+            source_start_ms=0,
+            source_end_ms=1000,
+            translation_status="success",
+        )
+    ])
+    work = tmp_path / "work"
+    work.mkdir()
+    raw = _seed_reusable_chunk(work, 1, "ngắn", "A")
+
+    monkeypatch.setattr(ls, "_profile_ai_client", lambda *_: object())
+    monkeypatch.setattr(ls, "_tts_config", lambda *_: _runtime())
+    probes = {"n": 0}
+
+    async def fake_duration(path):
+        probes["n"] += 1
+        return 800
+
+    async def fail_generate(*args, **kwargs):
+        pytest.fail("valid identity must reuse raw audio after duration probe")
+
+    def fake_compose(chunks, *, total_duration_ms, output_path):
+        output_path.write_bytes(b"wav")
+        return output_path
+
+    monkeypatch.setattr(ls, "_audio_duration_ms", fake_duration)
+    monkeypatch.setattr(ls, "_generate_tts_chunk", fail_generate)
+    monkeypatch.setattr(ls, "_compose_chunk_track_sync", fake_compose)
+    monkeypatch.setattr(
+        "backend.services.video_utils.probe_duration",
+        lambda *a, **k: 1.0,
+    )
+
+    await ls.synthesize_timed_dub(
+        tx,
+        source_media=tmp_path / "source.mp4",
+        target_language="Vietnamese",
+        profile=_profile(),
+        user_settings=object(),
+        work_dir=work,
+        reuse_existing_chunks=True,
+    )
+
+    assert probes["n"] == 1
+    sidecar = json.loads(ls._chunk_identity_path(raw).read_text(encoding="utf-8"))
+    assert sidecar["duration_ms"] == 800
+
+
 def test_c7_captions_use_fitted_target_timing_and_speaker():
     tx = LocalizationTranscript(segments=[LocalizationSegment(
         id="s1",
