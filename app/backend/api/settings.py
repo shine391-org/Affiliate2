@@ -44,6 +44,10 @@ class SettingsResponse(BaseModel):
     preferred_voice_id: str = "21m00Tcm4TlvDq8ikWAM"
     tts_provider: str = "edge_tts"
     preferred_tts_voice: Optional[str] = None
+    tts_model: Optional[str] = None
+    tts_base_url: Optional[str] = None
+    tts_region: Optional[str] = None
+    tts_api_key_set: bool = False
     caption_style: str = "viral"
     caption_enabled: bool = True
     music_enabled: bool = True
@@ -72,6 +76,10 @@ class SettingsUpdate(BaseModel):
     preferred_voice_id: Optional[str] = None
     tts_provider: Optional[str] = None
     preferred_tts_voice: Optional[str] = None
+    tts_model: Optional[str] = None
+    tts_base_url: Optional[str] = None
+    tts_region: Optional[str] = None
+    tts_api_key: Optional[str] = None
     caption_style: Optional[str] = None
     caption_enabled: Optional[bool] = None
     music_enabled: Optional[bool] = None
@@ -110,6 +118,10 @@ async def get_settings():
         preferred_voice_id=s.preferred_voice_id or "21m00Tcm4TlvDq8ikWAM",
         tts_provider=s.tts_provider or "edge_tts",
         preferred_tts_voice=s.preferred_tts_voice,
+        tts_model=s.tts_model,
+        tts_base_url=s.tts_base_url,
+        tts_region=s.tts_region,
+        tts_api_key_set=bool(s.tts_api_key_encrypted),
         caption_style=s.caption_style or "viral",
         caption_enabled=s.caption_enabled if s.caption_enabled is not None else True,
         music_enabled=s.music_enabled if s.music_enabled is not None else True,
@@ -157,9 +169,23 @@ async def update_settings(update: SettingsUpdate):
         if update.preferred_voice_id is not None:
             s.preferred_voice_id = update.preferred_voice_id
         if update.tts_provider is not None:
-            s.tts_provider = update.tts_provider
+            new_tts_provider = update.tts_provider.strip().lower()
+            if (
+                new_tts_provider != (s.tts_provider or "").strip().lower()
+                and update.tts_api_key is None
+            ):
+                s.tts_api_key_encrypted = None
+            s.tts_provider = new_tts_provider
         if update.preferred_tts_voice is not None:
-            s.preferred_tts_voice = update.preferred_tts_voice
+            s.preferred_tts_voice = update.preferred_tts_voice or None
+        if update.tts_model is not None:
+            s.tts_model = update.tts_model.strip() or None
+        if update.tts_base_url is not None:
+            s.tts_base_url = update.tts_base_url.strip() or None
+        if update.tts_region is not None:
+            s.tts_region = update.tts_region.strip() or None
+        if update.tts_api_key is not None:
+            s.tts_api_key_encrypted = encrypt(update.tts_api_key) if update.tts_api_key else None
         if update.caption_style is not None:
             s.caption_style = update.caption_style
         if update.caption_enabled is not None:

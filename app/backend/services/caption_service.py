@@ -996,20 +996,24 @@ async def burn_captions(
     render_profile: str = "balanced",
     target_aspect: str | None = None,
     reframe_method: str = "auto",
+    external_audio: Path | None = None,
+    video_slowdown: float = 1.0,
 ) -> Path:
-    """Burn ASS captions, optionally reframing in the SAME final video encode.
+    """One final visual generation: optional retime + reframe + ASS captions.
 
-    Phase C uses this path so 16:9 -> 9:16 + captions is one H.264 generation,
-    not reframe-encode followed by caption-encode.
+    Phase C may supply an externally mixed dub track. The source picture is
+    never pre-encoded for audio work or bounded slowdown; setpts, geometry and
+    captions share this single H.264 encode.
     """
     global _ffmpeg_has_ass
 
     if output_path is None:
         output_path = video_path.parent / f"{video_path.stem}_captioned.mp4"
-
     if not ass_path.exists() or ass_path.stat().st_size == 0:
-        logger.warning("Empty or missing ASS file — returning original video")
+        logger.warning("Empty or missing ASS file — final render refused")
         return video_path
+    if video_slowdown < 1.0 or video_slowdown > 1.5:
+        raise ValueError("video_slowdown must be between 1.0 and 1.5")
 
     if _ffmpeg_has_ass is None:
         _ffmpeg_has_ass = _check_ffmpeg_ass_support()
@@ -1019,40 +1023,18 @@ async def burn_captions(
 
     from backend.services.video_utils import probe_duration
     duration = await asyncio.to_thread(probe_duration, video_path, 0.0)
-    timeout_s = int(min(max(duration * 3, 600), 5400))
+    timeout_s = int(min(max(duration * video_slowdown * 3, 600), 5400))
 
-    # Resolve the visual filter before entering the blocking ffmpeg call.
-    filter_flag = "-vf"
-    visual_filter = ""
+    target_dims = None
+    method = reframe_method
     if target_aspect and target_aspect != "source":
         from backend.services.ffmpeg_service import (
             ASPECT_DIMS, _probe_dimensions, pick_reframe_method,
         )
-        target_w, target_h = ASPECT_DIMS[target_aspect]
-        method = reframe_method
+        target_dims = ASPECT_DIMS[target_aspect]
         if method == "auto":
             src_w, src_h = await _probe_dimensions(video_path)
             method = pick_reframe_method(src_w, src_h, target_aspect)
-
-        if method == "blur_fill":
-            filter_flag = "-filter_complex"
-            visual_filter = (
-                f"[0:v]split[original][bg];"
-                f"[bg]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,"
-                f"crop={target_w}:{target_h},boxblur=20:5[blurred];"
-                f"[original]scale={target_w}:{target_h}:force_original_aspect_ratio=decrease[scaled];"
-                f"[blurred][scaled]overlay=(W-w)/2:(H-h)/2[framed]"
-            )
-        elif method == "crop":
-            visual_filter = (
-                f"scale={target_w}:{target_h}:force_original_aspect_ratio=increase,"
-                f"crop={target_w}:{target_h}"
-            )
-        else:
-            visual_filter = (
-                f"scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,"
-                f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:black"
-            )
 
     def _burn():
         escaped_ass = (
@@ -1061,39 +1043,80 @@ async def burn_captions(
             .replace(":", "\\:")
             .replace("'", "'\\''")
         )
-        ass_filter = f"ass='{escaped_ass}'"
-        if filter_flag == "-filter_complex":
-            vf = visual_filter + f";[framed]{ass_filter}[vout]"
-            mapping = ["-map", "[vout]", "-map", "0:a?"]
-        else:
-            vf = f"{visual_filter},{ass_filter}" if visual_filter else ass_filter
-            mapping = []
+        filters: list[str] = []
+        current = "[0:v]"
+
+        if video_slowdown > 1.0005:
+            filters.append(f"{current}setpts={video_slowdown:.8f}*PTS[vslow]")
+            current = "[vslow]"
+
+        if target_dims:
+            target_w, target_h = target_dims
+            if method == "blur_fill":
+                filters.append(f"{current}split[original][bg]")
+                filters.append(
+                    f"[bg]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,"
+                    f"crop={target_w}:{target_h},boxblur=20:5[blurred]"
+                )
+                filters.append(
+                    f"[original]scale={target_w}:{target_h}:"
+                    f"force_original_aspect_ratio=decrease[scaled]"
+                )
+                filters.append("[blurred][scaled]overlay=(W-w)/2:(H-h)/2[framed]")
+            elif method == "crop":
+                filters.append(
+                    f"{current}scale={target_w}:{target_h}:force_original_aspect_ratio=increase,"
+                    f"crop={target_w}:{target_h}[framed]"
+                )
+            else:
+                filters.append(
+                    f"{current}scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,"
+                    f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:black[framed]"
+                )
+            current = "[framed]"
+
+        filters.append(f"{current}ass='{escaped_ass}'[vout]")
+
+        cmd = ["ffmpeg", "-y", "-i", str(video_path)]
+        if external_audio is not None:
+            cmd += ["-i", str(external_audio)]
+        cmd += ["-filter_complex", ";".join(filters), "-map", "[vout]"]
 
         from backend.services.ffmpeg_service import video_encode_args
-        base = [
-            "ffmpeg", "-y", "-i", str(video_path),
-            filter_flag, vf,
-            *mapping,
-            *video_encode_args(render_profile),
-        ]
+        cmd += video_encode_args(render_profile)
+
+        if external_audio is not None:
+            attempts = [[
+                *cmd,
+                "-map", "1:a:0",
+                "-af", "apad",
+                "-c:a", "aac", "-b:a", "192k",
+                "-shortest",
+            ]]
+        else:
+            cmd += ["-map", "0:a?"]
+            attempts = [
+                [*cmd, "-c:a", "copy"],
+                [*cmd, "-c:a", "aac", "-b:a", "192k"],
+            ]
+
         last_err = ""
-        for audio_args in (["-c:a", "copy"], ["-c:a", "aac", "-b:a", "192k"]):
-            cmd = base + audio_args + ["-movflags", "+faststart", str(output_path)]
+        for base in attempts:
+            full = base + ["-movflags", "+faststart", str(output_path)]
             try:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
-            except subprocess.TimeoutExpired:
-                logger.error(
-                    "ASS/final render timed out after %d min on a %.0f min source",
-                    timeout_s // 60, duration / 60,
+                result = subprocess.run(
+                    full, capture_output=True, text=True, timeout=timeout_s
                 )
+            except subprocess.TimeoutExpired:
+                logger.error("Final localization render timed out after %ds", timeout_s)
                 return video_path
             if result.returncode == 0 and output_path.exists():
-                logger.info("Captions/final render succeeded: %s", output_path)
+                logger.info("Final localization render succeeded: %s", output_path)
                 return output_path
-            last_err = (result.stderr or "")[-500:]
+            last_err = (result.stderr or "")[-700:]
             output_path.unlink(missing_ok=True)
 
-        logger.error("ASS/final render FFmpeg error: %s", last_err)
+        logger.error("Final localization render FFmpeg error: %s", last_err)
         return video_path
 
     return await asyncio.to_thread(_burn)

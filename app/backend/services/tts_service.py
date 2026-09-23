@@ -18,16 +18,28 @@ logger = logging.getLogger(__name__)
 class TTSProvider(str, Enum):
     OPENAI_TTS = "openai_tts"
     EDGE_TTS = "edge_tts"
+    OPENAI_COMPATIBLE = "openai_compatible_tts"
+    AZURE = "azure_tts"
+    ELEVENLABS = "elevenlabs"
+    GPT_SOVITS = "gpt_sovits"
 
 
 PROVIDER_INFO = {
-    TTSProvider.OPENAI_TTS: {"label": "OpenAI TTS",  "cost_1k_chars": 0.015, "quality": "standard", "needs_key": True},
-    TTSProvider.EDGE_TTS:   {"label": "Edge TTS",    "cost_1k_chars": 0.0,   "quality": "basic",    "needs_key": False},
+    TTSProvider.OPENAI_TTS: {"label": "OpenAI TTS", "cost_1k_chars": 0.015, "quality": "hq", "needs_key": True},
+    TTSProvider.EDGE_TTS: {"label": "Edge TTS", "cost_1k_chars": 0.0, "quality": "preview", "needs_key": False},
+    TTSProvider.OPENAI_COMPATIBLE: {"label": "OpenAI-compatible TTS", "cost_1k_chars": 0.0, "quality": "hq", "needs_key": False},
+    TTSProvider.AZURE: {"label": "Azure Speech", "cost_1k_chars": 0.0, "quality": "hq", "needs_key": True},
+    TTSProvider.ELEVENLABS: {"label": "ElevenLabs", "cost_1k_chars": 0.0, "quality": "hq", "needs_key": True},
+    TTSProvider.GPT_SOVITS: {"label": "GPT-SoVITS", "cost_1k_chars": 0.0, "quality": "voice_clone", "needs_key": False},
 }
 
 DEFAULT_VOICES = {
-    TTSProvider.OPENAI_TTS: "alloy",                    # alloy|echo|fable|onyx|nova|shimmer
-    TTSProvider.EDGE_TTS:   "en-US-AndrewMultilingualNeural",  # Natural multilingual voice
+    TTSProvider.OPENAI_TTS: "alloy",
+    TTSProvider.EDGE_TTS: "vi-VN-HoaiMyNeural",
+    TTSProvider.OPENAI_COMPATIBLE: "alloy",
+    TTSProvider.AZURE: "vi-VN-HoaiMyNeural",
+    TTSProvider.ELEVENLABS: "",
+    TTSProvider.GPT_SOVITS: "",
 }
 
 
@@ -39,6 +51,12 @@ async def generate_tts(
     output_path: Path = None,
     model: str | None = None,
     speed: float = 1.0,
+    base_url: str | None = None,
+    region: str | None = None,
+    reference_audio: str | None = None,
+    reference_text: str | None = None,
+    reference_language: str | None = None,
+    target_language: str | None = None,
 ) -> Path:
     """Generate speech using any supported TTS provider. Returns audio file path."""
     if output_path is None:
@@ -63,6 +81,39 @@ async def generate_tts(
     elif provider == TTSProvider.EDGE_TTS:
         from backend.services.edge_tts_service import generate_voice
         return await generate_voice(text, voice_id=voice, output_path=output_path, speed=speed)
+
+    elif provider == TTSProvider.OPENAI_COMPATIBLE:
+        from backend.services.openai_compatible_tts_service import generate_voice
+        return await generate_voice(
+            text, voice_id=voice, api_key=api_key, base_url=base_url or "",
+            output_path=output_path, model=model or "tts-1", speed=speed,
+        )
+
+    elif provider == TTSProvider.AZURE:
+        from backend.services.azure_tts_service import generate_voice
+        return await generate_voice(
+            text, voice_id=voice, api_key=api_key, region=region or "",
+            base_url=base_url, output_path=output_path, speed=speed,
+        )
+
+    elif provider == TTSProvider.ELEVENLABS:
+        from backend.services.elevenlabs_tts_service import generate_voice
+        return await generate_voice(
+            text, voice_id=voice, api_key=api_key, output_path=output_path,
+            model=model or "eleven_multilingual_v2", base_url=base_url, speed=speed,
+        )
+
+    elif provider == TTSProvider.GPT_SOVITS:
+        from backend.services.gpt_sovits_service import generate_voice
+        return await generate_voice(
+            text, output_path=output_path,
+            base_url=base_url or "http://127.0.0.1:9880",
+            text_language=target_language or "vi",
+            reference_audio=reference_audio,
+            prompt_text=reference_text,
+            prompt_language=reference_language,
+            speed=speed,
+        )
 
     raise VoiceGenerationError(f"Unknown TTS provider: {provider}")
 

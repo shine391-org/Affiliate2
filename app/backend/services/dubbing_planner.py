@@ -75,6 +75,7 @@ class DubbingChunk:
     item_indexes: list[int]
     start_ms: int
     end_ms: int
+    speaker_id: str | None = None
     actual_duration_ms: int = 0
     speed_factor: float = 1.0
 
@@ -166,6 +167,7 @@ def build_plan(
         item_indexes=[0],
         start_ms=ordered[0].start_ms,
         end_ms=ordered[0].end_ms,
+        speaker_id=ordered[0].speaker_id,
     )
 
     for i in range(1, len(ordered)):
@@ -197,6 +199,7 @@ def build_plan(
                 item_indexes=[i],
                 start_ms=cue.start_ms,
                 end_ms=cue.end_ms,
+                speaker_id=cue.speaker_id,
             )
         else:
             current.item_indexes.append(i)
@@ -208,6 +211,26 @@ def build_plan(
             plan[idx].chunk_id = chunk.id
     return plan, chunks
 
+
+
+
+def borrow_following_silence(
+    chunks: list[DubbingChunk],
+    *,
+    max_borrow_ms: int,
+) -> list[DubbingChunk]:
+    """Extend a chunk into following silence without crossing the next speech.
+
+    Adapted from SmartSub/VideoLingo gap-tolerance behavior. Speaker boundaries
+    remain hard boundaries; only otherwise-unused silence is borrowed.
+    """
+    if max_borrow_ms < 0:
+        raise ValueError("max_borrow_ms must be >= 0")
+    for i, chunk in enumerate(chunks[:-1]):
+        nxt = chunks[i + 1]
+        gap = max(0, nxt.start_ms - chunk.end_ms)
+        chunk.end_ms += min(gap, max_borrow_ms)
+    return chunks
 
 def chunk_text(plan: list[PlanItem], chunk: DubbingChunk) -> str:
     parts = [

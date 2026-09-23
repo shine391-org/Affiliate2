@@ -863,6 +863,7 @@ async def run_tool_translate(
 ):
     """Canonical Phase-C localization runner used by the Translate tool."""
     import shutil
+    from dataclasses import asdict
 
     from backend.api.tools import tool_out_path
     from backend.config import settings

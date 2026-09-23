@@ -63,8 +63,18 @@ pytrends==4.9.2
 yt-dlp>=2026.7.4
 curl-cffi>=0.15
 
-# Transcription
+# Transcription / HQ alignment
 faster-whisper
+# Match VideoLingo's tested WhisperX/PyTorch family. Loose WhisperX + arbitrary
+# Torch is not a supported combination and commonly breaks alignment/pyannote.
+whisperx>=3.8.6,<3.9
+pyannote-audio>=4.0.4,<5
+torch==2.8.0
+torchaudio==2.8.0
+torchvision==0.23.0
+torchcodec>=0.7,<0.8
+huggingface-hub>=0.36.2,<1
+librosa>=0.11,<2
 
 # Video generation
 # This used to be `moviepy==1.0.3`, which nothing imported — it was four

@@ -47,8 +47,12 @@ class UserSettings(Base, TimestampMixin):
     localization_profiles_json = Column(Text, nullable=True)   # Phase-C saved profiles; one JSON payload, not a new table
 
     # ── TTS Provider ───────────────────────────────────
-    tts_provider = Column(String(20), default="edge_tts")  # edge_tts|openai_tts
+    tts_provider = Column(String(40), default="edge_tts")
     preferred_tts_voice = Column(String(200), nullable=True)
+    tts_model = Column(String(200), nullable=True)
+    tts_base_url = Column(Text, nullable=True)
+    tts_region = Column(String(100), nullable=True)
+    tts_api_key_encrypted = Column(Text, nullable=True)
 
     # ── Caption Style ──────────────────────────────────
     caption_style = Column(String(20), default="viral")  # viral|classic|bold|none

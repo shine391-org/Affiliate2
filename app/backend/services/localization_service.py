@@ -1,16 +1,23 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Phase-C localization engine: ASR -> translation -> timed dub -> audio mix.
+"""Canonical Phase-C HQ localization engine.
 
-This is deliberately one domain service, not a workflow framework. Jobs/UI call
-these functions; persistence and orchestration stay in the existing app.
+Donor-derived behavior:
+- VideoLingo / SmartSub: word-aware semantic segmentation + validated translation.
+- OpenCreator: chunk planner, measured TTS, post-synthesis atempo fitting.
+- YouDub: clean background workflow (separation is orchestrated by tool runner).
+- pyVideoTrans: bounded video-retiming concept as a last-resort fit strategy.
+
+There is ONE active dubbing engine in this module. Raw Whisper segments are never
+treated as immutable TTS units.
 """
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
+import math
 import subprocess
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from backend.config import settings
@@ -21,16 +28,24 @@ from backend.core.localization import (
     load_profile_store,
     localization_transcript_from_source,
 )
+from backend.services.dubbing_planner import (
+    DubbingChunk,
+    DubbingConfig,
+    DubbingCue,
+    PlanItem,
+    atempo_filter,
+    borrow_following_silence,
+    build_plan,
+    chunk_text,
+    estimate_spoken_ms,
+    fit_timeline,
+    required_speed,
+)
 
 logger = logging.getLogger(__name__)
 
 _TRANSLATION_BATCH_SIZE = 12
 _CONTEXT_CHARS = 10_000
-_SAFE_SPEED = {
-    "strict": 1.00,
-    "natural": 1.06,
-    "auto": 1.12,
-}
 
 _PRESET_INSTRUCTIONS = {
     "natural_vietnamese": (
@@ -39,8 +54,8 @@ _PRESET_INSTRUCTIONS = {
     ),
     "affiliate_conversational": (
         "Use natural, energetic {language} suitable for a product/review short. "
-        "Keep it concise and spoken. Preserve the source meaning exactly: do not "
-        "invent benefits, prices, CTAs, guarantees or claims that are not present."
+        "Keep it concise and spoken. Preserve source meaning exactly: do not "
+        "invent benefits, prices, CTAs, guarantees or claims."
     ),
     "literal": (
         "Translate closely and faithfully. Prefer semantic accuracy over style; "
@@ -68,6 +83,16 @@ class LocalizationTimingError(RuntimeError):
 
 
 @dataclass
+class TTSRuntimeConfig:
+    provider: object
+    default_voice: str
+    api_key: str
+    model: str | None
+    base_url: str | None
+    region: str | None
+
+
+@dataclass
 class TimedDubResult:
     transcript: LocalizationTranscript
     dub_track: Path
@@ -76,6 +101,9 @@ class TimedDubResult:
     chunk_count: int = 0
     max_speed_factor: float = 1.0
     rewrite_count: int = 0
+    video_slowdown: float = 1.0
+    plan: list[PlanItem] | None = None
+    chunks: list[DubbingChunk] | None = None
 
 
 def resolve_localization_profile(user_settings, profile_id: str | None = None) -> LocalizationProfile:
@@ -93,7 +121,7 @@ async def transcribe_for_localization(
     *,
     language: str | None = None,
 ) -> LocalizationTranscript:
-    """C5 canonical ASR entry point for localization."""
+    """C5: faster-whisper transcription followed by optional WhisperX alignment."""
     from backend.services.whisper_service import whisper_service
 
     tx = await whisper_service.transcribe(
@@ -110,6 +138,15 @@ async def transcribe_for_localization(
     )
     if not transcript.segments:
         raise ValueError("No speech detected — nothing to localize.")
+
+    if profile.alignment_mode != "off" or profile.diarization_mode != "off":
+        from backend.services.alignment_service import align_localization_transcript
+        transcript, report = await align_localization_transcript(
+            media_path,
+            transcript,
+            profile,
+        )
+        transcript.metadata["alignment"] = asdict(report)
     return transcript
 
 
@@ -121,23 +158,36 @@ def _profile_ai_client(user_settings, profile: LocalizationProfile):
     configured = (getattr(user_settings, "ai_provider", None) or "").strip().lower()
 
     if requested:
-        # A shared OpenAI-compatible protocol does NOT make Ollama, LM Studio
-        # and vLLM interchangeable endpoints. A profile naming a concrete
-        # preset must match the configured preset. Generic "compatible" means
-        # "use whichever compatible endpoint Settings currently owns".
         generic_compatible = (
             requested == "compatible"
             and ai.provider == AIProvider.COMPATIBLE
         )
         if requested != configured and requested != ai.provider.value and not generic_compatible:
             raise ValueError(
-                f"Profile requests AI provider '{requested}', but Settings currently "
-                f"configure '{configured or ai.provider.value}'. Configure that provider first."
+                f"Profile requests AI provider '{requested}', but Settings configure "
+                f"'{configured or ai.provider.value}'. Configure that provider first."
             )
-
     if profile.translation_model:
         ai.model = profile.translation_model
     return ai
+
+
+async def prepare_semantic_transcript(
+    transcript: LocalizationTranscript,
+    *,
+    profile: LocalizationProfile,
+    user_settings,
+) -> LocalizationTranscript:
+    from backend.services.semantic_segmentation import (
+        normalize_semantic_cues,
+        refine_semantic_cues_with_ai,
+    )
+
+    normalized = normalize_semantic_cues(transcript)
+    if not profile.semantic_segmentation or len(normalized.segments) <= 1:
+        return normalized
+    ai = _profile_ai_client(user_settings, profile)
+    return await refine_semantic_cues_with_ai(normalized, ai)
 
 
 def _strip_json_fence(raw: str) -> str:
@@ -150,32 +200,6 @@ def _strip_json_fence(raw: str) -> str:
             lines = lines[:-1]
         text = "\n".join(lines).strip()
     return text
-
-
-async def prepare_semantic_transcript(
-    transcript: LocalizationTranscript,
-    *,
-    profile: LocalizationProfile,
-    user_settings,
-) -> LocalizationTranscript:
-    """VideoLingo/SmartSub-derived source cue preparation.
-
-    Raw Whisper segments are first normalized with real word timing. When the
-    profile enables semantic segmentation, the configured AI may only GROUP
-    stable cue IDs; invalid responses fall back to deterministic normalized
-    cues without rewriting source text.
-    """
-    from backend.services.semantic_segmentation import (
-        normalize_semantic_cues,
-        refine_semantic_cues_with_ai,
-    )
-
-    normalized = normalize_semantic_cues(transcript)
-    if not profile.semantic_segmentation or len(normalized.segments) <= 1:
-        return normalized
-
-    ai = _profile_ai_client(user_settings, profile)
-    return await refine_semantic_cues_with_ai(normalized, ai)
 
 
 def _translation_context(transcript: LocalizationTranscript) -> str:
@@ -207,16 +231,17 @@ def _translation_prompt(
     items = [
         {
             "id": seg.id,
+            "speaker_id": seg.speaker_id,
             "text": seg.source_text,
             "source_duration_ms": seg.source_end_ms - seg.source_start_ms,
         }
         for seg in batch
     ]
     timing = (
-        "For dubbing, keep each translation naturally speakable within its "
-        "source_duration_ms. Prefer concise target-language phrasing over speed-reading."
-        if for_dub else
-        "Keep each segment aligned to the same semantic unit."
+        "For dubbing, keep each translation concise and naturally speakable. "
+        "The downstream chunk planner will combine adjacent lines and measure real TTS."
+        if for_dub
+        else "Keep each segment aligned to the same semantic unit."
     )
     return f"""You are localizing a video into {target_language}.
 
@@ -242,9 +267,9 @@ FULL SOURCE CONTEXT:
 SEGMENTS:
 {json.dumps(items, ensure_ascii=False)}
 
-Return ONLY a JSON array of objects with exactly this shape:
+Return ONLY a JSON array:
 [{{"id":"segment-id","text":"translated speech"}}]
-The array must contain every input ID exactly once and no extra IDs."""
+Every input ID must appear exactly once and no extra IDs are allowed."""
 
 
 def _validate_translation_payload(raw: str, batch: list[LocalizationSegment]) -> list[str]:
@@ -254,7 +279,6 @@ def _validate_translation_payload(raw: str, batch: list[LocalizationSegment]) ->
     expected = [s.id for s in batch]
     if len(payload) != len(expected):
         raise ValueError("translation response count mismatch")
-
     seen: dict[str, str] = {}
     for item in payload:
         if not isinstance(item, dict):
@@ -292,7 +316,6 @@ async def _translate_batch_resilient(
         if len(batch) == 1:
             logger.warning("Translation shape failed for %s: %s", batch[0].id, exc)
             return [batch[0].source_text], {0}
-
         mid = len(batch) // 2
         left, lf = await _translate_batch_resilient(
             ai, batch[:mid], target_language=target_language, context=context,
@@ -313,7 +336,6 @@ async def translate_transcript(
     user_settings,
     for_dub: bool,
 ) -> LocalizationTranscript:
-    """C6 contextual structured translation preserving segment identity."""
     ai = _profile_ai_client(user_settings, profile)
     out = transcript.model_copy(deep=True)
     context = _translation_context(transcript)
@@ -322,8 +344,7 @@ async def translate_transcript(
     for start in range(0, len(out.segments), _TRANSLATION_BATCH_SIZE):
         batch = out.segments[start:start + _TRANSLATION_BATCH_SIZE]
         texts, failed = await _translate_batch_resilient(
-            ai,
-            batch,
+            ai, batch,
             target_language=target_language,
             context=context,
             profile=profile,
@@ -348,49 +369,7 @@ async def translate_transcript(
     return out
 
 
-async def _adapt_translation_for_duration(
-    ai,
-    seg: LocalizationSegment,
-    *,
-    target_language: str,
-    target_ms: int,
-    profile: LocalizationProfile,
-) -> str:
-    """One bounded refinement call, only after measured TTS overflow."""
-    current = (seg.translated_text or "").strip()
-    if not current:
-        return current
-    target_s = max(target_ms / 1000.0, 0.2)
-    prompt = f"""Shorten this {target_language} dubbing line so it can be spoken naturally in about {target_s:.2f} seconds.
-
-SOURCE MEANING:
-{seg.source_text}
-
-CURRENT TRANSLATION:
-{current}
-
-Rules:
-- Preserve the complete essential meaning, names, numbers and factual claims.
-- Do not add CTA, claims or information.
-- Prefer shorter natural phrasing, not abbreviations that sound robotic.
-- Return ONLY the revised spoken line."""
-    if profile.glossary:
-        terms = "; ".join(f"{k} => {v}" for k, v in profile.glossary.items())
-        prompt += f"\nGlossary to preserve: {terms[:1500]}"
-    if profile.translation_instructions:
-        prompt += f"\nStyle constraint: {profile.translation_instructions[:1000]}"
-    revised = (await ai.chat(
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=400,
-    ) or "").strip().strip('"').strip()
-    return revised or current
-
-
-def _tts_config(
-    user_settings,
-    profile: LocalizationProfile,
-    target_language: str,
-):
+def _tts_config(user_settings, profile: LocalizationProfile, target_language: str) -> TTSRuntimeConfig:
     from backend.core.crypto import decrypt_safe
     from backend.services.tts_service import DEFAULT_VOICES, TTSProvider
 
@@ -404,22 +383,25 @@ def _tts_config(
     except ValueError as exc:
         raise ValueError(f"Unsupported TTS provider: {raw_provider}") from exc
 
-    explicit_voice = (
+    voice = (
         profile.tts_voice
         or getattr(user_settings, "preferred_tts_voice", None)
         or getattr(user_settings, "preferred_voice_id", None)
+        or DEFAULT_VOICES.get(provider, "")
     )
-    if explicit_voice:
-        voice = explicit_voice
-    elif provider == TTSProvider.EDGE_TTS and target_language.lower() in {
-        "vi", "vietnamese", "tiếng việt", "tieng viet",
-    }:
+    if (
+        not profile.tts_voice
+        and not getattr(user_settings, "preferred_tts_voice", None)
+        and provider == TTSProvider.EDGE_TTS
+        and target_language.lower() in {"vi", "vietnamese", "tiếng việt", "tieng viet"}
+    ):
         voice = "vi-VN-HoaiMyNeural"
-    else:
-        voice = DEFAULT_VOICES[provider]
 
     api_key = ""
-    if provider == TTSProvider.OPENAI_TTS:
+    encrypted_tts = getattr(user_settings, "tts_api_key_encrypted", None)
+    if encrypted_tts:
+        api_key = decrypt_safe(encrypted_tts) or ""
+    if provider == TTSProvider.OPENAI_TTS and not api_key:
         if (
             (getattr(user_settings, "ai_provider", None) or "").lower() == "openai"
             and getattr(user_settings, "ai_api_key_encrypted", None)
@@ -427,25 +409,40 @@ def _tts_config(
             api_key = decrypt_safe(user_settings.ai_api_key_encrypted) or ""
         api_key = api_key or settings.OPENAI_API_KEY
 
-    return provider, voice, api_key, profile.tts_model
+    model = profile.tts_model or getattr(user_settings, "tts_model", None)
+    base_url = getattr(user_settings, "tts_base_url", None)
+    region = getattr(user_settings, "tts_region", None)
+    return TTSRuntimeConfig(provider, voice or "", api_key, model, base_url, region)
 
 
-def _timing_window(
-    segments: list[LocalizationSegment],
-    index: int,
-    *,
-    start_ms: int,
-    tolerance_ms: int,
-) -> int:
-    seg = segments[index]
-    end_ms = seg.source_end_ms + tolerance_ms
-    if index + 1 < len(segments):
-        next_start = segments[index + 1].source_start_ms
-        if next_start > seg.source_end_ms:
-            end_ms = min(end_ms, next_start)
-        else:
-            end_ms = seg.source_end_ms
-    return max(end_ms - start_ms, 1)
+def _chunk_speaker(plan: list[PlanItem], chunk: DubbingChunk) -> str | None:
+    speakers = {
+        plan[idx].speaker_id
+        for idx in chunk.item_indexes
+        if plan[idx].speaker_id is not None
+    }
+    if len(speakers) > 1:
+        raise RuntimeError(f"Dubbing chunk {chunk.id} crosses speaker boundary")
+    return next(iter(speakers)) if speakers else chunk.speaker_id
+
+
+def _voice_for_chunk(
+    profile: LocalizationProfile,
+    runtime: TTSRuntimeConfig,
+    speaker_id: str | None,
+) -> str:
+    if speaker_id and speaker_id in profile.speaker_voices:
+        return profile.speaker_voices[speaker_id]
+    return runtime.default_voice
+
+
+def _reference_for_chunk(
+    profile: LocalizationProfile,
+    speaker_id: str | None,
+) -> str | None:
+    if speaker_id and speaker_id in profile.speaker_reference_audio:
+        return profile.speaker_reference_audio[speaker_id]
+    return profile.tts_reference_audio
 
 
 async def _audio_duration_ms(path: Path) -> int:
@@ -454,75 +451,178 @@ async def _audio_duration_ms(path: Path) -> int:
     return max(0, round(float(seconds) * 1000))
 
 
-async def _generate_tts_block(
+async def _generate_tts_chunk(
     text: str,
     *,
-    provider,
+    runtime: TTSRuntimeConfig,
     voice: str,
-    api_key: str,
-    model: str | None,
-    speed: float,
+    profile: LocalizationProfile,
+    speaker_id: str | None,
+    target_language: str,
     output_path: Path,
+    attempts: int = 3,
 ) -> int:
     from backend.services.tts_service import generate_tts
 
-    output_path.unlink(missing_ok=True)
-    await generate_tts(
-        text,
-        provider=provider,
-        voice_id=voice,
-        api_key=api_key,
-        output_path=output_path,
-        model=model,
-        speed=speed,
-    )
-    duration = await _audio_duration_ms(output_path)
-    if duration <= 0:
-        raise RuntimeError(f"TTS produced unreadable audio: {output_path.name}")
-    return duration
+    last: Exception | None = None
+    for _ in range(max(1, attempts)):
+        output_path.unlink(missing_ok=True)
+        try:
+            await generate_tts(
+                text,
+                provider=runtime.provider,
+                voice_id=voice,
+                api_key=runtime.api_key,
+                output_path=output_path,
+                model=runtime.model,
+                speed=1.0,
+                base_url=runtime.base_url,
+                region=runtime.region,
+                reference_audio=_reference_for_chunk(profile, speaker_id),
+                reference_text=profile.tts_reference_text,
+                reference_language=profile.tts_reference_language,
+                target_language=target_language,
+            )
+            duration = await _audio_duration_ms(output_path)
+            if duration > 0:
+                return duration
+            last = RuntimeError("TTS generated zero-duration audio")
+        except Exception as exc:
+            last = exc
+    raise RuntimeError(f"TTS chunk failed after {attempts} attempts: {last}")
 
 
-def _compose_dub_track_sync(
-    timed_blocks: list[tuple[LocalizationSegment, Path]],
+async def _adapt_chunk_items(
+    ai,
+    *,
+    plan: list[PlanItem],
+    chunk: DubbingChunk,
+    segment_by_id: dict[str, LocalizationSegment],
+    target_language: str,
+    target_ms: int,
+    profile: LocalizationProfile,
+) -> bool:
+    items = []
+    for idx in chunk.item_indexes:
+        item = plan[idx]
+        seg = segment_by_id[item.segment_id]
+        items.append({
+            "id": item.segment_id,
+            "source": seg.source_text,
+            "current": seg.translated_text or item.spoken_text,
+        })
+    prompt = f"""Rewrite these {target_language} dubbing lines so the WHOLE group can be spoken naturally in about {target_ms / 1000.0:.2f} seconds.
+
+Rules:
+- Preserve every item ID and order.
+- Preserve essential meaning, names, numbers and factual claims.
+- Do not invent CTAs, claims, examples or prices.
+- Make wording concise and natural for speech.
+- Return ONLY JSON: [{{"id":"...","text":"..."}}]
+
+ITEMS:
+{json.dumps(items, ensure_ascii=False)}"""
+    if profile.glossary:
+        prompt += "\nGlossary: " + "; ".join(
+            f"{k} => {v}" for k, v in profile.glossary.items()
+        )[:1800]
+    if profile.translation_instructions:
+        prompt += f"\nStyle: {profile.translation_instructions[:1200]}"
+
+    raw = await ai.chat(messages=[{"role": "user", "content": prompt}], max_tokens=1000)
+    try:
+        payload = json.loads(_strip_json_fence(raw))
+    except Exception:
+        return False
+    if not isinstance(payload, list) or len(payload) != len(items):
+        return False
+    mapped: dict[str, str] = {}
+    for item in payload:
+        if not isinstance(item, dict):
+            return False
+        seg_id = str(item.get("id") or "")
+        text = str(item.get("text") or "").strip()
+        if not seg_id or not text or seg_id in mapped:
+            return False
+        mapped[seg_id] = text
+    expected = [x["id"] for x in items]
+    if set(mapped) != set(expected):
+        return False
+
+    changed = False
+    for idx in chunk.item_indexes:
+        item = plan[idx]
+        new_text = mapped[item.segment_id]
+        if new_text != item.spoken_text:
+            changed = True
+        item.spoken_text = new_text
+        item.estimated_duration_ms = estimate_spoken_ms(new_text, target_language)
+        item.rewrite_attempts += 1
+        segment_by_id[item.segment_id].translated_text = new_text
+    return changed
+
+
+def _fit_chunk_audio_sync(source: Path, destination: Path, speed_factor: float) -> Path:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.unlink(missing_ok=True)
+    cmd = [
+        "ffmpeg", "-y", "-i", str(source),
+        "-filter:a", atempo_filter(speed_factor),
+        "-ar", "48000", "-ac", "2",
+        "-c:a", "pcm_s16le",
+        str(destination),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if result.returncode != 0 or not destination.exists():
+        raise RuntimeError(f"Chunk audio fit failed: {(result.stderr or '')[-500:]}")
+    return destination
+
+
+def _compose_chunk_track_sync(
+    timed_chunks: list[tuple[int, Path]],
     *,
     total_duration_ms: int,
     output_path: Path,
 ) -> Path:
-    if not timed_blocks:
-        raise RuntimeError("No TTS blocks to compose")
+    if not timed_chunks:
+        raise RuntimeError("No fitted dubbing chunks to compose")
     total_s = max(total_duration_ms / 1000.0, 0.1)
     cmd = [
         "ffmpeg", "-y",
         "-f", "lavfi", "-t", f"{total_s:.3f}",
         "-i", "anullsrc=r=48000:cl=stereo",
     ]
-    for _, path in timed_blocks:
+    for _, path in timed_chunks:
         cmd += ["-i", str(path)]
-
     filters = ["[0:a]volume=0[base]"]
     labels = ["[base]"]
-    for idx, (seg, _) in enumerate(timed_blocks, start=1):
-        delay = max(int(seg.target_start_ms or 0), 0)
-        label = f"d{idx}"
-        filters.append(
-            f"[{idx}:a]aresample=48000,adelay={delay}|{delay}[{label}]"
-        )
+    for input_idx, (start_ms, _) in enumerate(timed_chunks, start=1):
+        delay = max(0, int(start_ms))
+        label = f"d{input_idx}"
+        filters.append(f"[{input_idx}:a]adelay={delay}|{delay}[{label}]")
         labels.append(f"[{label}]")
     filters.append(
         "".join(labels)
         + f"amix=inputs={len(labels)}:duration=longest:normalize=0,"
-          f"atrim=0:{total_s:.3f}[mix]"
+          f"alimiter=limit=0.95,atrim=0:{total_s:.3f}[mix]"
     )
     cmd += [
         "-filter_complex", ";".join(filters),
-        "-map", "[mix]",
-        "-c:a", "pcm_s16le",
-        str(output_path),
+        "-map", "[mix]", "-c:a", "pcm_s16le", str(output_path),
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     if result.returncode != 0 or not output_path.exists():
         raise RuntimeError(f"Dub-track composition failed: {(result.stderr or '')[-500:]}")
     return output_path
+
+
+def _scale_chunks_for_video_slowdown(
+    chunks: list[DubbingChunk],
+    factor: float,
+) -> None:
+    for chunk in chunks:
+        chunk.start_ms = round(chunk.start_ms * factor)
+        chunk.end_ms = round(chunk.end_ms * factor)
 
 
 async def synthesize_timed_dub(
@@ -535,113 +635,200 @@ async def synthesize_timed_dub(
     work_dir: Path,
     fail_on_overflow: bool = True,
 ) -> TimedDubResult:
-    """C7: TTS each translated block, measure it, adapt safely, then place it."""
+    """C7 donor-derived chunk planner with measured TTS and bounded retiming."""
     work_dir.mkdir(parents=True, exist_ok=True)
     out = transcript.model_copy(deep=True)
     ai = _profile_ai_client(user_settings, profile)
-    provider, voice, api_key, tts_model = _tts_config(
-        user_settings, profile, target_language
-    )
+    runtime = _tts_config(user_settings, profile, target_language)
 
-    timed_blocks: list[tuple[LocalizationSegment, Path]] = []
+    valid_segments = [
+        seg for seg in out.segments
+        if seg.translation_status == "success" and (seg.translated_text or "").strip()
+    ]
+    if not valid_segments:
+        raise RuntimeError("No translated speech is available for dubbing.")
+
+    config = DubbingConfig(
+        min_cue_duration_ms=profile.dub_min_cue_duration_ms,
+        max_chunk_size=profile.dub_max_chunk_size,
+        gap_tolerance_ms=profile.dub_gap_tolerance_ms,
+        speed_accept=profile.dub_speed_accept,
+        speed_max=profile.dub_speed_max,
+        rewrite_max_attempts=profile.dub_rewrite_attempts,
+    )
+    cues = [
+        DubbingCue(
+            index=i + 1,
+            segment_id=seg.id,
+            start_ms=seg.source_start_ms,
+            end_ms=seg.source_end_ms,
+            text=seg.translated_text or "",
+            speaker_id=seg.speaker_id,
+        )
+        for i, seg in enumerate(valid_segments)
+    ]
+    plan, chunks = build_plan(cues, config, language=target_language)
+    chunks = borrow_following_silence(
+        chunks,
+        max_borrow_ms=min(profile.dub_gap_tolerance_ms, 1500),
+    )
+    segment_by_id = {seg.id: seg for seg in out.segments}
+
+    raw_paths: dict[int, Path] = {}
     block_paths: list[Path] = []
     issues: list[dict] = []
-    previous_end = 0
+    rewrite_count = 0
 
-    for index, seg in enumerate(out.segments):
-        if seg.translation_status != "success" or not (seg.translated_text or "").strip():
-            seg.qc_status = "review"
-            issues.append({
-                "segment_id": seg.id,
-                "reason": "translation_unavailable",
-            })
-            continue
-
-        target_start = max(seg.source_start_ms, previous_end)
-        window_ms = _timing_window(
-            out.segments, index,
-            start_ms=target_start,
-            tolerance_ms=(
-                0 if profile.timing_policy == "strict"
-                else profile.timing_tolerance_ms
-            ),
-        )
-        path = work_dir / f"dub_{index:04d}.mp3"
+    for chunk in chunks:
+        speaker_id = _chunk_speaker(plan, chunk)
+        voice = _voice_for_chunk(profile, runtime, speaker_id)
+        path = work_dir / f"chunk_{chunk.id:04d}.wav"
+        raw_paths[chunk.id] = path
         block_paths.append(path)
 
-        adjusted = target_start != seg.source_start_ms
-        text = seg.translated_text
-        duration_ms = await _generate_tts_block(
-            text,
-            provider=provider, voice=voice, api_key=api_key, model=tts_model,
-            speed=1.0, output_path=path,
+        # OpenCreator-style estimator: try a bounded rewrite before spending on
+        # a clearly impossible TTS request.
+        estimated = sum(plan[i].estimated_duration_ms for i in chunk.item_indexes)
+        attempts = 0
+        if (
+            estimated > chunk.available_ms * config.speed_max
+            and attempts < config.rewrite_max_attempts
+        ):
+            changed = await _adapt_chunk_items(
+                ai, plan=plan, chunk=chunk, segment_by_id=segment_by_id,
+                target_language=target_language, target_ms=chunk.available_ms,
+                profile=profile,
+            )
+            attempts += 1
+            if changed:
+                rewrite_count += 1
+
+        duration_ms = await _generate_tts_chunk(
+            chunk_text(plan, chunk),
+            runtime=runtime,
+            voice=voice,
+            profile=profile,
+            speaker_id=speaker_id,
+            target_language=target_language,
+            output_path=path,
         )
 
-        if duration_ms > window_ms:
-            revised = await _adapt_translation_for_duration(
-                ai, seg, target_language=target_language,
-                target_ms=window_ms, profile=profile,
+        while (
+            required_speed(duration_ms, chunk.available_ms) > config.speed_max
+            and attempts < config.rewrite_max_attempts
+        ):
+            changed = await _adapt_chunk_items(
+                ai, plan=plan, chunk=chunk, segment_by_id=segment_by_id,
+                target_language=target_language, target_ms=chunk.available_ms,
+                profile=profile,
             )
-            if revised and revised != text:
-                text = revised
-                seg.translated_text = revised
-                adjusted = True
-                duration_ms = await _generate_tts_block(
-                    text,
-                    provider=provider, voice=voice, api_key=api_key, model=tts_model,
-                    speed=1.0, output_path=path,
-                )
+            attempts += 1
+            if not changed:
+                break
+            rewrite_count += 1
+            duration_ms = await _generate_tts_chunk(
+                chunk_text(plan, chunk),
+                runtime=runtime,
+                voice=voice,
+                profile=profile,
+                speaker_id=speaker_id,
+                target_language=target_language,
+                output_path=path,
+            )
+        chunk.actual_duration_ms = duration_ms
 
-        if duration_ms > window_ms:
-            max_speed = _SAFE_SPEED[profile.tts_rate_policy]
-            needed_speed = duration_ms / max(window_ms, 1)
-            if max_speed > 1.0 and needed_speed <= max_speed:
-                adjusted = True
-                duration_ms = await _generate_tts_block(
-                    text,
-                    provider=provider, voice=voice, api_key=api_key, model=tts_model,
-                    speed=max(1.0, needed_speed), output_path=path,
-                )
+    # Last resort from the pyVideoTrans family of strategies: if the donor
+    # planner still requires over-max speech, enlarge ALL source windows by one
+    # bounded visual slowdown. The final renderer applies this in the same
+    # visual encode as reframe/captions; TTS itself remains natural.
+    raw_required = [
+        required_speed(c.actual_duration_ms, c.available_ms)
+        for c in chunks
+    ]
+    needed_slowdown = max(
+        [1.0] + [speed / config.speed_max for speed in raw_required if speed > config.speed_max]
+    )
+    video_slowdown = 1.0
+    if needed_slowdown > 1.0 and profile.video_retime_mode == "fallback":
+        video_slowdown = min(needed_slowdown, profile.video_retime_max_slowdown)
+        _scale_chunks_for_video_slowdown(chunks, video_slowdown)
 
-        seg.target_start_ms = target_start
-        seg.target_end_ms = target_start + duration_ms
-        seg.tts_duration_ms = duration_ms
-
-        if duration_ms > window_ms:
-            overflow = duration_ms - window_ms
-            seg.timing_status = "overflow"
-            seg.qc_status = "review"
-            issues.append({
-                "segment_id": seg.id,
+    unresolved: list[dict] = []
+    for chunk in chunks:
+        speed = required_speed(chunk.actual_duration_ms, chunk.available_ms)
+        if speed > config.speed_max + 1e-6:
+            unresolved.append({
+                "chunk_id": chunk.id,
                 "reason": "timing_overflow",
-                "overflow_ms": overflow,
-                "window_ms": window_ms,
-                "tts_duration_ms": duration_ms,
+                "required_speed": round(speed, 4),
+                "speed_max": config.speed_max,
+                "available_ms": chunk.available_ms,
+                "tts_duration_ms": chunk.actual_duration_ms,
+                "segment_ids": [plan[i].segment_id for i in chunk.item_indexes],
             })
-        else:
-            seg.timing_status = "adjusted" if adjusted else "fit"
-            seg.qc_status = "pass"
-            timed_blocks.append((seg, path))
-            previous_end = seg.target_end_ms
+    if unresolved and fail_on_overflow:
+        raise LocalizationTimingError(unresolved)
+    issues.extend(unresolved)
 
-    if issues and fail_on_overflow:
-        raise LocalizationTimingError(issues)
-    if not timed_blocks:
-        raise RuntimeError("No usable dubbed blocks were produced.")
+    fitted_plan, fitted_chunks, report = fit_timeline(plan, chunks, config)
+    report.rewrite_count = rewrite_count
+
+    timed_chunks: list[tuple[int, Path]] = []
+    fitted_dir = work_dir / "fitted"
+    for chunk in fitted_chunks:
+        fitted = fitted_dir / f"chunk_{chunk.id:04d}.wav"
+        await asyncio.to_thread(
+            _fit_chunk_audio_sync,
+            raw_paths[chunk.id],
+            fitted,
+            chunk.speed_factor,
+        )
+        block_paths.append(fitted)
+        timed_chunks.append((chunk.start_ms, fitted))
+        if chunk.speed_factor > config.speed_accept:
+            issues.append({
+                "chunk_id": chunk.id,
+                "reason": "speed_warning",
+                "required_speed": round(chunk.speed_factor, 4),
+                "speed_accept": config.speed_accept,
+                "segment_ids": [fitted_plan[i].segment_id for i in chunk.item_indexes],
+            })
+
+    item_by_segment = {item.segment_id: item for item in fitted_plan}
+    for seg in out.segments:
+        item = item_by_segment.get(seg.id)
+        if item is None:
+            if seg.translation_status != "success":
+                seg.qc_status = "review"
+            continue
+        seg.target_start_ms = item.target_start_ms
+        seg.target_end_ms = item.target_end_ms
+        seg.tts_duration_ms = item.target_end_ms - item.target_start_ms
+        seg.timing_status = "adjusted" if (
+            item.speed_factor > 1.001 or video_slowdown > 1.001
+        ) else "fit"
+        seg.qc_status = "review" if item.speed_factor > config.speed_accept else "pass"
 
     from backend.services.video_utils import probe_duration
     source_duration_s = await asyncio.to_thread(probe_duration, source_media, 0.0)
     total_duration_ms = max(
-        round(source_duration_s * 1000),
-        max((seg.target_end_ms or 0) for seg, _ in timed_blocks),
+        round(source_duration_s * 1000 * video_slowdown),
+        max((seg.target_end_ms or 0) for seg in out.segments),
     )
     dub_track = work_dir / "dub_track.wav"
     await asyncio.to_thread(
-        _compose_dub_track_sync,
-        timed_blocks,
+        _compose_chunk_track_sync,
+        timed_chunks,
         total_duration_ms=total_duration_ms,
         output_path=dub_track,
     )
+    out.metadata["dubbing"] = {
+        "chunk_count": len(fitted_chunks),
+        "max_required_speed": report.max_speed_factor,
+        "rewrite_count": rewrite_count,
+        "video_slowdown": video_slowdown,
+        "issues": issues,
+    }
     return TimedDubResult(
         transcript=out,
         dub_track=dub_track,
@@ -649,11 +836,14 @@ async def synthesize_timed_dub(
         issues=issues,
         chunk_count=len(fitted_chunks),
         max_speed_factor=report.max_speed_factor,
-        rewrite_count=report.rewrite_count,
+        rewrite_count=rewrite_count,
+        video_slowdown=video_slowdown,
+        plan=fitted_plan,
+        chunks=fitted_chunks,
     )
 
 
-def _mix_dub_with_video_sync(
+def _mix_audio_sync(
     source_video: Path,
     dub_track: Path,
     output_path: Path,
@@ -663,73 +853,70 @@ def _mix_dub_with_video_sync(
     preserve_background: bool,
     background_gain_db: float,
     dub_gain_db: float,
+    video_slowdown: float,
 ) -> Path:
-    """Mix target dub while stream-copying the picture.
-
-    hq_clean: mix against Demucs background stem (source speech removed).
-    fast_duck: retain legacy source-audio sidechain ducking as preview/fallback.
-    """
-    from backend.services.ffmpeg_service import has_audio_stream_sync
+    """Create the final mixed AUDIO track; no picture is encoded here."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.unlink(missing_ok=True)
 
     if audio_mode == "hq_clean":
         if background_file is None or not background_file.exists():
             raise RuntimeError("HQ clean dub requires a separated background track.")
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", str(source_video),
-            "-i", str(dub_track),
-            "-i", str(background_file),
-            "-filter_complex",
-            (
-                f"[1:a]volume={dub_gain_db}dB[dub];"
-                f"[2:a]volume={background_gain_db}dB[bg];"
-                "[dub][bg]amix=inputs=2:duration=longest:normalize=0,"
-                "alimiter=limit=0.95[mix]"
-            ),
-            "-map", "0:v:0", "-map", "[mix]",
-        ]
+        cmd = ["ffmpeg", "-y", "-i", str(dub_track), "-i", str(background_file)]
+        bg_chain = f"[1:a]volume={background_gain_db}dB"
+        if video_slowdown > 1.001:
+            bg_chain += f",atempo={1.0 / video_slowdown:.6f}"
+        bg_chain += "[bg]"
+        fc = (
+            f"[0:a]volume={dub_gain_db}dB[dub];"
+            + bg_chain + ";"
+            "[dub][bg]amix=inputs=2:duration=longest:normalize=0,"
+            "alimiter=limit=0.95[mix]"
+        )
     else:
-        has_source_audio = has_audio_stream_sync(source_video)
-        cmd = ["ffmpeg", "-y", "-i", str(source_video), "-i", str(dub_track)]
-        if preserve_background and has_source_audio:
+        from backend.services.ffmpeg_service import has_audio_stream_sync
+        if not preserve_background or not has_audio_stream_sync(source_video):
+            cmd = ["ffmpeg", "-y", "-i", str(dub_track)]
+            fc = f"[0:a]volume={dub_gain_db}dB,alimiter=limit=0.95[mix]"
+        else:
+            cmd = ["ffmpeg", "-y", "-i", str(dub_track), "-i", str(source_video)]
+            bg_chain = f"[1:a]volume={background_gain_db}dB"
+            if video_slowdown > 1.001:
+                bg_chain += f",atempo={1.0 / video_slowdown:.6f}"
+            bg_chain += "[bg]"
             fc = (
-                f"[0:a]volume={background_gain_db}dB[bg];"
-                f"[1:a]volume={dub_gain_db}dB[dub];"
+                f"[0:a]volume={dub_gain_db}dB[dub];"
+                + bg_chain + ";"
                 "[bg][dub]sidechaincompress=threshold=0.025:ratio=12:"
                 "attack=15:release=220[ducked];"
                 "[ducked][dub]amix=inputs=2:duration=longest:normalize=0,"
                 "alimiter=limit=0.95[mix]"
             )
-            cmd += ["-filter_complex", fc, "-map", "0:v:0", "-map", "[mix]"]
-        else:
-            cmd += ["-map", "0:v:0", "-map", "1:a:0"]
 
     cmd += [
-        "-c:v", "copy",
-        "-c:a", "aac", "-b:a", "192k",
-        "-movflags", "+faststart",
-        "-shortest",
+        "-filter_complex", fc,
+        "-map", "[mix]",
+        "-ar", "48000", "-ac", "2",
+        "-c:a", "pcm_s16le",
         str(output_path),
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     if result.returncode != 0 or not output_path.exists():
-        raise RuntimeError(f"Dub/source audio mix failed: {(result.stderr or '')[-500:]}")
+        raise RuntimeError(f"Dub/background audio mix failed: {(result.stderr or '')[-500:]}")
     return output_path
 
 
-async def mix_dub_with_video(
+async def mix_dub_audio(
     source_video: Path,
     dub_track: Path,
     output_path: Path,
     profile: LocalizationProfile,
     *,
     background_file: Path | None = None,
+    video_slowdown: float = 1.0,
 ) -> Path:
-    """C8 donor-derived mix; audio-only stages never re-encode video."""
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.unlink(missing_ok=True)
     return await asyncio.to_thread(
-        _mix_dub_with_video_sync,
+        _mix_audio_sync,
         source_video,
         dub_track,
         output_path,
@@ -738,13 +925,11 @@ async def mix_dub_with_video(
         preserve_background=profile.preserve_background,
         background_gain_db=profile.background_gain_db,
         dub_gain_db=profile.dub_gain_db,
+        video_slowdown=video_slowdown,
     )
 
 
-def caption_segments_from_localization(
-    transcript: LocalizationTranscript,
-) -> list[dict]:
-    """Render captions from FINAL resolved timing, never source word timing."""
+def caption_segments_from_localization(transcript: LocalizationTranscript) -> list[dict]:
     out: list[dict] = []
     for seg in transcript.segments:
         text = (seg.translated_text or "").strip()
@@ -760,5 +945,6 @@ def caption_segments_from_localization(
             "start": start_ms / 1000.0,
             "end": end_ms / 1000.0,
             "text": text,
+            "speaker_id": seg.speaker_id,
         })
     return out

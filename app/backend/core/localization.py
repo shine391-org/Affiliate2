@@ -231,6 +231,7 @@ class LocalizationTranscript(BaseModel):
     language: str | None = None
     source: str | None = None
     segments: list[LocalizationSegment] = Field(default_factory=list)
+    metadata: dict = Field(default_factory=dict)
 
 
 def _seconds_to_ms(value) -> int:

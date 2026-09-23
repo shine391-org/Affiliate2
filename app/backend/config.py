@@ -66,6 +66,7 @@ class Settings(BaseSettings):
     AI_API_KEY: str = ""
     AI_MODEL: str = ""
     GEMINI_API_KEY: str = ""
+    HUGGINGFACE_TOKEN: str = ""  # WhisperX/pyannote diarization for HQ multi-speaker localization
 
     # ── Service keys (BYOK) ───────────────────────────
     # All optional — features gracefully degrade when keys are missing.
