@@ -17,11 +17,11 @@ def test_extract_candidate_json_accepts_fenced_and_rejects_non_object():
 @pytest.mark.asyncio
 async def test_candidate_media_uses_canonical_downloader(monkeypatch, tmp_path):
     source = tmp_path / "source.mkv"
-    source.write_bytes(b"x" * 20_000)
     seen = {}
 
     async def fake_download(**kwargs):
         seen.update(kwargs)
+        source.write_bytes(b"x" * 20_000)
         return {
             "video_path": source,
             "duration": 12,

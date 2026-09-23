@@ -122,7 +122,7 @@ async def fetch_candidate_media(
         return {
             "status": "MEDIA_UNAVAILABLE",
             "path": None,
-            "meta": {"reason": f"unsupported Radar platform: {platform or '(empty)}"},
+            "meta": {"reason": f"unsupported Radar platform: {platform or '(empty)'}"},
         }
     if not (canonical_url or "").strip():
         return {
