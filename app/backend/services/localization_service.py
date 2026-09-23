@@ -454,6 +454,116 @@ def _reference_for_chunk(
     return profile.tts_reference_audio
 
 
+def _extract_reference_clip_sync(
+    media_path: Path,
+    output_path: Path,
+    *,
+    start_ms: int,
+    end_ms: int,
+) -> Path:
+    """Extract a clean speech reference without touching video pixels."""
+    if end_ms <= start_ms:
+        raise ValueError("reference end must be after start")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.unlink(missing_ok=True)
+    cmd = [
+        "ffmpeg", "-y", "-loglevel", "error",
+        "-ss", f"{start_ms / 1000.0:.3f}",
+        "-t", f"{(end_ms - start_ms) / 1000.0:.3f}",
+        "-i", str(media_path),
+        "-vn", "-ac", "1", "-ar", "32000",
+        "-c:a", "pcm_s16le",
+        str(output_path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+    if result.returncode != 0 or not output_path.exists() or output_path.stat().st_size == 0:
+        raise RuntimeError(
+            f"Reference audio extraction failed: {(result.stderr or '')[-500:]}"
+        )
+    return output_path
+
+
+async def _build_auto_voice_references(
+    transcript: LocalizationTranscript,
+    *,
+    reference_media: Path,
+    profile: LocalizationProfile,
+    work_dir: Path,
+) -> dict[str, dict]:
+    """VideoLingo-style automatic source-reference extraction for cloning.
+
+    Prefer a 2–10s source utterance per speaker. For global mode choose the
+    single longest eligible utterance. Manual profile references always win.
+    """
+    mode = profile.voice_clone_reference_mode
+    if mode == "manual":
+        return {}
+
+    eligible = [
+        seg for seg in transcript.segments
+        if 1500 <= (seg.source_end_ms - seg.source_start_ms) <= 12000
+        and seg.source_text.strip()
+    ]
+    if not eligible:
+        eligible = [
+            seg for seg in transcript.segments
+            if (seg.source_end_ms - seg.source_start_ms) >= 600
+            and seg.source_text.strip()
+        ]
+    if not eligible:
+        return {}
+
+    chosen: dict[str, LocalizationSegment] = {}
+    if mode == "global_auto":
+        seg = max(eligible, key=lambda x: x.source_end_ms - x.source_start_ms)
+        chosen["__default__"] = seg
+    else:
+        for seg in eligible:
+            key = seg.speaker_id or "__default__"
+            current = chosen.get(key)
+            if (
+                current is None
+                or (seg.source_end_ms - seg.source_start_ms)
+                > (current.source_end_ms - current.source_start_ms)
+            ):
+                chosen[key] = seg
+
+    refs: dict[str, dict] = {}
+    ref_dir = work_dir / "references"
+    for key, seg in chosen.items():
+        # Explicit profile references override auto extraction for that speaker.
+        manual = (
+            profile.speaker_reference_audio.get(key)
+            if key != "__default__"
+            else profile.tts_reference_audio
+        )
+        if manual:
+            refs[key] = {
+                "audio": manual,
+                "text": profile.tts_reference_text or seg.source_text,
+                "language": profile.tts_reference_language or transcript.language or "en",
+                "source": "manual",
+            }
+            continue
+
+        safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in key)
+        path = ref_dir / f"{safe}.wav"
+        await asyncio.to_thread(
+            _extract_reference_clip_sync,
+            reference_media,
+            path,
+            start_ms=seg.source_start_ms,
+            end_ms=seg.source_end_ms,
+        )
+        refs[key] = {
+            "audio": str(path),
+            "text": seg.source_text,
+            "language": transcript.language or profile.tts_reference_language or "en",
+            "source": "auto",
+        }
+    return refs
+
+
 async def _audio_duration_ms(path: Path) -> int:
     from backend.services.video_utils import probe_duration
     seconds = await asyncio.to_thread(probe_duration, path, 0.0)
@@ -469,6 +579,9 @@ async def _generate_tts_chunk(
     speaker_id: str | None,
     target_language: str,
     output_path: Path,
+    reference_audio: str | None = None,
+    reference_text: str | None = None,
+    reference_language: str | None = None,
     attempts: int = 3,
 ) -> int:
     from backend.services.tts_service import generate_tts
@@ -487,9 +600,9 @@ async def _generate_tts_chunk(
                 speed=1.0,
                 base_url=runtime.base_url,
                 region=runtime.region,
-                reference_audio=_reference_for_chunk(profile, speaker_id),
-                reference_text=profile.tts_reference_text,
-                reference_language=profile.tts_reference_language,
+                reference_audio=reference_audio or _reference_for_chunk(profile, speaker_id),
+                reference_text=reference_text or profile.tts_reference_text,
+                reference_language=reference_language or profile.tts_reference_language,
                 target_language=target_language,
             )
             duration = await _audio_duration_ms(output_path)
@@ -645,6 +758,7 @@ async def synthesize_timed_dub(
     fail_on_overflow: bool = True,
     regenerate_chunk_ids: set[int] | None = None,
     reuse_existing_chunks: bool = False,
+    reference_media: Path | None = None,
 ) -> TimedDubResult:
     """C7 donor-derived chunk planner with measured TTS and bounded retiming."""
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -691,6 +805,16 @@ async def synthesize_timed_dub(
     )
     segment_by_id = {seg.id: seg for seg in out.segments}
 
+    auto_references: dict[str, dict] = {}
+    provider_value = getattr(runtime.provider, "value", str(runtime.provider))
+    if provider_value == "gpt_sovits":
+        auto_references = await _build_auto_voice_references(
+            out,
+            reference_media=Path(reference_media or source_media),
+            profile=profile,
+            work_dir=work_dir,
+        )
+
     raw_paths: dict[int, Path] = {}
     block_paths: list[Path] = []
     regenerate_chunk_ids = set(regenerate_chunk_ids or set())
@@ -722,6 +846,8 @@ async def synthesize_timed_dub(
             if changed:
                 rewrite_count += 1
 
+        ref_key = speaker_id or "__default__"
+        ref = auto_references.get(ref_key) or auto_references.get("__default__") or {}
         if (
             reuse_existing_chunks
             and chunk.id not in regenerate_chunk_ids
@@ -738,6 +864,9 @@ async def synthesize_timed_dub(
                     speaker_id=speaker_id,
                     target_language=target_language,
                     output_path=path,
+                    reference_audio=ref.get("audio"),
+                    reference_text=ref.get("text"),
+                    reference_language=ref.get("language"),
                 )
         else:
             duration_ms = await _generate_tts_chunk(
@@ -748,6 +877,9 @@ async def synthesize_timed_dub(
                 speaker_id=speaker_id,
                 target_language=target_language,
                 output_path=path,
+                reference_audio=ref.get("audio"),
+                reference_text=ref.get("text"),
+                reference_language=ref.get("language"),
             )
 
         while (
@@ -771,6 +903,9 @@ async def synthesize_timed_dub(
                 speaker_id=speaker_id,
                 target_language=target_language,
                 output_path=path,
+                reference_audio=ref.get("audio"),
+                reference_text=ref.get("text"),
+                reference_language=ref.get("language"),
             )
         chunk.actual_duration_ms = duration_ms
 

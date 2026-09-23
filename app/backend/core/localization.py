@@ -47,6 +47,7 @@ class LocalizationProfile(BaseModel):
     tts_reference_audio: str | None = None
     tts_reference_text: str | None = None
     tts_reference_language: str | None = None
+    voice_clone_reference_mode: Literal["manual", "global_auto", "per_speaker_auto"] = "per_speaker_auto"
 
     # Donor-derived semantic/dubbing policy. These values mirror the proven
     # OpenCreator smart-dubbing defaults unless Affiliate2 has a product reason

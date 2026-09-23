@@ -466,3 +466,82 @@ def test_c8_hq_clean_mix_builds_audio_only_from_clean_background(monkeypatch, tm
     assert "sidechaincompress" not in command
     assert "alimiter=limit=0.95" in command
     assert "-c:v" not in command
+
+
+
+@pytest.mark.asyncio
+async def test_gpt_sovits_auto_reference_selects_longest_clean_segment_per_speaker(
+    monkeypatch, tmp_path,
+):
+    tx = LocalizationTranscript(
+        language="en",
+        segments=[
+            LocalizationSegment(
+                id="a1", speaker_id="A", source_text="short",
+                source_start_ms=0, source_end_ms=1800,
+            ),
+            LocalizationSegment(
+                id="a2", speaker_id="A", source_text="best reference",
+                source_start_ms=2000, source_end_ms=6000,
+            ),
+            LocalizationSegment(
+                id="b1", speaker_id="B", source_text="speaker b",
+                source_start_ms=6500, source_end_ms=9000,
+            ),
+        ],
+    )
+    media = tmp_path / "vocals.wav"
+    media.write_bytes(b"audio")
+    seen = []
+
+    def fake_extract(media_path, output_path, *, start_ms, end_ms):
+        seen.append((output_path.name, start_ms, end_ms))
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"ref")
+        return output_path
+
+    monkeypatch.setattr(ls, "_extract_reference_clip_sync", fake_extract)
+    refs = await ls._build_auto_voice_references(
+        tx,
+        reference_media=media,
+        profile=_profile(
+            tts_provider="gpt_sovits",
+            voice_clone_reference_mode="per_speaker_auto",
+        ),
+        work_dir=tmp_path / "work",
+    )
+    assert set(refs) == {"A", "B"}
+    assert refs["A"]["text"] == "best reference"
+    assert refs["A"]["source"] == "auto"
+    assert ("A.wav", 2000, 6000) in seen
+    assert ("B.wav", 6500, 9000) in seen
+
+
+@pytest.mark.asyncio
+async def test_manual_clone_reference_overrides_auto_extraction(monkeypatch, tmp_path):
+    tx = LocalizationTranscript(
+        language="en",
+        segments=[
+            LocalizationSegment(
+                id="a1", speaker_id="A", source_text="reference",
+                source_start_ms=0, source_end_ms=3000,
+            )
+        ],
+    )
+
+    def should_not_extract(*args, **kwargs):
+        raise AssertionError("manual reference must win")
+
+    monkeypatch.setattr(ls, "_extract_reference_clip_sync", should_not_extract)
+    refs = await ls._build_auto_voice_references(
+        tx,
+        reference_media=tmp_path / "vocals.wav",
+        profile=_profile(
+            tts_provider="gpt_sovits",
+            speaker_reference_audio={"A": "manual.wav"},
+            voice_clone_reference_mode="per_speaker_auto",
+        ),
+        work_dir=tmp_path / "work",
+    )
+    assert refs["A"]["audio"] == "manual.wav"
+    assert refs["A"]["source"] == "manual"

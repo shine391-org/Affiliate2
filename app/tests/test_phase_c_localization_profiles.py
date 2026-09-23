@@ -31,6 +31,7 @@ def test_default_profile_is_full_hq_donor_stack():
     assert profile.video_retime_mode == "fallback"
     assert profile.video_retime_max_slowdown == 1.12
     assert profile.audio_mode == "hq_clean"
+    assert profile.voice_clone_reference_mode == "per_speaker_auto"
     assert profile.render_profile == "hq"
     assert profile.qc_profile == "strict"
 

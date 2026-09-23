@@ -1146,6 +1146,7 @@ async def run_tool_translate(
                         fail_on_overflow=True,
                         regenerate_chunk_ids=regenerate_chunk_ids,
                         reuse_existing_chunks=bool(regenerate_chunk_ids),
+                        reference_media=asr_input,
                     )
                     localized = dub.transcript
                     dub_track = dub.dub_track
