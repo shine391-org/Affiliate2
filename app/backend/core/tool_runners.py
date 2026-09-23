@@ -870,12 +870,12 @@ async def run_tool_translate(
     from backend.services.localization_service import (
         caption_segments_from_localization,
         mix_dub_with_video,
+        prepare_semantic_transcript,
         resolve_localization_profile,
         synthesize_timed_dub,
         transcribe_for_localization,
         translate_transcript,
     )
-    from backend.services.semantic_segmentation import normalize_semantic_cues
 
     target_language = _LANG_NAME_MAP.get(
         target_language.strip().lower(), target_language.strip()
@@ -934,8 +934,11 @@ async def run_tool_translate(
         transcript = await transcribe_for_localization(asr_input, profile)
         source_segment_count = len(transcript.segments)
 
-        if profile.semantic_segmentation:
-            transcript = normalize_semantic_cues(transcript)
+        transcript = await prepare_semantic_transcript(
+            transcript,
+            profile=profile,
+            user_settings=user_settings,
+        )
 
         await _tool_progress(
             job_id, 32,

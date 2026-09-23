@@ -689,8 +689,8 @@ class TestTranslate:
         with patch.object(trun, "_load_user_settings", new=AsyncMock(return_value=None)), \
              patch("backend.services.localization_service.transcribe_for_localization",
                    new=AsyncMock(return_value=source)), \
-             patch("backend.services.semantic_segmentation.normalize_semantic_cues",
-                   side_effect=lambda tx: tx), \
+             patch("backend.services.localization_service.prepare_semantic_transcript",
+                   new=AsyncMock(return_value=source)), \
              patch("backend.services.localization_service.translate_transcript",
                    new=AsyncMock(return_value=localized)), \
              patch.object(trun, "_probe_aspect_ratio", new=AsyncMock(return_value="9:16")), \

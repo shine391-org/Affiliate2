@@ -152,6 +152,32 @@ def _strip_json_fence(raw: str) -> str:
     return text
 
 
+async def prepare_semantic_transcript(
+    transcript: LocalizationTranscript,
+    *,
+    profile: LocalizationProfile,
+    user_settings,
+) -> LocalizationTranscript:
+    """VideoLingo/SmartSub-derived source cue preparation.
+
+    Raw Whisper segments are first normalized with real word timing. When the
+    profile enables semantic segmentation, the configured AI may only GROUP
+    stable cue IDs; invalid responses fall back to deterministic normalized
+    cues without rewriting source text.
+    """
+    from backend.services.semantic_segmentation import (
+        normalize_semantic_cues,
+        refine_semantic_cues_with_ai,
+    )
+
+    normalized = normalize_semantic_cues(transcript)
+    if not profile.semantic_segmentation or len(normalized.segments) <= 1:
+        return normalized
+
+    ai = _profile_ai_client(user_settings, profile)
+    return await refine_semantic_cues_with_ai(normalized, ai)
+
+
 def _translation_context(transcript: LocalizationTranscript) -> str:
     text = (transcript.text or "").strip()
     if not text:

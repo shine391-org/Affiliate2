@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
+import pytest
+
 from backend.core.localization import LocalizationSegment, LocalizationTranscript
 from backend.services.semantic_segmentation import normalize_semantic_cues
 
@@ -46,3 +48,41 @@ def test_semantic_normalizer_splits_long_segment_from_real_word_times():
     assert len(got.segments) >= 2
     assert got.segments[0].source_start_ms == 0
     assert got.segments[-1].source_end_ms == 7000
+
+
+class _GroupingAI:
+    def __init__(self, response):
+        self.response = response
+
+    async def chat(self, messages, **kwargs):
+        return self.response
+
+
+@pytest.mark.asyncio
+async def test_ai_refine_only_groups_ids_and_preserves_source_text():
+    from backend.services.semantic_segmentation import refine_semantic_cues_with_ai
+
+    tx = LocalizationTranscript(segments=[
+        LocalizationSegment(id="s1", source_text="Yes.", source_start_ms=0, source_end_ms=480),
+        LocalizationSegment(id="s2", source_text="Then we continue.", source_start_ms=500, source_end_ms=1800),
+        LocalizationSegment(id="s3", source_text="Next topic.", source_start_ms=3000, source_end_ms=4200),
+    ])
+    ai = _GroupingAI('[{"ids":["s1","s2"]},{"ids":["s3"]}]')
+    got = await refine_semantic_cues_with_ai(tx, ai)
+    assert len(got.segments) == 2
+    assert got.segments[0].source_text == "Yes. Then we continue."
+    assert got.segments[0].source_start_ms == 0
+    assert got.segments[0].source_end_ms == 1800
+
+
+@pytest.mark.asyncio
+async def test_ai_refine_invalid_rewrite_shape_falls_back_without_data_loss():
+    from backend.services.semantic_segmentation import refine_semantic_cues_with_ai
+
+    tx = LocalizationTranscript(segments=[
+        LocalizationSegment(id="s1", source_text="one", source_start_ms=0, source_end_ms=1000),
+        LocalizationSegment(id="s2", source_text="two", source_start_ms=1100, source_end_ms=2100),
+    ])
+    ai = _GroupingAI('[{"ids":["s2","s1"]}]')
+    got = await refine_semantic_cues_with_ai(tx, ai)
+    assert [s.source_text for s in got.segments] == ["one", "two"]
