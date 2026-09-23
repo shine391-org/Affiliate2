@@ -15,18 +15,26 @@ from backend.services.candidate_intelligence_service import (
 _extract_json = extract_candidate_json
 
 
+async def analyze_candidate_async(
+    metadata: dict,
+    transcript: dict | None,
+    out_path: Path,
+    force: bool = False,
+) -> dict:
+    """Async adapter used by the converged Radar intelligence pipeline."""
+    return await analyze_candidate_intelligence(
+        metadata,
+        transcript,
+        Path(out_path),
+        force=force,
+    )
+
+
 def analyze_candidate(
     metadata: dict,
     transcript: dict | None,
     out_path: Path,
     force: bool = False,
 ) -> dict:
-    """Preserve the legacy Radar CLI API while using canonical AI routing."""
-    return asyncio.run(
-        analyze_candidate_intelligence(
-            metadata,
-            transcript,
-            Path(out_path),
-            force=force,
-        )
-    )
+    """Sync compatibility API for older scripts/tests."""
+    return asyncio.run(analyze_candidate_async(metadata, transcript, out_path, force))
