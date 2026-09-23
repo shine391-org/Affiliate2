@@ -119,7 +119,7 @@ A platform provider resolves specialized media only when the canonical downloade
 
 The old 720p-first behavior is not a quality requirement. Phase C introduces explicit source/download quality policy and stores actual source properties.
 
-The legacy `src/radar/intel/media.py` path is removed only after parity is proven.
+Candidate Intelligence no longer owns a separate media downloader. The transitional `src/radar/intel/media.py` module delegates to the canonical source-best-first downloader and remains only for Radar CLI compatibility until later cleanup.
 
 ## Canonical AI/provider layer
 
@@ -138,6 +138,8 @@ UI model registries are suggestions/presets, not hard allowlists.
 
 Provider-specific direct clients should not proliferate outside the canonical abstraction.
 
+Candidate Intelligence follows this rule: the transitional Radar AI module delegates to `backend.core.ai_provider` instead of owning a direct OpenAI-compatible HTTP client.
+
 ## Canonical transcript/timeline
 
 One transcript should be reusable by:
@@ -147,7 +149,7 @@ One transcript should be reusable by:
 - Smart Cut
 - Creative Remake
 
-Do not perform duplicate ASR passes merely because features are implemented in different modules.
+Do not perform duplicate ASR passes merely because features are implemented in different modules. Candidate Intelligence delegates its fallback ASR to the canonical Whisper service instead of owning a standalone faster-whisper model.
 
 Source and output coordinates are explicit and distinct:
 
