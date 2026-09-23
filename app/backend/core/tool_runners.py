@@ -949,8 +949,6 @@ async def run_tool_translate(
                 updates["caption_style"] = caption_style
             if target_aspect:
                 updates["target_aspect"] = target_aspect
-            elif profile_id is None:
-                updates["target_aspect"] = "source"
             if updates:
                 profile = LocalizationProfile.model_validate({
                     **profile.model_dump(),

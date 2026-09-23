@@ -92,7 +92,7 @@ async def generate_voice(
     if not 0.75 <= float(speed) <= 1.25:
         raise VoiceGenerationError("Edge TTS speed must be between 0.75x and 1.25x")
     processed_text = _add_natural_pauses(text) if use_ssml else text
-    rate_pct = round(-5 + (float(speed) - 1.0) * 100)
+    rate_pct = round((float(speed) - 1.0) * 100)
     rate = f"{rate_pct:+d}%"
 
     last_error = None
