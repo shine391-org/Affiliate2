@@ -1189,8 +1189,7 @@ async def synthesize_timed_dub(
             )
 
         while (
-            not reuse_raw
-            and required_speed(duration_ms, chunk.available_ms) > config.speed_max
+            required_speed(duration_ms, chunk.available_ms) > config.speed_max
             and attempts < config.rewrite_max_attempts
         ):
             changed = await _adapt_chunk_items(
