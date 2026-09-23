@@ -846,6 +846,16 @@ _LANG_NAME_MAP = {
     "ja": "Japanese",
     "ko": "Korean",
     "zh": "Chinese",
+    "nl": "Dutch",
+    "pl": "Polish",
+    "ru": "Russian",
+    "ar": "Arabic",
+    "hi": "Hindi",
+    "tr": "Turkish",
+    "sv": "Swedish",
+    "da": "Danish",
+    "no": "Norwegian",
+    "fi": "Finnish",
 }
 
 

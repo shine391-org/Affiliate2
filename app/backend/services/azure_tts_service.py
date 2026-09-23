@@ -28,8 +28,10 @@ async def generate_voice(
     if not url.endswith("/cognitiveservices/v1"):
         url += "/cognitiveservices/v1"
     rate_pct = round((float(speed) - 1.0) * 100)
+    voice_parts = (voice_id or "").split("-")
+    locale = "-".join(voice_parts[:2]) if len(voice_parts) >= 2 else "en-US"
     ssml = (
-        "<speak version='1.0' xml:lang='vi-VN'>"
+        f"<speak version='1.0' xml:lang='{html.escape(locale)}'>"
         f"<voice name='{html.escape(voice_id)}'>"
         f"<prosody rate='{rate_pct:+d}%'>{html.escape(text)}</prosody>"
         "</voice></speak>"

@@ -80,6 +80,7 @@ class DubbingChunk:
     start_ms: int
     end_ms: int
     speaker_id: str | None = None
+    voice_id: str | None = None
     actual_duration_ms: int = 0
     speed_factor: float = 1.0
 
@@ -174,6 +175,7 @@ def build_plan(
         start_ms=ordered[0].start_ms,
         end_ms=ordered[0].end_ms,
         speaker_id=ordered[0].speaker_id,
+        voice_id=ordered[0].voice_id,
     )
 
     for i in range(1, len(ordered)):
@@ -198,11 +200,11 @@ def build_plan(
             and cue.speaker_id is not None
             and prev.speaker_id != cue.speaker_id
         )
-        voice_change = (
-            prev.voice_id is not None
-            and cue.voice_id is not None
-            and prev.voice_id != cue.voice_id
-        )
+        # An explicit voice override must never bleed into a neighbouring
+        # default-voice cue (or vice versa). None is meaningful here: it means
+        # "resolve the profile/speaker default", so None <-> explicit is a
+        # hard boundary as well.
+        voice_change = prev.voice_id != cue.voice_id
         must_split = (
             len(current.item_indexes) >= config.max_chunk_size
             or not should_merge_short
@@ -218,6 +220,7 @@ def build_plan(
                 start_ms=cue.start_ms,
                 end_ms=cue.end_ms,
                 speaker_id=cue.speaker_id,
+                voice_id=cue.voice_id,
             )
         else:
             current.item_indexes.append(i)

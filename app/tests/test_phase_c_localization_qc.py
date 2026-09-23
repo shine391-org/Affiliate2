@@ -98,3 +98,30 @@ def test_qc_keeps_speed_warning_as_review_not_fake_pass(monkeypatch, tmp_path):
         timing_issues=[{"reason": "speed_warning", "chunk_id": 1}],
     )
     assert report.status == "NEEDS_REVIEW"
+
+
+
+def test_qc_requires_review_when_global_video_retime_was_used(monkeypatch, tmp_path):
+    source = tmp_path / "s.mp4"
+    final = tmp_path / "f.mp4"
+    source.write_bytes(b"s")
+    final.write_bytes(b"f")
+
+    def media(path):
+        return _media(
+            width=1920 if path == source else 1080,
+            height=1080 if path == source else 1920,
+            duration=10.0 if path == source else 10.8,
+        )
+
+    monkeypatch.setattr(qc, "probe_media", media)
+    monkeypatch.setattr(qc, "audio_max_volume_db", lambda p: -1.0)
+    report = qc.evaluate_localization_qc(
+        source_video=source,
+        final_video=final,
+        transcript=_tx(),
+        profile=LocalizationProfile(id="x", name="X", target_aspect="9:16"),
+        video_slowdown=1.08,
+    )
+    assert report.status == "NEEDS_REVIEW"
+    assert "video_retimed" in {row["code"] for row in report.warnings}

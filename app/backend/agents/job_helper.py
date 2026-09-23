@@ -180,26 +180,30 @@ async def job_cancelled(job_id: str | None) -> bool:
 
 
 async def restart_job(job_id: str) -> bool:
-    """Reset an existing terminal job for an explicit user-requested rerun.
+    """Atomically reopen one terminal job for an explicit rerun.
 
-    Normal status updates still keep the terminal-state regression guard. This
-    separate function is the only supported way to reopen a completed/failed
-    localization job after its downstream stages were invalidated.
+    The conditional UPDATE is deliberate: two rapid rerun/regenerate requests
+    must not both turn into live coroutines writing the same manifest/artifacts.
     """
     from datetime import datetime
-    from sqlalchemy import select
+    from sqlalchemy import update
 
     async with AsyncSessionLocal() as db:
-        result = await db.execute(select(Job).where(Job.id == job_id))
-        job = result.scalar_one_or_none()
-        if not job:
-            return False
-        job.status = "pending"
-        job.progress_pct = 0.0
-        job.current_step = "Queued for rerun"
-        job.error_message = None
-        job.completed_at = None
-        job.started_at = None
-        job.updated_at = datetime.utcnow()
+        result = await db.execute(
+            update(Job)
+            .where(
+                Job.id == job_id,
+                Job.status.notin_(("running", "pending")),
+            )
+            .values(
+                status="pending",
+                progress_pct=0.0,
+                current_step="Queued for rerun",
+                error_message=None,
+                completed_at=None,
+                started_at=None,
+                updated_at=datetime.utcnow(),
+            )
+        )
         await db.commit()
-    return True
+        return bool(result.rowcount)

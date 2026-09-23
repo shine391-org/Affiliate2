@@ -78,6 +78,17 @@ def test_explicit_voice_change_is_hard_chunk_boundary():
     assert [c.voice_id for c in chunks] == ["v1", "v2"]
 
 
+def test_explicit_voice_to_default_is_hard_chunk_boundary():
+    cfg = DubbingConfig()
+    _, chunks = build_plan([
+        _cue(1, 0, 500, "one", speaker="A", voice="v1"),
+        _cue(2, 520, 1000, "two", speaker="A", voice=None),
+        _cue(3, 1020, 1500, "three", speaker="A", voice="v2"),
+    ], cfg)
+    assert len(chunks) == 3
+    assert [c.voice_id for c in chunks] == ["v1", None, "v2"]
+
+
 def test_borrow_following_silence_never_crosses_next_speech():
     chunks = [
         type("C", (), {"end_ms": 500, "start_ms": 0})(),

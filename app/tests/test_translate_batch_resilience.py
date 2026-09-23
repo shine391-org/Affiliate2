@@ -545,3 +545,59 @@ async def test_manual_clone_reference_overrides_auto_extraction(monkeypatch, tmp
     )
     assert refs["A"]["audio"] == "manual.wav"
     assert refs["A"]["source"] == "manual"
+
+
+
+def test_tts_config_rejects_profile_provider_mismatch():
+    settings = SimpleNamespace(
+        tts_provider="azure_tts",
+        preferred_tts_voice=None,
+        tts_api_key_encrypted=None,
+        tts_model=None,
+        tts_base_url=None,
+        tts_region="southeastasia",
+        preferred_voice_id="21m00Tcm4TlvDq8ikWAM",
+        ai_provider=None,
+        ai_api_key_encrypted=None,
+    )
+    with pytest.raises(ValueError, match="requests TTS provider"):
+        ls._tts_config(
+            settings,
+            _profile(tts_provider="elevenlabs"),
+            "Vietnamese",
+        )
+
+
+def test_phase_c_tts_does_not_inherit_legacy_generator_voice_id():
+    from backend.services.tts_service import TTSProvider
+
+    settings = SimpleNamespace(
+        tts_provider="edge_tts",
+        preferred_tts_voice=None,
+        preferred_voice_id="21m00Tcm4TlvDq8ikWAM",
+        tts_api_key_encrypted=None,
+        tts_model=None,
+        tts_base_url=None,
+        tts_region=None,
+        ai_provider=None,
+        ai_api_key_encrypted=None,
+    )
+    runtime = ls._tts_config(settings, _profile(tts_provider=None), "Vietnamese")
+    assert runtime.provider == TTSProvider.EDGE_TTS
+    assert runtime.default_voice == "vi-VN-HoaiMyNeural"
+
+
+def test_phase_c_edge_default_voice_follows_target_language():
+    settings = SimpleNamespace(
+        tts_provider="edge_tts",
+        preferred_tts_voice=None,
+        preferred_voice_id="legacy-id-must-not-win",
+        tts_api_key_encrypted=None,
+        tts_model=None,
+        tts_base_url=None,
+        tts_region=None,
+        ai_provider=None,
+        ai_api_key_encrypted=None,
+    )
+    runtime = ls._tts_config(settings, _profile(tts_provider=None), "English")
+    assert runtime.default_voice == "en-US-AndrewMultilingualNeural"

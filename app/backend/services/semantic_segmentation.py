@@ -174,7 +174,7 @@ def _timed_words(transcript: LocalizationTranscript) -> list[dict]:
                 "text": text,
                 "start_ms": start,
                 "end_ms": end,
-                "speaker_id": seg.speaker_id,
+                "speaker_id": raw.get("speaker_id") or seg.speaker_id,
                 "raw": raw,
             })
             number += 1
@@ -317,8 +317,10 @@ Every input word ID must appear exactly once and in the same order."""
                     if len(known) > 1:
                         raise ValueError("semantic group crosses speaker boundary")
             except Exception:
-                # Window-level fallback preserves every word and real timestamp.
-                groups = [[w["id"]] for w in window]
+                # Do NOT degrade into one-word translation cues. Returning None
+                # hands control back to the already-normalized cue tier, which
+                # preserves semantic context and still retains real word timing.
+                return None
 
         generated = _word_groups_to_segments(
             groups,

@@ -144,3 +144,31 @@ def test_gpt_sovits_dispatches_reference_audio_and_languages(monkeypatch, tmp_pa
     assert seen["prompt_text"] == "hello"
     assert seen["prompt_language"] == "en"
     assert seen["text_language"] == "vi"
+
+
+
+def test_azure_ssml_uses_selected_voice_locale(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from backend.services import azure_tts_service
+
+    captured = {}
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+        async def post(self, url, headers=None, content=None, **kwargs):
+            captured["content"] = content.decode("utf-8")
+            return SimpleNamespace(status_code=200, content=b"wav", text="")
+
+    monkeypatch.setattr(azure_tts_service.httpx, "AsyncClient", lambda **kwargs: FakeClient())
+    out = asyncio.run(azure_tts_service.generate_voice(
+        "Hello",
+        voice_id="en-US-AvaMultilingualNeural",
+        api_key="k",
+        region="eastus",
+        output_path=tmp_path / "azure.wav",
+    ))
+    assert out.exists()
+    assert "xml:lang='en-US'" in captured["content"]

@@ -64,8 +64,28 @@ _QC_KEYS = {"qc_profile"}
 def _load_run(job_id: str) -> LocalizationRun:
     try:
         return LocalizationRun.load(job_id)
-    except (ValueError, RuntimeError) as exc:
+    except ValueError as exc:
         raise HTTPException(status_code=404, detail="Localization run not found") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+async def _assert_job_inactive(job_id: str) -> None:
+    from sqlalchemy import select
+    from backend.database import AsyncSessionLocal
+    from backend.models.job import Job
+
+    async with AsyncSessionLocal() as db:
+        status = (await db.execute(
+            select(Job.status).where(Job.id == job_id)
+        )).scalar_one_or_none()
+    if status is None:
+        raise HTTPException(status_code=404, detail="Job row not found")
+    if status in {"running", "pending"}:
+        raise HTTPException(
+            status_code=409,
+            detail="Localization job is already active; wait for it to finish before editing or rerunning.",
+        )
 
 
 def _earliest_stage(stages: list[str]) -> str:
@@ -121,7 +141,10 @@ async def _dispatch_existing_run(run: LocalizationRun):
     if not run.source_path.exists():
         raise HTTPException(status_code=409, detail="Persisted source media is missing")
     if not await restart_job(run.job_id):
-        raise HTTPException(status_code=404, detail="Job row not found")
+        raise HTTPException(
+            status_code=409,
+            detail="Localization job became active before the rerun could be claimed.",
+        )
 
     req = run.request
     dispatch(run_tool_translate(
@@ -177,6 +200,7 @@ async def localization_exceptions(limit: int = 50):
 
 @router.post("/jobs/{job_id}/override")
 async def localization_expert_override(job_id: str, body: ExpertOverrideRequest):
+    await _assert_job_inactive(job_id)
     run = _load_run(job_id)
     invalidations: list[str] = []
 
@@ -271,6 +295,7 @@ async def localization_expert_override(job_id: str, body: ExpertOverrideRequest)
 
 @router.post("/jobs/{job_id}/chunks/{chunk_id}/regenerate")
 async def regenerate_localization_chunk(job_id: str, chunk_id: int):
+    await _assert_job_inactive(job_id)
     run = _load_run(job_id)
     chunks = _optional_json(run, "dubbing", "chunks") or []
     ids = {int(row.get("id")) for row in chunks if isinstance(row, dict) and row.get("id") is not None}
@@ -289,11 +314,24 @@ async def regenerate_localization_chunk(job_id: str, chunk_id: int):
 
 @router.post("/jobs/{job_id}/rerun")
 async def rerun_localization_job(job_id: str, body: RerunRequest):
+    await _assert_job_inactive(job_id)
     run = _load_run(job_id)
     stage = body.from_stage or run.first_incomplete_stage() or "qc"
     run.invalidate_from(stage, delete_artifacts=True)
     await _dispatch_existing_run(run)
     return {"ok": True, "job_id": job_id, "from_stage": stage}
+
+
+async def _run_localization_batch_sequential(specs: list[dict]) -> None:
+    """Run HQ localization jobs one-by-one to avoid loading Demucs/WhisperX N times.
+
+    The normal per-job runner is reused verbatim; this is only a lightweight
+    coordinator and intentionally bypasses the generic max-3 heavy-task fanout.
+    """
+    from backend.core.tool_runners import run_tool_translate
+
+    for spec in specs:
+        await run_tool_translate(**spec)
 
 
 @router.post("/batch")
@@ -315,10 +353,10 @@ async def localization_batch(
 
     from backend.agents.job_helper import create_job
     from backend.api.tools import VIDEO_EXTS, VIDEO_MAX_BYTES, save_upload
-    from backend.core.task_runner import dispatch
-    from backend.core.tool_runners import run_tool_translate
+    from backend.core.task_runner import spawn_background
 
     jobs = []
+    specs = []
     for file in files:
         job = await create_job("tool:translate", "local", {
             "target_language": target_language,
@@ -331,17 +369,18 @@ async def localization_batch(
             "filename": file.filename,
         })
         in_path = await save_upload(file, job.id, VIDEO_EXTS, VIDEO_MAX_BYTES)
-        dispatch(run_tool_translate(
-            job.id,
-            in_path,
-            target_language,
-            mode,
-            voice_id,
-            caption_style,
-            emoji_style,
-            target_aspect=target_aspect,
-            profile_id=profile_id,
-        ))
+        specs.append({
+            "job_id": job.id,
+            "in_path": in_path,
+            "target_language": target_language,
+            "mode": mode,
+            "voice_id": voice_id,
+            "caption_style": caption_style,
+            "emoji_style": emoji_style,
+            "target_aspect": target_aspect,
+            "profile_id": profile_id,
+        })
         jobs.append({"job_id": job.id, "filename": file.filename})
 
+    spawn_background(_run_localization_batch_sequential(specs))
     return {"count": len(jobs), "jobs": jobs}

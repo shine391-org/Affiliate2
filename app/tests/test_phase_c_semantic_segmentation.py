@@ -143,7 +143,41 @@ async def test_ai_word_tier_invalid_ids_falls_back_without_losing_words():
     )
     ai = _GroupingAI('[{"ids":["w00002","w00001"]}]')
     got = await refine_semantic_cues_with_ai(tx, ai)
-    assert [s.source_text for s in got.segments] == ["one", "two"]
+    # Invalid word-tier grouping must not degrade translation into one-word
+    # cues. Fall back to the already-normalized semantic cue tier instead.
+    assert [s.source_text for s in got.segments] == ["one two"]
     assert [(s.source_start_ms, s.source_end_ms) for s in got.segments] == [
-        (0, 500), (500, 1000)
+        (0, 1000)
     ]
+
+
+
+@pytest.mark.asyncio
+async def test_word_level_speaker_id_survives_semantic_segmentation():
+    from backend.services.semantic_segmentation import refine_semantic_cues_with_ai
+
+    words = [
+        {"word": "hello", "start": 0.0, "end": 0.4, "speaker_id": "A"},
+        {"word": "there", "start": 0.4, "end": 0.8, "speaker_id": "A"},
+        {"word": "yes", "start": 0.9, "end": 1.2, "speaker_id": "B"},
+        {"word": "indeed", "start": 1.2, "end": 1.6, "speaker_id": "B"},
+    ]
+    tx = LocalizationTranscript(
+        text="hello there yes indeed",
+        segments=[
+            LocalizationSegment(
+                id="raw1",
+                speaker_id="A",
+                source_text="hello there yes indeed",
+                source_start_ms=0,
+                source_end_ms=1600,
+                source_words=words,
+            )
+        ],
+    )
+    ai = _GroupingAI(
+        '[{"ids":["w00001","w00002"]},{"ids":["w00003","w00004"]}]'
+    )
+    got = await refine_semantic_cues_with_ai(tx, ai)
+    assert [s.speaker_id for s in got.segments] == ["A", "B"]
+    assert [s.source_text for s in got.segments] == ["hello there", "yes indeed"]

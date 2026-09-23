@@ -163,6 +163,13 @@ def evaluate_localization_qc(
     elif coverage < 0.88:
         warnings.append({"code": "target_speech_coverage", "ratio": round(coverage, 4)})
 
+    if video_slowdown > 1.005:
+        warnings.append({
+            "code": "video_retimed",
+            "slowdown_factor": round(video_slowdown, 5),
+            "message": "Global video slowdown was used as a last-resort dubbing fit; human cadence review required.",
+        })
+
     expected_duration = source_meta["duration"] * max(1.0, video_slowdown)
     duration_delta = abs(final_meta["duration"] - expected_duration)
     duration_tolerance = max(0.75, expected_duration * 0.02)
