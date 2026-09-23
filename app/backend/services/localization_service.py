@@ -872,7 +872,20 @@ async def _adapt_chunk_items(
             "source": seg.source_text,
             "current": seg.translated_text or item.spoken_text,
         })
+    current_words = sum(len(item["current"].split()) for item in items)
+    duration_ms = int((state or {}).get("measured_duration_ms") or sum(
+        plan[idx].estimated_duration_ms for idx in chunk.item_indexes
+    ))
+    # Feed the actual natural-rate measurement back into the next attempt,
+    # rather than asking the same vague question again. Leave modest headroom
+    # for TTS pauses; this budget is guidance, never permission to drop facts.
+    ratio = min(0.85, target_ms / max(duration_ms, 1))
+    word_budget = max(len(items), math.floor(current_words * ratio * 0.95))
     prompt = f"""Rewrite these {target_language} dubbing lines so the WHOLE group can be spoken naturally in about {target_ms / 1000.0:.2f} seconds.
+Duration feedback: current duration {duration_ms} ms; target duration {target_ms} ms.
+Attempt {(state or {}).get('attempt', 1)}. Combined word budget: at most {word_budget} whitespace-separated words (current: {current_words}).
+Remove redundant connective phrases and filler, not cooking steps, heat settings, ingredients, quantities, names or other factual content. Do not add polite filler or expand the previous wording.
+If essential facts cannot fit, preserve them rather than inventing or deleting facts.
 
 Rules:
 - Preserve every item ID and order.
@@ -949,6 +962,22 @@ ITEMS:
     expected = [x["id"] for x in items]
     if set(mapped) != set(expected):
         return record_invalid("id_mismatch")
+
+    current_text = chunk_text(plan, chunk)
+    candidate_text = " ".join(mapped[item["id"]] for item in items)
+    # A paraphrase that grows cannot solve a duration overflow. Reject it
+    # atomically so neither the plan nor the caption transcript drifts.
+    if len(candidate_text) >= len(current_text) or (
+        current_words > 1
+        and len(candidate_text.split()) >= current_words
+    ):
+        if issues is not None:
+            issues.append({
+                "chunk_id": chunk.id,
+                "reason": "rewrite_not_shorter",
+                "segment_ids": expected,
+            })
+        return False
 
     changed = False
     for idx in chunk.item_indexes:
@@ -1293,6 +1322,7 @@ async def synthesize_timed_dub(
             and required_speed(duration_ms, chunk.available_ms) > config.speed_max
             and attempts < config.rewrite_max_attempts
         ):
+            rewrite_state.update(measured_duration_ms=duration_ms, attempt=attempts + 1)
             changed = await _adapt_chunk_items(
                 ai, plan=plan, chunk=chunk, segment_by_id=segment_by_id,
                 target_language=target_language, target_ms=chunk.available_ms,
@@ -1305,7 +1335,7 @@ async def synthesize_timed_dub(
                 rewrite_unavailable_recorded = True
                 attempts = config.rewrite_max_attempts
             if not changed:
-                break
+                continue
             rewrite_count += 1
             speech_text = chunk_text(plan, chunk)
             synthesis_identity = _chunk_synthesis_identity(
@@ -1356,6 +1386,25 @@ async def synthesize_timed_dub(
     video_slowdown = 1.0
     if needed_slowdown > 1.0 and profile.video_retime_mode == "fallback":
         video_slowdown = min(needed_slowdown, profile.video_retime_max_slowdown)
+        # Independent rounding of the two endpoints can shrink a window by
+        # almost 1ms. If the ideal factor would still overflow on that integer
+        # timeline, reserve one rounding tick before applying the SAME global
+        # factor once. Never relax the speed or configured retime ceiling.
+        if any(
+            required_speed(
+                c.actual_duration_ms,
+                round(c.end_ms * video_slowdown) - round(c.start_ms * video_slowdown),
+            ) > config.speed_max
+            for c in chunks
+        ):
+            rounding_safe_slowdown = max(
+                (math.ceil(c.actual_duration_ms / config.speed_max) + 1) / c.available_ms
+                for c in chunks
+            )
+            video_slowdown = min(
+                max(video_slowdown, rounding_safe_slowdown),
+                profile.video_retime_max_slowdown,
+            )
         _scale_chunks_for_video_slowdown(chunks, video_slowdown)
 
     unresolved: list[dict] = []

@@ -390,6 +390,88 @@ async def test_c7_overlong_chunk_rewrites_then_regenerates(monkeypatch, tmp_path
 
 
 @pytest.mark.asyncio
+async def test_c7_slowdown_accounts_for_integer_timestamp_rounding(monkeypatch, tmp_path):
+    # Exact real-job regression: the real-valued factor rounds this window to
+    # 6535ms, requiring 1.3000765x instead of the allowed 1.3x.
+    tx = LocalizationTranscript(segments=[
+        LocalizationSegment(
+            id="s1", source_text="one", translated_text="một",
+            source_start_ms=12765, source_end_ms=18817,
+            translation_status="success",
+        ),
+    ])
+    _patch_dub_io(monkeypatch, tmp_path, [8496])
+    monkeypatch.setattr(
+        "backend.services.video_utils.probe_duration", lambda *a, **k: 18.817,
+    )
+    result = await ls.synthesize_timed_dub(
+        tx, source_media=tmp_path / "source.mp4", target_language="Vietnamese",
+        profile=_profile(dub_rewrite_attempts=0, video_retime_mode="fallback"),
+        user_settings=object(), work_dir=tmp_path / "work",
+    )
+    assert 1.0 < result.video_slowdown <= 1.12
+    assert result.chunks is not None
+    assert result.chunks[0].speed_factor <= 1.3
+    assert result.chunks[0].available_ms >= 8496 / 1.3
+    assert not any(i["reason"] == "timing_overflow" for i in result.issues)
+
+
+@pytest.mark.asyncio
+async def test_c7_rounding_guard_does_not_hide_overflow_at_retime_ceiling(monkeypatch, tmp_path):
+    tx = LocalizationTranscript(segments=[
+        LocalizationSegment(
+            id="s1", source_text="one", translated_text="một",
+            source_start_ms=12765, source_end_ms=18817,
+            translation_status="success",
+        ),
+    ])
+    _patch_dub_io(monkeypatch, tmp_path, [10000])
+    monkeypatch.setattr(
+        "backend.services.video_utils.probe_duration", lambda *a, **k: 18.817,
+    )
+    with pytest.raises(ls.LocalizationTimingError) as error:
+        await ls.synthesize_timed_dub(
+            tx, source_media=tmp_path / "source.mp4", target_language="Vietnamese",
+            profile=_profile(dub_rewrite_attempts=0, video_retime_mode="fallback"),
+            user_settings=object(), work_dir=tmp_path / "work",
+        )
+    assert error.value.issues[0]["available_ms"] == round(18817 * 1.12) - round(12765 * 1.12)
+    assert error.value.issues[0]["reason"] == "timing_overflow"
+
+
+@pytest.mark.asyncio
+async def test_c7_rejected_rewrite_retries_with_measured_feedback(monkeypatch, tmp_path):
+    tx = LocalizationTranscript(segments=[
+        LocalizationSegment(
+            id="s1", source_text="one", translated_text="một câu dài",
+            source_start_ms=0, source_end_ms=2000, translation_status="success",
+        ),
+    ])
+    _patch_dub_io(monkeypatch, tmp_path, [3000, 1800])
+    seen = []
+
+    async def adapt(ai, *, plan, chunk, segment_by_id, state, **kwargs):
+        seen.append(dict(state))
+        if len(seen) == 1:
+            return False
+        plan[0].spoken_text = "ngắn"
+        segment_by_id["s1"].translated_text = "ngắn"
+        return True
+
+    monkeypatch.setattr(ls, "_adapt_chunk_items", adapt)
+    result = await ls.synthesize_timed_dub(
+        tx, source_media=tmp_path / "source.mp4", target_language="Vietnamese",
+        profile=_profile(dub_rewrite_attempts=2), user_settings=object(),
+        work_dir=tmp_path / "work",
+    )
+    assert seen == [
+        {"measured_duration_ms": 3000, "attempt": 1},
+        {"measured_duration_ms": 3000, "attempt": 2},
+    ]
+    assert result.rewrite_count == 1
+
+
+@pytest.mark.asyncio
 async def test_c7_over_max_after_rewrite_fails_without_retime(monkeypatch, tmp_path):
     tx = LocalizationTranscript(segments=[
         LocalizationSegment(
