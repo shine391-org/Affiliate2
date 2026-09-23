@@ -46,6 +46,17 @@ def test_planner_does_not_merge_long_cues_only_because_gap_is_small():
     assert len(chunks) == 2
 
 
+def test_planner_does_not_orphan_short_cue_after_strong_boundary():
+    cfg = DubbingConfig()
+    plan, chunks = build_plan([
+        _cue(1, 0, 3000, "First long sentence."),
+        _cue(2, 3200, 3500, "ok"),
+    ], cfg)
+    assert len(chunks) == 1
+    assert chunks[0].item_indexes == [0, 1]
+    assert plan[0].chunk_id == plan[1].chunk_id
+
+
 def test_planner_respects_max_chunk_size():
     cfg = DubbingConfig(max_chunk_size=2)
     _, chunks = build_plan([
@@ -96,6 +107,30 @@ def test_borrow_following_silence_never_crosses_next_speech():
     ]
     borrow_following_silence(chunks, max_borrow_ms=400)
     assert chunks[0].end_ms == 900
+
+
+def test_borrow_following_silence_uses_real_trailing_timeline_for_last_chunk():
+    chunks = [
+        type("C", (), {"end_ms": 500, "start_ms": 0})(),
+    ]
+    borrow_following_silence(
+        chunks,
+        max_borrow_ms=400,
+        timeline_end_ms=1000,
+    )
+    assert chunks[0].end_ms == 900
+
+
+def test_borrow_following_silence_does_not_extend_past_timeline_end():
+    chunks = [
+        type("C", (), {"end_ms": 1200, "start_ms": 1000})(),
+    ]
+    borrow_following_silence(
+        chunks,
+        max_borrow_ms=400,
+        timeline_end_ms=1100,
+    )
+    assert chunks[0].end_ms == 1200
 
 
 def test_fit_timeline_is_monotonic_and_uses_measured_chunk_duration():

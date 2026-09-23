@@ -189,11 +189,14 @@ def build_plan(
                 or cue.duration_ms < config.min_cue_duration_ms
             )
         )
-        # Strong sentence boundaries make a long-enough preceding cue a better
-        # chunk boundary, matching VideoLingo's semantic/audio separation goal.
+        # Strong sentence boundaries are useful only when they do not strand
+        # a micro-cue. A very short following cue must remain mergeable with
+        # the previous chunk (same speaker/voice, within the gap tolerance),
+        # otherwise sub-second utterances can become impossible dubbing slots.
         strong_boundary = (
             bool(_STRONG_END.search(prev.text))
             and prev.duration_ms >= config.min_cue_duration_ms
+            and cue.duration_ms >= config.min_cue_duration_ms
         )
         speaker_change = (
             prev.speaker_id is not None
@@ -239,17 +242,28 @@ def borrow_following_silence(
     chunks: list[DubbingChunk],
     *,
     max_borrow_ms: int,
+    timeline_end_ms: int | None = None,
 ) -> list[DubbingChunk]:
-    """Extend a chunk into following silence without crossing the next speech.
+    """Extend chunks into otherwise-unused silence without crossing speech.
 
-    Adapted from SmartSub/VideoLingo gap-tolerance behavior. Speaker boundaries
-    remain hard boundaries; only otherwise-unused silence is borrowed.
+    Intermediate chunks may borrow only up to the next speech start. The last
+    chunk may also borrow real trailing source-media silence when the canonical
+    timeline end is known. Speaker/voice boundaries remain hard boundaries
+    because this function only extends an already-planned chunk.
     """
     if max_borrow_ms < 0:
         raise ValueError("max_borrow_ms must be >= 0")
-    for i, chunk in enumerate(chunks[:-1]):
-        nxt = chunks[i + 1]
-        gap = max(0, nxt.start_ms - chunk.end_ms)
+    if timeline_end_ms is not None and timeline_end_ms < 0:
+        raise ValueError("timeline_end_ms must be >= 0")
+
+    for i, chunk in enumerate(chunks):
+        if i + 1 < len(chunks):
+            boundary = chunks[i + 1].start_ms
+        elif timeline_end_ms is not None:
+            boundary = timeline_end_ms
+        else:
+            continue
+        gap = max(0, boundary - chunk.end_ms)
         chunk.end_ms += min(gap, max_borrow_ms)
     return chunks
 

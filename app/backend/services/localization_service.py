@@ -1087,9 +1087,21 @@ async def synthesize_timed_dub(
                 if override.get("voice_id") is not None else None,
         ))
     plan, chunks = build_plan(cues, config, language=target_language)
+
+    # Probe once up front so the planner can use real trailing source silence
+    # for the final chunk. The same measured duration is reused later when the
+    # complete dub track is composed, avoiding an extra ffprobe subprocess.
+    from backend.services.video_utils import probe_duration
+    source_duration_s = await asyncio.to_thread(probe_duration, source_media, 0.0)
+    source_duration_ms = (
+        round(source_duration_s * 1000)
+        if source_duration_s > 0
+        else None
+    )
     chunks = borrow_following_silence(
         chunks,
         max_borrow_ms=min(profile.dub_gap_tolerance_ms, 1500),
+        timeline_end_ms=source_duration_ms,
     )
     segment_by_id = {seg.id: seg for seg in out.segments}
 
@@ -1396,8 +1408,6 @@ async def synthesize_timed_dub(
         ) else "fit"
         seg.qc_status = "review" if item.speed_factor > config.speed_accept else "pass"
 
-    from backend.services.video_utils import probe_duration
-    source_duration_s = await asyncio.to_thread(probe_duration, source_media, 0.0)
     total_duration_ms = max(
         round(source_duration_s * 1000 * video_slowdown),
         max((seg.target_end_ms or 0) for seg in out.segments),
