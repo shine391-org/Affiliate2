@@ -113,6 +113,7 @@ def evaluate_localization_qc(
     profile: LocalizationProfile,
     video_slowdown: float = 1.0,
     timing_issues: list[dict] | None = None,
+    check_tts_quality: bool = True,
 ) -> QCReport:
     failures: list[dict] = []
     warnings: list[dict] = []
@@ -144,6 +145,13 @@ def evaluate_localization_qc(
             "code": "timing_overflow",
             "count": len(overflow),
             "issues": overflow[:30],
+        })
+
+    if check_tts_quality and (profile.tts_provider or "").strip().lower() == "edge_tts":
+        warnings.append({
+            "code": "preview_tts_provider",
+            "provider": "edge_tts",
+            "message": "Edge TTS is the free preview/fallback tier; human voice-quality approval is required before publish.",
         })
 
     speed_warnings = [

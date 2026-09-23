@@ -125,3 +125,51 @@ def test_qc_requires_review_when_global_video_retime_was_used(monkeypatch, tmp_p
     )
     assert report.status == "NEEDS_REVIEW"
     assert "video_retimed" in {row["code"] for row in report.warnings}
+
+
+
+def test_qc_requires_review_for_edge_full_dub_preview_tier(monkeypatch, tmp_path):
+    source = tmp_path / "s.mp4"
+    final = tmp_path / "f.mp4"
+    source.write_bytes(b"s")
+    final.write_bytes(b"f")
+    monkeypatch.setattr(qc, "probe_media", lambda p: _media(
+        width=1920 if p == source else 1080,
+        height=1080 if p == source else 1920,
+    ))
+    monkeypatch.setattr(qc, "audio_max_volume_db", lambda p: -1.0)
+
+    report = qc.evaluate_localization_qc(
+        source_video=source,
+        final_video=final,
+        transcript=_tx(),
+        profile=LocalizationProfile(
+            id="x", name="X", target_aspect="9:16", tts_provider="edge_tts"
+        ),
+        check_tts_quality=True,
+    )
+    assert report.status == "NEEDS_REVIEW"
+    assert "preview_tts_provider" in {row["code"] for row in report.warnings}
+
+
+def test_captions_only_does_not_warn_about_tts_provider(monkeypatch, tmp_path):
+    source = tmp_path / "s.mp4"
+    final = tmp_path / "f.mp4"
+    source.write_bytes(b"s")
+    final.write_bytes(b"f")
+    monkeypatch.setattr(qc, "probe_media", lambda p: _media(
+        width=1920 if p == source else 1080,
+        height=1080 if p == source else 1920,
+    ))
+    monkeypatch.setattr(qc, "audio_max_volume_db", lambda p: -1.0)
+
+    report = qc.evaluate_localization_qc(
+        source_video=source,
+        final_video=final,
+        transcript=_tx(),
+        profile=LocalizationProfile(
+            id="x", name="X", target_aspect="9:16", tts_provider="edge_tts"
+        ),
+        check_tts_quality=False,
+    )
+    assert "preview_tts_provider" not in {row["code"] for row in report.warnings}

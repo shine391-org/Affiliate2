@@ -1326,6 +1326,7 @@ async def run_tool_translate(
                     profile=profile,
                     video_slowdown=video_slowdown if is_dub else 1.0,
                     timing_issues=timing_issues,
+                    check_tts_quality=is_dub,
                 )
                 qc = qc_report.as_dict()
                 report_path = run.save_json("qc", "report.json", qc)
