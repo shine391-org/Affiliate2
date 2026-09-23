@@ -161,6 +161,8 @@ Behavior:
 - ONE natural-rate TTS request per dubbing chunk
 - real generated duration is authoritative
 - bounded AI rewrite/regeneration for overlong speech
+- AI rewrite is best-effort: local/provider timeout or malformed rewrite records a review warning and continues through measured TTS / atempo / bounded retime instead of killing the whole dubbing stage
+- local OpenAI-compatible endpoints get a longer request timeout than cloud endpoints
 - post-TTS FFmpeg `atempo`
 - fitted time redistributed to constituent display cues
 - monotonic target timeline

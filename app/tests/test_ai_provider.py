@@ -211,3 +211,23 @@ def test_env_compatible_local_can_run_without_api_key():
     assert c.api_key == "local"
     assert c.model == "qwen3:8b"
     assert c.base_url == "http://localhost:11434/v1"
+
+
+
+def test_local_compatible_gets_longer_request_timeout():
+    assert ap._openai_request_timeout_seconds(
+        AIProvider.COMPATIBLE,
+        "http://127.0.0.1:1234/v1",
+    ) == 120.0
+    assert ap._openai_request_timeout_seconds(
+        AIProvider.COMPATIBLE,
+        "http://localhost:11434/v1",
+    ) == 120.0
+    assert ap._openai_request_timeout_seconds(
+        AIProvider.COMPATIBLE,
+        "https://api.example.com/v1",
+    ) == 55.0
+    assert ap._openai_request_timeout_seconds(
+        AIProvider.OPENAI,
+        "https://api.openai.com/v1",
+    ) == 55.0

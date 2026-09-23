@@ -726,6 +726,8 @@ async def _adapt_chunk_items(
     target_language: str,
     target_ms: int,
     profile: LocalizationProfile,
+    issues: list[dict] | None = None,
+    state: dict | None = None,
 ) -> bool:
     items = []
     for idx in chunk.item_indexes:
@@ -754,10 +756,38 @@ ITEMS:
     if profile.translation_instructions:
         prompt += f"\nStyle: {profile.translation_instructions[:1200]}"
 
-    raw = await ai.chat(messages=[{"role": "user", "content": prompt}], max_tokens=1000)
+    try:
+        raw = await ai.chat(
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=1000,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Dubbing rewrite unavailable for chunk %s: %s",
+            chunk.id,
+            exc,
+        )
+        if state is not None:
+            state["unavailable"] = True
+        if issues is not None:
+            issues.append({
+                "chunk_id": chunk.id,
+                "reason": "rewrite_ai_unavailable",
+                "error_type": type(exc).__name__,
+                "message": str(exc)[:300],
+                "segment_ids": [plan[i].segment_id for i in chunk.item_indexes],
+            })
+        return False
+
     try:
         payload = json.loads(_strip_json_fence(raw))
     except Exception:
+        if issues is not None:
+            issues.append({
+                "chunk_id": chunk.id,
+                "reason": "rewrite_invalid_response",
+                "segment_ids": [plan[i].segment_id for i in chunk.item_indexes],
+            })
         return False
     if not isinstance(payload, list) or len(payload) != len(items):
         return False
@@ -936,6 +966,7 @@ async def synthesize_timed_dub(
         # a clearly impossible TTS request.
         estimated = sum(plan[i].estimated_duration_ms for i in chunk.item_indexes)
         attempts = 0
+        rewrite_state: dict = {}
         if (
             estimated > chunk.available_ms * config.speed_max
             and attempts < config.rewrite_max_attempts
@@ -943,9 +974,11 @@ async def synthesize_timed_dub(
             changed = await _adapt_chunk_items(
                 ai, plan=plan, chunk=chunk, segment_by_id=segment_by_id,
                 target_language=target_language, target_ms=chunk.available_ms,
-                profile=profile,
+                profile=profile, issues=issues, state=rewrite_state,
             )
             attempts += 1
+            if rewrite_state.get("unavailable"):
+                attempts = config.rewrite_max_attempts
             if changed:
                 rewrite_count += 1
 
@@ -992,9 +1025,11 @@ async def synthesize_timed_dub(
             changed = await _adapt_chunk_items(
                 ai, plan=plan, chunk=chunk, segment_by_id=segment_by_id,
                 target_language=target_language, target_ms=chunk.available_ms,
-                profile=profile,
+                profile=profile, issues=issues, state=rewrite_state,
             )
             attempts += 1
+            if rewrite_state.get("unavailable"):
+                attempts = config.rewrite_max_attempts
             if not changed:
                 break
             rewrite_count += 1

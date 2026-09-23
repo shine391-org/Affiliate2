@@ -45,6 +45,7 @@ Current implementation:
 - C5 faster-whisper + WhisperX forced alignment + optional diarization: IMPLEMENTED
 - C6R word-aware semantic segmentation + validated contextual translation: IMPLEMENTED
 - C7R speaker-aware smart dubbing, chunk TTS, measured fit, rewrite, silence borrowing, atempo, bounded retiming: IMPLEMENTED
+  - duration rewrite AI is best-effort; provider timeout degrades to measured TTS/timing fallback + QC review instead of aborting dubbing
 - C8R Demucs HQ clean dub + multi-provider HQ TTS + voice cloning reference extraction + one final video encode: IMPLEMENTED
 - C9 durable stage artifacts + version-2 manifest guard + reproducible runtime bindings + resume + rerun-from-stage + batch: IMPLEMENTED
 - C10 automatic QC + exception queue: IMPLEMENTED

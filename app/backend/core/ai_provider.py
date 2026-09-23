@@ -15,6 +15,7 @@ slug like `anthropic/claude-opus-4.7`.
 """
 from enum import Enum
 from typing import AsyncIterator, Optional
+from urllib.parse import urlparse
 import logging
 
 from backend.config import settings
@@ -63,6 +64,15 @@ _OPENROUTER_HEADERS = {
     "HTTP-Referer": "https://github.com/openclaw-easy/ViralMint",
     "X-Title": "ViralMint (OSS)",
 }
+
+
+def _openai_request_timeout_seconds(provider: AIProvider, base_url: str | None) -> float:
+    """Give local compatible models enough time without weakening cloud failure detection."""
+    if provider == AIProvider.COMPATIBLE and base_url:
+        host = (urlparse(base_url).hostname or "").lower()
+        if host in {"localhost", "127.0.0.1", "::1"}:
+            return 120.0
+    return 55.0
 
 
 class AIClient:
@@ -125,7 +135,10 @@ class AIClient:
 
     async def _openai_stream(self, messages, system, max_tokens):
         import openai
-        client_kwargs = {"api_key": self.api_key, "timeout": 55.0}
+        client_kwargs = {
+            "api_key": self.api_key,
+            "timeout": _openai_request_timeout_seconds(self.provider, self.base_url),
+        }
         if self.base_url:
             client_kwargs["base_url"] = self.base_url
         client = openai.AsyncOpenAI(**client_kwargs)

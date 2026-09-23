@@ -682,3 +682,126 @@ def test_dubbing_rewrite_persistence_keeps_translation_text_but_not_target_timin
     assert got.segments[0].target_end_ms is None
     assert got.segments[0].tts_duration_ms is None
     assert got.segments[0].timing_status == "pending"
+
+
+
+@pytest.mark.asyncio
+async def test_c7_ai_rewrite_timeout_degrades_to_tts_instead_of_failing(
+    monkeypatch, tmp_path,
+):
+    tx = LocalizationTranscript(segments=[
+        LocalizationSegment(
+            id="s1",
+            source_text="A source line that is intentionally verbose.",
+            translated_text=(
+                "Đây là một câu tiếng Việt cố ý rất dài để bộ ước lượng "
+                "thử gọi bước rút gọn trước khi tổng hợp giọng nói."
+            ),
+            source_start_ms=0,
+            source_end_ms=500,
+            translation_status="success",
+        )
+    ])
+
+    class SlowAI:
+        calls = 0
+        async def chat(self, *args, **kwargs):
+            self.calls += 1
+            raise TimeoutError("LM Studio rewrite timeout")
+
+    slow = SlowAI()
+    monkeypatch.setattr(ls, "_profile_ai_client", lambda *_: slow)
+    monkeypatch.setattr(ls, "_tts_config", lambda *_: _runtime())
+
+    async def fake_generate(text, *, output_path, **kwargs):
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"raw")
+        # Measured TTS happens to fit, proving rewrite timeout is not fatal.
+        return 450
+
+    def fake_fit(source, destination, speed_factor):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b"fit")
+        return destination
+
+    def fake_compose(chunks, *, total_duration_ms, output_path):
+        output_path.write_bytes(b"wav")
+        return output_path
+
+    monkeypatch.setattr(ls, "_generate_tts_chunk", fake_generate)
+    monkeypatch.setattr(ls, "_fit_chunk_audio_sync", fake_fit)
+    monkeypatch.setattr(ls, "_compose_chunk_track_sync", fake_compose)
+    monkeypatch.setattr(
+        "backend.services.video_utils.probe_duration",
+        lambda *a, **k: 1.0,
+    )
+
+    result = await ls.synthesize_timed_dub(
+        tx,
+        source_media=tmp_path / "source.mp4",
+        target_language="Vietnamese",
+        profile=_profile(
+            dub_rewrite_attempts=2,
+            dub_speed_max=1.30,
+            video_retime_mode="fallback",
+        ),
+        user_settings=object(),
+        work_dir=tmp_path / "work",
+    )
+
+    assert slow.calls == 1
+    assert result.chunk_count == 1
+    assert any(
+        issue["reason"] == "rewrite_ai_unavailable"
+        for issue in result.issues
+    )
+    assert result.transcript.segments[0].target_start_ms is not None
+
+
+@pytest.mark.asyncio
+async def test_adapt_chunk_timeout_is_best_effort_and_records_issue():
+    from backend.services.dubbing_planner import DubbingCue, DubbingConfig, build_plan
+
+    tx = LocalizationTranscript(segments=[
+        LocalizationSegment(
+            id="s1",
+            source_text="source",
+            translated_text="bản dịch",
+            source_start_ms=0,
+            source_end_ms=1000,
+            translation_status="success",
+        )
+    ])
+    plan, chunks = build_plan(
+        [DubbingCue(
+            index=1,
+            segment_id="s1",
+            start_ms=0,
+            end_ms=1000,
+            text="bản dịch",
+        )],
+        DubbingConfig(),
+        language="Vietnamese",
+    )
+
+    class TimeoutAI:
+        async def chat(self, *args, **kwargs):
+            raise TimeoutError("slow local model")
+
+    issues = []
+    state = {}
+    changed = await ls._adapt_chunk_items(
+        TimeoutAI(),
+        plan=plan,
+        chunk=chunks[0],
+        segment_by_id={"s1": tx.segments[0]},
+        target_language="Vietnamese",
+        target_ms=1000,
+        profile=_profile(),
+        issues=issues,
+        state=state,
+    )
+    assert changed is False
+    assert state["unavailable"] is True
+    assert issues[0]["reason"] == "rewrite_ai_unavailable"
+    assert issues[0]["error_type"] == "TimeoutError"

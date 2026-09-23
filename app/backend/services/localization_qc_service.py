@@ -154,6 +154,18 @@ def evaluate_localization_qc(
             "message": "Edge TTS is the free preview/fallback tier; human voice-quality approval is required before publish.",
         })
 
+    rewrite_warnings = [
+        issue for issue in (timing_issues or [])
+        if issue.get("reason") in {"rewrite_ai_unavailable", "rewrite_invalid_response"}
+    ]
+    if rewrite_warnings:
+        warnings.append({
+            "code": "dubbing_rewrite_degraded",
+            "count": len(rewrite_warnings),
+            "issues": rewrite_warnings[:30],
+            "message": "Duration-aware AI rewrite was unavailable/invalid; timing continued with measured TTS and bounded fallback.",
+        })
+
     speed_warnings = [
         issue for issue in (timing_issues or [])
         if issue.get("reason") == "speed_warning"

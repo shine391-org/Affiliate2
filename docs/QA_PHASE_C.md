@@ -158,6 +158,8 @@ Verify real behavior:
 - actual generated duration measured
 - safe following silence borrowing works
 - overlong chunk can rewrite/regenerate
+- force one duration-rewrite AI timeout: dubbing must continue to TTS/timing fallback, record `rewrite_ai_unavailable`, and QC must become at least NEEDS_REVIEW rather than failing the whole stage
+- local LM Studio/Ollama compatible requests may use the longer local timeout; cloud timeout policy remains bounded
 - FFmpeg atempo happens AFTER synthesis
 - quality speed ceiling is enforced
 - unresolved over-max speech never gets silently dropped
