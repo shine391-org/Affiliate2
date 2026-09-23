@@ -45,7 +45,6 @@ def _edge_recommended() -> dict[str, str]:
 
 @pytest.mark.parametrize("page,const", [
     ("pages/tools/Voiceover.jsx", "FALLBACK_EDGE_VOICES"),
-    ("pages/tools/Translate.jsx", "DUB_VOICES"),
 ])
 def test_every_offered_edge_voice_exists_in_the_engine(page, const):
     offered = _voice_ids((FRONTEND / page).read_text(), const)
@@ -58,7 +57,6 @@ def test_every_offered_edge_voice_exists_in_the_engine(page, const):
 
 @pytest.mark.parametrize("page,const", [
     ("pages/tools/Voiceover.jsx", "FALLBACK_EDGE_VOICES"),
-    ("pages/tools/Translate.jsx", "DUB_VOICES"),
 ])
 def test_the_offered_edge_names_match_the_engines_own(page, const):
     """A name that differs makes the voice RENAME ITSELF under the user the
@@ -75,6 +73,18 @@ def test_the_offered_edge_names_match_the_engines_own(page, const):
         assert engine in shown, (
             f'{page}: {vid} is shown as "{shown}" but the engine calls it "{engine}"'
         )
+
+
+def test_translate_uses_profile_or_free_form_voice_override():
+    """Localization must not maintain a second hard-coded provider voice list.
+
+    The selected Localization Profile/provider owns the voice vocabulary, and
+    Expert mode may supply a free-form provider voice ID.
+    """
+    text = (FRONTEND / "pages/tools/Translate.jsx").read_text()
+    assert "DUB_VOICES" not in text
+    assert "Localization profile" in text
+    assert "Voice override (optional)" in text
 
 
 # ── OpenAI TTS ──────────────────────────────────────────────────────────────

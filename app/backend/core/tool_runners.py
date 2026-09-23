@@ -888,6 +888,7 @@ async def run_tool_translate(
     from backend.services.localization_qc_service import evaluate_localization_qc
     from backend.services.localization_service import (
         caption_segments_from_localization,
+        materialize_localization_profile,
         mix_dub_audio,
         prepare_semantic_transcript,
         resolve_localization_profile,
@@ -956,6 +957,12 @@ async def run_tool_translate(
                 })
 
         if run is None:
+            profile = materialize_localization_profile(
+                user_settings,
+                profile,
+                target_language=target_language,
+                for_dub=is_dub,
+            )
             run = LocalizationRun(
                 job_id,
                 source_path=str(original_input),

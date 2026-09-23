@@ -116,6 +116,38 @@ def resolve_localization_profile(user_settings, profile_id: str | None = None) -
     raise ValueError(f"Localization profile not found: {wanted}")
 
 
+def materialize_localization_profile(
+    user_settings,
+    profile: LocalizationProfile,
+    *,
+    target_language: str,
+    for_dub: bool = True,
+) -> LocalizationProfile:
+    """Resolve non-secret runtime bindings once for a reproducible job snapshot.
+
+    Secrets stay in encrypted Settings; provider/model/base URL/voice/region are
+    safe configuration and must not drift silently between resume/rerun calls.
+    """
+    ai = _profile_ai_client(user_settings, profile)
+
+    data = profile.model_dump()
+    data.update({
+        "translation_provider": ai.provider.value,
+        "translation_model": ai.model,
+        "translation_base_url": ai.base_url,
+    })
+    if for_dub:
+        tts = _tts_config(user_settings, profile, target_language)
+        data.update({
+            "tts_provider": getattr(tts.provider, "value", str(tts.provider)),
+            "tts_model": tts.model,
+            "tts_voice": tts.default_voice or None,
+            "tts_base_url": tts.base_url,
+            "tts_region": tts.region,
+        })
+    return LocalizationProfile.model_validate(data)
+
+
 async def transcribe_for_localization(
     media_path: Path | str,
     profile: LocalizationProfile,
@@ -176,6 +208,10 @@ def _profile_ai_client(user_settings, profile: LocalizationProfile):
             )
     if profile.translation_model:
         ai.model = profile.translation_model
+    if profile.translation_base_url:
+        if ai.provider != AIProvider.COMPATIBLE:
+            raise ValueError("translation_base_url is only valid for an OpenAI-compatible AI provider")
+        ai.base_url = profile.translation_base_url.rstrip("/")
     return ai
 
 
@@ -483,8 +519,8 @@ def _tts_config(user_settings, profile: LocalizationProfile, target_language: st
         api_key = api_key or settings.OPENAI_API_KEY
 
     model = profile.tts_model or getattr(user_settings, "tts_model", None)
-    base_url = getattr(user_settings, "tts_base_url", None)
-    region = getattr(user_settings, "tts_region", None)
+    base_url = profile.tts_base_url or getattr(user_settings, "tts_base_url", None)
+    region = profile.tts_region or getattr(user_settings, "tts_region", None)
     return TTSRuntimeConfig(provider, voice or "", api_key, model, base_url, region)
 
 

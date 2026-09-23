@@ -33,6 +33,7 @@ class LocalizationProfile(BaseModel):
     # provider connection data inside every profile.
     translation_provider: str | None = None
     translation_model: str | None = None
+    translation_base_url: str | None = None
     translation_preset: Literal[
         "natural_vietnamese", "affiliate_conversational", "literal", "custom"
     ] = "affiliate_conversational"
@@ -42,6 +43,8 @@ class LocalizationProfile(BaseModel):
     tts_provider: str | None = None
     tts_model: str | None = None
     tts_voice: str | None = None
+    tts_base_url: str | None = None
+    tts_region: str | None = None
     speaker_voices: dict[str, str] = Field(default_factory=dict)
     speaker_reference_audio: dict[str, str] = Field(default_factory=dict)
     tts_reference_audio: str | None = None

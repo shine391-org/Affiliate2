@@ -601,3 +601,56 @@ def test_phase_c_edge_default_voice_follows_target_language():
     )
     runtime = ls._tts_config(settings, _profile(tts_provider=None), "English")
     assert runtime.default_voice == "en-US-AndrewMultilingualNeural"
+
+
+
+def test_materialized_profile_snapshots_non_secret_runtime_bindings(monkeypatch):
+    fake_ai = SimpleNamespace(
+        provider=SimpleNamespace(value="compatible"),
+        model="qwen-local",
+        base_url="http://localhost:1234/v1",
+    )
+    fake_tts = ls.TTSRuntimeConfig(
+        provider=SimpleNamespace(value="edge_tts"),
+        default_voice="vi-VN-HoaiMyNeural",
+        api_key="secret-must-not-be-persisted",
+        model=None,
+        base_url=None,
+        region=None,
+    )
+    monkeypatch.setattr(ls, "_profile_ai_client", lambda *_: fake_ai)
+    monkeypatch.setattr(ls, "_tts_config", lambda *_: fake_tts)
+
+    got = ls.materialize_localization_profile(
+        object(),
+        _profile(),
+        target_language="Vietnamese",
+        for_dub=True,
+    )
+    assert got.translation_provider == "compatible"
+    assert got.translation_model == "qwen-local"
+    assert got.translation_base_url == "http://localhost:1234/v1"
+    assert got.tts_provider == "edge_tts"
+    assert got.tts_voice == "vi-VN-HoaiMyNeural"
+    assert "secret-must-not-be-persisted" not in got.model_dump_json()
+
+
+def test_captions_only_profile_materialization_does_not_require_tts(monkeypatch):
+    fake_ai = SimpleNamespace(
+        provider=SimpleNamespace(value="compatible"),
+        model="qwen-local",
+        base_url="http://localhost:1234/v1",
+    )
+    monkeypatch.setattr(ls, "_profile_ai_client", lambda *_: fake_ai)
+
+    def fail_tts(*args, **kwargs):
+        raise AssertionError("captions-only materialization must not resolve TTS")
+
+    monkeypatch.setattr(ls, "_tts_config", fail_tts)
+    got = ls.materialize_localization_profile(
+        object(),
+        _profile(),
+        target_language="Vietnamese",
+        for_dub=False,
+    )
+    assert got.translation_model == "qwen-local"
