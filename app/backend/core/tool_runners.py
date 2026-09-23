@@ -1131,7 +1131,7 @@ async def run_tool_translate(
         # ── C7 smart dubbing ────────────────────────────────────────────
         current_stage = "dubbing"
         if is_dub:
-            if run.is_complete("dubbing", ("transcript", "dub_track")):
+            if run.is_complete("dubbing", ("transcript", "dub_track", "plan", "chunks")):
                 localized = LocalizationTranscript.model_validate(
                     run.load_json("dubbing", "transcript")
                 )
