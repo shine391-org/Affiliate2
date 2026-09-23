@@ -2,7 +2,7 @@
 
 ## Status
 
-**STARTED — DONOR REALIGNMENT IN PROGRESS**
+**STARTED — DONOR-DERIVED C4R/C6R/C7R/C8R IMPLEMENTED / QA PENDING**
 
 Branch:
 `phase-c-media-ai-hq-localization`
@@ -32,7 +32,7 @@ The happy path must not require manual transcript, translation, timing or FFmpeg
 
 ## Phase map after donor review
 
-### C0R — Donor realignment — IN PROGRESS
+### C0R — Donor realignment — COMPLETE ✅
 
 Policy:
 - reuse/wrap/adapt mature donor behavior;
@@ -84,7 +84,7 @@ Revise profile fields during C4R/C8R to include explicit donor-derived policy su
 - clean_dub vs fast_duck audio mode;
 - ASR/translation/TTS/render/QC choices.
 
-### C4R — Canonical localization representations — REWORK REQUIRED
+### C4R — Canonical localization representations — IMPLEMENTED / QA PENDING
 
 Do not treat one `LocalizationSegment` granularity as every downstream unit.
 
@@ -98,7 +98,7 @@ Required conceptual representations:
 
 These do not require separate databases. They may be job artifacts/data models.
 
-### C5 — ASR convergence — KEEP / RE-VERIFY AFTER C4R
+### C5 — ASR convergence — KEEP / QA RECHECK WITH REWORK
 
 Current fixes remain valuable:
 - requested quality/model reaches actual faster-whisper model;
@@ -107,56 +107,59 @@ Current fixes remain valuable:
 
 Do not add WhisperX automatically. Re-evaluate on semantic segmentation/multi-speaker samples after donor-derived C6/C7 is in place.
 
-### C6R — Semantic segmentation + translation — REPLACE PROTOTYPE
+### C6R — Semantic segmentation + translation — IMPLEMENTED / QA PENDING
 
 Port/adapt VideoLingo + SmartSub behavior.
 
-Required flow:
+Implemented flow:
 
 source words / ASR cues
-→ deterministic baseline cues
-→ optional AI semantic segmentation that may insert boundaries but cannot rewrite source
-→ validate content equivalence
-→ align boundaries back to real word times
-→ contextual translation with terminology/glossary
-→ validate identity/order/content coverage
-→ create display cues
-→ preserve/remerge text for dubbing
+→ deterministic word-time normalization
+→ split overly long source cues from real word timestamps
+→ merge tiny dependent cues
+→ optional AI grouping of stable cue IDs only
+→ validate every cue ID exactly once and in order
+→ fallback to deterministic cues on invalid AI response
+→ contextual translation with glossary/preset/custom instructions
+→ stable-ID translation validation
+→ display cues remain independent from dubbing chunks
 
 Important:
 - raw Whisper segments are not canonical translation/dubbing units;
 - display subtitle granularity may differ from audio dubbing granularity;
 - strict QC forbids silent source-language passthrough.
 
-### C7R — Donor-derived dubbing planner/timing — REPLACE PROTOTYPE
+### C7R — Donor-derived dubbing planner/timing — IMPLEMENTED / QA PENDING
 
 Port/adapt OpenCreator Smart Dubbing as the main skeleton.
 
-Required core data:
+Implemented donor-derived core data:
 - DubbingConfig
+- DubbingCue
 - PlanItem
-- Chunk
-- Report
+- DubbingChunk
+- DubbingReport
 
-Required behavior:
+Implemented behavior:
 - clean spoken text;
 - estimate target speech duration;
 - rewrite overlong text before synthesis when configured;
 - merge short adjacent cues inside gap tolerance;
 - cap chunk size;
-- TTS **one audio file per chunk**, not one file per raw Whisper segment;
-- measure actual audio duration;
-- fit each chunk against available timeline;
-- distribute fitted chunk duration back to constituent plan items;
+- TTS **one natural-rate audio file per chunk**, not one file per raw Whisper segment;
+- measure actual chunk audio duration;
+- bounded structured rewrite/regeneration when required speed exceeds max;
+- fit generated audio AFTER synthesis using FFmpeg atempo rather than trusting provider speed controls;
+- distribute fitted chunk duration back to constituent caption/plan items;
 - validate monotonic target timing;
-- insert explicit silence;
-- emit warnings/review reasons when required speed exceeds policy.
+- compose explicit silence/timeline gaps;
+- emit warnings above acceptable speed and explicit failure above max speed.
 
 Use SmartSub's overlong/review policy rather than blindly applying extreme speed.
 
 The original C7 implementation that produced 15/21 overflows is a failed prototype and is not the canonical timing engine.
 
-### C8R — HQ Clean Dub audio pipeline — REPLACE HQ PROTOTYPE
+### C8R — HQ Clean Dub audio pipeline — IMPLEMENTED / QA PENDING
 
 Two explicit modes:
 
@@ -165,15 +168,16 @@ Two explicit modes:
 - useful for quick output/fallback.
 
 **HQ Clean Dub**
-- separate source vocals/background using a YouDub-style separation stage;
+- Demucs `htdemucs_ft`, using YouDub's chunk/overlap/crossfade/atomic-artifact pattern;
+- ASR runs on the separated vocals stem for full-dub HQ jobs;
 - synthesize/fitted target dub;
-- mix target dub with clean background/music;
-- preserve source non-speech events when appropriate;
-- protect against clipping;
+- mix target dub with clean background/music rather than ducking source speech;
+- global peak protection + final limiter;
+- RF64-compatible long-audio intermediates;
 - stream-copy video during audio-only stages;
 - perform one final visual encode for reframe/captions.
 
-Default `vi-affiliate-hq` profile should target HQ Clean Dub.
+Default `vi-affiliate-hq` profile now targets `hq_clean`. `fast_duck` remains an explicit preview/fallback mode.
 
 ### C9 — Automation + batch — BLOCKED UNTIL C6R–C8R QA PASS
 
@@ -229,16 +233,17 @@ Must inspect:
 - visible render quality;
 - beginning/end truncation.
 
-## Immediate implementation order
+## Immediate gate
 
-1. C0R docs/source map
-2. C4R representations
-3. C6R VideoLingo/SmartSub-derived semantic segmentation + translation
-4. C7R OpenCreator-derived planner/chunk/fit engine
-5. C8R YouDub-derived separation/mix
-6. rerun the exact failing sample
-7. human perceptual QA
-8. only then C9
+C0R/C4R/C6R/C7R/C8R are now implemented.
+
+Next:
+1. sync local branch and install the updated app requirements (Demucs added);
+2. run focused donor-regression suites + frontend build;
+3. rerun the **same 65.7s failing sample**;
+4. capture semantic cue count, dubbing chunk count, rewrite count, max required speed, timing issues, clean-dub artifacts and final ffprobe;
+5. user performs perceptual QA;
+6. only after PASS may C9 start.
 
 ## Definition of done
 

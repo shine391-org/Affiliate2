@@ -53,11 +53,18 @@ Phase C now ports/adapts proven behavior from:
 
 pyVideoTrans (GPL-3.0) remains reference-only unless licensing is explicitly approved.
 
-### Current gate
-C9+ is blocked.
+### Donor-derived rework now implemented
+- C4R representation split: IMPLEMENTED / QA PENDING
+- C5 ASR fixes retained
+- C6R semantic normalization + validated AI grouping + contextual translation: IMPLEMENTED / QA PENDING
+- C7R OpenCreator-derived chunk planner / measured TTS / post-TTS atempo fit: IMPLEMENTED / QA PENDING
+- C8R YouDub-derived Demucs HQ clean-dub path: IMPLEMENTED / QA PENDING
 
-Required sequence:
-C4R → C6R → C7R → C8R → same-sample local QA → human video QA → C9.
+### Current gate
+C9+ remains blocked.
+
+Required next step:
+rerun focused local QA + the same previously failing 65.7s sample, then user perceptual QA.
 
 See:
 - `docs/PHASE_C.md`

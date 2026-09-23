@@ -71,6 +71,7 @@ def _extract_stereo_audio(
         "-vn", "-map", "0:a:0",
         "-ac", "2", "-ar", str(sample_rate),
         "-c:a", "pcm_f32le",
+        "-rf64", "auto",
         str(destination),
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
@@ -130,11 +131,11 @@ def _separate_sync(
             sf.SoundFile(source_wav) as reader,
             sf.SoundFile(
                 vocals_raw, "w", samplerate=sample_rate, channels=2,
-                subtype="FLOAT", format="WAV",
+                subtype="FLOAT", format="RF64",
             ) as vocals_writer,
             sf.SoundFile(
                 bgm_raw, "w", samplerate=sample_rate, channels=2,
-                subtype="FLOAT", format="WAV",
+                subtype="FLOAT", format="RF64",
             ) as bgm_writer,
         ):
             plan = _chunk_plan(
@@ -195,7 +196,7 @@ def _separate_sync(
                 samplerate=sample_rate,
                 channels=2,
                 subtype="PCM_16",
-                format="WAV",
+                format="RF64",
             ) as writer:
                 while True:
                     block = reader.read(1 << 20, dtype="float32", always_2d=True)
