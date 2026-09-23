@@ -327,3 +327,40 @@ async def test_cue_tier_provider_failure_skips_remaining_ai_windows():
         f"Cue {i}." for i in range(6)
     ]
 
+@pytest.mark.asyncio
+async def test_invalid_semantic_response_does_not_trip_provider_breaker():
+    from backend.services.semantic_segmentation import refine_semantic_cues_with_ai
+
+    tx = LocalizationTranscript(
+        text="One. Two. Three. Four.",
+        segments=[
+            LocalizationSegment(
+                id=f"s{i}",
+                source_text=f"Cue {i}.",
+                source_start_ms=i * 1200,
+                source_end_ms=i * 1200 + 1000,
+            )
+            for i in range(4)
+        ],
+    )
+
+    class RecoveringAI:
+        def __init__(self):
+            self.calls = 0
+
+        async def chat(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return '[{"ids":["s1","s0"]}]'
+            return '[{"ids":["s2","s3"]}]'
+
+    ai = RecoveringAI()
+    got = await refine_semantic_cues_with_ai(tx, ai, window_size=2)
+
+    assert ai.calls == 2
+    assert [seg.source_text for seg in got.segments] == [
+        "Cue 0.",
+        "Cue 1.",
+        "Cue 2. Cue 3.",
+    ]
+
