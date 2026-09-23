@@ -2,7 +2,7 @@
 
 ## Status
 
-**C1–C3 QA PASS. C4R–C11 TECHNICAL PASS. C12 IMPLEMENTED / LOCAL QA PENDING. C13 REAL-MEDIA ACCEPTANCE PENDING.**
+**C1–C3 QA PASS. C4R–C12 TECHNICAL PASS. C13 REAL-MEDIA ACCEPTANCE ACTIVE.**
 
 Branch:
 `phase-c-media-ai-hq-localization`
@@ -296,7 +296,7 @@ It supports:
 
 It does not become a CapCut clone.
 
-## C12 — Intelligence Convergence — IMPLEMENTED / LOCAL QA PENDING
+## C12 — Intelligence Convergence — QA PASS
 
 C4–C11 technical parity is proven on a clean real-media job, so the transitional Candidate Intelligence plumbing is now converged without reopening the localization render architecture.
 
@@ -315,6 +315,8 @@ Removed duplicate ownership:
 - its direct httpx OpenAI-compatible AI client/config.
 
 C12 deliberately does not perform DB convergence; that remains Phase G.
+
+Local QA evidence at `8e15807`: focused canonical Candidate Intelligence, legacy Intel, Analyzer, AI-provider, Radar enrichment and Affiliate Radar suites passed; cache reuse, real canonical Whisper with word timestamps, real Gemma 4 E4B via LM Studio, failure isolation and ownership checks also passed.
 
 ## C13 — Final Real-Media Acceptance
 
