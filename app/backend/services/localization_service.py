@@ -13,6 +13,7 @@ treated as immutable TTS units.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import math
@@ -46,6 +47,7 @@ logger = logging.getLogger(__name__)
 
 _TRANSLATION_BATCH_SIZE = 12
 _CONTEXT_CHARS = 10_000
+_DUBBING_SYNTHESIS_RULES_VERSION = 1
 
 _PRESET_INSTRUCTIONS = {
     "natural_vietnamese": (
@@ -717,6 +719,114 @@ async def _generate_tts_chunk(
     raise RuntimeError(f"TTS chunk failed after {attempts} attempts: {last}")
 
 
+
+def _chunk_synthesis_identity(
+    *,
+    text: str,
+    runtime: TTSRuntimeConfig,
+    voice: str,
+    target_language: str,
+    speaker_id: str | None,
+    reference_audio: str | None,
+    reference_text: str | None,
+    reference_language: str | None,
+) -> str:
+    """Fingerprint every input that can change a raw natural-rate TTS chunk.
+
+    This is intentionally separate from timing/fitting inputs: a timing-only
+    edit may safely reuse natural TTS, while any speech/voice/provider change
+    must regenerate it.
+    """
+    provider = getattr(runtime.provider, "value", str(runtime.provider))
+    payload = {
+        "rules": _DUBBING_SYNTHESIS_RULES_VERSION,
+        "provider": provider,
+        "model": runtime.model,
+        "base_url": runtime.base_url,
+        "region": runtime.region,
+        "voice": voice,
+        "language": target_language,
+        "speaker_id": speaker_id,
+        "text": text,
+        "reference_audio": reference_audio,
+        "reference_text": reference_text,
+        "reference_language": reference_language,
+    }
+    raw = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _chunk_identity_path(audio_path: Path) -> Path:
+    return audio_path.with_name(audio_path.name + ".input.json")
+
+
+def _chunk_identity_matches(audio_path: Path, identity: str) -> bool:
+    sidecar = _chunk_identity_path(audio_path)
+    try:
+        payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return False
+    return (
+        isinstance(payload, dict)
+        and payload.get("rules") == _DUBBING_SYNTHESIS_RULES_VERSION
+        and payload.get("identity") == identity
+    )
+
+
+def _write_chunk_identity(audio_path: Path, identity: str) -> None:
+    sidecar = _chunk_identity_path(audio_path)
+    tmp = sidecar.with_name(sidecar.name + ".tmp")
+    tmp.write_text(
+        json.dumps(
+            {
+                "rules": _DUBBING_SYNTHESIS_RULES_VERSION,
+                "identity": identity,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    tmp.replace(sidecar)
+
+
+async def _generate_tts_chunk_atomic(
+    text: str,
+    *,
+    output_path: Path,
+    identity: str,
+    **kwargs,
+) -> int:
+    """Publish a new raw chunk only after TTS and duration probing succeed."""
+    pending = output_path.with_name(output_path.stem + ".pending" + output_path.suffix)
+    pending.unlink(missing_ok=True)
+    try:
+        duration = await _generate_tts_chunk(
+            text,
+            output_path=pending,
+            **kwargs,
+        )
+        pending.replace(output_path)
+        try:
+            _write_chunk_identity(output_path, identity)
+        except Exception as exc:
+            # Missing identity only disables future reuse; it must not invalidate
+            # a TTS artifact that was already generated and measured correctly.
+            logger.warning(
+                "Could not persist synthesis identity for %s: %s",
+                output_path.name,
+                exc,
+            )
+        return duration
+    finally:
+        pending.unlink(missing_ok=True)
+
+
 async def _adapt_chunk_items(
     ai,
     *,
@@ -1019,6 +1129,19 @@ async def synthesize_timed_dub(
 
         ref_key = speaker_id or "__default__"
         ref = auto_references.get(ref_key) or auto_references.get("__default__") or {}
+        speech_text = chunk_text(plan, chunk)
+        synthesis_identity = _chunk_synthesis_identity(
+            text=speech_text,
+            runtime=runtime,
+            voice=voice,
+            target_language=target_language,
+            speaker_id=speaker_id,
+            reference_audio=ref.get("audio"),
+            reference_text=ref.get("text"),
+            reference_language=ref.get("language"),
+        )
+        reuse_raw = reuse_raw and _chunk_identity_matches(path, synthesis_identity)
+
         duration_ms = 0
         if reuse_raw:
             try:
@@ -1034,14 +1157,15 @@ async def synthesize_timed_dub(
                 reuse_raw = False
 
         if not reuse_raw:
-            duration_ms = await _generate_tts_chunk(
-                chunk_text(plan, chunk),
+            duration_ms = await _generate_tts_chunk_atomic(
+                speech_text,
                 runtime=runtime,
                 voice=voice,
                 profile=profile,
                 speaker_id=speaker_id,
                 target_language=target_language,
                 output_path=path,
+                identity=synthesis_identity,
                 reference_audio=ref.get("audio"),
                 reference_text=ref.get("text"),
                 reference_language=ref.get("language"),
@@ -1064,14 +1188,26 @@ async def synthesize_timed_dub(
             if not changed:
                 break
             rewrite_count += 1
-            duration_ms = await _generate_tts_chunk(
-                chunk_text(plan, chunk),
+            speech_text = chunk_text(plan, chunk)
+            synthesis_identity = _chunk_synthesis_identity(
+                text=speech_text,
+                runtime=runtime,
+                voice=voice,
+                target_language=target_language,
+                speaker_id=speaker_id,
+                reference_audio=ref.get("audio"),
+                reference_text=ref.get("text"),
+                reference_language=ref.get("language"),
+            )
+            duration_ms = await _generate_tts_chunk_atomic(
+                speech_text,
                 runtime=runtime,
                 voice=voice,
                 profile=profile,
                 speaker_id=speaker_id,
                 target_language=target_language,
                 output_path=path,
+                identity=synthesis_identity,
                 reference_audio=ref.get("audio"),
                 reference_text=ref.get("text"),
                 reference_language=ref.get("language"),
