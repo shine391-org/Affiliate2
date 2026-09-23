@@ -1,308 +1,214 @@
-# Phase C0 — Donor / Source Audit and Decision Matrix
+# Phase C0 — Donor-First Source Audit and Implementation Policy
 
 Date: 2026-09-23
 
-Status: **COMPLETE**
+Status: **REALIGNED AFTER C5–C8 REAL-MEDIA QA**
 
-This audit decides what Affiliate2 should keep, adapt, reimplement or reject before Phase-C runtime changes begin.
+## Why this document changed
 
-The objective is not to assemble multiple OSS applications. The objective is to keep one Affiliate2 application and reuse only proven ideas/contracts where they reduce risk or improve output quality.
+Phase C originally researched mature open-source localization projects so Affiliate2 would not reinvent video localization. During C6–C8 implementation that rule drifted into "reimplement the minimum behavior locally". Real-media QA then exposed a systematic dubbing failure: 15 of 21 translated segments overflowed because raw ASR segments were treated as one-to-one TTS units.
 
-## Ponytail decision
+That failure is now treated as evidence that the implementation policy was wrong, not merely that one threshold needs tuning.
 
-Do **not** download/vendor the donor repositories into Affiliate2.
+The Phase-C policy is therefore:
 
-Current decision:
+> **Reuse first. Wrap second. Adapt third. Build only what donors do not already solve or what is Affiliate2-specific.**
 
-- keep one application, one job system and one media/localization pipeline
-- reuse existing installed/runtime dependencies before adding new ones
-- port small patterns/contracts, not donor application architecture
-- add a dependency only when a Phase-C benchmark proves the existing stack cannot meet the acceptance gate
-- do not create provider factories/abstractions beyond the canonical interfaces that already exist
+Do not optimize for minimum code or minimum dependency count at the expense of a behavior that a mature donor already implements and tests.
 
-## Ponytail quality guardrail
+## Evidence standard
 
-Ponytail optimizes for the **least architecture that passes the Phase-C quality gate**, not the fewest features at any cost.
+A donor is considered stronger when it has several of:
 
-The following complexity is protected when evidence shows it is required for output quality or reliable automation:
+1. concrete source implementation, not README-only claims;
+2. regression/integration tests for the behavior;
+3. active development and releases;
+4. meaningful adoption/community usage;
+5. credible real workflow evidence.
 
-- preserving the best eligible source instead of silently degrading media
-- word/timing precision needed for dubbing and captions
-- measuring real TTS duration per block
-- bounded speech/timeline fitting
-- source/background separation when speech bleed makes the dub unacceptable
-- minimum-loss render/composition, including lossless or stream-copy intermediates when a true one-pass graph is impractical
-- persisted stage artifacts/config snapshots needed for safe resume and targeted rerun
-- cloud/local provider controls required to choose an actually suitable model
-- QC evidence and actionable exceptions
+Stars are a popularity signal only, not proof of quality.
 
-Escalation rule for every quality-sensitive capability:
+## Donor snapshot
 
-1. reuse the simplest existing implementation that could plausibly pass;
-2. benchmark it on representative real media;
-3. if it fails a defined quality criterion, add the smallest proven next capability;
-4. benchmark again.
+| Project | Current signal | License | Strongest Phase-C role |
+|---|---:|---|---|
+| VideoLingo | ~18.5k stars, active, one-click translation/dubbing | Apache-2.0 | semantic segmentation, terminology/context translation, display-vs-audio units |
+| SmartSub | ~5.3k stars, active desktop releases, full ASR→translate→dub workflow | MIT | word-aware subtitle refinement, provider breadth, measured alignment, review exceptions |
+| YouDub-webui | active end-to-end localization app; author states a 1M+ follower / 20k+ video Bilibili creator workflow uses it | Apache-2.0 | production-style stages, Demucs separation, background preservation, resume/cache |
+| OpenCreator | ~12.2k stars, active; Smart Dubbing + video translation available | Apache-2.0 | dubbing planner/chunks, actual-duration fitting, task/workspace state |
+| pyVideoTrans | ~19.1k stars, mature dedicated translator/dubber | GPL-3.0 | algorithm/reference for timing, diarization, audio/video sync, provider breadth |
 
-A `DEFER`, `BENCHMARK-GATED` or Ponytail/YAGNI decision may **never** be used to waive a Phase-C acceptance criterion. Simplicity chooses *how* to meet the bar; it does not lower the bar.
+YouDub production-scale figures are the author's repository claim and should be treated as such, not as independently audited analytics.
 
-## Audited source snapshots
+## License policy
 
-| Project | Head audited | License | Role in Phase C |
-|---|---|---|---|
-| YouDub-webui | `0f6c75935e7a208c4b8ea56140e31c5316953fec` | Apache-2.0 | production-oriented stage/cache/resume, OpenAI-compatible settings, Demucs/background-mix reference |
-| SmartSub | `156d6a85e7c12a63b551efb7c03a004e1d661266` | MIT | translation validation, provider UX, timed per-line dubbing, exception workflow |
-| VideoLingo | `11048cc4a78e2a36e657224566305ff7bb1a1ad9` | Apache-2.0 | semantic segmentation, terminology/context translation, duration-aware dubbing reference |
-| pyVideoTrans | `16a5a047bf1bef9c68133ab500d76c11709617e8` | GPL-3.0 | synchronization/timing algorithm reference |
-| OpenCreator | `a153ac073e6d03b55a142266aadce3d82109b37f` | Apache-2.0 | shared automation/expert workspace state and targeted stage rerun reference |
-| faster-whisper | `ed9a06cd89a93e47838f564998a6c09b655d7f43` | MIT | canonical ASR implementation already installed by Affiliate2 |
-| WhisperX | `2cfd7b7c5c7bba144954364db747319b50e8232b` | BSD-2-Clause | optional word alignment / diarization reference only until benchmark requires it |
-| MoneyPrinterTurbo | `3d5f4e421927d61f3eac729cf4b711ac0b69d688` | MIT | future Phase-E composition/render reference; not Phase-C localization runtime |
+- **Apache-2.0 / MIT donors:** port/adapt behavior and tests directly where appropriate; preserve required notices/attribution.
+- **GPL-3.0 donor (pyVideoTrans):** algorithm/reference by default. Do not copy implementation into Affiliate2 without an explicit licensing decision.
 
-License note:
+## Correct donor mapping
 
-Affiliate2's current `app/pyproject.toml` declares AGPL-3.0-only. This audit still avoids casual source copying. Any copied donor code must receive an explicit license/attribution review; reference-only algorithm study remains the default for pyVideoTrans.
+### Media / ingest / render
+Primary: Affiliate2 existing path.
+Reference: YouDub / SmartSub for robust task artifacts and media handling.
 
-## Current Affiliate2 findings
+### ASR / word timing
+Primary: current faster-whisper adapter.
+Upgrade/reference: VideoLingo WhisperX and SmartSub multi-engine ASR when word alignment or diarization quality requires it.
 
-### Media
+### Semantic subtitle formation
+Primary donors:
+- SmartSub AI segmentation: LLM inserts boundaries while content is validated against source text and real word times.
+- VideoLingo NLP/meaning splitting: semantic sentence formation before translation.
 
-Current `app/backend/services/ytdlp_service.py` prefers:
+Affiliate2 must not equate raw Whisper segments with final subtitle or dubbing units.
 
-```
-bestvideo[height<=720]+bestaudio/best[height<=720]/best
-```
+### Translation
+Primary donors:
+- VideoLingo: context, terminology, semantic units, translation alignment, display split + remerged audio text.
+- SmartSub: structured provider handling, validation, fallback/retry, local/cloud provider breadth.
 
-before unrestricted best quality.
+Affiliate2-specific additions:
+- affiliate/conversational preset;
+- custom instructions;
+- saved glossary;
+- profile/model selection.
 
-Decision: this is a quality bug/default for the Phase-C goal, not a behavior to preserve.
+### Dubbing planner / timing
+Primary donor skeleton: **OpenCreator Smart Dubbing**.
 
-### AI provider
+Behaviors to port/adapt:
+- PlanItem / Chunk / Report model;
+- merge short adjacent cues within gap tolerance;
+- max chunk size;
+- estimate duration before synthesis;
+- bounded text rewrite;
+- TTS at **chunk** granularity;
+- measure actual chunk audio;
+- fit actual duration into chunk window;
+- redistribute fitted chunk timing to constituent cue items;
+- monotonic timeline validation;
+- insert silence explicitly;
+- stream-copy video at audio mux.
 
-Current `app/backend/core/ai_provider.py` already contains:
+SmartSub contributes:
+- slot/gap accounting;
+- provider speed capability;
+- overlong/review policy.
 
-- `AIProvider.COMPATIBLE`
-- `base_url`
-- OpenAI-compatible client creation
-- user-setting resolution for `ai_base_url`
+pyVideoTrans remains a timing/reference source for harder cases.
 
-Current database model already contains `ai_base_url`.
+### Audio separation / mix
+Primary donor: **YouDub**.
 
-But the Settings API/UI does not expose the complete compatible/local-provider path, and the frontend provider dropdown only exposes Anthropic, OpenAI and OpenRouter.
+HQ clean-dub path:
+- separate vocals/background;
+- dub against clean background/music;
+- mix final target speech with background;
+- persist stage artifacts and safely resume.
 
-Decision: keep the backend provider abstraction; wire the missing settings/model-discovery UX instead of adding another AI framework.
-
-### ASR
-
-Current requirements already include `faster-whisper`.
-
-Current Whisper service already maps:
-
-- fast
-- balanced
-- accurate
-- best
-
-to different model sizes.
-
-faster-whisper itself already supports `word_timestamps=True`.
-
-Decision: use the installed stack first. Do not add WhisperX until real dubbing samples show that faster-whisper timestamps are insufficient.
-
-### Translation / dubbing
-
-Current Translate runner:
-
-- uses a hard-coded translation prompt
-- translates timed segments
-- joins all translated text into one `full_text`
-- calls Edge TTS directly for the complete text
-- later burns captions separately
-
-This bypasses the canonical TTS abstraction and discards per-segment speech timing for dubbing.
-
-Decision: replace this path; do not preserve it for compatibility.
-
-### Render quality
-
-Current media services use several independent H.264 encode paths (commonly CRF 20), while caption burn uses another encode at CRF 23.
-
-Decision: adapt existing FFmpeg utilities toward a minimum-loss/final-compose path instead of introducing another renderer.
-
-## Capability decision matrix
-
-| Capability | Current Affiliate2 | Reference evidence | Decision | Phase-C implementation consequence |
-|---|---|---|---|---|
-| URL/media download | Existing yt-dlp service + provider fallbacks | YouDub/VideoLingo also center yt-dlp rather than a second crawler | **ADAPT** | Fix quality selection in `ytdlp_service.py`; retain one downloader; keep platform resolver as fallback |
-| Source media metadata | Partial/probe utilities, not a canonical quality record | YouDub persists stage artifacts; Phase-C needs source-vs-final QA | **REIMPLEMENT MINIMAL** | Add only the metadata fields required by QA/profile decisions; reuse existing probe utilities |
-| Render/composition | Existing FFmpeg services/caption service | MoneyPrinterTurbo demonstrates useful FFmpeg composition ideas but is a different product | **ADAPT** | Keep FFmpeg service; reduce avoidable lossy encodes. Allow stream-copy/lossless intermediates when needed for correctness/quality; no MPT runtime dependency |
-| Cloud AI provider | Existing `AIClient` supports Anthropic/OpenAI/OpenRouter/compatible | YouDub and SmartSub expose base URL/model directly | **KEEP + ADAPT UI/API** | Complete Settings/API/UI; do not introduce LiteLLM or another provider framework |
-| Local AI | Compatible backend exists but UI/settings path is incomplete | YouDub model discovery; SmartSub/Ollama-compatible patterns | **ADAPT** | Ollama/LM Studio/vLLM are presets over OpenAI-compatible transport where possible, not separate engines |
-| Model registry | Static frontend choices | Donors allow explicit model IDs and/or model discovery | **REJECT AS ALLOWLIST** | Registry becomes suggestions; manual model ID remains valid |
-| Localization Profile | No canonical reusable Phase-C profile | OpenCreator shared state + SmartSub config snapshots | **REIMPLEMENT MINIMAL** | Start with one persisted profile payload plus an immutable effective-config snapshot per job; normalize into more tables only if a real query/edit need appears |
-| ASR engine | faster-whisper already installed; service already emits word timestamps and accepts explicit quality | faster-whisper supports word timestamps | **KEEP + FIX CALL-SITE ROUTING** | Propagate profile/user quality into every localization call site; retain word timestamps. Evaluate device/compute selection for batch throughput without changing transcript semantics |
-| WhisperX | Not installed | Better forced alignment/diarization, but additional dependency/model complexity | **BENCHMARK-GATED** | Do not install initially. Add forced alignment and/or diarization if representative timing or multi-speaker samples fail with faster-whisper word timestamps |
-| Transcript/timeline contract | Existing features use incompatible segment shapes | SmartSub explicitly separates original slots/final timing; OpenCreator persists artifact/version state | **REIMPLEMENT MINIMAL** | Canonical source and target time fields; enough state for targeted rerun, no generic workflow framework |
-| Translation quality | Hard-coded single prompt path | VideoLingo context/terminology/duration-aware translation; SmartSub structured batch validation/glossary | **REIMPLEMENT ON EXISTING AI CLIENT** | Context + small preset set + custom instructions + glossary + structured segment identity/validation |
-| Translation refinement pass | Not present | VideoLingo has richer multi-step translation/refinement | **BENCHMARK-GATED** | Start with one contextual structured pass. Add a bounded second refinement/adaptation pass only if semantic/naturalness/timing-fit QA repeatedly fails; do not build a generic multi-agent framework |
-| Canonical TTS service | Existing Edge/OpenAI abstraction | SmartSub has broader provider catalog | **KEEP + EXTEND WHEN QUALITY REQUIRES** | First make Translate use the existing abstraction. Edge TTS is a baseline/fallback, not the quality target; add the smallest compatible/local or cloud provider path if voice QA cannot pass |
-| Whole-video TTS | Current Translate joins all translated segments | All serious localization donors operate on timed chunks/lines | **REJECT** | TTS per semantic/timed block |
-| Dubbing timing | No real per-block fit engine | SmartSub measures synthesized duration and creates alignment plans; pyVideoTrans contains mature speed/video timing logic | **REIMPLEMENT FIT-FOR-QUALITY** | Implement the smallest engine that still measures real duration, preserves source/output coordinates, applies bounded fitting and produces explicit exceptions; escalate from simple rate fitting when real-media QA requires it |
-| Video slowdown to solve speech overflow | Not canonical | pyVideoTrans can split the burden between speech speed and video PTS | **BENCHMARK-GATED** | Start with translation adaptation + bounded audio speed + silence borrowing. If representative samples still show systematic overflow or unnatural speech, bounded video retiming becomes required rather than permanently deferred |
-| Background/source separation | Current Translate can replace/mux audio but has no canonical vocal/background separation | YouDub/VideoLingo use Demucs | **BENCHMARK-GATED** | Keep the mix contract independent of a separator. Benchmark speech+music/ambient samples early in C8; if source-speech bleed or background damage fails perceptual QA, add Demucs (or the smallest proven separator) in Phase C |
-| Batch jobs | Existing app job/progress infrastructure | YouDub persists stage progress and resumes cached stages | **KEEP + ADAPT** | Extend existing job states/stage artifacts; no Celery/Redis/second worker system |
-| Stage resume / targeted rerun | Existing jobs exist, but localization-specific invalidation is incomplete | YouDub caches completed stages; OpenCreator tracks versions/stale artifacts | **ADAPT** | Keep a fixed ordered stage list and `rerun_from(stage)` semantics with config/artifact snapshots. Do not build a generic dependency graph/DAG engine |
-| Exception review | Existing app review surfaces, no localization exception model | SmartSub filters failed/overlong lines and permits per-line regeneration | **ADAPT** | Reuse job/status storage with READY / NEEDS_REVIEW / FAILED and actionable per-block reasons; do not create a second queue/table unless the existing job model cannot represent it |
-| Expert workspace | Existing UI has tool/settings surfaces | OpenCreator shares current task state between automation and workspace | **ADAPT PATTERN** | Expert UI is a view/editor over the same job/profile/segments, not a second pipeline |
-| Creative short assembly | Not Phase C | MoneyPrinterTurbo has broad short-video assembly/render workflows | **REJECT FOR PHASE C** | Revisit in Phase E only |
-
-## Donor-specific conclusions
-
-### YouDub — ADAPT patterns, do not embed app
-
-Useful:
-
-- explicit serial stages and artifact cache
-- resume after failed stage
-- OpenAI-compatible Base URL/model settings
-- Demucs → vocals/background → ASR → translate → TTS → mix → FFmpeg flow
-
-Do not take:
-
-- its complete task/database/web application
-- its exact provider set
-- its Bilibili/YouTube-only product assumptions
-
-### SmartSub — strongest direct reference for exception-driven dubbing
-
-Useful:
-
-- original subtitle window remains distinct from resolved target timing
-- measured TTS duration, not text-length assumption, drives final decision
-- overlong items remain explicit and reviewable
-- per-line synthesis/regeneration
-- glossary and structured translation validation
-- provider settings are user-configurable rather than hard-coded
-
-Do not take:
-
-- Electron-specific architecture
-- its large provider catalog wholesale
-- every alignment option before real Affiliate2 samples require them
-
-### VideoLingo — strongest translation/subtitle reference
-
-Useful:
-
-- semantic sentence splitting
-- context/terminology extraction
-- translation quality checks
-- spoken-duration awareness before dubbing
-- block-based TTS and silence-aware audio merge
-
-Do not take initially:
-
-- the complete multi-step prompt graph
-- Streamlit/config architecture
-- its complete TTS backend catalog
-
-### pyVideoTrans — algorithm reference only
-
-Useful:
-
-- clear source vs target duration accounting
-- measured dub duration
-- audio time-stretch
-- optional video PTS adjustment
-- aligned final audio composition
-
-Do not port its `SpeedRate` class wholesale. It is large and coupled to pyVideoTrans internals. Reimplement only the behaviors required by Affiliate2's real-media gate; if bounded audio fitting is insufficient, the necessary video-retiming behavior is still in scope.
-
-### OpenCreator — state/UX reference only
-
-Useful:
-
-- automation and workspace share current task state
-- persisted result versions/artifact state
-- stage-level rerun semantics
-
-Do not introduce a generic skill/agent/workflow framework into Affiliate2.
-
-### faster-whisper — KEEP
-
-It is already installed and supports word timestamps. This is the first timing source to benchmark.
-
-### WhisperX — benchmark-gated
-
-Potential value:
-
-- forced word alignment
-- diarization
-
-Cost:
-
-- additional dependency/model/runtime complexity
-
-The existing Whisper service already requests faster-whisper word timestamps, so Phase C first fixes quality propagation at call sites and benchmarks those timestamps.
-
-If representative timing or multi-speaker samples still fail, WhisperX/alignment is promoted into Phase C. The dependency is deferred, not the quality requirement.
-
-### MoneyPrinterTurbo — Phase E only
-
-Useful later:
-
-- automated short-video composition
-- FFmpeg-oriented concat/render improvements
-- source-fit/aspect/clip composition patterns
-
-It does not solve Phase-C localization and must not become another media runtime.
-
-## Canonical Phase-C contracts after C0
-
-The implementation should converge on only these product-level concepts.
-
-These are **data/behavior contracts, not mandatory classes, services or database tables**. Prefer existing job metadata, JSON payloads and service boundaries until a second concrete use case requires another abstraction:
-
-1. **Download quality policy**
-2. **Canonical media metadata**
-3. **Canonical AI provider settings**
-4. **Localization Profile**
-5. **Localization Segment with distinct source/target time**
-6. **Canonical ASR result**
-7. **Canonical TTS block result**
-8. **Timing/QC result**
-9. **Existing job + stage artifacts**
-
-Do not add generic plugin systems, workflow engines, DAG frameworks, provider registries or media applications beyond these needs.
-
-## Implementation order unlocked by C0
-
-The lowest-rework order is:
-
-1. **C1 media quality** — remove 720p-first default and establish source/final evidence
-2. **C2 AI/local provider wiring** — expose the compatible backend already present
-3. **C4 transcript/timeline contract** — define source vs target timing before Translate/TTS work
-4. **C3 Localization Profiles** — snapshot settings against the contracts above
-5. **C5 ASR routing/timestamps** — reuse faster-whisper first
-6. **C6/C7 translation + timed dubbing**
-7. **C8 mix**
-8. **C9/C10/C11 automation, QC and expert override**
-9. **C12 intelligence convergence**
-10. **C13 real-media gate**
-
-C1, C2 and the data-contract portion of C4 may be implemented independently, but they must converge before C6/C7.
-
-## C0 exit criteria
-
-- [x] Current Affiliate2 media/AI/ASR/Translate/TTS/render paths inspected
-- [x] Required donor/reference repositories inspected at pinned snapshots
-- [x] License identified for each required donor
-- [x] KEEP / ADAPT / REIMPLEMENT / REJECT decisions recorded
-- [x] No donor repo vendored into Affiliate2
-- [x] No new dependency added
-- [x] Initial WhisperX decision made: benchmark-gated, not installed
-- [x] Initial separation/video-retiming decisions made: benchmark-gated, promoted when quality requires
-- [x] Ponytail guardrail established: architecture may shrink, quality acceptance may not
-- [x] Initial MoneyPrinterTurbo decision made: Phase-E reference only
-- [x] Phase-C implementation order fixed
-
-Next implementation gate: **C1 Media Quality Foundation**.
+Fast/fallback path may use source ducking, but **HQ profile must not define ducking-only as the intended final-quality path**.
+
+### Stage persistence / resume / batch
+Primary donors:
+- YouDub stage runner/cache/artifact recovery;
+- OpenCreator task/stage state and shared workspace state.
+
+Affiliate2 keeps its existing Job system and ports the proven stage/artifact semantics into it. Do not import a second application/job system.
+
+### Expert review
+Primary donors:
+- SmartSub line-level regenerate/review;
+- OpenCreator shared automation/workspace state.
+
+Auto, batch and expert remain one pipeline.
+
+## What C1–C3 actually contribute to video quality
+
+### C1 — Media quality foundation
+**Direct quality impact.**
+
+It determines the pixels and codecs entering the entire pipeline and the quality of the final encode.
+
+Keep:
+- source-best-first download;
+- hard quality ceilings;
+- actual ffprobe evidence;
+- HQ render profile;
+- minimum-loss render path.
+
+### C2 — AI/local provider controls
+**Indirect but necessary quality impact.**
+
+It does not improve pixels by itself. It allows the localization engine to choose a model that is actually good enough for:
+- semantic segmentation;
+- terminology/context translation;
+- duration-aware rewrite;
+- later intelligence/remake tasks.
+
+Keep:
+- provider/base URL/model selection;
+- model discovery;
+- test connection;
+- local OpenAI-compatible support;
+- credential safety.
+
+### C3 — Localization Profiles
+**Indirect but necessary quality/reproducibility impact.**
+
+A profile does not make a video better by itself. It makes the chosen quality policy reproducible across one video, batches and reruns.
+
+Keep:
+- source quality;
+- ASR engine/model;
+- translation model/prompt/glossary;
+- TTS provider/voice;
+- segmentation/dubbing policy;
+- audio mode (fast duck / HQ clean dub);
+- render/QC policy.
+
+Profiles should store policy, not replace the donor-derived engines.
+
+## Revised Phase-C implementation policy
+
+For each capability:
+
+1. inspect Affiliate2 existing behavior;
+2. inspect donor source + tests;
+3. if donor behavior is stronger and license-compatible, port/adapt it;
+4. preserve donor regression behavior in Affiliate2 tests;
+5. change only for Affiliate2-specific requirements or measured quality evidence;
+6. real-media QA before building automation on top.
+
+No Ponytail/YAGNI gate is used in Phase C.
+
+## Current rework decision
+
+- C1–C3: **KEEP**
+- C4: **EXTEND** to distinguish source words / semantic cues / display cues / dubbing chunks
+- C5: **KEEP + later alignment upgrade if real evidence requires**
+- C6 prototype: **SUPERSEDED; replace with VideoLingo/SmartSub-derived segmentation + translation**
+- C7 prototype: **SUPERSEDED; replace with OpenCreator-derived planner/chunk/fit engine**
+- C8 prototype: **SUPERSEDED as HQ path; retain ducking only as fast/fallback, add YouDub-style clean-dub separation**
+- C9–C11: **DO NOT IMPLEMENT until reworked C6–C8 passes real-media QA**
+- C12–C13: unchanged conceptually
+
+## Required rework checkpoint
+
+Use the same failing real sample first.
+
+Before:
+- 21 usable translated source segments
+- 15 timing overflows
+- only a small fraction of the timeline received target-language dub
+
+After donor-derived rework, record:
+- semantic/display cue count;
+- dubbing chunk count;
+- actual chunk durations;
+- required speed factors;
+- over-max chunk count;
+- target speech coverage;
+- source vocal bleed;
+- final media evidence.
+
+Only then ask for additional real Douyin/Bilibili samples.

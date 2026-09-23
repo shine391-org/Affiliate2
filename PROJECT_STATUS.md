@@ -1,137 +1,65 @@
 # PROJECT_STATUS.md
 
-## Overall status: PHASE C STARTED
+## Overall status: PHASE C STARTED — DONOR REALIGNMENT
 
 Phase A and Phase B are complete and merged to `master`.
 
 ### Phase A — COMPLETE ✅
+Merge commit: `fbd1a6fec8949bf72098261c57d731a3c484c868`
 
-Merge commit:
-`fbd1a6fec8949bf72098261c57d731a3c484c868`
+### Phase B — COMPLETE ✅
+Squash commit: `d20ac9db86acc3dc83f2d7236610ec9cb1291485`
+Closeout: `ae30ebca156a0a286f920445e69adbddd8d6a018`
 
-Validated:
-
-- canonical application source established under `app/`
-- source parity repaired
-- frontend build PASS
-- focused backend/API regression 60/60 PASS
-- dev mode PASS
-- hot reload PASS
-- stable local mode PASS
-- stop-script process safety PASS
-
----
-
-## Phase B — Sources + Radar Integration — COMPLETE ✅
-
-Merged via PR #6.
-
-Squash commit:
-`d20ac9db86acc3dc83f2d7236610ec9cb1291485`
-
-Phase-B closeout/docs commit:
-`ae30ebca156a0a286f920445e69adbddd8d6a018`
-
-Validated:
-
-- app-native provider contract
-- real Bilibili keyword search + creator history
-- real Douyin discovery through Edge CDP
-- Radar repeated observations and velocity
-- creator-relative outlier semantics
-- Scout Radar API/UI integration
-- focused Phase-B suite: 162 passed / 0 failed
-- frontend production build PASS
-- real-provider/runtime smoke PASS
-
-Phase B is closed. It must not be reopened unless a regression is discovered.
-
-See:
-`docs/PHASE_B.md`
-`docs/QA_PHASE_B.md`
+Validated Phase B:
+- canonical application source
+- Bilibili + Douyin provider paths
+- Radar observations/velocity
+- Scout integration
+- 162 focused tests
+- frontend build
+- real-provider/runtime smoke
 
 ---
 
-## Phase C — Media, AI & Automated HQ Localization — STARTED 🚧
+## Phase C — Media, AI & Automated HQ Localization — REALIGNMENT 🚧
 
-Implementation branch:
+Branch:
 `phase-c-media-ai-hq-localization`
 
-Goal:
-
-Build one canonical media/AI/localization path that can take a Radar candidate to a review-ready Vietnamese video automatically, while retaining expert controls as optional overrides on the same pipeline.
-
-Phase C absorbs the previous "Media + Intelligence" work and the Translate/Dub HQ foundation because those concerns share the same downloader, ASR, AI-provider, transcript, timeline, TTS and render contracts.
-
-Current implementation state:
-
-- C0 donor/source audit: COMPLETE
-- C1 media quality foundation: QA PASS
-- C2 AI + local/OpenAI-compatible provider controls: QA PASS
+### Stable/kept foundation
+- C1 media quality: QA PASS
+- C2 AI/local provider controls: QA PASS
 - C3 Localization Profiles: QA PASS
-- C4 canonical transcript/timeline contract: QA PASS
-- C5 ASR convergence: IMPLEMENTED / QA PENDING
-- C6 contextual translation: IMPLEMENTED / QA PENDING
-- C7 timed dubbing: IMPLEMENTED / QA PENDING
-- C8 audio mix + minimum-loss final render: IMPLEMENTED / QA PENDING
-- next gate: independent local C5–C8 quality checkpoint before C9
+- C4 source/target coordinate separation: useful foundation, now being extended
 
-C1–C4 local QA passed on the Windows runtime (107 focused + 16 root-intelligence tests, frontend build, LM Studio provider/runtime smoke). C5–C8 now form the first end-to-end HQ localization core and require real-media perceptual QA before automation is built on top.
+### Real-media finding that triggered rework
+At C5–C8 checkpoint on a 65.7s real sample:
+- C5 ASR: PASS
+- C6 translation: PASS
+- C7 timed dubbing: FAIL
+- 15/21 timed speech units overflowed
+- most target-language dub was absent
 
-Legacy Radar intelligence media/AI paths remain transitional until C12 parity; they are not new Phase-C runtime architecture.
+Root architectural problem:
+raw ASR segments were treated too directly as TTS units. Mature donors already separate semantic/display units from dubbing chunks.
 
-Primary outcomes:
+### Donor-first correction
+Phase C now ports/adapts proven behavior from:
+- VideoLingo (Apache-2.0)
+- SmartSub (MIT)
+- OpenCreator (Apache-2.0)
+- YouDub-webui (Apache-2.0)
 
-1. source-quality-aware canonical media ingestion
-2. one canonical AI/provider abstraction with cloud + local OpenAI-compatible support
-3. reusable Localization Profiles for automation
-4. one canonical transcript/timeline model with source/output coordinate separation
-5. configurable ASR quality with no hidden downgrade
-6. contextual Vietnamese translation with prompt/preset/glossary controls
-7. timing-aware block TTS rather than one whole-video TTS blob
-8. background/audio preservation and controlled mixing
-9. one-pass or minimum-loss final render path
-10. batch automation, QC and exception queue
-11. expert override/retry on the same job state
-12. one transcript/intelligence path reused by later Smart Cut and Creative Remake
+pyVideoTrans (GPL-3.0) remains reference-only unless licensing is explicitly approved.
 
-Phase-C acceptance requires real Douyin/Bilibili media, perceptual QA and measurable media/timing evidence. A valid MP4 alone is not a product-quality PASS.
+### Current gate
+C9+ is blocked.
+
+Required sequence:
+C4R → C6R → C7R → C8R → same-sample local QA → human video QA → C9.
 
 See:
-`docs/PHASE_C.md`
-`docs/QA_PHASE_C.md`
-
----
-
-## Later phases
-
-### Phase D — Smart Cut
-
-- shorten/repackage source material
-- source-range proposal/editing
-- retime/reorder approved ranges
-- reuse canonical media, transcript and timeline from Phase C
-- keep Smart Cut distinct from Creative Remake
-
-### Phase E — Creative Remake HQ
-
-- full transcript + visual shot map
-- VN creative beats
-- explicit source-shot/material mapping
-- storyboard human approval
-- automated creative assembly/render
-- source/output timeline separation
-- evaluate MoneyPrinterTurbo-style composition patterns without importing a second application
-
-### Phase F — Review / Publish / Performance native migration
-
-- remove overlay copy/sync architecture after parity
-- reuse app upload/metrics plumbing
-- preserve approval/publication lineage
-- keep Affiliate2 performance-learning semantics
-
-### Phase G — DB convergence + final cleanup
-
-- migrate to one canonical application DB
-- remove dead duplicate code only after verified parity
-- milestone/full QA
+- `docs/PHASE_C.md`
+- `docs/PHASE_C_C0_DONOR_AUDIT.md`
+- `docs/QA_PHASE_C.md`
