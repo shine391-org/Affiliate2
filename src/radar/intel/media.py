@@ -18,13 +18,16 @@ def candidate_dir(platform: str, content_id: str) -> Path:
     return path
 
 
-def fetch_media(platform: str, content_id: str, canonical_url: str) -> dict:
-    """Sync CLI adapter; implementation lives in app/backend."""
-    return asyncio.run(
-        fetch_candidate_media(
-            platform,
-            content_id,
-            canonical_url,
-            candidate_dir(platform, content_id),
-        )
+async def fetch_media_async(platform: str, content_id: str, canonical_url: str) -> dict:
+    """Async adapter used by the converged Radar intelligence pipeline."""
+    return await fetch_candidate_media(
+        platform,
+        content_id,
+        canonical_url,
+        candidate_dir(platform, content_id),
     )
+
+
+def fetch_media(platform: str, content_id: str, canonical_url: str) -> dict:
+    """Sync compatibility API for older scripts/tests."""
+    return asyncio.run(fetch_media_async(platform, content_id, canonical_url))
