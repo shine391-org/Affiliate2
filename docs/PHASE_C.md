@@ -2,7 +2,7 @@
 
 ## Status
 
-**C1–C3 QA PASS. C4R–C11 IMPLEMENTED. FINAL LOCAL / REAL-MEDIA QA PENDING.**
+**C1–C3 QA PASS. C4R–C11 TECHNICAL PASS. C12 IMPLEMENTED / LOCAL QA PENDING. C13 REAL-MEDIA ACCEPTANCE PENDING.**
 
 Branch:
 `phase-c-media-ai-hq-localization`
@@ -296,17 +296,25 @@ It supports:
 
 It does not become a CapCut clone.
 
-## C12 — Intelligence Convergence — AFTER ACCEPTANCE GATE
+## C12 — Intelligence Convergence — IMPLEMENTED / LOCAL QA PENDING
 
-Legacy `src/radar/intel/*` still owns a transitional candidate-intelligence downloader/transcriber.
+C4–C11 technical parity is proven on a clean real-media job, so the transitional Candidate Intelligence plumbing is now converged without reopening the localization render architecture.
 
-It is outside the localized-video render path.
+Current path:
+- Radar candidate cache/report contract remains stable;
+- media acquisition delegates to canonical source-best-first `ytdlp_service`;
+- candidate ASR delegates to canonical `whisper_service`;
+- candidate AI analysis delegates to canonical `ai_provider` routing;
+- one async batch loop owns each CLI intelligence run so canonical model/provider lifecycle is not recreated per stage;
+- legacy `src/radar/intel/media.py`, `transcribe.py`, and `ai_analyze.py` remain thin compatibility adapters only.
 
-Do NOT remove it before C4–C11 real-media parity is proven. After acceptance:
-- route intelligence to canonical media/transcript/provider paths where practical;
-- remove duplicate download/transcribe paths only after focused parity tests.
+Removed duplicate ownership:
+- Candidate Intelligence's MediaCrawler-JSONL/Douyin direct downloader;
+- Candidate Intelligence's Bilibili HTML/DASH downloader;
+- its standalone faster-whisper model singleton;
+- its direct httpx OpenAI-compatible AI client/config.
 
-This cleanup should not require another human perceptual-video round.
+C12 deliberately does not perform DB convergence; that remains Phase G.
 
 ## C13 — Final Real-Media Acceptance
 
