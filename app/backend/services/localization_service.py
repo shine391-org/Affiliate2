@@ -1244,6 +1244,12 @@ async def synthesize_timed_dub(
             if duration_ms <= 0:
                 reuse_raw = False
 
+        if targeted_regeneration and not is_target_chunk and not reuse_raw:
+            raise RuntimeError(
+                f"Cannot safely targeted-regenerate chunk(s) {sorted(regenerate_chunk_ids)} "
+                f"because non-target chunk {chunk.id} could not be reused/measured."
+            )
+
         if not reuse_raw:
             duration_ms = await _generate_tts_chunk_atomic(
                 speech_text,
