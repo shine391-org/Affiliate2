@@ -45,10 +45,12 @@ def _stub_faster_whisper(monkeypatch):
     monkeypatch.setitem(sys.modules, "faster_whisper", fake)
     WhisperService._model = None
     WhisperService._loaded_quality = None
+    WhisperService._loaded_model_name = None
     WhisperService._evict_task = None
     yield
     WhisperService._model = None
     WhisperService._loaded_quality = None
+    WhisperService._loaded_model_name = None
     WhisperService._evict_task = None
 
 
@@ -175,3 +177,19 @@ def test_arm_evictor_is_a_noop_without_a_running_loop():
     WhisperService.load("best")
     WhisperService._arm_evictor()
     assert WhisperService._evict_task is None
+
+
+def test_explicit_model_override_is_not_replaced_by_quality(tmp_path):
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"x")
+    asyncio.run(ws_mod.whisper_service.transcribe(
+        audio, quality="best", model_name="custom-whisper-model"
+    ))
+    assert WhisperService._loaded_quality == "best"
+    assert WhisperService._loaded_model_name == "custom-whisper-model"
+    assert WhisperService._model.name == "custom-whisper-model"
+
+
+def test_unknown_quality_fails_loudly_without_explicit_model():
+    with pytest.raises(ValueError, match="Unknown Whisper quality"):
+        WhisperService.load("magic")

@@ -50,9 +50,20 @@ _PROGRESS_EMIT_INTERVAL = 3.0
 _SERIALIZE_MIN_SECONDS = 120.0
 
 
+def resolve_whisper_model(quality: str = "balanced", model_name: str | None = None) -> str:
+    """Resolve the exact model requested by a profile/caller."""
+    explicit = (model_name or "").strip()
+    if explicit:
+        return explicit
+    if quality not in WHISPER_QUALITY_MAP:
+        raise ValueError(f"Unknown Whisper quality: {quality}")
+    return WHISPER_QUALITY_MAP[quality]
+
+
 class WhisperService:
     _model = None
     _loaded_quality = None
+    _loaded_model_name = None
     _lock = threading.Lock()
     _last_used = 0.0
     _evict_task = None
@@ -82,9 +93,9 @@ class WhisperService:
         return base / "hub"
 
     @classmethod
-    def is_model_cached(cls, quality: str = "balanced") -> bool:
-        """Check if the Whisper model is already downloaded in the HF cache."""
-        model_name = WHISPER_QUALITY_MAP.get(quality, "small")
+    def is_model_cached(cls, quality: str = "balanced", model_name: str | None = None) -> bool:
+        """Check if the exact Whisper model is already downloaded."""
+        model_name = resolve_whisper_model(quality, model_name)
         model_dir = cls._hub_dir() / f"models--Systran--faster-whisper-{model_name}"
         if not model_dir.exists():
             return False
@@ -97,19 +108,20 @@ class WhisperService:
         return True
 
     @classmethod
-    def load(cls, quality: str = "balanced"):
+    def load(cls, quality: str = "balanced", model_name: str | None = None):
+        resolved_model = resolve_whisper_model(quality, model_name)
         with cls._lock:
-            if cls._model is None or cls._loaded_quality != quality:
+            if cls._model is None or cls._loaded_model_name != resolved_model:
                 from faster_whisper import WhisperModel
-                model_name = WHISPER_QUALITY_MAP.get(quality, "small")
-                logger.info(f"Loading Whisper model: {model_name}")
+                logger.info("Loading Whisper model: %s (quality=%s)", resolved_model, quality)
                 cls._model = WhisperModel(
-                    model_name,
+                    resolved_model,
                     device="cpu",
                     compute_type="int8",
                 )
                 cls._loaded_quality = quality
-                logger.info(f"Whisper model '{model_name}' loaded")
+                cls._loaded_model_name = resolved_model
+                logger.info("Whisper model '%s' loaded", resolved_model)
             cls._last_used = time.monotonic()
             return cls._model
 
@@ -119,9 +131,10 @@ class WhisperService:
         with cls._lock:
             if cls._model is None:
                 return False
-            freed = cls._loaded_quality
+            freed = cls._loaded_model_name or cls._loaded_quality
             cls._model = None
             cls._loaded_quality = None
+            cls._loaded_model_name = None
         import gc
         gc.collect()
         logger.info("Whisper model '%s' evicted (idle)", freed)
@@ -138,10 +151,11 @@ class WhisperService:
             while True:
                 with cls._lock:
                     quality = cls._loaded_quality
+                    model_name = cls._loaded_model_name
                     last = cls._last_used
                 if quality is None:
                     return
-                if WHISPER_QUALITY_MAP.get(quality) not in _HEAVY_MODELS:
+                if model_name not in _HEAVY_MODELS:
                     return
                 idle = time.monotonic() - last
                 if idle >= _IDLE_EVICT_SECONDS:
@@ -155,7 +169,7 @@ class WhisperService:
 
     @classmethod
     def _arm_evictor(cls):
-        if WHISPER_QUALITY_MAP.get(cls._loaded_quality) not in _HEAVY_MODELS:
+        if cls._loaded_model_name not in _HEAVY_MODELS:
             return
         if cls._evict_task is not None and not cls._evict_task.done():
             return
@@ -169,6 +183,7 @@ class WhisperService:
         audio_path: str | Path,
         language: str = None,
         quality: str = "balanced",
+        model_name: str | None = None,
         timing_only: bool = False,
         on_progress=None,
     ) -> dict:
@@ -208,7 +223,7 @@ class WhisperService:
         if not await has_audio_stream(Path(audio_path)):
             raise ValueError(f"No audio stream found in {audio_path}")
 
-        model = self.load(quality)
+        model = self.load(quality, model_name=model_name)
 
         # Duration serves two decisions: the progress fraction denominator AND
         # whether this transcription is long enough to take the batch gate.

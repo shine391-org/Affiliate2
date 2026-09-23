@@ -288,3 +288,30 @@ class TestReanalyzeSingle:
             )
         assert ujs.await_args_list[-1].args[1] == "failed"
         assert "audio" in ujs.await_args_list[-1].kwargs["error_message"].lower()
+
+
+@pytest.mark.asyncio
+async def test_analyzer_uses_saved_whisper_quality(monkeypatch):
+    dv = _fake_downloaded_video(
+        transcript=None,
+        transcript_source=None,
+        audio_path="/tmp/fake.wav",
+    )
+    settings = MagicMock()
+    settings.whisper_quality = "best"
+    factory, _ = _session_cm([
+        _result_scalars_all([dv]),
+        _result_scalar_one(settings),
+    ])
+
+    class _Whisper:
+        async def transcribe(self, *args, **kwargs):
+            assert kwargs["quality"] == "best"
+            return {"text": "hello world", "language": "en", "segments": []}
+
+    monkeypatch.setattr("pathlib.Path.exists", lambda self: True)
+    monkeypatch.setattr("backend.services.whisper_service.whisper_service", _Whisper())
+    monkeypatch.setattr(analyzer_mod, "_ai_correct_transcript", AsyncMock(return_value="hello world"))
+
+    with patch.object(analyzer_mod, "AsyncSessionLocal", factory),          patch.object(analyzer_mod, "get_ai_client", side_effect=RuntimeError("stop after ASR")),          patch.object(analyzer_mod, "update_job_status", AsyncMock()),          patch.object(analyzer_mod.ws_manager, "send_progress", AsyncMock()),          patch.object(analyzer_mod.ws_manager, "send_constraint_warning", AsyncMock()):
+        await AnalyzerAgent().run(job_id="jq", user_id="local")

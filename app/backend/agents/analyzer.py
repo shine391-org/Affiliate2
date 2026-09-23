@@ -281,7 +281,9 @@ class AnalyzerAgent:
             )
             user_settings = result.scalar_one_or_none()
 
-        whisper_quality = "balanced"
+        whisper_quality = (
+            (getattr(user_settings, "whisper_quality", None) or "balanced").strip().lower()
+        )
 
         total = len(videos)
         failed_count = 0
@@ -315,7 +317,6 @@ class AnalyzerAgent:
                         continue
 
                     from backend.services.whisper_service import whisper_service
-                    await asyncio.to_thread(whisper_service.load, whisper_quality)
                     transcript_data = await whisper_service.transcribe(
                         audio_path, quality=whisper_quality)
                     transcript_source = "whisper"
