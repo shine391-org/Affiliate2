@@ -2,7 +2,7 @@
 
 ## Status
 
-**STARTED — C0 COMPLETE; C1–C4 IMPLEMENTED / QA PENDING**
+**STARTED — C0 COMPLETE; C1–C4 QA PASS; C5–C8 IMPLEMENTED / QA PENDING**
 
 Branch:
 `phase-c-media-ai-hq-localization`
@@ -10,10 +10,11 @@ Branch:
 C0 donor/source audit:
 `docs/PHASE_C_C0_DONOR_AUDIT.md`
 
-Next implementation gate:
-**C5 — ASR Convergence**
+Current checkpoint:
+**LOCAL QA REQUIRED AFTER C8 BEFORE C9**
 
-Independent QA should review C1–C4 before C5 is treated as a mergeable milestone.
+C1–C4 passed independent local QA at commit `a14d4e31`:
+107 focused tests + 16 root intelligence tests + frontend build + LM Studio/runtime/settings/profile smoke. The real URL download smoke was not performed there and remains part of the later real-media gates.
 
 ## Product goal
 
@@ -64,7 +65,7 @@ C0 established these implementation rules:
 - keep MoneyPrinterTurbo out of Phase-C runtime
 - apply Ponytail to architecture size only: a deferred capability becomes required when the defined quality gate fails
 
-### C1 — Media quality foundation — IMPLEMENTED / QA PENDING
+### C1 — Media quality foundation — QA PASS ✅
 
 Implementation:
 
@@ -86,7 +87,7 @@ Requirements:
 - minimize repeated lossy video encodes
 - define Draft / Balanced / HQ render profiles
 
-### C2 — AI provider + local AI — IMPLEMENTED / QA PENDING
+### C2 — AI provider + local AI — QA PASS ✅
 
 Implementation:
 
@@ -122,7 +123,7 @@ Static model lists are suggestions, not hard gates.
 
 Remove the duplicate direct AI HTTP client only after feature parity.
 
-### C3 — Localization Profiles — IMPLEMENTED / QA PENDING
+### C3 — Localization Profiles — QA PASS ✅
 
 Implementation:
 
@@ -158,7 +159,7 @@ Initial translation presets:
 - Literal
 - Custom
 
-### C4 — Canonical transcript/timeline — IMPLEMENTED / QA PENDING
+### C4 — Canonical transcript/timeline — QA PASS ✅
 
 Implementation:
 
@@ -200,7 +201,15 @@ Rules:
 - one transcript can be reused by intelligence/localization/Smart Cut/Remake
 - job/segment state must support targeted rerun after expert override
 
-### C5 — ASR convergence
+### C5 — ASR convergence — IMPLEMENTED / QA PENDING
+
+Implementation:
+
+- localization now has one explicit ASR entry point using the selected Localization Profile
+- profile `asr_quality` and optional `asr_model` reach the actual faster-whisper model load
+- Analyzer no longer hardcodes `balanced`; saved user quality is respected
+- redundant pre-load/re-load behavior was removed
+- faster-whisper word timestamps remain the initial timing source; WhisperX is still benchmark-gated
 
 Requirements:
 
@@ -213,7 +222,16 @@ Requirements:
 
 The current faster-whisper path already provides word timestamps. Phase C first validates those timestamps and fixes call-site quality routing. If real localization samples show material alignment or multi-speaker failures, forced alignment/diarization support becomes required even if that adds dependency complexity.
 
-### C6 — Translation engine
+### C6 — Translation engine — IMPLEMENTED / QA PENDING
+
+Implementation:
+
+- one canonical localization service replaces the old Translate-tool translation path
+- each batch receives full-source context, segment IDs, source durations, preset/style instructions and glossary terms
+- output is structured by stable segment ID, not positional text alone
+- malformed batch shapes split recursively so one bad response cannot slide later captions onto the wrong segment
+- strict QC refuses to publish any source-language passthrough segment
+- a single bounded duration-adaptation call is available only after measured TTS overflow; no generic multi-agent graph was added
 
 Translation should consider:
 
@@ -228,7 +246,19 @@ Initial implementation should remain simpler than a full multi-agent translation
 
 Custom prompt/instructions live in the saved profile/advanced surface.
 
-### C7 — HQ dubbing/timing
+### C7 — HQ dubbing/timing — IMPLEMENTED / QA PENDING
+
+Implementation:
+
+- whole-video joined-text TTS is removed from the active Translate path
+- TTS is generated per timed semantic block through the canonical TTS service
+- each block is measured from the generated audio file
+- Vietnamese Edge fallback selects a Vietnamese voice (`vi-VN-HoaiMyNeural`) rather than an English default
+- measured overflow first triggers bounded translation shortening, then bounded speaking-rate adjustment
+- safe rate ceilings are 1.06x for `natural` and 1.12x for `auto`; `strict` does not speed speech
+- local source silence may be borrowed only within configured tolerance; strict timing ignores tolerance
+- unresolved overflow is explicit and fails the current tool path rather than silently truncating/distorting speech
+- final target timestamps are written from measured TTS duration and captions consume those timestamps
 
 Replace whole-video joined-text TTS with timed semantic blocks.
 
@@ -255,7 +285,16 @@ Final audio is composed at resolved timeline positions.
 
 Captions derive from the same resolved blocks.
 
-### C8 — Audio separation/mixing
+### C8 — Audio separation/mixing — IMPLEMENTED BASELINE / QA PENDING
+
+Implementation:
+
+- per-block TTS is composed onto one resolved dub timeline
+- source video is stream-copied during audio mix; dubbing itself never re-encodes picture pixels
+- when background preservation is enabled, source audio is gain-controlled and sidechain-ducked under the target dub, preserving ambience/music in gaps
+- geometry/reframe and translated caption burn now share one final H.264 encode instead of two sequential lossy encodes
+- final render uses the selected Draft/Balanced/HQ profile
+- Demucs/source separation remains deliberately benchmark-gated: if source-speech bleed is perceptually unacceptable after C8 QA, separation is promoted into Phase C
 
 Preserve useful source background/music/ambience.
 

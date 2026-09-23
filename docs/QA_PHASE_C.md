@@ -75,6 +75,99 @@ Also smoke the Settings API/UI for:
 
 Do not infer runtime PASS from the implementation commits alone.
 
+## C5–C8 local quality checkpoint
+
+C5–C8 are implemented but are **not QA PASS** until this checkpoint runs on the local Windows machine.
+
+Do not start C9 if this checkpoint finds a quality blocker that requires changing the ASR / translation / dubbing / mix contracts.
+
+### Focused automated gate
+
+From `app/`:
+
+```powershell
+python -m pytest -q `
+  tests/test_whisper_service.py `
+  tests/test_analyzer.py `
+  tests/test_translate_batch_resilience.py `
+  tests/test_phase_c_tts_timing.py `
+  tests/test_phase_c_render_quality.py `
+  tests/test_phase_c_localization_profiles.py `
+  tests/test_phase_c_localization_timeline.py `
+  tests/test_ai_provider.py
+
+npm --prefix frontend run build
+```
+
+Then run any directly affected regression suites the QA agent deems necessary.
+
+### Runtime / real-media checkpoint
+
+Use real supported media, not synthetic-only fixtures. Minimum useful set for this checkpoint:
+
+1. vertical Douyin talking-head or product/demo short
+2. fast-speech short
+3. speech over music/ambient-heavy source
+4. longer or multi-speaker/complex Bilibili sample; preferably include a 16:9 → 9:16 final localization render
+
+For each sample record:
+
+- source URL/content identity
+- source width/height/fps/codec/bitrate/duration
+- actual ASR quality/model loaded
+- transcript and word-timestamp quality
+- translation provider/model/profile
+- translation naturalness and terminology
+- TTS provider/voice
+- per-block measured TTS duration
+- adaptation/regeneration events
+- actual speech-rate adjustments
+- unresolved timing overflow count
+- source/dub/background gain policy
+- final width/height/fps/codec/bitrate/duration
+- visible quality and caption sync
+
+### Mandatory quality-escalation decisions
+
+This checkpoint exists to decide whether benchmark-gated complexity is now required.
+
+- **WhisperX / forced alignment / diarization** becomes required in Phase C if faster-whisper word timing materially fails representative fast-speech or multi-speaker alignment.
+- **Better TTS provider / voice path** becomes required if the selected Vietnamese voice is not publishable in perceptual review.
+- **Source separation (Demucs or the smallest proven alternative)** becomes required if duck/mix leaves unacceptable source-speech bleed or damages useful background/music.
+- **Bounded video retiming** becomes required if timing overflow or unnatural speech speed remains systematic after duration-aware translation, bounded rewrite, safe TTS speed and configured silence tolerance.
+
+Ponytail/YAGNI may choose the smallest implementation that passes, but it may not be used to accept perceptibly bad output.
+
+### Render-loss check
+
+For full-dub localization:
+
+- dub/background mix must stream-copy the video stream
+- reframe + translated captions should share one final lossy video encode
+- HQ profile should use the configured HQ render settings
+- no hidden extra video transcode should be inserted merely because audio/timing stages ran
+
+### Gate result
+
+Report each as:
+
+```
+C5 ASR: PASS / FAIL / BLOCKED
+C6 Translation: PASS / FAIL / BLOCKED
+C7 Timed dubbing: PASS / FAIL / BLOCKED
+C8 Mix/final render: PASS / FAIL / BLOCKED
+
+QUALITY ESCALATION:
+WhisperX required: YES/NO
+Better TTS required: YES/NO
+Source separation required: YES/NO
+Video retiming required: YES/NO
+
+READY FOR C9: YES/NO
+```
+
+`READY FOR C9: YES` requires no unresolved quality/architecture blocker in C5–C8.
+
 ## Required automated assertions
 
 ### Media/source quality

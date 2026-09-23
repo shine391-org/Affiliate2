@@ -66,13 +66,19 @@ Phase C absorbs the previous "Media + Intelligence" work and the Translate/Dub H
 Current implementation state:
 
 - C0 donor/source audit: COMPLETE
-- C1 media quality foundation: IMPLEMENTED / QA PENDING
-- C2 AI + local/OpenAI-compatible provider controls: IMPLEMENTED / QA PENDING
-- C3 Localization Profiles: IMPLEMENTED / QA PENDING
-- C4 canonical transcript/timeline contract: IMPLEMENTED / QA PENDING
-- next implementation gate: C5 ASR convergence
+- C1 media quality foundation: QA PASS
+- C2 AI + local/OpenAI-compatible provider controls: QA PASS
+- C3 Localization Profiles: QA PASS
+- C4 canonical transcript/timeline contract: QA PASS
+- C5 ASR convergence: IMPLEMENTED / QA PENDING
+- C6 contextual translation: IMPLEMENTED / QA PENDING
+- C7 timed dubbing: IMPLEMENTED / QA PENDING
+- C8 audio mix + minimum-loss final render: IMPLEMENTED / QA PENDING
+- next gate: independent local C5–C8 quality checkpoint before C9
 
-C1–C4 intentionally reuse existing app/job/storage/provider primitives. Legacy Radar intelligence media/AI paths remain transitional until C12 parity; they are not new Phase-C runtime architecture.
+C1–C4 local QA passed on the Windows runtime (107 focused + 16 root-intelligence tests, frontend build, LM Studio provider/runtime smoke). C5–C8 now form the first end-to-end HQ localization core and require real-media perceptual QA before automation is built on top.
+
+Legacy Radar intelligence media/AI paths remain transitional until C12 parity; they are not new Phase-C runtime architecture.
 
 Primary outcomes:
 
