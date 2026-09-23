@@ -74,3 +74,23 @@ def test_torch_checkpoint_compat_sets_weights_only_false_by_default(monkeypatch)
 
     patched.load("checkpoint.pt", weights_only=True)
     assert seen["weights_only"] is True
+
+
+
+def test_diarization_pipeline_uses_whisperx_38_token_keyword():
+    from backend.services.alignment_service import _make_diarization_pipeline
+
+    seen = {}
+
+    class FakePipeline:
+        def __init__(self, *, token=None, device=None):
+            seen["token"] = token
+            seen["device"] = device
+
+    pipeline = _make_diarization_pipeline(
+        FakePipeline,
+        token="hf_test",
+        device="cpu",
+    )
+    assert isinstance(pipeline, FakePipeline)
+    assert seen == {"token": "hf_test", "device": "cpu"}

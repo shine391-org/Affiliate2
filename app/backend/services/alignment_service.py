@@ -60,6 +60,15 @@ def _device() -> str:
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
+def _make_diarization_pipeline(factory, *, token: str, device: str):
+    """WhisperX 3.8.x names the gated-model credential `token`.
+
+    Keep construction isolated so signature drift is covered by a cheap unit
+    test instead of being discovered after a multi-gigabyte model install.
+    """
+    return factory(token=token, device=device)
+
+
 def _speaker_segments(rows) -> list[dict]:
     out: list[dict] = []
     if rows is None:
@@ -236,8 +245,9 @@ def _align_sync(
                     from whisperx.diarize import DiarizationPipeline
                 except ImportError:
                     DiarizationPipeline = whisperx.DiarizationPipeline
-                pipeline = DiarizationPipeline(
-                    use_auth_token=token,
+                pipeline = _make_diarization_pipeline(
+                    DiarizationPipeline,
+                    token=token,
                     device=device,
                 )
                 kwargs = {}
