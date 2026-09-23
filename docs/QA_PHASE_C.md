@@ -1,5 +1,7 @@
 # QA Phase C — Final Full-Stack Localization Checkpoint
 
+> **Historical checkpoint:** this document is retained for the C4R-C11 full-stack technical checkpoint. C12 has since passed QA. The active final acceptance procedure is `docs/QA_PHASE_C13.md`.
+
 ## Scope
 
 This is the FIRST local QA after the complete donor-derived quality stack was implemented.
@@ -365,10 +367,10 @@ The user previously said they will supply video links.
 
 ## C12
 
-Do not refactor legacy `src/radar/intel/*` during this QA.
-Only run `tests/test_intel.py` as regression evidence.
-
-C12 cleanup starts only after the Phase-C output engine is accepted; it should not require another full perceptual-video campaign.
+C12 Candidate Intelligence convergence has completed and passed local QA. Do not
+reopen its downloader/ASR/provider ownership during C13 unless a shared canonical
+service regression is proven. Active final acceptance now follows
+`docs/QA_PHASE_C13.md`.
 
 ## QA fix policy
 
@@ -483,7 +485,7 @@ QA fix commits:
 ## Final Gate
 C4-C11 TECHNICALLY ACCEPTED: YES/NO
 USER VIDEO QUALITY ACCEPTED: YES/NO/PENDING
-READY FOR C12: YES/NO
+C13 READY/ACTIVE: YES/NO
 ```
 
 If technical QA passes but user has not watched the output:
