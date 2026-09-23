@@ -225,6 +225,29 @@ def _deterministic_word_groups(words: list[dict]) -> list[list[str]]:
     return groups
 
 
+def _join_words_preserve_spacing(words: list[dict]) -> str:
+    """Join grouped word tokens preserving original whitespace conventions.
+
+    English Whisper tokens typically carry a leading space on non-initial words
+    ("Hello", " there"). Concatenating those preserves correct spacing without
+    introducing it. When tokens lack leading spaces (e.g. test fixtures or some
+    non-Whisper tokenizers), English would collapse into "Hellothere." if we
+    concatenated blindly.
+
+    CJK tokens never carry inter-word whitespace, so they must always be
+    concatenated. We use a CJK-detection heuristic: if the raw concatenated
+    text contains CJK characters, no space should be inserted between tokens.
+    Otherwise (bare Latin/Cyrillic/etc tokens), join with a single space.
+    """
+    raw_parts = [w.get("raw_text", w["text"]) for w in words]
+    if any(p[:1].isspace() for p in raw_parts):
+        return _collapse_ws("".join(raw_parts))
+    compact = "".join(w["text"].strip() for w in words)
+    if any("一" <= ch <= "鿿" for ch in compact):
+        return compact
+    return _collapse_ws(" ".join(w["text"].strip() for w in words))
+
+
 def _word_groups_to_segments(
     groups: list[list[str]],
     words: list[dict],
@@ -237,11 +260,7 @@ def _word_groups_to_segments(
         group = [by_id[word_id] for word_id in ids]
         speaker_ids = {w["speaker_id"] for w in group}
         speaker_id = next(iter(speaker_ids)) if len(speaker_ids) == 1 else None
-        # Preserve the tokenizer's original whitespace. English Whisper words
-        # usually carry a leading space; Chinese/Japanese tokens usually do
-        # not. Joining stripped tokens with a forced space corrupts CJK source
-        # text into "你 好 世 界", which is avoidable translation noise.
-        text = _collapse_ws("".join(w.get("raw_text", w["text"]) for w in group))
+        text = _join_words_preserve_spacing(group)
         out.append(LocalizationSegment(
             id=f"sem-{start_group_index + offset:04d}",
             speaker_id=speaker_id,

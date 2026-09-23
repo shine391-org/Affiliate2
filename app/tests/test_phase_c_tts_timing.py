@@ -179,14 +179,15 @@ def test_edge_speed_one_maps_to_native_zero_percent(monkeypatch, tmp_path):
     captured = {}
 
     class FakeCommunicate:
-        def __init__(self, text, voice, rate):
+        def __init__(self, text, voice, rate, pitch=None):
             captured["rate"] = rate
 
         async def save(self, path):
             from pathlib import Path
             Path(path).write_bytes(b"mp3")
 
-    monkeypatch.setattr(edge_tts_service.edge_tts, "Communicate", FakeCommunicate)
+    import edge_tts
+    monkeypatch.setattr(edge_tts, "Communicate", FakeCommunicate)
     out = asyncio.run(edge_tts_service.generate_voice(
         "xin chào",
         output_path=tmp_path / "edge.mp3",

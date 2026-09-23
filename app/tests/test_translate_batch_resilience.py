@@ -150,16 +150,19 @@ async def test_c5_hq_profile_calls_alignment_layer(monkeypatch, tmp_path):
             }
 
     seen = {}
+    from backend.services.alignment_service import AlignmentReport
+    fake_report = AlignmentReport(
+        alignment_applied=True,
+        diarization_applied=False,
+        diarization_reason="missing_huggingface_token",
+        speaker_count=0,
+        device="cpu",
+    )
+
     async def fake_align(path, transcript, profile, **kwargs):
         seen["path"] = Path(path)
         seen["alignment"] = profile.alignment_mode
-        return transcript, SimpleNamespace(
-            alignment_applied=True,
-            diarization_applied=False,
-            diarization_reason="missing_huggingface_token",
-            speaker_count=0,
-            device="cpu",
-        )
+        return transcript, fake_report
 
     monkeypatch.setattr("backend.services.whisper_service.whisper_service", _Whisper())
     monkeypatch.setattr("backend.services.alignment_service.align_localization_transcript", fake_align)
