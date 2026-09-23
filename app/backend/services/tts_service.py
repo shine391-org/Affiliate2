@@ -37,6 +37,8 @@ async def generate_tts(
     voice_id: str = None,
     api_key: str = "",
     output_path: Path = None,
+    model: str | None = None,
+    speed: float = 1.0,
 ) -> Path:
     """Generate speech using any supported TTS provider. Returns audio file path."""
     if output_path is None:
@@ -53,11 +55,14 @@ async def generate_tts(
 
     if provider == TTSProvider.OPENAI_TTS:
         from backend.services.openai_tts_service import generate_voice
-        return await generate_voice(text, voice_id=voice, api_key=api_key, output_path=output_path)
+        return await generate_voice(
+            text, voice_id=voice, api_key=api_key, output_path=output_path,
+            model=model or "tts-1", speed=speed,
+        )
 
     elif provider == TTSProvider.EDGE_TTS:
         from backend.services.edge_tts_service import generate_voice
-        return await generate_voice(text, voice_id=voice, output_path=output_path)
+        return await generate_voice(text, voice_id=voice, output_path=output_path, speed=speed)
 
     raise VoiceGenerationError(f"Unknown TTS provider: {provider}")
 

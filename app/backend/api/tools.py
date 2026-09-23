@@ -342,13 +342,14 @@ async def translate_tool(
     caption_style: str = Form("viral"),
     emoji_style: str = Form("moderate"),
     target_aspect: Optional[str] = Form(None),
+    profile_id: Optional[str] = Form(None),
 ):
     """Translate captions (and optionally dub audio) to another language.
 
     Modes:
       - captions_only: original audio kept; burn translated captions
-      - full_dub: replace audio with target-language Edge-TTS voiceover +
-                  burn translated captions on the dubbed video
+      - full_dub: timing-aware per-block TTS using the selected Localization
+                  Profile, source-audio duck/mix, and final-timing captions
     """
     if mode not in ("captions_only", "full_dub"):
         raise HTTPException(400, f"Invalid mode: {mode}")
@@ -364,12 +365,14 @@ async def translate_tool(
         "voice_id": voice_id if mode == "full_dub" else None,
         "caption_style": caption_style,
         "target_aspect": target_aspect,
+        "profile_id": profile_id,
     })
     in_path = await save_upload(file, job.id, VIDEO_EXTS, VIDEO_MAX_BYTES)
     dispatch(run_tool_translate(
         job.id, in_path, target_language.strip(), mode,
         voice_id, caption_style, emoji_style,
         target_aspect=target_aspect,
+        profile_id=profile_id,
     ))
     return {"job_id": job.id}
 

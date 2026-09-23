@@ -38,6 +38,9 @@ RECOMMENDED_VOICES = {
     "es-MX-DaliaNeural": "Dalia (Female, Mexican Spanish)",
     "ja-JP-NanamiNeural": "Nanami (Female, Japanese)",
     "zh-CN-XiaoxiaoNeural": "Xiaoxiao (Female, Mandarin)",
+    # Vietnamese — primary Affiliate2 localization target
+    "vi-VN-HoaiMyNeural": "Hoài My (Female, Vietnamese)",
+    "vi-VN-NamMinhNeural": "Nam Minh (Male, Vietnamese)",
 }
 
 # Default voice — AndrewMultilingual is significantly more natural than AriaNeural
@@ -73,6 +76,7 @@ async def generate_voice(
     voice_id: str = None,
     output_path: Path = None,
     use_ssml: bool = True,
+    speed: float = 1.0,
 ) -> Path:
     """Generate speech using Edge TTS (free, no API key needed)."""
     if voice_id is None:
@@ -84,8 +88,12 @@ async def generate_voice(
     import asyncio
     import edge_tts
 
-    # Add natural pauses via punctuation and use native rate/pitch
+    # Add natural pauses via punctuation and use native rate/pitch.
+    if not 0.75 <= float(speed) <= 1.25:
+        raise VoiceGenerationError("Edge TTS speed must be between 0.75x and 1.25x")
     processed_text = _add_natural_pauses(text) if use_ssml else text
+    rate_pct = round(-5 + (float(speed) - 1.0) * 100)
+    rate = f"{rate_pct:+d}%"
 
     last_error = None
     for attempt in range(3):
@@ -93,7 +101,7 @@ async def generate_voice(
             communicate = edge_tts.Communicate(
                 processed_text,
                 voice_id,
-                rate="-5%",
+                rate=rate,
                 pitch="+2Hz",
             )
             await communicate.save(str(output_path))

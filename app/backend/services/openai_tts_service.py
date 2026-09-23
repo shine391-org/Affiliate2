@@ -17,6 +17,7 @@ async def generate_voice(
     api_key: str = "",
     output_path: Path = None,
     model: str = "tts-1",
+    speed: float = 1.0,
 ) -> Path:
     """
     Generate speech using OpenAI TTS API.
@@ -25,6 +26,8 @@ async def generate_voice(
     """
     if not api_key:
         raise VoiceGenerationError("OpenAI API key not configured for TTS")
+    if not 0.75 <= float(speed) <= 1.25:
+        raise VoiceGenerationError("OpenAI TTS speed must be between 0.75x and 1.25x")
 
     if output_path is None:
         output_path = settings.AUDIO_DIR / f"openai_{hash(text) & 0xFFFFFFFF:08x}.mp3"
@@ -39,6 +42,7 @@ async def generate_voice(
             voice=voice_id,
             input=text,
             response_format="mp3",
+            speed=float(speed),
         )
 
         response.stream_to_file(str(output_path))

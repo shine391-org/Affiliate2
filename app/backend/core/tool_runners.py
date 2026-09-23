@@ -835,9 +835,6 @@ async def run_tool_merge_clips(
 
 # ── Translate (captions + optional Edge-TTS dub) ───────────────────────────
 
-_TRANSLATE_BATCH_SIZE = 20
-
-
 _LANG_NAME_MAP = {
     "vi": "Vietnamese",
     "en": "English",
@@ -852,276 +849,174 @@ _LANG_NAME_MAP = {
 }
 
 
-def _translation_prompt(target_language: str, texts: list[str], is_dub: bool = False) -> str:
-    """Build the per-batch translation prompt. Strict 1:1 contract: the output
-    array must have exactly the same length as the input."""
-    target_name = _LANG_NAME_MAP.get(target_language.lower(), target_language)
-    indexed = "\n".join(f"  [{i}] {t!r}" for i, t in enumerate(texts))
-    if is_dub:
-        instructions = f"""You translate video captions for dubbing.
-Translate each line below naturally into {target_name} while keeping the spoken length close to the source.
-Preserve meaning accurately.
-Do not add explanations, commentary, CTA, examples, or new information.
-Keep each translated segment concise enough to fit approximately within the source segment timing.
-Do NOT reorder lines."""
-    else:
-        instructions = f"""You translate video captions. Translate each line below into natural, conversational {target_name}. Preserve meaning — do NOT shorten, expand, or reorder lines."""
-
-    return f"""{instructions}
-
-Source lines (each line is one caption segment):
-{indexed}
-
-Respond with ONLY a JSON array of strings, one per line, in the same order. The array MUST have exactly {len(texts)} elements — same as input.
-
-Example shape:
-["translated line 0", "translated line 1", ...]
-
-Respond with the JSON array only — no markdown, no commentary."""
-
-
-async def _translate_segments(
-    segments: list[dict], target_language: str, user_settings, is_dub: bool = False
-) -> list[dict]:
-    """AI-translate Whisper segments into the target language. Returns segments
-    with the same start/end timing and translated `text`.
-
-    Batches in groups of _TRANSLATE_BATCH_SIZE — one AI call per batch. This
-    used to be a SINGLE call carrying every segment, which meant a long video
-    either blew the token budget or came back as truncated JSON, and either way
-    the whole job died after the Whisper pass had already run.
-
-    The 1:1 contract is real — a translation list shorter than its input slides
-    every later caption onto the wrong timestamp — but enforcing it by raising
-    is too brittle: one batch coming back 19-for-20 throws away everything
-    translated so far. A short batch is split and retried in halves down to
-    single lines, where the count can't be wrong; only a line that fails even
-    alone keeps its source text, marked `untranslated`.
-    """
-    from backend.core.ai_provider import get_ai_client
-
-    compact = [
-        {"start": float(s.get("start", 0)), "end": float(s.get("end", 0)),
-         "text": (s.get("text") or "").strip(), **{k: v for k, v in s.items()
-                                                   if k not in ("start", "end", "text")}}
-        for s in segments if (s.get("text") or "").strip()
-    ]
-    if not compact:
-        return []
-
-    ai = get_ai_client(user_settings)
-    out: list[dict] = []
-
-    for start in range(0, len(compact), _TRANSLATE_BATCH_SIZE):
-        batch = compact[start:start + _TRANSLATE_BATCH_SIZE]
-        source_texts = [s["text"] for s in batch]
-        translated, failed_idx = await _translate_batch_resilient(
-            ai, target_language, source_texts, is_dub=is_dub)
-        if failed_idx:
-            logger.warning(
-                "translate: %d/%d line(s) kept their source text after "
-                "per-line retries", len(failed_idx), len(source_texts))
-        for i, (src_seg, txt) in enumerate(zip(batch, translated)):
-            new_seg = {**src_seg, "text": txt}
-            # DROP the per-word array — Whisper's `words` are the SOURCE
-            # language's words with source-aligned timings. Keeping them makes
-            # the caption renderer prefer word-level data over `text` and burn
-            # the original words onto the video, which reads as "nothing was
-            # translated". Without them the renderer falls back to the segment
-            # text and spreads it evenly across the segment.
-            new_seg.pop("words", None)
-            if i in failed_idx:
-                new_seg["untranslated"] = True
-            out.append(new_seg)
-
-    if not out:
-        raise RuntimeError("Translation produced no segments")
-    # Degrading a few lines is the point of the split-and-retry; degrading
-    # EVERY line is not a translation. Shipping that would burn a full render
-    # to hand back the source captions under a "translated" label, so fail
-    # loudly instead. (A provider-level outage raises AIProviderError and
-    # never reaches here — this catches a model that answers, badly, every
-    # time.)
-    if all(s.get("untranslated") for s in out):
-        raise RuntimeError(
-            "Translation failed — the model never returned a usable result. "
-            "Try again, or pick a different target language."
-        )
-    return out
-
-
-async def _translate_batch_resilient(
-    ai, target_language: str, texts: list[str], attempts: int = 2, is_dub: bool = False,
-) -> tuple[list[str], set[int]]:
-    """`_translate_one_batch` with divide-and-conquer recovery.
-
-    Returns (translations, indexes that kept their source text). Splitting is
-    the fix for a model that merges or drops a line: halving the batch changes
-    the shape of the request, and a single-line request has essentially no way
-    to come back with the wrong count. Extra calls happen only on failure.
-    """
-    import json as _json
-    try:
-        return await _translate_one_batch(ai, target_language, texts, attempts, is_dub=is_dub), set()
-    except (RuntimeError, ValueError, _json.JSONDecodeError) as e:
-        if len(texts) <= 1:
-            # One line that won't translate even alone. Keeping the source text
-            # preserves every other caption's timing — dropping or padding it
-            # would slide the rest of the video out of sync.
-            logger.warning("translate: line kept untranslated (%s): %r", e, texts[:1])
-            return list(texts), {0}
-        mid = len(texts) // 2
-        logger.info("translate: batch of %d failed (%s) — retrying as %d + %d",
-                    len(texts), e, mid, len(texts) - mid)
-        # attempts=1 below: the split IS the retry (see _translate_one_batch),
-        # so re-retrying at every level would fan one bad 20-line batch out to
-        # ~60 AI calls.
-        left, lf = await _translate_batch_resilient(ai, target_language, texts[:mid], 1, is_dub=is_dub)
-        right, rf = await _translate_batch_resilient(ai, target_language, texts[mid:], 1, is_dub=is_dub)
-        return left + right, lf | {mid + i for i in rf}
-
-
-async def _translate_one_batch(
-    ai, target_language: str, texts: list[str], attempts: int = 2, is_dub: bool = False,
-) -> list[str]:
-    """Send one batch to the AI; parse + validate; retry once on a shape error."""
-    import json as _json
-    response = ""
-    for attempt in range(max(1, attempts)):
-        try:
-            stricter = ("\n\nIMPORTANT: respond with ONLY the JSON array. "
-                        "No code fences, no commentary, no extra text.")
-            prompt = _translation_prompt(target_language, texts, is_dub=is_dub)
-            response = await ai.chat(
-                messages=[{"role": "user",
-                           "content": prompt if attempt == 0 else prompt + stricter}],
-                max_tokens=2048,
-            )
-            arr = _json.loads(_strip_json_fence(response))
-            if not isinstance(arr, list):
-                raise ValueError(f"Expected list, got {type(arr).__name__}")
-            if len(arr) != len(texts):
-                raise ValueError(
-                    f"Translation count mismatch: input {len(texts)}, output {len(arr)}")
-            if not all(isinstance(x, str) for x in arr):
-                raise ValueError("Non-string in translation output")
-            return arr
-        except (_json.JSONDecodeError, ValueError) as e:
-            logger.warning(
-                "Translate batch parse failed (attempt %d/%d): %s — raw: %r",
-                attempt + 1, max(1, attempts), e, response[:200],
-            )
-            if attempt == max(1, attempts) - 1:
-                raise RuntimeError(f"Translation failed after retry: {e}")
-
-    raise RuntimeError("Translation flow ended unexpectedly")
-
-
 async def run_tool_translate(
     job_id: str,
     in_path: Path,
     target_language: str,
-    mode: str,                    # "captions_only" | "full_dub"
+    mode: str,
     voice_id: str,
     caption_style: str,
     emoji_style: str,
     user_id: str = "local",
     target_aspect: str | None = None,
+    profile_id: str | None = None,
 ):
-    """Translate captions (and optionally dub the audio with Edge TTS) into
-    another language."""
+    """Canonical Phase-C localization runner used by the Translate tool."""
+    import shutil
+
     from backend.api.tools import tool_out_path
     from backend.config import settings
-
-    target_language = _LANG_NAME_MAP.get(target_language.strip().lower(), target_language.strip())
-    logger.info(
-        "TASK START tool:translate | job=%s target=%s mode=%s target_aspect=%s",
-        job_id[:8], target_language, mode, target_aspect,
+    from backend.core.localization import LocalizationProfile
+    from backend.services.localization_service import (
+        caption_segments_from_localization,
+        mix_dub_with_video,
+        resolve_localization_profile,
+        synthesize_timed_dub,
+        transcribe_for_localization,
+        translate_transcript,
     )
+
+    target_language = _LANG_NAME_MAP.get(
+        target_language.strip().lower(), target_language.strip()
+    )
+    logger.info(
+        "TASK START tool:translate | job=%s target=%s mode=%s profile=%s",
+        job_id[:8], target_language, mode, profile_id or "default",
+    )
+
     cleanup: list[Path] = [in_path]
+    work_dir = settings.TMP_DIR / f"{job_id}_localization"
+
     try:
         user_settings = await _load_user_settings(user_id)
+        profile = resolve_localization_profile(user_settings, profile_id)
 
-        await _tool_progress(job_id, 10, "Transcribing source audio...", user_id)
-        from backend.services.whisper_service import whisper_service
-        tx = await whisper_service.transcribe(str(in_path))
-        segments = tx.get("segments", [])
-        if not segments:
-            raise ValueError("No speech detected — nothing to translate.")
+        # Tool controls are job-level overrides on the saved profile.
+        updates = {}
+        if voice_id:
+            updates["tts_voice"] = voice_id
+        if caption_style:
+            updates["caption_style"] = caption_style
+        if target_aspect:
+            updates["target_aspect"] = target_aspect
+        if updates:
+            profile = LocalizationProfile.model_validate({
+                **profile.model_dump(),
+                **updates,
+            })
 
-        is_dub = (mode == "full_dub")
-        await _tool_progress(job_id, 35, f"Translating {len(segments)} segments...", user_id)
-        translated_segments = await _translate_segments(
-            segments, target_language, user_settings, is_dub=is_dub
+        await _tool_progress(
+            job_id, 8,
+            f"Transcribing with {profile.asr_model or profile.asr_quality}...",
+            user_id,
+        )
+        transcript = await transcribe_for_localization(in_path, profile)
+
+        is_dub = mode == "full_dub"
+        await _tool_progress(
+            job_id, 30,
+            f"Translating {len(transcript.segments)} timed segments...",
+            user_id,
+        )
+        localized = await translate_transcript(
+            transcript,
+            target_language=target_language,
+            profile=profile,
+            user_settings=user_settings,
+            for_dub=is_dub,
         )
 
-        out_path = tool_out_path(job_id, ".mp4")
         captioned_input = in_path
+        timing_issues: list[dict] = []
 
-        if mode == "full_dub":
-            await _tool_progress(job_id, 55, "Generating dubbed voiceover (Edge TTS)...", user_id)
-            full_text = " ".join(s.get("text", "") for s in translated_segments).strip()
-            if not full_text:
-                raise ValueError("Translation produced empty text — try a different target language.")
+        if is_dub:
+            await _tool_progress(
+                job_id, 50,
+                "Synthesizing and fitting timed dubbing blocks...",
+                user_id,
+            )
+            dub = await synthesize_timed_dub(
+                localized,
+                source_media=in_path,
+                target_language=target_language,
+                profile=profile,
+                user_settings=user_settings,
+                work_dir=work_dir,
+                fail_on_overflow=True,
+            )
+            localized = dub.transcript
+            timing_issues = dub.issues
 
-            from backend.services.edge_tts_service import generate_voice
-            settings.AUDIO_DIR.mkdir(parents=True, exist_ok=True)
-            dub_audio = settings.AUDIO_DIR / f"{job_id}_dub.mp3"
-            cleanup.append(dub_audio)
-            await generate_voice(full_text, voice_id=voice_id or None, output_path=dub_audio)
-
-            await _tool_progress(job_id, 75, "Muxing audio onto video...", user_id)
-            from backend.services.ffmpeg_service import add_audio_to_video
+            await _tool_progress(job_id, 70, "Mixing dub with source ambience...", user_id)
             settings.TMP_DIR.mkdir(parents=True, exist_ok=True)
             dubbed_video = settings.TMP_DIR / f"{job_id}_dubbed.mp4"
             cleanup.append(dubbed_video)
-            await add_audio_to_video(in_path, dub_audio, dubbed_video)
+            await mix_dub_with_video(in_path, dub.dub_track, dubbed_video, profile)
             captioned_input = dubbed_video
 
-        # Only reframe if target_aspect is explicitly requested (e.g. "9:16")
-        if target_aspect:
-            need_reframe = True
-            if target_aspect == "9:16":
-                need_reframe = not await _is_already_vertical(captioned_input)
-            if need_reframe:
-                await _tool_progress(job_id, 80, f"Reframing to {target_aspect} (blur-fill)...", user_id)
-                from backend.services.ffmpeg_service import convert_aspect_ratio
-                reframed_video = settings.TMP_DIR / f"{job_id}_{target_aspect.replace(':', 'x')}.mp4"
-                reframed_video.unlink(missing_ok=True)
-                cleanup.append(reframed_video)
-                await convert_aspect_ratio(
-                    captioned_input, target_aspect=target_aspect, method="blur_fill", output_path=reframed_video
-                )
-                captioned_input = reframed_video
-
-        await _tool_progress(job_id, 88, "Burning translated captions...", user_id)
+        # Geometry + captions share one final H.264 encode. The dub/mix step
+        # stream-copies the video, so audio work cannot soften source pixels.
+        effective_aspect = profile.target_aspect
+        await _tool_progress(job_id, 84, "Rendering final localized video...", user_id)
         from backend.services.caption_service import generate_captions_ass, burn_captions
-        aspect = await _probe_aspect_ratio(captioned_input)
+
+        render_segments = caption_segments_from_localization(localized)
+        if not render_segments:
+            raise RuntimeError("Localization produced no captionable target segments.")
+
+        caption_aspect = (
+            effective_aspect
+            if effective_aspect and effective_aspect != "source"
+            else await _probe_aspect_ratio(captioned_input)
+        )
         ass_path = await generate_captions_ass(
-            translated_segments,
-            style=caption_style,
-            aspect_ratio=aspect,
+            render_segments,
+            style=profile.caption_style,
+            aspect_ratio=caption_aspect,
             emoji_style=emoji_style,
         )
         cleanup.append(ass_path)
-        await burn_captions(captioned_input, ass_path, out_path)
-        if not out_path.exists():
-            raise RuntimeError("Caption burn produced no output")
+
+        out_path = tool_out_path(job_id, ".mp4")
+        rendered = await burn_captions(
+            captioned_input,
+            ass_path,
+            out_path,
+            render_profile=profile.render_profile,
+            target_aspect=effective_aspect,
+            reframe_method="auto",
+        )
+        if rendered != out_path or not out_path.exists():
+            raise RuntimeError("Final localization render failed.")
 
         from backend.services.video_utils import probe_duration
         src_dur = await asyncio.to_thread(probe_duration, in_path)
         final_dur = await asyncio.to_thread(probe_duration, out_path)
 
-        await _tool_success(job_id, out_path, cleanup, user_id, extra_output={
-            "target_language": target_language,
-            "mode": mode,
-            "source_duration": src_dur,
-            "final_duration": final_dur,
-            "duration_ratio": round(final_dur / src_dur, 4) if src_dur > 0 else 1.0,
-        })
+        await _tool_success(
+            job_id,
+            out_path,
+            cleanup,
+            user_id,
+            extra_output={
+                "target_language": target_language,
+                "mode": mode,
+                "localization_profile": profile.id,
+                "asr_quality": profile.asr_quality,
+                "asr_model": profile.asr_model,
+                "render_profile": profile.render_profile,
+                "preserve_background": profile.preserve_background if is_dub else False,
+                "timing_issue_count": len(timing_issues),
+                "source_duration": src_dur,
+                "final_duration": final_dur,
+                "duration_ratio": round(final_dur / src_dur, 4) if src_dur > 0 else 1.0,
+            },
+        )
         logger.info("TASK DONE  tool:translate | job=%s", job_id[:8])
     except Exception as e:
         await _tool_fail(job_id, e, cleanup, user_id, "translate")
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
 
 
 # ── Hook analysis (Whisper first 10s → AI score) ───────────────────────────

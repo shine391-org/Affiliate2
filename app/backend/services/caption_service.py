@@ -994,8 +994,14 @@ async def burn_captions(
     ass_path: Path,
     output_path: Path = None,
     render_profile: str = "balanced",
+    target_aspect: str | None = None,
+    reframe_method: str = "auto",
 ) -> Path:
-    """Burn ASS captions into video using FFmpeg's libass filter."""
+    """Burn ASS captions, optionally reframing in the SAME final video encode.
+
+    Phase C uses this path so 16:9 -> 9:16 + captions is one H.264 generation,
+    not reframe-encode followed by caption-encode.
+    """
     global _ffmpeg_has_ass
 
     if output_path is None:
@@ -1005,52 +1011,89 @@ async def burn_captions(
         logger.warning("Empty or missing ASS file — returning original video")
         return video_path
 
-    # Check libass support once
     if _ffmpeg_has_ass is None:
         _ffmpeg_has_ass = _check_ffmpeg_ass_support()
-
     if not _ffmpeg_has_ass:
-        logger.error(
-            "FFmpeg is missing libass support — captions CANNOT be burned. "
-            "Install FFmpeg with libass: brew install homebrew-ffmpeg/ffmpeg/ffmpeg "
-            "(macOS) or sudo apt install ffmpeg libass-dev (Linux)"
-        )
+        logger.error("FFmpeg is missing libass support — captions cannot be burned")
         return video_path
 
-    # The burn is a full H.264 re-encode, so its wall-clock scales with the
-    # SOURCE length — a flat 600 s cap killed a 17-minute video at the last
-    # step, after transcription and (for the translate tool) translation had
-    # already run. Budget 3x realtime with the same floor, and a 90 min
-    # ceiling so a pathological input can't pin a worker forever.
     from backend.services.video_utils import probe_duration
     duration = await asyncio.to_thread(probe_duration, video_path, 0.0)
     timeout_s = int(min(max(duration * 3, 600), 5400))
 
+    # Resolve the visual filter before entering the blocking ffmpeg call.
+    filter_flag = "-vf"
+    visual_filter = ""
+    if target_aspect and target_aspect != "source":
+        from backend.services.ffmpeg_service import (
+            ASPECT_DIMS, _probe_dimensions, pick_reframe_method,
+        )
+        target_w, target_h = ASPECT_DIMS[target_aspect]
+        method = reframe_method
+        if method == "auto":
+            src_w, src_h = await _probe_dimensions(video_path)
+            method = pick_reframe_method(src_w, src_h, target_aspect)
+
+        if method == "blur_fill":
+            filter_flag = "-filter_complex"
+            visual_filter = (
+                f"[0:v]split[original][bg];"
+                f"[bg]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,"
+                f"crop={target_w}:{target_h},boxblur=20:5[blurred];"
+                f"[original]scale={target_w}:{target_h}:force_original_aspect_ratio=decrease[scaled];"
+                f"[blurred][scaled]overlay=(W-w)/2:(H-h)/2[framed]"
+            )
+        elif method == "crop":
+            visual_filter = (
+                f"scale={target_w}:{target_h}:force_original_aspect_ratio=increase,"
+                f"crop={target_w}:{target_h}"
+            )
+        else:
+            visual_filter = (
+                f"scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,"
+                f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:black"
+            )
+
     def _burn():
-        # Escape path for FFmpeg filter (colons, backslashes, and quote for paths with spaces)
-        escaped_ass = str(ass_path.resolve()).replace("\\", "/").replace(":", "\\:").replace("'", "'\\''")
+        escaped_ass = (
+            str(ass_path.resolve())
+            .replace("\\", "/")
+            .replace(":", "\\:")
+            .replace("'", "'\\''")
+        )
+        ass_filter = f"ass='{escaped_ass}'"
+        if filter_flag == "-filter_complex":
+            vf = visual_filter + f";[framed]{ass_filter}[vout]"
+            mapping = ["-map", "[vout]", "-map", "0:a?"]
+        else:
+            vf = f"{visual_filter},{ass_filter}" if visual_filter else ass_filter
+            mapping = []
 
         from backend.services.ffmpeg_service import video_encode_args
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", str(video_path),
-            "-vf", f"ass='{escaped_ass}'",
-            "-c:a", "copy",
+        base = [
+            "ffmpeg", "-y", "-i", str(video_path),
+            filter_flag, vf,
+            *mapping,
             *video_encode_args(render_profile),
-            str(output_path),
         ]
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
-        except subprocess.TimeoutExpired:
-            logger.error(
-                "ASS caption burn timed out after %d min on a %.0f min source "
-                "— returning the original video", timeout_s // 60, duration / 60,
-            )
-            return video_path
-        if result.returncode != 0:
-            logger.error(f"ASS caption burn FFmpeg error: {result.stderr[:500]}")
-            return video_path  # Return original on failure
-        logger.info(f"Captions burned successfully: {output_path}")
-        return output_path
+        last_err = ""
+        for audio_args in (["-c:a", "copy"], ["-c:a", "aac", "-b:a", "192k"]):
+            cmd = base + audio_args + ["-movflags", "+faststart", str(output_path)]
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
+            except subprocess.TimeoutExpired:
+                logger.error(
+                    "ASS/final render timed out after %d min on a %.0f min source",
+                    timeout_s // 60, duration / 60,
+                )
+                return video_path
+            if result.returncode == 0 and output_path.exists():
+                logger.info("Captions/final render succeeded: %s", output_path)
+                return output_path
+            last_err = (result.stderr or "")[-500:]
+            output_path.unlink(missing_ok=True)
+
+        logger.error("ASS/final render FFmpeg error: %s", last_err)
+        return video_path
 
     return await asyncio.to_thread(_burn)
