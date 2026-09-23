@@ -1,6 +1,6 @@
 # PROJECT_STATUS.md
 
-## Overall status: PHASE C FULL HQ STACK IMPLEMENTED — FINAL LOCAL QA PENDING
+## Overall status: PHASE C C4–C11 TECHNICAL PASS — C12 IMPLEMENTED / LOCAL QA PENDING — C13 ACCEPTANCE PENDING
 
 Phase A and Phase B are complete and merged to `master`.
 
@@ -76,21 +76,22 @@ GPT-SoVITS can use manual reference audio or automatically extract reference spe
 - Localization Review exposes QC exceptions and the same persisted artifacts.
 - Expert panel can edit translation/timing/voice, regenerate one dubbing chunk, or rerun downstream stages.
 
-### Current gate
-**FINAL LOCAL QA PENDING.**
+### C4–C11 technical gate
+**TECHNICAL PASS** on the clean real-media job at commit `b5e3609`.
 
-Do not start C12 cleanup until the complete C4–C11 stack passes:
-1. focused/full affected tests;
-2. frontend build;
-3. same previously failing 65.7s sample;
-4. real HQ clean-dub runtime;
-5. resume/rerun/QC/expert controls;
-6. user perceptual QA.
+Verified engineering evidence includes real C7 timing success without relaxing profile limits, HQ mix/final render, one final visual encode, QC without failures, source provenance protection, and C11 targeted regeneration isolation. Broader perceptual/multi-sample acceptance remains C13.
 
-### C12
-Intelligence convergence is intentionally AFTER the localization acceptance gate.
+### C12 — Intelligence convergence
+**IMPLEMENTED / LOCAL QA PENDING.**
 
-Reason: `src/radar/intel/*` is a transitional legacy intelligence path and is not the media path that renders Phase-C localized output. Removing it before proven parity creates unrelated regression risk. After Phase-C video acceptance, C12 can remove/converge it with focused regression rather than another full perceptual-video round.
+Candidate Intelligence now routes through canonical application services for:
+- source-best-first media download via `backend.services.ytdlp_service`;
+- canonical faster-whisper via `backend.services.whisper_service`;
+- canonical BYOK/local AI routing via `backend.core.ai_provider`.
+
+The old `src/radar/intel/media.py`, `transcribe.py`, and `ai_analyze.py` are compatibility adapters only. Their duplicate platform downloader, standalone faster-whisper model owner, and direct OpenAI-compatible HTTP client have been removed.
+
+The Radar CLI/report/cache contract remains intact during this transition. DB convergence remains Phase G.
 
 ### C13
 Final acceptance = same regression sample + representative real supported videos supplied by the user, including fast speech, music-heavy and multi-speaker material.
