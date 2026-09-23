@@ -1094,14 +1094,30 @@ async def synthesize_timed_dub(
         raw_paths[chunk.id] = path
         block_paths.append(path)
 
-        # Targeted regeneration must never rewrite a non-target chunk and then
-        # reuse its old raw audio: that would make captions/text diverge from
-        # what the reused audio actually says.
+        ref_key = speaker_id or "__default__"
+        ref = auto_references.get(ref_key) or auto_references.get("__default__") or {}
+        initial_text = chunk_text(plan, chunk)
+        initial_identity = _chunk_synthesis_identity(
+            text=initial_text,
+            runtime=runtime,
+            voice=voice,
+            target_language=target_language,
+            speaker_id=speaker_id,
+            reference_audio=ref.get("audio"),
+            reference_text=ref.get("text"),
+            reference_language=ref.get("language"),
+        )
+
+        # Targeted/resumed reuse is permitted only when the raw artifact's
+        # synthesis identity proves it still matches current speech inputs.
+        # This mirrors SmartSub's input-key invariant instead of trusting a
+        # filename left over from a previous attempt.
         reuse_raw = (
             reuse_existing_chunks
             and chunk.id not in regenerate_chunk_ids
             and path.exists()
             and path.stat().st_size > 0
+            and _chunk_identity_matches(path, initial_identity)
         )
 
         # OpenCreator-style estimator: try a bounded rewrite before spending on
@@ -1127,8 +1143,6 @@ async def synthesize_timed_dub(
             if changed:
                 rewrite_count += 1
 
-        ref_key = speaker_id or "__default__"
-        ref = auto_references.get(ref_key) or auto_references.get("__default__") or {}
         speech_text = chunk_text(plan, chunk)
         synthesis_identity = _chunk_synthesis_identity(
             text=speech_text,
@@ -1140,7 +1154,10 @@ async def synthesize_timed_dub(
             reference_text=ref.get("text"),
             reference_language=ref.get("language"),
         )
-        reuse_raw = reuse_raw and _chunk_identity_matches(path, synthesis_identity)
+        # If a rewrite occurred, reuse_raw was already false. Recomputing the
+        # identity here makes the newly generated artifact authoritative for the
+        # exact post-rewrite speech text.
+        reuse_raw = reuse_raw and synthesis_identity == initial_identity
 
         duration_ms = 0
         if reuse_raw:
