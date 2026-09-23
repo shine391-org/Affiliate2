@@ -584,6 +584,62 @@ async def test_c7_targeted_regeneration_keeps_overlong_non_target_immutable(
 
 
 @pytest.mark.asyncio
+async def test_c7_targeted_non_target_probe_failure_never_resynthesizes(
+    monkeypatch, tmp_path,
+):
+    tx = LocalizationTranscript(segments=[
+        LocalizationSegment(
+            id="s1",
+            speaker_id="A",
+            source_text="one",
+            translated_text="giữ nguyên",
+            source_start_ms=0,
+            source_end_ms=1000,
+            translation_status="success",
+        ),
+        LocalizationSegment(
+            id="s2",
+            speaker_id="B",
+            source_text="two",
+            translated_text="target",
+            source_start_ms=1000,
+            source_end_ms=2000,
+            translation_status="success",
+        ),
+    ])
+    work = tmp_path / "work"
+    work.mkdir()
+    _seed_reusable_chunk(work, 1, "giữ nguyên", "A")
+    _seed_reusable_chunk(work, 2, "target", "B")
+
+    monkeypatch.setattr(ls, "_profile_ai_client", lambda *_: object())
+    monkeypatch.setattr(ls, "_tts_config", lambda *_: _runtime())
+
+    async def fail_duration(path):
+        raise RuntimeError("ffprobe failed")
+
+    async def fail_generate(*args, **kwargs):
+        pytest.fail("non-target chunk must never be resynthesized")
+
+    monkeypatch.setattr(ls, "_audio_duration_ms", fail_duration)
+    monkeypatch.setattr(ls, "_generate_tts_chunk", fail_generate)
+
+    with pytest.raises(RuntimeError, match="could not be reused/measured"):
+        await ls.synthesize_timed_dub(
+            tx,
+            source_media=tmp_path / "source.mp4",
+            target_language="Vietnamese",
+            profile=_profile(),
+            user_settings=object(),
+            work_dir=work,
+            regenerate_chunk_ids={2},
+            reuse_existing_chunks=True,
+        )
+
+    assert (work / "chunk_0001.wav").read_bytes() == b"old"
+
+
+@pytest.mark.asyncio
 async def test_c7_natural_rate_chunks_skip_audio_fit_ffmpeg(monkeypatch, tmp_path):
     tx = LocalizationTranscript(segments=[
         LocalizationSegment(
