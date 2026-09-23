@@ -403,6 +403,15 @@ async def test_c7_over_max_after_rewrite_fails_without_retime(monkeypatch, tmp_p
         return False
 
     monkeypatch.setattr(ls, "_adapt_chunk_items", no_change)
+    # This case is specifically about an overlong chunk with no retime room.
+    # The shared helper exposes a 2s source timeline, which now legitimately
+    # lets a normal final chunk borrow trailing silence. Pin the canonical
+    # source end to the cue end so the test keeps exercising overflow rather
+    # than the newer trailing-silence behavior.
+    monkeypatch.setattr(
+        "backend.services.video_utils.probe_duration",
+        lambda *a, **k: 0.5,
+    )
     with pytest.raises(ls.LocalizationTimingError) as exc:
         await ls.synthesize_timed_dub(
             tx,
