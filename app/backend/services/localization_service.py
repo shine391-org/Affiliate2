@@ -728,6 +728,7 @@ async def _adapt_chunk_items(
     profile: LocalizationProfile,
     issues: list[dict] | None = None,
     state: dict | None = None,
+    setup_error: Exception | None = None,
 ) -> bool:
     items = []
     for idx in chunk.item_indexes:
@@ -756,12 +757,7 @@ ITEMS:
     if profile.translation_instructions:
         prompt += f"\nStyle: {profile.translation_instructions[:1200]}"
 
-    try:
-        raw = await ai.chat(
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=1000,
-        )
-    except Exception as exc:
+    def record_unavailable(exc: Exception) -> bool:
         logger.warning(
             "Dubbing rewrite unavailable for chunk %s: %s",
             chunk.id,
@@ -779,30 +775,47 @@ ITEMS:
             })
         return False
 
-    try:
-        payload = json.loads(_strip_json_fence(raw))
-    except Exception:
+    def record_invalid(detail: str) -> bool:
         if issues is not None:
             issues.append({
                 "chunk_id": chunk.id,
                 "reason": "rewrite_invalid_response",
+                "detail": detail,
                 "segment_ids": [plan[i].segment_id for i in chunk.item_indexes],
             })
         return False
+
+    if ai is None:
+        return record_unavailable(
+            setup_error or RuntimeError("Duration rewrite AI client is unavailable")
+        )
+
+    try:
+        raw = await ai.chat(
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=1000,
+        )
+    except Exception as exc:
+        return record_unavailable(exc)
+
+    try:
+        payload = json.loads(_strip_json_fence(raw))
+    except Exception:
+        return record_invalid("json_parse")
     if not isinstance(payload, list) or len(payload) != len(items):
-        return False
+        return record_invalid("shape_or_length")
     mapped: dict[str, str] = {}
     for item in payload:
         if not isinstance(item, dict):
-            return False
+            return record_invalid("item_not_object")
         seg_id = str(item.get("id") or "")
         text = str(item.get("text") or "").strip()
         if not seg_id or not text or seg_id in mapped:
-            return False
+            return record_invalid("invalid_or_duplicate_item")
         mapped[seg_id] = text
     expected = [x["id"] for x in items]
     if set(mapped) != set(expected):
-        return False
+        return record_invalid("id_mismatch")
 
     changed = False
     for idx in chunk.item_indexes:
@@ -896,7 +909,16 @@ async def synthesize_timed_dub(
     """C7 donor-derived chunk planner with measured TTS and bounded retiming."""
     work_dir.mkdir(parents=True, exist_ok=True)
     out = transcript.model_copy(deep=True)
-    ai = _profile_ai_client(user_settings, profile)
+    rewrite_ai_error: Exception | None = None
+    try:
+        ai = _profile_ai_client(user_settings, profile)
+    except Exception as exc:
+        # C7 rewrite is a quality optimization, not a hard dependency. A
+        # persisted translation can still be synthesized/measured/fitted even
+        # if its original AI provider is temporarily unavailable at resume.
+        ai = None
+        rewrite_ai_error = exc
+        logger.warning("Duration rewrite AI client unavailable: %s", exc)
     runtime = _tts_config(user_settings, profile, target_language)
 
     valid_segments = [
@@ -962,19 +984,32 @@ async def synthesize_timed_dub(
         raw_paths[chunk.id] = path
         block_paths.append(path)
 
+        # Targeted regeneration must never rewrite a non-target chunk and then
+        # reuse its old raw audio: that would make captions/text diverge from
+        # what the reused audio actually says.
+        reuse_raw = (
+            reuse_existing_chunks
+            and chunk.id not in regenerate_chunk_ids
+            and path.exists()
+            and path.stat().st_size > 0
+        )
+
         # OpenCreator-style estimator: try a bounded rewrite before spending on
-        # a clearly impossible TTS request.
+        # a clearly impossible TTS request. Reused raw chunks already match the
+        # durable translation snapshot from their prior successful run.
         estimated = sum(plan[i].estimated_duration_ms for i in chunk.item_indexes)
         attempts = 0
         rewrite_state: dict = {}
         if (
-            estimated > chunk.available_ms * config.speed_max
+            not reuse_raw
+            and estimated > chunk.available_ms * config.speed_max
             and attempts < config.rewrite_max_attempts
         ):
             changed = await _adapt_chunk_items(
                 ai, plan=plan, chunk=chunk, segment_by_id=segment_by_id,
                 target_language=target_language, target_ms=chunk.available_ms,
                 profile=profile, issues=issues, state=rewrite_state,
+                setup_error=rewrite_ai_error,
             )
             attempts += 1
             if rewrite_state.get("unavailable"):
@@ -984,27 +1019,21 @@ async def synthesize_timed_dub(
 
         ref_key = speaker_id or "__default__"
         ref = auto_references.get(ref_key) or auto_references.get("__default__") or {}
-        if (
-            reuse_existing_chunks
-            and chunk.id not in regenerate_chunk_ids
-            and path.exists()
-            and path.stat().st_size > 0
-        ):
-            duration_ms = await _audio_duration_ms(path)
-            if duration_ms <= 0:
-                duration_ms = await _generate_tts_chunk(
-                    chunk_text(plan, chunk),
-                    runtime=runtime,
-                    voice=voice,
-                    profile=profile,
-                    speaker_id=speaker_id,
-                    target_language=target_language,
-                    output_path=path,
-                    reference_audio=ref.get("audio"),
-                    reference_text=ref.get("text"),
-                    reference_language=ref.get("language"),
+        duration_ms = 0
+        if reuse_raw:
+            try:
+                duration_ms = await _audio_duration_ms(path)
+            except Exception as exc:
+                logger.warning(
+                    "Could not reuse dubbing chunk %s; regenerating: %s",
+                    chunk.id,
+                    exc,
                 )
-        else:
+                reuse_raw = False
+            if duration_ms <= 0:
+                reuse_raw = False
+
+        if not reuse_raw:
             duration_ms = await _generate_tts_chunk(
                 chunk_text(plan, chunk),
                 runtime=runtime,
@@ -1019,13 +1048,15 @@ async def synthesize_timed_dub(
             )
 
         while (
-            required_speed(duration_ms, chunk.available_ms) > config.speed_max
+            not reuse_raw
+            and required_speed(duration_ms, chunk.available_ms) > config.speed_max
             and attempts < config.rewrite_max_attempts
         ):
             changed = await _adapt_chunk_items(
                 ai, plan=plan, chunk=chunk, segment_by_id=segment_by_id,
                 target_language=target_language, target_ms=chunk.available_ms,
                 profile=profile, issues=issues, state=rewrite_state,
+                setup_error=rewrite_ai_error,
             )
             attempts += 1
             if rewrite_state.get("unavailable"):
