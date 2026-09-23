@@ -20,10 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from radar.intel.ai_analyze import _extract_json
-from radar.intel.media import (
-    _PLAYINFO_RE, _best_bandwidth_stream, _load_douyin_jsonl_records,
-    candidate_dir, fetch_media,
-)
+from radar.intel.media import candidate_dir, fetch_media
 from radar.intel.report import _risk_badge, build_report
 from radar.intel.pipeline import run_intelligence
 
@@ -57,52 +54,14 @@ def test_extract_json_invalid():
 
 
 # ---------------------------------------------------------------------------
-# media: playinfo regex
+# media: canonical app bridge
 # ---------------------------------------------------------------------------
 
-def test_playinfo_regex():
-    html = '<script>window.__playinfo__={"data":{"dash":{"video":[]}}}</script>'
-    m = _PLAYINFO_RE.search(html)
-    assert m is not None
-    d = json.loads(m.group(1))
-    assert "dash" in d["data"]
 
-
-def test_playinfo_regex_none():
-    html = '<script>window.__other__={}</script>'
-    assert _PLAYINFO_RE.search(html) is None
-
-
-
-
-
-def test_bilibili_dash_prefers_highest_bandwidth():
-    streams = [
-        {"baseUrl": "low", "bandwidth": 500_000, "id": 64},
-        {"baseUrl": "high", "bandwidth": 5_000_000, "id": 80},
-        {"baseUrl": "mid", "bandwidth": 2_000_000, "id": 74},
-    ]
-    best = _best_bandwidth_stream(streams)
-    assert best["baseUrl"] == "high"
-    assert best["id"] == 80
-
-
-def test_bilibili_dash_ignores_unusable_entries():
-    assert _best_bandwidth_stream([{"bandwidth": 9_000_000}, None, {}]) is None
-
-
-# ---------------------------------------------------------------------------
-# media: douyin JSONL loader
-# ---------------------------------------------------------------------------
-
-def test_load_douyin_jsonl():
-    records = _load_douyin_jsonl_records()
-    # Real JSONL exists in repo with >= 40 records (Phase 2.1+ data)
-    if records:
-        # every record has aweme_id key
-        assert all(isinstance(k, str) for k in records)
-    # If no files exist, loader returns empty dict without crash
-    assert isinstance(records, dict)
+def test_unknown_platform_fails_without_network():
+    result = fetch_media("unknownplat", "12345", "https://example.com")
+    assert result["status"] == "MEDIA_UNAVAILABLE"
+    assert "unsupported Radar platform" in result["meta"]["reason"]
 
 
 # ---------------------------------------------------------------------------
@@ -128,16 +87,6 @@ def test_no_redownload(tmp_path=None):
     assert result["status"] == "ALREADY_EXISTS"
     assert result["path"] == source
     assert source.stat().st_size == size_before
-
-
-# ---------------------------------------------------------------------------
-# media: unavailable platform does not crash
-# ---------------------------------------------------------------------------
-
-def test_unknown_platform():
-    result = fetch_media("tiktok", "12345", "https://example.com")
-    assert result["status"] == "MEDIA_UNAVAILABLE"
-    assert "reason" in result["meta"]
 
 
 # ---------------------------------------------------------------------------
@@ -260,11 +209,8 @@ if __name__ == "__main__":
         test_extract_json_fenced,
         test_extract_json_with_prose,
         test_extract_json_invalid,
-        test_playinfo_regex,
-        test_playinfo_regex_none,
-        test_load_douyin_jsonl,
+        test_unknown_platform_fails_without_network,
         test_no_redownload,
-        test_unknown_platform,
         test_cache_hit,
         test_risk_badge,
         test_risk_badge_empty,
