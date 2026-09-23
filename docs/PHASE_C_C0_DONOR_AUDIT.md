@@ -181,6 +181,88 @@ For each capability:
 
 No Ponytail/YAGNI gate is used in Phase C.
 
+## 2026-09-23 donor fidelity re-audit
+
+The C7 implementation is a **hybrid adaptation**, not a verbatim clone of one
+donor engine. Future reviews must compare invariants, not assume that a donor
+name in a comment means the donor's failure semantics were preserved.
+
+Current donor snapshots reviewed:
+
+- OpenCreator `master` at `422d9db`
+- VideoLingo `main` at `11048cc`
+- SmartSub `main` at `6120a4d`
+- YouDub-webui current `main`
+
+### OpenCreator invariants actually worth preserving
+
+OpenCreator's current Smart Dubbing runtime:
+
+- makes the LLM optimizer optional;
+- ignores optimizer failure and keeps the original spoken text;
+- synthesizes one natural-rate raw file per planned chunk;
+- measures the generated chunk duration before fitting;
+- retries TTS without treating a stale output file as success;
+- writes plan/report artifacts after fitting.
+
+Important divergence: OpenCreator currently treats `SpeedMax` as a warning
+threshold and can apply a larger measured speed factor. Affiliate2 intentionally
+does **not** copy that quality policy: it keeps a hard quality ceiling and uses
+bounded rewrite/retime/failure handling instead.
+
+Therefore Affiliate2's post-measure rewrite loop, hard speed ceiling and bounded
+video retime are Affiliate2 integration logic and need their own tests.
+
+### SmartSub invariants needed for safe resume/regeneration
+
+SmartSub 3.x does not reuse speech audio just because a WAV exists. It computes a
+synthesis identity from inputs such as engine/rules, voice, text, language and
+speaker settings. A changed identity marks the artifact stale.
+
+It also synthesizes into a new attempt artifact and only makes that artifact
+authoritative after synthesis/alignment succeeds. A failed regeneration keeps the
+previous good artifact available.
+
+Affiliate2 now mirrors these invariants for C7 raw chunks:
+
+- raw chunk reuse requires a synthesis-identity sidecar;
+- stale/missing identity forces regeneration;
+- TTS regeneration writes a pending WAV then atomically replaces the canonical
+  chunk only after generation and duration probing succeed;
+- normal C7 resume may reuse validated completed chunks;
+- an overlong reused chunk may still enter rewrite/regeneration rather than
+  becoming permanently locked by cache state.
+
+### VideoLingo / YouDub invariants
+
+VideoLingo treats duration estimation as advisory and has fallback behavior when
+AI shortening fails; measured audio/timeline logic remains authoritative.
+
+YouDub uses explicit downstream stage-artifact invalidation and publishes Demucs
+outputs through pending files before replacing canonical artifacts. Affiliate2's
+stage manifest should preserve the same principle: a stage is complete only when
+all artifacts required by downstream/expert paths exist.
+
+### Affiliate2-specific glue that donors do not validate for us
+
+These behaviors are not covered simply by saying "ported from donor" and require
+Affiliate2 regression + real-media QA:
+
+- multi-item JSON duration rewrite with stable segment IDs;
+- local OpenAI-compatible timeout/degradation semantics;
+- hard speaker/voice chunk boundaries;
+- hard speech-speed ceiling;
+- bounded whole-video retime;
+- persistence of duration-rewritten translation text;
+- targeted chunk regeneration across the shared C6/C7/C11 state;
+- synthesis identity compatibility across resume;
+- QC promotion of degraded rewrite behavior to NEEDS_REVIEW.
+
+This distinction explains the earlier timeout bug: OpenCreator's planner swallows
+optimizer failure by design, while the first Affiliate2 adaptation called the
+shared AI client directly and allowed its timeout exception to escape the C7
+stage.
+
 ## Current rework decision
 
 - C1–C3: **KEEP**
