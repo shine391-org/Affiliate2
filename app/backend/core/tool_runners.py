@@ -1129,6 +1129,9 @@ async def run_tool_translate(
                 )
                 run.start("dubbing")
                 try:
+                    regenerate_chunk_ids = {
+                        int(x) for x in (run.request.get("regenerate_chunk_ids") or [])
+                    }
                     dub = await synthesize_timed_dub(
                         localized,
                         source_media=source_path,
@@ -1137,6 +1140,8 @@ async def run_tool_translate(
                         user_settings=user_settings,
                         work_dir=run.stage_dir("dubbing"),
                         fail_on_overflow=True,
+                        regenerate_chunk_ids=regenerate_chunk_ids,
+                        reuse_existing_chunks=bool(regenerate_chunk_ids),
                     )
                     localized = dub.transcript
                     dub_track = dub.dub_track
@@ -1172,6 +1177,11 @@ async def run_tool_translate(
                             "rewrite_count": dubbing_rewrite_count,
                         },
                     )
+                    if regenerate_chunk_ids:
+                        run.update_request({
+                            **run.request,
+                            "regenerate_chunk_ids": [],
+                        })
                 except Exception as exc:
                     run.fail("dubbing", exc)
                     raise

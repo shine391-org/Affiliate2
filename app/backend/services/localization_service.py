@@ -637,6 +637,8 @@ async def synthesize_timed_dub(
     user_settings,
     work_dir: Path,
     fail_on_overflow: bool = True,
+    regenerate_chunk_ids: set[int] | None = None,
+    reuse_existing_chunks: bool = False,
 ) -> TimedDubResult:
     """C7 donor-derived chunk planner with measured TTS and bounded retiming."""
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -685,6 +687,7 @@ async def synthesize_timed_dub(
 
     raw_paths: dict[int, Path] = {}
     block_paths: list[Path] = []
+    regenerate_chunk_ids = set(regenerate_chunk_ids or set())
     issues: list[dict] = []
     rewrite_count = 0
 
@@ -713,15 +716,33 @@ async def synthesize_timed_dub(
             if changed:
                 rewrite_count += 1
 
-        duration_ms = await _generate_tts_chunk(
-            chunk_text(plan, chunk),
-            runtime=runtime,
-            voice=voice,
-            profile=profile,
-            speaker_id=speaker_id,
-            target_language=target_language,
-            output_path=path,
-        )
+        if (
+            reuse_existing_chunks
+            and chunk.id not in regenerate_chunk_ids
+            and path.exists()
+            and path.stat().st_size > 0
+        ):
+            duration_ms = await _audio_duration_ms(path)
+            if duration_ms <= 0:
+                duration_ms = await _generate_tts_chunk(
+                    chunk_text(plan, chunk),
+                    runtime=runtime,
+                    voice=voice,
+                    profile=profile,
+                    speaker_id=speaker_id,
+                    target_language=target_language,
+                    output_path=path,
+                )
+        else:
+            duration_ms = await _generate_tts_chunk(
+                chunk_text(plan, chunk),
+                runtime=runtime,
+                voice=voice,
+                profile=profile,
+                speaker_id=speaker_id,
+                target_language=target_language,
+                output_path=path,
+            )
 
         while (
             required_speed(duration_ms, chunk.available_ms) > config.speed_max
