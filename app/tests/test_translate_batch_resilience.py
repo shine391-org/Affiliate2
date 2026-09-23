@@ -805,3 +805,207 @@ async def test_adapt_chunk_timeout_is_best_effort_and_records_issue():
     assert state["unavailable"] is True
     assert issues[0]["reason"] == "rewrite_ai_unavailable"
     assert issues[0]["error_type"] == "TimeoutError"
+
+@pytest.mark.asyncio
+async def test_c7_rewrite_client_setup_failure_is_non_fatal(monkeypatch, tmp_path):
+    tx = LocalizationTranscript(segments=[
+        LocalizationSegment(
+            id="s1",
+            source_text="source",
+            translated_text=(
+                "Đây là một câu tiếng Việt cố ý rất dài để kích hoạt bước "
+                "rút gọn trước khi tổng hợp giọng nói."
+            ),
+            source_start_ms=0,
+            source_end_ms=500,
+            translation_status="success",
+        )
+    ])
+
+    def fail_ai(*args, **kwargs):
+        raise ValueError("saved rewrite provider is temporarily unavailable")
+
+    monkeypatch.setattr(ls, "_profile_ai_client", fail_ai)
+    monkeypatch.setattr(ls, "_tts_config", lambda *_: _runtime())
+
+    async def fake_generate(text, *, output_path, **kwargs):
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"raw")
+        return 450
+
+    def fake_fit(source, destination, speed_factor):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b"fit")
+        return destination
+
+    def fake_compose(chunks, *, total_duration_ms, output_path):
+        output_path.write_bytes(b"wav")
+        return output_path
+
+    monkeypatch.setattr(ls, "_generate_tts_chunk", fake_generate)
+    monkeypatch.setattr(ls, "_fit_chunk_audio_sync", fake_fit)
+    monkeypatch.setattr(ls, "_compose_chunk_track_sync", fake_compose)
+    monkeypatch.setattr(
+        "backend.services.video_utils.probe_duration",
+        lambda *a, **k: 1.0,
+    )
+
+    result = await ls.synthesize_timed_dub(
+        tx,
+        source_media=tmp_path / "source.mp4",
+        target_language="Vietnamese",
+        profile=_profile(
+            dub_rewrite_attempts=2,
+            dub_speed_max=1.30,
+            video_retime_mode="fallback",
+        ),
+        user_settings=object(),
+        work_dir=tmp_path / "work",
+    )
+
+    assert result.chunk_count == 1
+    issue = next(
+        item for item in result.issues
+        if item["reason"] == "rewrite_ai_unavailable"
+    )
+    assert issue["error_type"] == "ValueError"
+    assert result.transcript.segments[0].target_start_ms is not None
+
+
+@pytest.mark.asyncio
+async def test_c7_targeted_regeneration_never_rewrites_reused_chunk(
+    monkeypatch, tmp_path,
+):
+    tx = LocalizationTranscript(segments=[
+        LocalizationSegment(
+            id="s1",
+            speaker_id="A",
+            source_text="one",
+            translated_text=(
+                "đây là câu rất dài dùng để buộc estimator muốn rewrite "
+                "nhưng chunk này phải được reuse nguyên trạng"
+            ),
+            source_start_ms=0,
+            source_end_ms=500,
+            translation_status="success",
+        ),
+        LocalizationSegment(
+            id="s2",
+            speaker_id="B",
+            source_text="two",
+            translated_text=(
+                "đây cũng là câu dài để chunk mục tiêu được phép rewrite "
+                "trước khi regenerate"
+            ),
+            source_start_ms=1000,
+            source_end_ms=1500,
+            translation_status="success",
+        ),
+    ])
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / "chunk_0001.wav").write_bytes(b"old1")
+    (work / "chunk_0002.wav").write_bytes(b"old2")
+
+    monkeypatch.setattr(ls, "_profile_ai_client", lambda *_: object())
+    monkeypatch.setattr(ls, "_tts_config", lambda *_: _runtime())
+
+    async def fake_duration(path):
+        return 400
+
+    generated = []
+    async def fake_generate(text, *, output_path, **kwargs):
+        generated.append(output_path.name)
+        output_path.write_bytes(b"new")
+        return 400
+
+    adapted = []
+    async def fake_adapt(ai, *, plan, chunk, segment_by_id, **kwargs):
+        adapted.append(chunk.id)
+        for idx in chunk.item_indexes:
+            plan[idx].spoken_text = "ngắn"
+            plan[idx].estimated_duration_ms = 300
+            segment_by_id[plan[idx].segment_id].translated_text = "ngắn"
+        return True
+
+    def fake_fit(source, destination, speed_factor):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b"fit")
+        return destination
+
+    def fake_compose(chunks, *, total_duration_ms, output_path):
+        output_path.write_bytes(b"wav")
+        return output_path
+
+    monkeypatch.setattr(ls, "_audio_duration_ms", fake_duration)
+    monkeypatch.setattr(ls, "_generate_tts_chunk", fake_generate)
+    monkeypatch.setattr(ls, "_adapt_chunk_items", fake_adapt)
+    monkeypatch.setattr(ls, "_fit_chunk_audio_sync", fake_fit)
+    monkeypatch.setattr(ls, "_compose_chunk_track_sync", fake_compose)
+    monkeypatch.setattr(
+        "backend.services.video_utils.probe_duration",
+        lambda *a, **k: 2.0,
+    )
+
+    result = await ls.synthesize_timed_dub(
+        tx,
+        source_media=tmp_path / "source.mp4",
+        target_language="Vietnamese",
+        profile=_profile(dub_rewrite_attempts=2, dub_speed_max=1.30),
+        user_settings=object(),
+        work_dir=work,
+        regenerate_chunk_ids={2},
+        reuse_existing_chunks=True,
+    )
+
+    assert adapted == [2]
+    assert generated == ["chunk_0002.wav"]
+    assert result.transcript.segments[0].translated_text.startswith("đây là câu rất dài")
+    assert result.transcript.segments[1].translated_text == "ngắn"
+
+
+@pytest.mark.asyncio
+async def test_adapt_chunk_invalid_shape_records_qc_warning():
+    from backend.services.dubbing_planner import DubbingCue, DubbingConfig, build_plan
+
+    tx = LocalizationTranscript(segments=[
+        LocalizationSegment(
+            id="s1",
+            source_text="source",
+            translated_text="bản dịch",
+            source_start_ms=0,
+            source_end_ms=1000,
+            translation_status="success",
+        )
+    ])
+    plan, chunks = build_plan(
+        [DubbingCue(
+            index=1,
+            segment_id="s1",
+            start_ms=0,
+            end_ms=1000,
+            text="bản dịch",
+        )],
+        DubbingConfig(),
+        language="Vietnamese",
+    )
+
+    class BadShapeAI:
+        async def chat(self, *args, **kwargs):
+            return "[]"
+
+    issues = []
+    changed = await ls._adapt_chunk_items(
+        BadShapeAI(),
+        plan=plan,
+        chunk=chunks[0],
+        segment_by_id={"s1": tx.segments[0]},
+        target_language="Vietnamese",
+        target_ms=1000,
+        profile=_profile(),
+        issues=issues,
+    )
+    assert changed is False
+    assert issues[0]["reason"] == "rewrite_invalid_response"
+    assert issues[0]["detail"] == "shape_or_length"
+
