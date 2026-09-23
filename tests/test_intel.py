@@ -2,13 +2,10 @@
 test_intel.py — Tests for Candidate Intelligence (Phase 3.1)
 
 Tests:
-- media: douyin URL lookup from JSONL
-- media: bilibili playinfo parsing
-- media: no re-download when source.mp4 exists
-- transcribe: JSON structure (uses tiny model or mock)
-- ai_analyze: JSON extraction from fenced/raw model replies
-- ai_analyze: cache hit without model call
-- pipeline: MEDIA_UNAVAILABLE does not block batch
+- legacy CLI bridge delegates media/ASR/AI ownership to canonical app services
+- media: no re-download when a candidate source already exists
+- AI analysis: JSON extraction + cache behavior
+- pipeline: MEDIA_UNAVAILABLE stays isolated per candidate
 - report: shortlist table renders
 """
 from __future__ import annotations
