@@ -1087,10 +1087,12 @@ async def synthesize_timed_dub(
                 if override.get("voice_id") is not None else None,
         ))
     plan, chunks = build_plan(cues, config, language=target_language)
+    segment_by_id = {seg.id: seg for seg in out.segments}
 
     # Probe once up front so the planner can use real trailing source silence
-    # for the final chunk. The same measured duration is reused later when the
-    # complete dub track is composed, avoiding an extra ffprobe subprocess.
+    # for an ordinary final chunk. An explicit expert timing override is a hard
+    # user boundary, so never extend that final chunk beyond its requested end.
+    # The same measured duration is reused later when composing the dub track.
     from backend.services.video_utils import probe_duration
     source_duration_s = await asyncio.to_thread(probe_duration, source_media, 0.0)
     source_duration_ms = (
@@ -1098,12 +1100,20 @@ async def synthesize_timed_dub(
         if source_duration_s > 0
         else None
     )
+    final_chunk_has_timing_override = bool(chunks) and any(
+        any(
+            key in (segment_by_id[plan[idx].segment_id].overrides or {})
+            for key in ("target_start_ms", "target_end_ms")
+        )
+        for idx in chunks[-1].item_indexes
+    )
     chunks = borrow_following_silence(
         chunks,
         max_borrow_ms=min(profile.dub_gap_tolerance_ms, 1500),
-        timeline_end_ms=source_duration_ms,
+        timeline_end_ms=(
+            None if final_chunk_has_timing_override else source_duration_ms
+        ),
     )
-    segment_by_id = {seg.id: seg for seg in out.segments}
 
     auto_references: dict[str, dict] = {}
     provider_value = getattr(runtime.provider, "value", str(runtime.provider))

@@ -303,6 +303,35 @@ async def test_c7_speaker_change_forces_chunk_boundary(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_c7_last_chunk_borrows_trailing_silence_without_timing_override(
+    monkeypatch, tmp_path,
+):
+    tx = LocalizationTranscript(segments=[
+        LocalizationSegment(
+            id="s1",
+            source_text="one",
+            translated_text="một",
+            source_start_ms=0,
+            source_end_ms=500,
+            translation_status="success",
+        )
+    ])
+    _patch_dub_io(monkeypatch, tmp_path, [800])
+    result = await ls.synthesize_timed_dub(
+        tx,
+        source_media=tmp_path / "source.mp4",
+        target_language="Vietnamese",
+        profile=_profile(),
+        user_settings=object(),
+        work_dir=tmp_path / "work",
+    )
+    # _patch_dub_io reports a 2s canonical source. The final chunk can borrow
+    # the 1.5s trailing silence because no expert timing boundary exists.
+    assert result.chunks[0].end_ms == 2000
+    assert result.chunks[0].available_ms == 2000
+
+
+@pytest.mark.asyncio
 async def test_c7_expert_voice_and_timing_override_reaches_planner(monkeypatch, tmp_path):
     tx = LocalizationTranscript(segments=[
         LocalizationSegment(
