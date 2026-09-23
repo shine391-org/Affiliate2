@@ -2,249 +2,347 @@
 
 ## Status
 
-**STARTED — DONOR-DERIVED C4R/C6R/C7R/C8R IMPLEMENTED / QA PENDING**
+**C1–C3 QA PASS. C4R–C11 IMPLEMENTED. FINAL LOCAL / REAL-MEDIA QA PENDING.**
 
 Branch:
 `phase-c-media-ai-hq-localization`
 
-C1–C4 passed local QA previously. C5–C8 then reached real-media QA, where the first real sample exposed a systematic C7 failure: 15/21 timed speech units overflowed and most Vietnamese dubbing was absent.
-
-That failure froze C9+ and triggered the donor-first realignment documented in:
-`docs/PHASE_C_C0_DONOR_AUDIT.md`.
+The first real C5–C8 checkpoint exposed a systematic C7 failure (15/21 timing overflows and mostly missing Vietnamese dub). Phase C was therefore rebuilt donor-first instead of continuing the prototype.
 
 ## Product goal
 
 Radar candidate
-→ best source
-→ canonical ASR/word timing
+→ best eligible source
+→ clean vocal/background artifacts
+→ ASR
+→ forced word alignment
+→ optional speaker diarization
 → semantic source cues
 → contextual translation
-→ display-caption cues
-→ dubbing chunks
-→ measured TTS
-→ fitted target timeline
+→ display cues
+→ speaker-aware dubbing chunks
+→ natural-rate TTS
+→ measured audio duration
+→ rewrite / silence borrowing / post-TTS fit
+→ bounded video retime only if still needed
 → clean background mix
-→ minimum-loss final render
-→ QC
-→ review-ready output
+→ one final visual encode
+→ automatic QC
+→ review / targeted rerun
+→ publish-ready output or explicit exception
 
-The happy path must not require manual transcript, translation, timing or FFmpeg work.
+Automation is the normal path. Expert mode edits the SAME persisted pipeline state; it is not a second editor engine.
 
-## Phase map after donor review
+## Donor policy
 
-### C0R — Donor realignment — COMPLETE ✅
+For quality-critical behavior:
+1. reuse;
+2. wrap;
+3. adapt;
+4. build Affiliate2-specific glue only when no donor behavior fits.
 
-Policy:
-- reuse/wrap/adapt mature donor behavior;
-- build only Affiliate2-specific glue/domain behavior;
-- Apache/MIT donor code/tests may be ported with proper notice;
-- GPL donor remains reference unless licensing is explicitly approved.
+Apache/MIT donor behavior may be ported/adapted with attribution.
+GPL code remains reference-only unless licensing changes.
 
 Canonical donors:
-- VideoLingo: semantic segmentation + translation structure + display/audio split
-- SmartSub: word-aware segmentation validation + alignment/review + provider breadth
-- OpenCreator: dubbing planner/chunks/fit/audio
-- YouDub: clean audio separation/mix + stage/cache/resume
-- pyVideoTrans: GPL timing/diarization/reference only
+- VideoLingo: WhisperX alignment, semantic/display/dubbing separation, reference-audio TTS workflow
+- SmartSub: word/cue validation, speaker overlap assignment, provider registry / exception behavior
+- OpenCreator: Smart Dubbing planner, chunk synthesis, measured timeline fitting, audio assembly
+- YouDub: Demucs clean separation and durable stage/cache semantics
+- pyVideoTrans: timing/retiming reference only
 
-### C1 — Media quality foundation — QA PASS ✅
+## C1 — Media Quality Foundation — QA PASS ✅
 
-**Direct video-quality value.**
+Direct video-quality controls:
+- source-best-first download
+- explicit quality caps
+- real ffprobe metadata
+- Draft / Balanced / HQ encode profiles
+- HQ CRF 18
+- audio-only stages do not re-encode picture
+- reframe + optional retime + captions share one final lossy visual encode
 
-Keep:
-- source-best-first downloader;
-- explicit quality caps;
-- actual ffprobe source/final evidence;
-- Draft/Balanced/HQ render profiles;
-- minimum-loss final visual encode.
+## C2 — AI Provider + Local AI — QA PASS ✅
 
-### C2 — AI provider + local AI — QA PASS ✅
+Provider/model control plane:
+- Anthropic
+- OpenAI
+- OpenRouter
+- Ollama
+- LM Studio
+- vLLM
+- custom OpenAI-compatible
+- free model IDs
+- editable Base URL
+- model discovery / connection test
+- credential isolation
 
-**Indirect quality value: model freedom.**
+## C3 — Localization Profiles — QA PASS ✅ / EXTENDED
 
-Keep:
-- OpenAI / Anthropic / OpenRouter;
-- Ollama / LM Studio / vLLM / custom compatible;
-- Base URL;
-- free-form model ID;
-- discovery/test connection;
-- credential isolation.
+Profiles persist the quality contract:
+- ASR quality/model
+- WhisperX alignment mode
+- diarization mode / speaker count
+- semantic segmentation policy
+- translation model/preset/instructions/glossary
+- TTS provider/model/default voice
+- speaker voice map
+- manual or automatic speaker reference audio
+- smart-dubbing chunk/speed/rewrite policy
+- clean-dub audio policy
+- bounded video retime policy
+- caption/aspect/render/QC policy
 
-C2 is control-plane plumbing, not the translation engine itself.
+Default profile: `vi-affiliate-hq`.
 
-### C3 — Localization Profiles — QA PASS ✅
+## C4R — Canonical Localization State — IMPLEMENTED
 
-**Indirect quality/reproducibility value.**
+The pipeline distinguishes:
+1. source word timestamps
+2. semantic source cues
+3. translated/display cues
+4. speaker identity
+5. expert overrides
+6. dubbing PlanItems
+7. dubbing Chunks
+8. measured raw/fitted TTS artifacts
+9. resolved target timeline
 
-Keep profile persistence and validation.
+One raw Whisper segment is NOT automatically one translation line, caption line or TTS request.
 
-Revise profile fields during C4R/C8R to include explicit donor-derived policy such as:
-- segmentation policy;
-- dubbing planner policy;
-- clean_dub vs fast_duck audio mode;
-- ASR/translation/TTS/render/QC choices.
+## C5 — HQ ASR + Alignment + Speakers — IMPLEMENTED
 
-### C4R — Canonical localization representations — IMPLEMENTED / QA PENDING
+Normal transcription:
+- faster-whisper
+- requested model/quality reaches runtime
+- word timestamps retained
 
-Do not treat one `LocalizationSegment` granularity as every downstream unit.
+HQ alignment:
+- WhisperX forced alignment, following VideoLingo's proven pattern
+- uses separated vocal audio on full HQ clean-dub jobs
 
-Required conceptual representations:
+Multi-speaker:
+- optional WhisperX/pyannote diarization
+- Hugging Face gated-model token via encrypted Settings or .env
+- SmartSub-style overlap-duration speaker assignment
+- stable `speaker_id` propagated downstream
+- dubbing chunks cannot silently cross known speaker boundaries
 
-1. **Source words** — word text + source timestamps
-2. **Semantic source cues** — language/meaning units used for translation
-3. **Display cues** — subtitle-readable units
-4. **Dubbing chunks** — longer audio synthesis/fitting units
-5. **Dubbing plan items** — mapping from source/display items to fitted target timing
+## C6R — Semantic Segmentation + Translation — IMPLEMENTED
 
-These do not require separate databases. They may be job artifacts/data models.
-
-### C5 — ASR convergence — KEEP / QA RECHECK WITH REWORK
-
-Current fixes remain valuable:
-- requested quality/model reaches actual faster-whisper model;
-- Analyzer does not hardcode balanced;
-- word timestamps preserved.
-
-Do not add WhisperX automatically. Re-evaluate on semantic segmentation/multi-speaker samples after donor-derived C6/C7 is in place.
-
-### C6R — Semantic segmentation + translation — IMPLEMENTED / QA PENDING
-
-Port/adapt VideoLingo + SmartSub behavior.
-
-Implemented flow:
-
-source words / ASR cues
+Flow:
+source words
 → deterministic word-time normalization
-→ split overly long source cues from real word timestamps
-→ merge tiny dependent cues
-→ optional AI grouping of stable cue IDs only
-→ validate every cue ID exactly once and in order
-→ fallback to deterministic cues on invalid AI response
-→ contextual translation with glossary/preset/custom instructions
-→ stable-ID translation validation
-→ display cues remain independent from dubbing chunks
+→ split long raw ASR units using real word timestamps
+→ merge tiny dependent fragments
+→ AI semantic grouping of stable word/cue IDs only
+→ exact ID/order/coverage validation
+→ deterministic fallback on bad model output
+→ contextual translation with full context + glossary + style/profile
+→ stable-ID structured validation
+→ display cue state
 
-Important:
-- raw Whisper segments are not canonical translation/dubbing units;
-- display subtitle granularity may differ from audio dubbing granularity;
-- strict QC forbids silent source-language passthrough.
+AI segmentation may choose boundaries; it may not rewrite source transcript content.
 
-### C7R — Donor-derived dubbing planner/timing — IMPLEMENTED / QA PENDING
+## C7R — Smart Dubbing / Timing — IMPLEMENTED
 
-Port/adapt OpenCreator Smart Dubbing as the main skeleton.
-
-Implemented donor-derived core data:
+OpenCreator-derived core:
 - DubbingConfig
 - DubbingCue
 - PlanItem
 - DubbingChunk
 - DubbingReport
 
-Implemented behavior:
-- clean spoken text;
-- estimate target speech duration;
-- rewrite overlong text before synthesis when configured;
-- merge short adjacent cues inside gap tolerance;
-- cap chunk size;
-- TTS **one natural-rate audio file per chunk**, not one file per raw Whisper segment;
-- measure actual chunk audio duration;
-- bounded structured rewrite/regeneration when required speed exceeds max;
-- fit generated audio AFTER synthesis using FFmpeg atempo rather than trusting provider speed controls;
-- distribute fitted chunk duration back to constituent caption/plan items;
-- validate monotonic target timing;
-- compose explicit silence/timeline gaps;
-- emit warnings above acceptable speed and explicit failure above max speed.
+Behavior:
+- speaker/voice changes are hard chunk boundaries
+- short adjacent cues can merge
+- max chunk size enforced
+- following unused silence may be borrowed safely
+- ONE natural-rate TTS request per dubbing chunk
+- real generated duration is authoritative
+- bounded AI rewrite/regeneration for overlong speech
+- post-TTS FFmpeg `atempo`
+- fitted time redistributed to constituent display cues
+- monotonic target timeline
+- explicit gaps/silence
+- acceptable/max speed thresholds
+- no silent dropped Vietnamese blocks
 
-Use SmartSub's overlong/review policy rather than blindly applying extreme speed.
+Last-resort timing:
+- bounded video slowdown can enlarge timing windows only after semantic/chunk/rewrite/atempo strategies are insufficient
+- configured quality ceiling defaults to 1.12x slowdown
+- slowdown is applied in the same final visual encode, not another H.264 generation
 
-The original C7 implementation that produced 15/21 overflows is a failed prototype and is not the canonical timing engine.
+Expert overrides:
+- translation
+- target start/end
+- segment voice
+- speaker identity
 
-### C8R — HQ Clean Dub audio pipeline — IMPLEMENTED / QA PENDING
+Targeted chunk regeneration can reuse raw audio for all unaffected chunks.
 
-Two explicit modes:
+## C8R — HQ Clean Dub / TTS / Final Media — IMPLEMENTED
 
-**Fast / Preview**
-- source ducking + target dub;
-- useful for quick output/fallback.
+### Audio separation
+YouDub-derived:
+- Demucs `htdemucs_ft`
+- long-file chunking
+- overlap/crossfade
+- peak protection
+- atomic completed artifacts
+- RF64-safe intermediates
 
-**HQ Clean Dub**
-- Demucs `htdemucs_ft`, using YouDub's chunk/overlap/crossfade/atomic-artifact pattern;
-- ASR runs on the separated vocals stem for full-dub HQ jobs;
-- synthesize/fitted target dub;
-- mix target dub with clean background/music rather than ducking source speech;
-- global peak protection + final limiter;
-- RF64-compatible long-audio intermediates;
-- stream-copy video during audio-only stages;
-- perform one final visual encode for reframe/captions.
+HQ ASR can consume the vocal stem.
 
-Default `vi-affiliate-hq` profile now targets `hq_clean`. `fast_duck` remains an explicit preview/fallback mode.
+### TTS provider layer
+Implemented:
+- Edge TTS
+- OpenAI TTS
+- OpenAI-compatible TTS
+- Azure Speech
+- ElevenLabs
+- GPT-SoVITS
 
-### C9 — Automation + batch — BLOCKED UNTIL C6R–C8R QA PASS
+Edge remains useful as preview/fallback; the pipeline is no longer architecturally tied to it.
 
-Reuse existing Affiliate2 jobs, but port YouDub/OpenCreator stage semantics:
-- persisted stage state;
-- artifact paths;
-- resume after completed stages;
-- rerun from invalidated stage;
-- no second queue/app.
+### Voice cloning/reference audio
+GPT-SoVITS supports:
+- manual global reference
+- manual speaker-specific reference
+- automatic longest suitable source reference
+- automatic per-speaker reference extraction
+- source prompt text/language propagation
 
-### C10 — Automatic QC + exception review — BLOCKED UNTIL C9
+On clean-dub jobs automatic references are extracted from the vocal input rather than requiring the user to pre-cut WAV files.
 
-Port/adapt:
-- SmartSub overlong/alignment review reasons;
-- OpenCreator Dubbing Report;
-- Affiliate2 media/QC evidence.
+### Mix/render
+- target dub mixes against clean background/music
+- final limiter protects peaks
+- fast source-duck mode remains explicit preview/fallback
+- audio work never encodes picture
+- external mixed audio + optional setpts retime + reframe + ASS captions = ONE final H.264 encode
 
-Output:
-READY / NEEDS_REVIEW / FAILED.
+## C9 — Durable Automation + Batch — IMPLEMENTED
 
-### C11 — Expert override — BLOCKED UNTIL C10
+No second queue system.
 
-Use the same job/artifacts as automation.
+Every localization job gets:
+`storage/localization_jobs/<job_id>/manifest.json`
 
-Allow targeted:
-- translation edit/rerun;
-- TTS/chunk regenerate;
-- voice/model override;
-- timing exception handling;
-- final render rerun.
+Persisted stages:
+1. separation
+2. ASR/alignment
+3. semantic
+4. translation
+5. dubbing
+6. audio mix
+7. final render
+8. QC
 
-No CapCut clone.
+Capabilities:
+- persisted effective profile
+- persisted source copy
+- atomic JSON/artifact publication
+- stage completion verification
+- resume completed expensive stages
+- invalidate/rerun downstream only
+- targeted chunk regeneration
+- failed-stage evidence
+- batch endpoint up to 20 videos
+- Localization Batch UI using the same canonical runner
 
-### C12 — Intelligence convergence
+## C10 — Automatic QC + Exception Queue — IMPLEMENTED
 
-Reuse canonical media, transcript and provider paths for Radar/intelligence.
+QC combines:
+- media/ffprobe evidence
+- translated coverage
+- target speech coverage
+- timing issues
+- duration/aspect checks
+- clipping/peak evidence
 
-Remove transitional duplicate paths only after parity.
+Statuses:
+- READY
+- NEEDS_REVIEW
+- FAILED
 
-### C13 — Real-media final gate
+QC does not pretend a rendered MP4 is publishable merely because FFmpeg exited 0.
 
-At least 10 real supported Douyin/Bilibili candidates.
+Exception API + Localization Review UI show jobs requiring attention.
 
-Must inspect:
-- ASR;
-- semantic segmentation;
-- Vietnamese translation;
-- dubbing coverage;
-- required speed factors;
-- caption sync;
-- clean background;
-- TTS naturalness;
-- visible render quality;
-- beginning/end truncation.
+## C11 — Expert Override — IMPLEMENTED
 
-## Immediate gate
+The Expert workspace is an escape hatch over the SAME artifacts.
 
-C0R/C4R/C6R/C7R/C8R are now implemented.
+It supports:
+- inspect final video
+- inspect stage states
+- inspect QC
+- inspect semantic/translated segments
+- inspect dubbing chunks
+- edit translated speech
+- override target timing
+- override segment voice
+- regenerate one chunk
+- rerun translation/dubbing/final-render/QC downstream
 
-Next:
-1. sync local branch and install the updated app requirements (Demucs added);
-2. run focused donor-regression suites + frontend build;
-3. rerun the **same 65.7s failing sample**;
-4. capture semantic cue count, dubbing chunk count, rewrite count, max required speed, timing issues, clean-dub artifacts and final ffprobe;
-5. user performs perceptual QA;
-6. only after PASS may C9 start.
+It does not become a CapCut clone.
+
+## C12 — Intelligence Convergence — AFTER ACCEPTANCE GATE
+
+Legacy `src/radar/intel/*` still owns a transitional candidate-intelligence downloader/transcriber.
+
+It is outside the localized-video render path.
+
+Do NOT remove it before C4–C11 real-media parity is proven. After acceptance:
+- route intelligence to canonical media/transcript/provider paths where practical;
+- remove duplicate download/transcribe paths only after focused parity tests.
+
+This cleanup should not require another human perceptual-video round.
+
+## C13 — Final Real-Media Acceptance
+
+One final QA campaign after C4–C11 implementation.
+
+First regression:
+`E:\Affiliate ver 1\storage\videos\qa\sample.mp4`
+
+Old evidence:
+- ~65.7s
+- 21 timed units
+- 15 overflows
+- most Vietnamese dub missing
+
+Then representative supported media supplied by the user:
+- fast speech
+- music-heavy
+- multi-speaker
+- longer-form
+- normal product/review short
+
+Agent must ASK the user for URLs only when additional real samples are required.
+
+The user is the final perceptual judge of:
+- Vietnamese naturalness/meaning
+- TTS publishability
+- timing
+- source-language bleed
+- caption sync
+- background/music quality
+- visible quality loss
+- final publishability
 
 ## Definition of done
 
-Phase C is done only when 10 real candidates can go from Radar → localized Vietnamese output automatically, with review-ready video or explicit actionable exceptions and without routine manual editing.
+Phase C output engine is accepted only when:
+- automated tests/build pass;
+- old regression is fixed;
+- HQ clean dub runs end-to-end;
+- WhisperX path works;
+- multi-speaker path works on a suitable sample;
+- stage resume/rerun works;
+- QC catches real exceptions;
+- Expert targeted rerun works;
+- user accepts representative final outputs.
+
+After that, C12 can converge legacy intelligence plumbing without reopening the video-quality architecture.

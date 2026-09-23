@@ -1,50 +1,45 @@
-# QA Phase C — Donor-Derived HQ Localization
+# QA Phase C — Final Full-Stack Localization Checkpoint
 
-## Current checkpoint
+## Scope
 
-C1–C4 foundation previously passed local QA.
+This is the FIRST local QA after the complete donor-derived quality stack was implemented.
 
-The original C5–C8 prototype failed its first real-media checkpoint:
-- 65.7s source
-- 21 usable translated timing units
-- 15 timing overflows
-- most Vietnamese dub missing
+C1–C3 passed earlier.
+This checkpoint validates C4R through C11 together.
 
-C4R/C6R/C7R/C8R have now been reworked from proven donor behavior.
+Do not split this into another C5–C8 QA followed by C9–C11 QA.
 
-**Do not start C9 until this checkpoint passes.**
+## Historical regression
 
-## Donor behaviors that must be preserved
+Use this sample first if it still exists:
 
-### VideoLingo / SmartSub
-- raw ASR segments are not sacred translation/dubbing units;
-- long cues can be split using real word timestamps;
-- tiny/dependent cues can be merged;
-- AI semantic refinement may only change boundaries/grouping, not source content;
-- invalid AI segmentation must fall back safely;
-- translation identity/order must be validated.
+`E:\Affiliate ver 1\storage\videos\qa\sample.mp4`
 
-### OpenCreator Smart Dubbing
-- merge short adjacent cues into dubbing chunks;
-- respect max chunk size and gap tolerance;
-- synthesize TTS at chunk granularity;
-- measure actual generated audio;
-- fit after synthesis;
-- redistribute fitted chunk timing to plan items;
-- preserve monotonic output timing;
-- explicit warnings/failures for excessive required speed.
+Old failure:
+- 1280x720 / 30fps / H.264 + AAC
+- ~65.7s
+- C5 ASR passed
+- C6 translation passed
+- old C7 produced 15/21 overflows
+- most Vietnamese speech was missing
 
-### YouDub
-- HQ path separates vocals/background before dubbing;
-- ASR may consume the vocals stem;
-- background stem is preserved for final mix;
-- separation uses long-file-safe chunking/overlap/crossfade/artifacts;
-- completed media stages must not silently degrade source video pixels.
+The new architecture must fix the behavior, not hide it with a threshold.
 
-## Environment/bootstrap
+## Git safety
+
+Preserve all user/untracked files.
+
+Forbidden:
+- `git reset --hard`
+- `git clean -fd`
+- force push
+- deleting research/media/user files
+- merging master during QA
 
 Sync:
+
 ```powershell
+git status --short
 git fetch origin
 git checkout phase-c-media-ai-hq-localization
 git pull --ff-only
@@ -53,175 +48,340 @@ git rev-parse origin/phase-c-media-ai-hq-localization
 git rev-list --left-right --count HEAD...origin/phase-c-media-ai-hq-localization
 ```
 
-Preserve all user untracked files.
+Use newest remote HEAD and report it.
+
+## Read first
+
+- AGENTS.md
+- PROJECT_STATUS.md
+- docs/PHASE_C.md
+- docs/PHASE_C_C0_DONOR_AUDIT.md
+- docs/PHASE_C_DONOR_CAPABILITY_MATRIX.md
+- docs/QA_PHASE_C.md
+- docs/ARCHITECTURE.md
+
+## Environment
 
 Use the project venv.
 
-Because HQ clean dub now uses Demucs, install/update dependencies using the repository's normal setup/requirements path before runtime testing.
+Install/update app requirements using the repo's normal bootstrap path.
 
 Record:
 - Python executable/version
 - Node/npm
 - FFmpeg/ffprobe
-- torch version/device
-- Demucs import/version/device
-- local AI provider/model
+- torch / CUDA / GPU
+- WhisperX import/version
+- pyannote import/version
+- Demucs import/version + selected device
+- AI provider/model
+- TTS provider/model/voice
+- Hugging Face token configured? YES/NO only — never print it
 
-## Focused automated gate
+Never print secrets.
+
+## Automated gate
 
 From `app/`:
 
 ```powershell
 python -m pytest -q `
+  tests/test_download_options.py `
+  tests/test_phase_c_media_quality.py `
+  tests/test_phase_c_render_quality.py `
+  tests/test_ai_provider.py `
   tests/test_whisper_service.py `
   tests/test_analyzer.py `
+  tests/test_phase_c_alignment.py `
   tests/test_phase_c_semantic_segmentation.py `
   tests/test_phase_c_dubbing_planner.py `
   tests/test_translate_batch_resilience.py `
   tests/test_phase_c_audio_separation.py `
   tests/test_phase_c_tts_timing.py `
-  tests/test_phase_c_render_quality.py `
   tests/test_phase_c_localization_profiles.py `
   tests/test_phase_c_localization_timeline.py `
-  tests/test_ai_provider.py `
+  tests/test_phase_c_localization_stages.py `
+  tests/test_phase_c_localization_qc.py `
   tests/test_tool_runners_more.py
+```
 
+Then:
+
+```powershell
 npm --prefix frontend run build
 ```
 
-Run additional directly affected regression tests if failures or import/signature changes point to another surface.
+Then run the broader directly affected app suite if the focused suite passes:
 
-## Same-sample regression gate
+```powershell
+python -m pytest -q
+```
 
-Use the exact sample that previously failed if it is still available:
+From repo root also run:
 
-`E:\Affiliate ver 1\storage\videos\qa\sample.mp4`
+```powershell
+python -m pytest -q tests/test_intel.py
+```
 
-Previous evidence:
-- 1280x720, 30fps, H.264/AAC
-- 65.7s
-- C5 ASR passed
-- C6 translation passed
-- old C7: 15/21 overflow
-- final dub coverage was unacceptable
+If a failure is a stale test fixture, prove that before changing it.
+Do not change product behavior merely to make tests green.
 
-Do not replace this first regression with a new easier clip.
-
-### Required new pipeline
-
-For `vi-affiliate-hq` full dub:
-
-source
-→ Demucs HQ separation
-→ vocals stem
-→ ASR + word timestamps
-→ semantic cue preparation
-→ contextual translation
-→ OpenCreator-derived dubbing chunks
-→ one natural-rate TTS per chunk
-→ actual duration measurement
-→ bounded rewrite/regeneration if required
-→ post-TTS FFmpeg atempo fit
-→ fitted target timeline
-→ mix with clean background stem
-→ one final visual encode for reframe/captions
-
-## Required evidence
-
-### Separation
-- vocals/background files exist and are non-empty
-- duration close to source
-- actual Demucs model/device
-- no source video re-encode in separation/mix stage
-
-### Segmentation/translation
-Record:
-- raw ASR segment count
-- semantic cue count
-- semantic grouping fallback/degraded count if exposed
-- translated cue count
-- failed/untranslated count
-
-### Dubbing
-Record:
-- dubbing chunk count
-- chunk → constituent cue IDs
-- natural TTS duration per chunk
-- rewrite/regeneration count
-- required/fitted speed factor per chunk
-- max speed factor
-- chunks above accept threshold
-- chunks above max threshold
-- final timing issue count
-- Vietnamese speech coverage across the timeline
-
-The regression is not fixed merely because the number of chunks is smaller. Target speech must actually cover the spoken content.
-
-### Audio/mix
-Record:
-- audio_mode
-- vocals/background/dub paths
-- background gain / dub gain
-- clipping/peak evidence when practical
-- whether obvious English/source speech remains in the final mix
-
-### Final media
-ffprobe:
-- width/height
-- fps
-- video codec
-- audio codec
-- bitrate
-- duration
+## C4R / C5 gate
 
 Verify:
-- no beginning/end truncation
-- video stream is copied through audio-only stages
-- reframe + captions use one final lossy visual encode
+- words / semantic cues / target timeline / dubbing chunks are distinct state
+- faster-whisper keeps word timestamps
+- HQ profile invokes WhisperX forced alignment
+- diarization OFF/AUTO/WHISPERX modes behave as configured
+- AUTO can degrade safely when gated model/token is unavailable
+- strict WHISPERX diarization fails explicitly if required prerequisites are missing
+- speaker assignment uses temporal overlap
+- known speaker boundaries survive into semantic/dubbing state
+
+## C6 gate
+
+Verify:
+- word-tier semantic segmentation can create boundaries inside a raw ASR segment
+- AI may group stable word/cue IDs only
+- missing/duplicate/reordered IDs reject/fallback
+- source words are never silently lost
+- full context/glossary/style reach translation
+- translated stable IDs/order are validated
+- malformed model output cannot slide text onto the wrong segment
+
+## C7 gate
+
+Verify real behavior:
+- short adjacent cues become natural dubbing chunks
+- speaker/voice change forces chunk boundary
+- one natural-rate TTS request per chunk
+- actual generated duration measured
+- safe following silence borrowing works
+- overlong chunk can rewrite/regenerate
+- FFmpeg atempo happens AFTER synthesis
+- quality speed ceiling is enforced
+- unresolved over-max speech never gets silently dropped
+- bounded video retime is last resort only
+- retime never exceeds profile ceiling
+- target timeline remains monotonic
+- Expert translation/timing/voice override reaches the real planner
+- targeted chunk regeneration reuses unaffected raw chunk audio
+
+## C8 gate
+
+HQ mode:
+- Demucs model = `htdemucs_ft`
+- vocal/background artifacts non-empty
+- long-file chunking/overlap/crossfade path intact
+- RF64-safe intermediate handling
+- ASR/alignment consumes vocals on HQ full dub
+- target dub mixes with CLEAN background
+- no original-language speech is deliberately mixed back in HQ mode
+- audio-only stages do not re-encode picture
+- external mixed audio + optional setpts + reframe + captions = one final lossy video encode
+
+TTS provider registry:
+- Edge
+- OpenAI
+- OpenAI-compatible
+- Azure
+- ElevenLabs
+- GPT-SoVITS
+
+Do not require paid provider live calls if no credential exists.
+Do verify dispatch/config/credential isolation with tests.
+
+If GPT-SoVITS is available locally, run a live smoke.
+If it is not available, report BLOCKED only for live clone verification — do not fail unrelated HQ TTS providers.
+
+Automatic clone reference:
+- manual reference overrides auto
+- auto mode extracts suitable reference speech
+- per-speaker mode uses separate reference artifacts when speaker IDs exist
+- on HQ clean-dub the reference source should be the vocal input
+
+## C9 gate — persisted automation / resume / batch
+
+Run an actual localization job and inspect:
+
+`storage/localization_jobs/<job_id>/manifest.json`
+
+Verify stages:
+1. separation
+2. asr
+3. semantic
+4. translation
+5. dubbing
+6. audio_mix
+7. final_render
+8. qc
+
+Verify:
+- persisted source copy
+- effective profile snapshot
+- artifact files actually exist
+- completed stage is not considered complete when artifact disappears
+- restart/rerun can reuse completed expensive stages
+- rerun from dubbing does NOT rerun Demucs/ASR/translation
+- rerun final_render does not rerun TTS
+- failure leaves actionable stage/error evidence
+
+Batch:
+- submit at least 2 lightweight test videos or copies through the Batch API/UI
+- each gets its own normal Job + localization manifest
+- batch uses the same runner/profile, not a separate low-quality path
+
+## C10 gate — QC / exceptions
+
+Verify QC can produce:
+- READY
+- NEEDS_REVIEW
+- FAILED
+
+Verify it catches at minimum:
+- untranslated target speech
+- low target-speech coverage
+- timing overflow
+- suspicious aspect/duration drift
+- missing media streams
+- clipping/peak warning where applicable
+
+Open Localization Review UI:
+- exception jobs appear
+- stage/QC evidence visible
+- no secret values exposed
+
+A rendered MP4 with FAILED QC is NOT a publish-ready pass.
+
+## C11 gate — Expert targeted control
+
+From Localization Expert UI/API:
+- edit one translated segment
+- override one target timing window
+- override one segment voice
+- rerun downstream
+- verify upstream expensive stages are reused
+
+Then:
+- regenerate ONE dubbing chunk
+- prove unaffected raw chunks were not regenerated
+- final audio/render/QC updates
+
+Rerun:
+- translation
+- dubbing
+- final render
+- QC
+
+must all work from the same manifest/job rather than creating a second editing engine.
+
+## Same failing sample — mandatory
+
+After automated/runtime smoke, process the OLD sample end-to-end with `vi-affiliate-hq`.
+
+Record:
+- source ffprobe
+- Demucs device/model
+- Whisper/faster-whisper model
+- alignment applied?
+- diarization applied? / reason
+- raw ASR count
+- word count
+- semantic cue count
+- translated count / failed count
+- speaker count
+- dubbing chunk count
+- cue IDs per chunk
+- TTS provider/model/voice
+- natural TTS duration per chunk
+- rewrite count
+- max raw required speed
+- fitted speed per chunk
+- video slowdown
+- over-accept count
+- over-max count
+- timing issues
+- target speech coverage
+- QC result
+- final ffprobe
+- final video path
+
+Compare explicitly:
+
+OLD:
+- 21 timing units
+- 15 overflows
+- most Vietnamese dub absent
+
+NEW:
+- exact metrics
+- is meaningful Vietnamese speech present across essentially all spoken content? YES/NO
 
 ## User perceptual QA
 
-The user, not the QA agent, decides:
-- Vietnamese translation naturalness
-- TTS voice publishability
-- speech timing
-- caption sync
-- residual source-language speech
-- music/ambience quality
-- visual degradation
-- overall publishability
+The USER is the final judge.
 
-Provide the local final-video path to the user.
+After technical sample finishes, return the exact local final path and ask the user to inspect:
+1. meaning / natural Vietnamese
+2. TTS voice publishability
+3. speaking cadence
+4. caption sync
+5. source-language bleed
+6. background/music quality
+7. visual degradation
+8. beginning/end truncation
+9. overall publishability
 
-## Decisions after same-sample rerun
+Do NOT self-award perceptual PASS.
 
-### WhisperX
-Do not add only because VideoLingo uses it.
-Promote it if real word timing/alignment remains materially wrong after the new segmentation/chunk pipeline.
+## Additional real-media acceptance
 
-### Better TTS
-Evaluate only after the new chunk engine produces near-complete Vietnamese coverage.
-Edge is allowed as a test/fallback voice; publishability is a human decision.
+Only after the old regression works.
 
-### Video retiming
-Do not add merely because the old segment-per-TTS engine overflowed.
-Consider it only if donor-derived chunking + rewrite + post-TTS fit still leaves systematic over-max chunks.
+Use representative real videos:
+- fast speech
+- music-heavy
+- multi-speaker
+- longer video
+- normal product/review short
 
-### C9 gate
-`READY FOR C9: YES` requires:
-- automated tests/build pass;
-- same old sample no longer reproduces systematic dubbing loss;
-- HQ clean-dub path runs successfully;
-- no unresolved architectural/quality blocker;
-- user perceptual QA accepts the sample sufficiently to proceed.
+If suitable URLs are not already available, STOP at this point and ASK THE USER for links.
 
-## Final report format
+Do not fabricate or randomly replace the requested real samples.
+
+Suggested request:
+`I need the next real-media QA links now: 1 fast-speech, 1 music-heavy, 1 multi-speaker, 1 longer video, and 1 normal product/review video. Please send the URLs.`
+
+The user previously said they will supply video links.
+
+## C12
+
+Do not refactor legacy `src/radar/intel/*` during this QA.
+Only run `tests/test_intel.py` as regression evidence.
+
+C12 cleanup starts only after the Phase-C output engine is accepted; it should not require another full perceptual-video campaign.
+
+## QA fix policy
+
+QA may:
+- fix an objectively stale test fixture;
+- fix a small direct product bug with clear root cause + regression test;
+- commit each real fix separately.
+
+QA must not:
+- redesign Phase C;
+- remove donor quality mechanisms because they are slow;
+- disable WhisperX/Demucs/QC to get green tests;
+- lower quality thresholds to hide a failure;
+- replace real-media evidence with mocks.
+
+## Final report
 
 ```
 ## QA STATUS
-PASS / FAIL / BLOCKED
+TECHNICAL PASS / PASS / FAIL / BLOCKED
 
-## Git
+## Git State
 branch:
 local HEAD:
 remote HEAD:
@@ -232,48 +392,92 @@ working tree:
 Python:
 Node/npm:
 FFmpeg/ffprobe:
-Torch:
+Torch/CUDA/GPU:
+WhisperX:
+pyannote:
 Demucs/device:
 AI provider/model:
+TTS provider/model/voice:
+HF token configured: YES/NO
 
 ## Automated
-focused tests:
+focused:
+full app suite:
+root intel:
 frontend build:
-additional regressions:
 
-## Same Sample
-source:
-raw ASR segments:
-semantic cues:
-translated cues:
-dub chunks:
+## C4-C6
+ASR:
+alignment:
+diarization:
+semantic:
+translation:
+
+## C7 Smart Dubbing
+chunks:
+speaker boundaries:
 rewrite count:
-max speed:
-over-accept chunks:
-over-max chunks:
-timing issues:
-audio mode:
-separation artifacts:
-final ffprobe:
-final video path:
+max raw required speed:
+max fitted speed:
+video slowdown:
+over-max:
+target coverage:
 
-## Technical Verdict
-C4R:
-C5:
-C6R:
-C7R:
-C8R:
+## C8 HQ Media
+separation:
+TTS:
+voice reference:
+audio mix:
+single final encode:
+ffprobe:
+
+## C9 Automation
+manifest:
+resume:
+rerun-from-stage:
+batch:
+
+## C10 QC
+status:
+failures:
+warnings:
+exception queue:
+
+## C11 Expert
+translation override:
+timing override:
+voice override:
+targeted chunk regenerate:
+upstream reuse:
+
+## Old Sample Regression
+OLD: 15/21 overflow; most target dub missing
+NEW:
+regression fixed: YES/NO
+final video path:
 
 ## User Perceptual QA
 PENDING / PASS / FAIL
 notes:
 
-## Remaining Escalations
-WhisperX:
-Better TTS:
-Video retiming:
-Other:
+## Additional Real Samples
+requested from user: YES/NO
+tested:
+results:
+
+## Issues
+BLOCKER:
+MAJOR:
+MINOR:
+QA fix commits:
 
 ## Final Gate
-READY FOR C9: YES/NO
+C4-C11 TECHNICALLY ACCEPTED: YES/NO
+USER VIDEO QUALITY ACCEPTED: YES/NO/PENDING
+READY FOR C12: YES/NO
 ```
+
+If technical QA passes but user has not watched the output:
+- QA STATUS = TECHNICAL PASS
+- USER VIDEO QUALITY ACCEPTED = PENDING
+- READY FOR C12 = NO
