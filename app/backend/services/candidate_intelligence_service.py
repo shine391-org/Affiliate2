@@ -8,6 +8,7 @@ and later Smart Cut share the same quality/provider contracts.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -82,12 +83,12 @@ def _atomic_json(path: Path, payload: Any) -> None:
 def _existing_source(output_dir: Path) -> Path | None:
     for ext in _SOURCE_VIDEO_EXTS:
         path = output_dir / f"source{ext}"
-        if path.exists() and path.stat().st_size > 10_000:
+        if path.is_file() and path.stat().st_size > 10_000:
             return path
     candidates = [
         path for path in output_dir.glob("source.*")
         if path.suffix.lower() in _SOURCE_VIDEO_EXTS
-        and path.exists()
+        and path.is_file()
         and path.stat().st_size > 10_000
     ]
     return max(candidates, key=lambda p: p.stat().st_size) if candidates else None
@@ -141,7 +142,7 @@ async def fetch_candidate_media(
             options={"quality": "best"},
         )
         video_path = Path(result.get("video_path") or "")
-        if not video_path.exists() or video_path.stat().st_size <= 10_000:
+        if not video_path.is_file() or video_path.stat().st_size <= 10_000:
             raise RuntimeError("canonical downloader returned no usable video artifact")
         return {
             "status": "SUCCESS",
@@ -184,12 +185,15 @@ async def transcribe_candidate(
             quality=quality,
             model_name=model_name,
         )
+        duration_seconds = await asyncio.to_thread(
+            probe_duration, media_path, 0.0
+        )
         data = {
             "transcribed_at": datetime.now(timezone.utc).isoformat(),
             "model": f"faster-whisper/{resolve_whisper_model(quality, model_name)}",
             "detected_language": result.get("language"),
             "language_probability": result.get("language_probability"),
-            "duration": round(float(probe_duration(media_path, 0.0)), 3),
+            "duration": round(float(duration_seconds), 3),
             "segments": result.get("segments") or [],
             "full_transcript": (result.get("text") or "").strip(),
         }
