@@ -765,31 +765,54 @@ def _chunk_identity_path(audio_path: Path) -> Path:
     return audio_path.with_name(audio_path.name + ".input.json")
 
 
-def _chunk_identity_matches(audio_path: Path, identity: str) -> bool:
+def _chunk_identity_payload(audio_path: Path) -> dict | None:
     sidecar = _chunk_identity_path(audio_path)
     try:
         payload = json.loads(sidecar.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, TypeError):
-        return False
-    return (
-        isinstance(payload, dict)
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _chunk_identity_matches(audio_path: Path, identity: str) -> bool:
+    payload = _chunk_identity_payload(audio_path)
+    return bool(
+        payload
         and payload.get("rules") == _DUBBING_SYNTHESIS_RULES_VERSION
         and payload.get("identity") == identity
     )
 
 
-def _write_chunk_identity(audio_path: Path, identity: str) -> None:
+def _chunk_persisted_duration_ms(audio_path: Path, identity: str) -> int | None:
+    payload = _chunk_identity_payload(audio_path)
+    if not (
+        payload
+        and payload.get("rules") == _DUBBING_SYNTHESIS_RULES_VERSION
+        and payload.get("identity") == identity
+    ):
+        return None
+    try:
+        duration_ms = int(payload.get("duration_ms"))
+    except (TypeError, ValueError):
+        return None
+    return duration_ms if duration_ms > 0 else None
+
+
+def _write_chunk_identity(
+    audio_path: Path,
+    identity: str,
+    duration_ms: int | None = None,
+) -> None:
     sidecar = _chunk_identity_path(audio_path)
+    payload = {
+        "rules": _DUBBING_SYNTHESIS_RULES_VERSION,
+        "identity": identity,
+    }
+    if duration_ms is not None and duration_ms > 0:
+        payload["duration_ms"] = int(duration_ms)
     tmp = sidecar.with_name(sidecar.name + ".tmp")
     tmp.write_text(
-        json.dumps(
-            {
-                "rules": _DUBBING_SYNTHESIS_RULES_VERSION,
-                "identity": identity,
-            },
-            indent=2,
-        )
-        + "\n",
+        json.dumps(payload, indent=2) + "\n",
         encoding="utf-8",
     )
     tmp.replace(sidecar)
@@ -813,7 +836,7 @@ async def _generate_tts_chunk_atomic(
         )
         pending.replace(output_path)
         try:
-            _write_chunk_identity(output_path, identity)
+            _write_chunk_identity(output_path, identity, duration)
         except Exception as exc:
             # Missing identity only disables future reuse; it must not invalidate
             # a TTS artifact that was already generated and measured correctly.
@@ -1083,8 +1106,27 @@ async def synthesize_timed_dub(
     raw_paths: dict[int, Path] = {}
     block_paths: list[Path] = []
     regenerate_chunk_ids = set(regenerate_chunk_ids or set())
+    targeted_regeneration = bool(regenerate_chunk_ids)
     issues: list[dict] = []
     rewrite_count = 0
+    rewrite_disabled = ai is None
+    rewrite_unavailable_recorded = False
+
+    def record_rewrite_setup_unavailable(chunk: DubbingChunk) -> None:
+        nonlocal rewrite_unavailable_recorded
+        if rewrite_unavailable_recorded:
+            return
+        exc = rewrite_ai_error or RuntimeError(
+            "Duration rewrite AI client is unavailable"
+        )
+        issues.append({
+            "chunk_id": chunk.id,
+            "reason": "rewrite_ai_unavailable",
+            "error_type": type(exc).__name__,
+            "message": str(exc)[:300],
+            "segment_ids": [plan[i].segment_id for i in chunk.item_indexes],
+        })
+        rewrite_unavailable_recorded = True
 
     for chunk in chunks:
         speaker_id = _chunk_speaker(plan, chunk)
@@ -1119,15 +1161,23 @@ async def synthesize_timed_dub(
             and path.stat().st_size > 0
             and _chunk_identity_matches(path, initial_identity)
         )
+        is_target_chunk = not targeted_regeneration or chunk.id in regenerate_chunk_ids
+        if targeted_regeneration and not is_target_chunk and not reuse_raw:
+            raise RuntimeError(
+                f"Cannot safely targeted-regenerate chunk(s) {sorted(regenerate_chunk_ids)} "
+                f"because non-target chunk {chunk.id} has no valid reusable raw artifact."
+            )
 
         # OpenCreator-style estimator: try a bounded rewrite before spending on
-        # a clearly impossible TTS request. Reused raw chunks already match the
-        # durable translation snapshot from their prior successful run.
+        # a clearly impossible TTS request. In targeted mode, non-target chunks
+        # are immutable even when their measured duration later exceeds speed_max.
         estimated = sum(plan[i].estimated_duration_ms for i in chunk.item_indexes)
         attempts = 0
         rewrite_state: dict = {}
+        can_optional_rewrite = is_target_chunk and not rewrite_disabled
         if (
             not reuse_raw
+            and can_optional_rewrite
             and estimated > chunk.available_ms * config.speed_max
             and attempts < config.rewrite_max_attempts
         ):
@@ -1139,9 +1189,19 @@ async def synthesize_timed_dub(
             )
             attempts += 1
             if rewrite_state.get("unavailable"):
+                rewrite_disabled = True
+                rewrite_unavailable_recorded = True
                 attempts = config.rewrite_max_attempts
             if changed:
                 rewrite_count += 1
+        elif (
+            not reuse_raw
+            and is_target_chunk
+            and rewrite_disabled
+            and estimated > chunk.available_ms * config.speed_max
+            and config.rewrite_max_attempts > 0
+        ):
+            record_rewrite_setup_unavailable(chunk)
 
         speech_text = chunk_text(plan, chunk)
         synthesis_identity = _chunk_synthesis_identity(
@@ -1161,15 +1221,26 @@ async def synthesize_timed_dub(
 
         duration_ms = 0
         if reuse_raw:
-            try:
-                duration_ms = await _audio_duration_ms(path)
-            except Exception as exc:
-                logger.warning(
-                    "Could not reuse dubbing chunk %s; regenerating: %s",
-                    chunk.id,
-                    exc,
-                )
-                reuse_raw = False
+            duration_ms = _chunk_persisted_duration_ms(path, initial_identity) or 0
+            if duration_ms <= 0:
+                try:
+                    duration_ms = await _audio_duration_ms(path)
+                except Exception as exc:
+                    logger.warning(
+                        "Could not reuse dubbing chunk %s; regenerating: %s",
+                        chunk.id,
+                        exc,
+                    )
+                    reuse_raw = False
+                if duration_ms > 0:
+                    try:
+                        _write_chunk_identity(path, initial_identity, duration_ms)
+                    except Exception as exc:
+                        logger.warning(
+                            "Could not heal synthesis duration metadata for %s: %s",
+                            path.name,
+                            exc,
+                        )
             if duration_ms <= 0:
                 reuse_raw = False
 
@@ -1189,7 +1260,9 @@ async def synthesize_timed_dub(
             )
 
         while (
-            required_speed(duration_ms, chunk.available_ms) > config.speed_max
+            is_target_chunk
+            and not rewrite_disabled
+            and required_speed(duration_ms, chunk.available_ms) > config.speed_max
             and attempts < config.rewrite_max_attempts
         ):
             changed = await _adapt_chunk_items(
@@ -1200,6 +1273,8 @@ async def synthesize_timed_dub(
             )
             attempts += 1
             if rewrite_state.get("unavailable"):
+                rewrite_disabled = True
+                rewrite_unavailable_recorded = True
                 attempts = config.rewrite_max_attempts
             if not changed:
                 break
@@ -1228,6 +1303,14 @@ async def synthesize_timed_dub(
                 reference_text=ref.get("text"),
                 reference_language=ref.get("language"),
             )
+        if (
+            is_target_chunk
+            and rewrite_disabled
+            and not rewrite_unavailable_recorded
+            and required_speed(duration_ms, chunk.available_ms) > config.speed_max
+            and config.rewrite_max_attempts > 0
+        ):
+            record_rewrite_setup_unavailable(chunk)
         chunk.actual_duration_ms = duration_ms
 
     # Last resort from the pyVideoTrans family of strategies: if the donor
@@ -1270,15 +1353,19 @@ async def synthesize_timed_dub(
     timed_chunks: list[tuple[int, Path]] = []
     fitted_dir = work_dir / "fitted"
     for chunk in fitted_chunks:
-        fitted = fitted_dir / f"chunk_{chunk.id:04d}.wav"
-        await asyncio.to_thread(
-            _fit_chunk_audio_sync,
-            raw_paths[chunk.id],
-            fitted,
-            chunk.speed_factor,
-        )
-        block_paths.append(fitted)
-        timed_chunks.append((chunk.start_ms, fitted))
+        if abs(chunk.speed_factor - 1.0) <= 0.001:
+            timed_path = raw_paths[chunk.id]
+        else:
+            fitted = fitted_dir / f"chunk_{chunk.id:04d}.wav"
+            await asyncio.to_thread(
+                _fit_chunk_audio_sync,
+                raw_paths[chunk.id],
+                fitted,
+                chunk.speed_factor,
+            )
+            block_paths.append(fitted)
+            timed_path = fitted
+        timed_chunks.append((chunk.start_ms, timed_path))
         if chunk.speed_factor > config.speed_accept:
             issues.append({
                 "chunk_id": chunk.id,
