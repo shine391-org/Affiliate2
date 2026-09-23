@@ -183,6 +183,48 @@ def _timed_words(transcript: LocalizationTranscript) -> list[dict]:
     return out
 
 
+def _deterministic_word_groups(words: list[dict]) -> list[list[str]]:
+    """Fallback grouping that preserves speaker boundaries without fragmenting words.
+
+    AI failure must not collapse a multi-speaker aligned segment back into one
+    parent cue. Group contiguous words, split on a known speaker change, and
+    prefer strong sentence punctuation / a bounded semantic duration.
+    """
+    if not words:
+        return []
+
+    groups: list[list[str]] = []
+    current: list[str] = []
+    current_speaker = None
+    group_start = None
+
+    for word in words:
+        speaker = word.get("speaker_id")
+        if current and speaker is not None and current_speaker is not None and speaker != current_speaker:
+            groups.append(current)
+            current = []
+            group_start = None
+
+        if not current:
+            current_speaker = speaker
+            group_start = int(word["start_ms"])
+        elif current_speaker is None and speaker is not None:
+            current_speaker = speaker
+
+        current.append(word["id"])
+        token = str(word.get("text") or "")
+        elapsed = int(word["end_ms"]) - int(group_start or word["start_ms"])
+        if _STRONG_END.search(token) or elapsed >= 6000:
+            groups.append(current)
+            current = []
+            current_speaker = None
+            group_start = None
+
+    if current:
+        groups.append(current)
+    return groups
+
+
 def _word_groups_to_segments(
     groups: list[list[str]],
     words: list[dict],
@@ -321,10 +363,11 @@ Every input word ID must appear exactly once and in the same order."""
                     if len(known) > 1:
                         raise ValueError("semantic group crosses speaker boundary")
             except Exception:
-                # Do NOT degrade into one-word translation cues. Returning None
-                # hands control back to the already-normalized cue tier, which
-                # preserves semantic context and still retains real word timing.
-                return None
+                # Keep real word timing and known speaker boundaries even when
+                # the model returns malformed grouping. Deterministic fallback
+                # avoids both one-word translation fragments and cross-speaker
+                # cues.
+                groups = _deterministic_word_groups(window)
 
         generated = _word_groups_to_segments(
             groups,

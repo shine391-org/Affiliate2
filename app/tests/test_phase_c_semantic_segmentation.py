@@ -222,3 +222,33 @@ async def test_word_tier_preserves_whisper_spacing_for_english_and_cjk():
         zh, _GroupingAI('[{"ids":["w00001","w00002","w00003","w00004"]}]')
     )
     assert got_zh.segments[0].source_text == "你好世界"
+
+
+
+@pytest.mark.asyncio
+async def test_invalid_ai_grouping_still_preserves_word_speaker_boundary():
+    from backend.services.semantic_segmentation import refine_semantic_cues_with_ai
+
+    tx = LocalizationTranscript(
+        text="hello there yes indeed",
+        segments=[LocalizationSegment(
+            id="raw1",
+            speaker_id="A",
+            source_text="hello there yes indeed",
+            source_start_ms=0,
+            source_end_ms=1600,
+            source_words=[
+                {"word": "hello", "start": 0.0, "end": 0.4, "speaker_id": "A"},
+                {"word": " there", "start": 0.4, "end": 0.8, "speaker_id": "A"},
+                {"word": " yes", "start": 0.9, "end": 1.2, "speaker_id": "B"},
+                {"word": " indeed", "start": 1.2, "end": 1.6, "speaker_id": "B"},
+            ],
+        )],
+    )
+    # Invalid order forces deterministic fallback.
+    got = await refine_semantic_cues_with_ai(
+        tx,
+        _GroupingAI('[{"ids":["w00003","w00001","w00002","w00004"]}]'),
+    )
+    assert [s.speaker_id for s in got.segments] == ["A", "B"]
+    assert [s.source_text for s in got.segments] == ["hello there", "yes indeed"]
