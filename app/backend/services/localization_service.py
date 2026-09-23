@@ -1208,6 +1208,29 @@ async def mix_dub_audio(
     )
 
 
+def persist_dubbing_rewrites(
+    translation: LocalizationTranscript,
+    dubbed: LocalizationTranscript,
+) -> LocalizationTranscript:
+    """Persist only spoken-text decisions from C7 back into C6 state.
+
+    C7 may shorten translated lines so real TTS fits the timeline. Target
+    timing remains a dubbing-stage concern, but the final spoken wording must
+    survive targeted chunk regeneration/resume or reused raw audio can diverge
+    from captions/text.
+    """
+    out = translation.model_copy(deep=True)
+    dubbed_by_id = {seg.id: seg for seg in dubbed.segments}
+    for seg in out.segments:
+        resolved = dubbed_by_id.get(seg.id)
+        if resolved is None:
+            continue
+        if (resolved.translated_text or "").strip():
+            seg.translated_text = resolved.translated_text
+            seg.translation_status = resolved.translation_status
+    return out
+
+
 def caption_segments_from_localization(transcript: LocalizationTranscript) -> list[dict]:
     out: list[dict] = []
     for seg in transcript.segments:

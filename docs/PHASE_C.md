@@ -201,12 +201,14 @@ Implemented:
 - OpenAI-compatible TTS
 - Azure Speech
 - ElevenLabs
-- GPT-SoVITS
+- GPT-SoVITS (donor-compatible Chinese/English clone path only)
 
 Edge remains useful as preview/fallback; the pipeline is no longer architecturally tied to it.
+For Vietnamese publish-quality dubbing, use a provider that actually supports Vietnamese
+(e.g. Azure, ElevenLabs, or a verified OpenAI-compatible TTS backend).
 
 ### Voice cloning/reference audio
-GPT-SoVITS supports:
+GPT-SoVITS supports the donor-compatible Chinese/English path:
 - manual global reference
 - manual speaker-specific reference
 - automatic longest suitable source reference
@@ -229,6 +231,9 @@ No second queue system.
 Every localization job gets:
 `storage/localization_jobs/<job_id>/manifest.json`
 
+Current manifest contract: **version 2**. Older manifests are rejected instead
+of silently resuming artifacts produced by an incompatible pipeline contract.
+
 Persisted stages:
 1. separation
 2. ASR/alignment
@@ -247,6 +252,7 @@ Capabilities:
 - resume completed expensive stages
 - invalidate/rerun downstream only
 - targeted chunk regeneration
+- duration-aware C7 spoken rewrites persist back to C6 translated text so reused raw chunks cannot drift from captions
 - failed-stage evidence
 - batch endpoint up to 20 videos
 - Localization Batch UI using the same canonical runner

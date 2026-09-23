@@ -43,6 +43,7 @@ export default function TTSProviderSection({ settings, updateSettings }) {
 
   const changeProvider = (next) => {
     setProvider(next)
+    setVoice("")
     setModel(PROVIDERS[next]?.defaultModel || "")
     setBaseUrl(PROVIDERS[next]?.defaultBase || "")
     setRegion("")

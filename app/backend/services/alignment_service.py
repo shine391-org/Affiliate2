@@ -61,12 +61,13 @@ def _device() -> str:
 
 
 def _make_diarization_pipeline(factory, *, token: str, device: str):
-    """WhisperX 3.8.x names the gated-model credential `token`.
+    """Construct WhisperX diarization with the exact upstream contracts.
 
-    Keep construction isolated so signature drift is covered by a cheap unit
-    test instead of being discovered after a multi-gigabyte model install.
+    WhisperX 3.8.x names the gated credential `token`, while pyannote's
+    Pipeline.to() requires an actual torch.device rather than a string.
     """
-    return factory(token=token, device=device)
+    import torch
+    return factory(token=token, device=torch.device(device))
 
 
 def _speaker_segments(rows) -> list[dict]:

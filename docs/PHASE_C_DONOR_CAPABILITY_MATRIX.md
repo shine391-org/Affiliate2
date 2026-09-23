@@ -26,7 +26,7 @@ or every commercial/provider integration.
 | Long-audio chunk/overlap/crossfade | YouDub | IMPLEMENTED |
 | HQ cloud TTS | SmartSub / VideoLingo provider breadth | IMPLEMENTED: OpenAI, Azure, ElevenLabs |
 | OpenAI-compatible/local TTS endpoint | SmartSub provider architecture | IMPLEMENTED |
-| Local voice cloning | VideoLingo | IMPLEMENTED: GPT-SoVITS |
+| Local voice cloning | VideoLingo | IMPLEMENTED for donor-compatible GPT-SoVITS EN/ZH; NOT claimed for Vietnamese |
 | Automatic reference audio extraction | VideoLingo | IMPLEMENTED global/per-speaker |
 | Multi-speaker voice mapping | donor speaker-aware dubbing | IMPLEMENTED |
 | Persisted stage artifacts | YouDub / OpenCreator | IMPLEMENTED |
@@ -49,8 +49,9 @@ optional winner-video enhancement.
 
 ### Every donor's TTS vendor button
 Provider **quality tiers and extensibility** are required; duplicating every
-vendor is not. Affiliate2 already has free fallback, HQ cloud, generic
-OpenAI-compatible/local and local voice-clone paths. More provider adapters can
+vendor is not. Affiliate2 already has free fallback, HQ cloud and generic
+OpenAI-compatible/local paths. GPT-SoVITS cloning is explicitly scoped to its
+donor-compatible EN/ZH language contract rather than falsely advertised for Vietnamese. More provider adapters can
 be added without changing C7 timing or C8 mixing.
 
 ### GPL implementation copy

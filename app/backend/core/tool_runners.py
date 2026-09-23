@@ -890,6 +890,7 @@ async def run_tool_translate(
         caption_segments_from_localization,
         materialize_localization_profile,
         mix_dub_audio,
+        persist_dubbing_rewrites,
         prepare_semantic_transcript,
         resolve_localization_profile,
         synthesize_timed_dub,
@@ -1203,6 +1204,31 @@ async def run_tool_translate(
                             "rewrite_count": dubbing_rewrite_count,
                         },
                     )
+                    if dubbing_rewrite_count:
+                        translation_base = LocalizationTranscript.model_validate(
+                            run.load_json("translation", "transcript")
+                        )
+                        durable_translation = persist_dubbing_rewrites(
+                            translation_base,
+                            localized,
+                        )
+                        translation_path = run.save_json(
+                            "translation",
+                            "transcript.json",
+                            durable_translation.model_dump(),
+                        )
+                        translation_meta = dict(
+                            run.record("translation").get("metadata") or {}
+                        )
+                        translation_meta["duration_rewrite_count"] = (
+                            int(translation_meta.get("duration_rewrite_count") or 0)
+                            + dubbing_rewrite_count
+                        )
+                        run.complete(
+                            "translation",
+                            artifacts={"transcript": translation_path},
+                            metadata=translation_meta,
+                        )
                     if regenerate_chunk_ids:
                         run.update_request({
                             **run.request,

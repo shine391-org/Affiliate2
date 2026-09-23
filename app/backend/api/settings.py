@@ -175,11 +175,22 @@ async def update_settings(update: SettingsUpdate):
             s.preferred_voice_id = update.preferred_voice_id
         if update.tts_provider is not None:
             new_tts_provider = update.tts_provider.strip().lower()
-            if (
+            provider_changed = (
                 new_tts_provider != (s.tts_provider or "").strip().lower()
-                and update.tts_api_key is None
-            ):
-                s.tts_api_key_encrypted = None
+            )
+            if provider_changed:
+                if update.tts_api_key is None:
+                    s.tts_api_key_encrypted = None
+                # Provider-scoped identifiers/endpoints must not silently ride
+                # across a switch (e.g. an Azure voice/base URL into ElevenLabs).
+                if update.preferred_tts_voice is None:
+                    s.preferred_tts_voice = None
+                if update.tts_model is None:
+                    s.tts_model = None
+                if update.tts_base_url is None:
+                    s.tts_base_url = None
+                if update.tts_region is None:
+                    s.tts_region = None
             s.tts_provider = new_tts_provider
         if update.preferred_tts_voice is not None:
             s.preferred_tts_voice = update.preferred_tts_voice or None

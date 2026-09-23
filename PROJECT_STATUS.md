@@ -46,7 +46,7 @@ Current implementation:
 - C6R word-aware semantic segmentation + validated contextual translation: IMPLEMENTED
 - C7R speaker-aware smart dubbing, chunk TTS, measured fit, rewrite, silence borrowing, atempo, bounded retiming: IMPLEMENTED
 - C8R Demucs HQ clean dub + multi-provider HQ TTS + voice cloning reference extraction + one final video encode: IMPLEMENTED
-- C9 durable stage artifacts + resume + rerun-from-stage + batch: IMPLEMENTED
+- C9 durable stage artifacts + version-2 manifest guard + reproducible runtime bindings + resume + rerun-from-stage + batch: IMPLEMENTED
 - C10 automatic QC + exception queue: IMPLEMENTED
 - C11 Expert workspace + translation/timing/voice overrides + targeted chunk regeneration: IMPLEMENTED
 
@@ -57,12 +57,12 @@ Supported provider layer now includes:
 - OpenAI-compatible TTS
 - Azure Speech
 - ElevenLabs
-- GPT-SoVITS local voice cloning
+- GPT-SoVITS local voice cloning (donor-compatible EN/ZH only; not a Vietnamese acceptance path)
 
 Multi-speaker flow:
 ASR → forced alignment → optional diarization → stable speaker IDs → semantic cues → speaker-safe chunks → speaker voice/reference mapping → target dub.
 
-GPT-SoVITS can use manual reference audio or automatically extract reference speech from the separated vocal/source timeline per speaker.
+GPT-SoVITS can use manual reference audio or automatically extract reference speech from the separated vocal/source timeline per speaker, within its donor-compatible EN/ZH language contract. Vietnamese HQ acceptance must use a Vietnamese-capable provider.
 
 ### Control / credentials
 - AI provider/model/base URL BYOK remains encrypted.

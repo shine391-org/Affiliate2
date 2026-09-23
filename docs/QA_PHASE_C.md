@@ -166,6 +166,7 @@ Verify real behavior:
 - target timeline remains monotonic
 - Expert translation/timing/voice override reaches the real planner
 - targeted chunk regeneration reuses unaffected raw chunk audio
+- if C7 shortened translated wording for duration, that spoken wording persists; a later one-chunk regeneration must not revert captions/text while reusing old raw chunks
 
 ## C8 gate
 
@@ -186,12 +187,15 @@ TTS provider registry:
 - OpenAI-compatible
 - Azure
 - ElevenLabs
-- GPT-SoVITS
+- GPT-SoVITS (Chinese/English donor-compatible clone path only; DO NOT use it as a Vietnamese acceptance provider)
 
 Do not require paid provider live calls if no credential exists.
+For the Vietnamese publish-quality sample, use Edge only as a technical fallback;
+human publishability requires a Vietnamese-capable HQ provider such as Azure,
+ElevenLabs, or a verified OpenAI-compatible backend.
 Do verify dispatch/config/credential isolation with tests.
 
-If GPT-SoVITS is available locally, run a live smoke.
+If GPT-SoVITS is available locally, run a live EN/ZH clone smoke only.
 If it is not available, report BLOCKED only for live clone verification — do not fail unrelated HQ TTS providers.
 
 Automatic clone reference:
@@ -205,6 +209,9 @@ Automatic clone reference:
 Run an actual localization job and inspect:
 
 `storage/localization_jobs/<job_id>/manifest.json`
+
+Verify `version == 2`. A version-1/stale manifest must fail explicitly rather
+than resume old artifacts.
 
 Verify stages:
 1. separation

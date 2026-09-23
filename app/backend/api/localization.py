@@ -369,7 +369,7 @@ async def localization_batch(
 
     from backend.agents.job_helper import create_job
     from backend.api.tools import VIDEO_EXTS, VIDEO_MAX_BYTES, save_upload
-    from backend.core.task_runner import spawn_background
+    from backend.core.task_runner import dispatch
 
     jobs = []
     specs = []
@@ -398,5 +398,7 @@ async def localization_batch(
         })
         jobs.append({"job_id": job.id, "filename": file.filename})
 
-    spawn_background(_run_localization_batch_sequential(specs))
+    # One coordinator consumes one global heavy-task slot; jobs inside it are
+    # strictly sequential, so a 20-video batch cannot fan out 20 Demucs models.
+    dispatch(_run_localization_batch_sequential(specs))
     return {"count": len(jobs), "jobs": jobs}

@@ -654,3 +654,31 @@ def test_captions_only_profile_materialization_does_not_require_tts(monkeypatch)
         for_dub=False,
     )
     assert got.translation_model == "qwen-local"
+
+
+
+def test_dubbing_rewrite_persistence_keeps_translation_text_but_not_target_timing():
+    base = LocalizationTranscript(segments=[
+        LocalizationSegment(
+            id="s1",
+            source_text="source",
+            translated_text="bản dịch dài",
+            source_start_ms=0,
+            source_end_ms=1000,
+            translation_status="success",
+        )
+    ])
+    dubbed = base.model_copy(deep=True)
+    dubbed.segments[0].translated_text = "bản ngắn"
+    dubbed.segments[0].target_start_ms = 100
+    dubbed.segments[0].target_end_ms = 900
+    dubbed.segments[0].tts_duration_ms = 800
+    dubbed.segments[0].timing_status = "adjusted"
+
+    got = ls.persist_dubbing_rewrites(base, dubbed)
+    assert got.segments[0].translated_text == "bản ngắn"
+    assert got.segments[0].translation_status == "success"
+    assert got.segments[0].target_start_ms is None
+    assert got.segments[0].target_end_ms is None
+    assert got.segments[0].tts_duration_ms is None
+    assert got.segments[0].timing_status == "pending"

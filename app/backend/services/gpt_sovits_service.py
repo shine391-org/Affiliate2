@@ -8,6 +8,24 @@ import httpx
 from backend.core.exceptions import VoiceGenerationError
 
 
+def _normalize_gpt_sovits_language(value: str | None) -> str:
+    """Match the donor-compatible GPT-SoVITS language contract.
+
+    VideoLingo's pinned GPT-SoVITS adapter supports Chinese and English only.
+    Do not silently send Vietnamese or another unsupported language to a local
+    clone server and report the resulting garbage/error as an HQ path.
+    """
+    key = (value or "").strip().lower()
+    if key in {"zh", "cn", "chinese", "中文", "all_zh"}:
+        return "zh"
+    if key in {"en", "english", "英文", "英语"}:
+        return "en"
+    raise VoiceGenerationError(
+        "GPT-SoVITS donor-compatible mode supports Chinese/English only; "
+        f"unsupported language: {value or '(empty)'}"
+    )
+
+
 async def generate_voice(
     text: str,
     *,
@@ -22,11 +40,13 @@ async def generate_voice(
 ) -> Path:
     if not reference_audio:
         raise VoiceGenerationError("GPT-SoVITS requires reference audio")
+    text_lang = _normalize_gpt_sovits_language(text_language)
+    prompt_lang = _normalize_gpt_sovits_language(prompt_language or text_language)
     payload = {
         "text": text,
-        "text_lang": text_language or "vi",
+        "text_lang": text_lang,
         "ref_audio_path": str(reference_audio),
-        "prompt_lang": prompt_language or text_language or "vi",
+        "prompt_lang": prompt_lang,
         "prompt_text": prompt_text or "",
         "speed_factor": float(speed),
     }

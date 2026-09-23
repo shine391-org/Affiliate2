@@ -82,6 +82,8 @@ def test_diarization_pipeline_uses_whisperx_38_token_keyword():
 
     seen = {}
 
+    import torch
+
     class FakePipeline:
         def __init__(self, *, token=None, device=None):
             seen["token"] = token
@@ -93,4 +95,6 @@ def test_diarization_pipeline_uses_whisperx_38_token_keyword():
         device="cpu",
     )
     assert isinstance(pipeline, FakePipeline)
-    assert seen == {"token": "hf_test", "device": "cpu"}
+    assert seen["token"] == "hf_test"
+    assert isinstance(seen["device"], torch.device)
+    assert seen["device"].type == "cpu"

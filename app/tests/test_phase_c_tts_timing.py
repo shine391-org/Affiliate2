@@ -194,3 +194,25 @@ def test_edge_speed_one_maps_to_native_zero_percent(monkeypatch, tmp_path):
     ))
     assert out.exists()
     assert captured["rate"] == "+0%"
+
+
+
+def test_gpt_sovits_rejects_vietnamese_in_donor_compatible_mode(tmp_path):
+    from backend.core.exceptions import VoiceGenerationError
+    from backend.services import gpt_sovits_service
+
+    with pytest.raises(VoiceGenerationError, match="Chinese/English only"):
+        asyncio.run(gpt_sovits_service.generate_voice(
+            "xin chào",
+            output_path=tmp_path / "g.wav",
+            reference_audio="ref.wav",
+            text_language="Vietnamese",
+            prompt_language="English",
+        ))
+
+
+def test_gpt_sovits_language_normalization_matches_donor_contract():
+    from backend.services.gpt_sovits_service import _normalize_gpt_sovits_language
+
+    assert _normalize_gpt_sovits_language("Chinese") == "zh"
+    assert _normalize_gpt_sovits_language("en") == "en"
