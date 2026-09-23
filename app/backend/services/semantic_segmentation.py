@@ -307,10 +307,13 @@ async def _refine_words_with_ai(
 
     output: list[LocalizationSegment] = []
     next_group_index = 1
+    ai_available = True
     for start in range(0, len(words), max_words_per_window):
         window = words[start:start + max_words_per_window]
         if len(window) == 1:
             groups = [[window[0]["id"]]]
+        elif not ai_available:
+            groups = _deterministic_word_groups(window)
         else:
             public_items = [
                 {
@@ -342,32 +345,38 @@ Every input word ID must appear exactly once and in the same order."""
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=1800,
                 )
-                text = (raw or "").strip()
-                if text.startswith("```"):
-                    lines = text.splitlines()
-                    lines = lines[1:] if lines else lines
-                    if lines and lines[-1].strip().startswith("```"):
-                        lines = lines[:-1]
-                    text = "\n".join(lines).strip()
-                payload = __import__("json").loads(text)
-                groups = _validate_group_ids(payload, [w["id"] for w in window])
-
-                # Do not allow an AI group to cross a known speaker boundary.
-                by_id = {w["id"]: w for w in window}
-                for ids in groups:
-                    known = {
-                        by_id[word_id]["speaker_id"]
-                        for word_id in ids
-                        if by_id[word_id]["speaker_id"] is not None
-                    }
-                    if len(known) > 1:
-                        raise ValueError("semantic group crosses speaker boundary")
             except Exception:
-                # Keep real word timing and known speaker boundaries even when
-                # the model returns malformed grouping. Deterministic fallback
-                # avoids both one-word translation fragments and cross-speaker
-                # cues.
+                # Semantic refinement is optional. One provider failure opens a
+                # stage-local circuit breaker so the remaining windows do not
+                # multiply the same network/model timeout.
+                ai_available = False
                 groups = _deterministic_word_groups(window)
+            else:
+                try:
+                    text = (raw or "").strip()
+                    if text.startswith("```"):
+                        lines = text.splitlines()
+                        lines = lines[1:] if lines else lines
+                        if lines and lines[-1].strip().startswith("```"):
+                            lines = lines[:-1]
+                        text = "\n".join(lines).strip()
+                    payload = __import__("json").loads(text)
+                    groups = _validate_group_ids(payload, [w["id"] for w in window])
+
+                    # Do not allow an AI group to cross a known speaker boundary.
+                    by_id = {w["id"]: w for w in window}
+                    for ids in groups:
+                        known = {
+                            by_id[word_id]["speaker_id"]
+                            for word_id in ids
+                            if by_id[word_id]["speaker_id"] is not None
+                        }
+                        if len(known) > 1:
+                            raise ValueError("semantic group crosses speaker boundary")
+                except Exception:
+                    # Invalid model output is a data-quality fallback, not
+                    # provider unavailability: later windows may still use AI.
+                    groups = _deterministic_word_groups(window)
 
         generated = _word_groups_to_segments(
             groups,
@@ -406,11 +415,17 @@ async def refine_semantic_cues_with_ai(
 
     output: list[LocalizationSegment] = []
     group_index = 1
+    ai_available = True
     for start in range(0, len(base.segments), window_size):
         window = base.segments[start:start + window_size]
         if len(window) == 1:
             output.append(_merge_group(window, group_index))
             group_index += 1
+            continue
+        if not ai_available:
+            for seg in window:
+                output.append(_merge_group([seg], group_index))
+                group_index += 1
             continue
 
         items = [
@@ -446,27 +461,34 @@ Every input ID must appear exactly once and in the same order."""
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=1200,
             )
-            text = (raw or "").strip()
-            if text.startswith("```"):
-                lines = text.splitlines()
-                lines = lines[1:] if lines else lines
-                if lines and lines[-1].strip().startswith("```"):
-                    lines = lines[:-1]
-                text = "\n".join(lines).strip()
-            payload = __import__("json").loads(text)
-            groups = _validate_group_ids(payload, [seg.id for seg in window])
-
-            by_id = {seg.id: seg for seg in window}
-            for ids in groups:
-                speakers = {
-                    by_id[seg_id].speaker_id
-                    for seg_id in ids
-                    if by_id[seg_id].speaker_id is not None
-                }
-                if len(speakers) > 1:
-                    raise ValueError("semantic group crosses speaker boundary")
         except Exception:
+            ai_available = False
             groups = [[seg.id] for seg in window]
+        else:
+            try:
+                text = (raw or "").strip()
+                if text.startswith("```"):
+                    lines = text.splitlines()
+                    lines = lines[1:] if lines else lines
+                    if lines and lines[-1].strip().startswith("```"):
+                        lines = lines[:-1]
+                    text = "\n".join(lines).strip()
+                payload = __import__("json").loads(text)
+                groups = _validate_group_ids(payload, [seg.id for seg in window])
+
+                by_id = {seg.id: seg for seg in window}
+                for ids in groups:
+                    speakers = {
+                        by_id[seg_id].speaker_id
+                        for seg_id in ids
+                        if by_id[seg_id].speaker_id is not None
+                    }
+                    if len(speakers) > 1:
+                        raise ValueError("semantic group crosses speaker boundary")
+            except Exception:
+                # Malformed/invalid grouping falls back only for this window;
+                # it does not imply the provider is unavailable.
+                groups = [[seg.id] for seg in window]
 
         by_id = {seg.id: seg for seg in window}
         for ids in groups:
