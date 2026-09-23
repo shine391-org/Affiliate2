@@ -145,6 +145,10 @@ async def _dispatch_existing_run(run: LocalizationRun):
 
     if not run.source_path.exists():
         raise HTTPException(status_code=409, detail="Persisted source media is missing")
+    try:
+        run.verify_source_identity()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not await restart_job(run.job_id):
         raise HTTPException(
             status_code=409,
@@ -334,6 +338,11 @@ async def rerun_localization_job(job_id: str, body: RerunRequest):
     run = _load_run(job_id)
     stage = body.from_stage or run.first_incomplete_stage() or "qc"
     run.invalidate_from(stage, delete_artifacts=True)
+    if stage == "separation":
+        # This is the explicit recovery path for an intentionally replaced
+        # source. All source-derived artifacts were invalidated above, so the
+        # current bytes can safely become the new canonical identity.
+        run.refresh_source_identity()
     await _dispatch_existing_run(run)
     return {"ok": True, "job_id": job_id, "from_stage": stage}
 

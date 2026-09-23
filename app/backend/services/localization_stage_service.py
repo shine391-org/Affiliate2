@@ -8,6 +8,7 @@ artifacts so a failed/restarted job can resume or rerun from a selected stage.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 from dataclasses import asdict, dataclass, field
@@ -33,6 +34,22 @@ STAGES = (
 
 def _utc() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _source_identity(path: Path) -> dict[str, Any]:
+    """Return the content identity used to decide whether resume is safe.
+
+    The path is deliberately not part of the identity: replacing bytes at the
+    same filename is exactly the corruption case this guard must detect.
+    """
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return {
+        "sha256": digest.hexdigest(),
+        "size_bytes": path.stat().st_size,
+    }
 
 
 @dataclass
@@ -67,6 +84,7 @@ class LocalizationRun:
                 "version": MANIFEST_VERSION,
                 "job_id": job_id,
                 "source_path": str(Path(source_path).resolve()),
+                "source_identity": None,
                 "effective_profile": effective_profile or {},
                 "request": request or {},
                 "created_at": _utc(),
@@ -104,12 +122,19 @@ class LocalizationRun:
         )
         tmp.replace(self.manifest_path)
 
+    def _has_completed_stages(self) -> bool:
+        return any(
+            self.record(name).get("status") == "complete"
+            for name in STAGES
+        )
+
     def ensure_source_copy(self, source: Path | str) -> Path:
-        """Persist the uploaded/source media so resume survives temp cleanup."""
+        """Persist one immutable-by-identity source snapshot for this run."""
         source = Path(source).resolve()
         current = Path(self.data["source_path"]).resolve()
         try:
             if current.exists() and current.is_relative_to(self.root.resolve()):
+                self.verify_source_identity()
                 return current
         except (OSError, ValueError):
             pass
@@ -120,9 +145,59 @@ class LocalizationRun:
             tmp = target.with_suffix(target.suffix + ".tmp")
             shutil.copy2(source, tmp)
             tmp.replace(target)
+        if not target.exists() or target.stat().st_size <= 0:
+            raise RuntimeError(f"Persisted source media is missing or empty: {target}")
+
         self.data["source_path"] = str(target.resolve())
+        self.data["source_identity"] = _source_identity(target)
         self._write()
         return target
+
+    def verify_source_identity(self) -> dict[str, Any]:
+        """Fail closed when a resumable run's source bytes have changed."""
+        path = self.source_path.resolve()
+        if not path.exists() or path.stat().st_size <= 0:
+            raise RuntimeError(f"Persisted source media is missing or empty: {path}")
+
+        expected = self.data.get("source_identity")
+        if not expected:
+            if self._has_completed_stages():
+                raise RuntimeError(
+                    "Localization source identity is missing for a run with completed "
+                    "stages. Existing artifacts cannot be safely resumed; rerun from "
+                    "separation using the current source media."
+                )
+            current = _source_identity(path)
+            self.data["source_identity"] = current
+            self._write()
+            return current
+
+        current = _source_identity(path)
+        if (
+            str(expected.get("sha256") or "") != current["sha256"]
+            or int(expected.get("size_bytes") or -1) != current["size_bytes"]
+        ):
+            raise RuntimeError(
+                "Persisted source media has changed since this localization run was "
+                "created. Existing separation/ASR/translation artifacts cannot be "
+                "safely resumed; rerun from separation using the current source media."
+            )
+        return current
+
+    def refresh_source_identity(self) -> dict[str, Any]:
+        """Accept the current source only after every stage was invalidated."""
+        if self._has_completed_stages():
+            raise RuntimeError(
+                "Cannot accept changed source media while completed localization "
+                "stages remain; invalidate from separation first."
+            )
+        path = self.source_path.resolve()
+        if not path.exists() or path.stat().st_size <= 0:
+            raise RuntimeError(f"Persisted source media is missing or empty: {path}")
+        current = _source_identity(path)
+        self.data["source_identity"] = current
+        self._write()
+        return current
 
     @property
     def source_path(self) -> Path:

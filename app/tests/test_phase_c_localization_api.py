@@ -48,3 +48,45 @@ def test_profile_invalidation_uses_earliest_quality_stage():
     assert api._profile_invalidation({"render_profile"}) == "final_render"
     assert api._profile_invalidation({"translation_model", "tts_model"}) == "translation"
     assert api._profile_invalidation({"asr_model", "render_profile"}) == "asr"
+
+
+
+@pytest.mark.asyncio
+async def test_rerun_from_separation_rebinds_source_identity(monkeypatch):
+    events = []
+
+    class FakeRun:
+        job_id = "job-source-reset"
+
+        def first_incomplete_stage(self):
+            return "dubbing"
+
+        def invalidate_from(self, stage, *, delete_artifacts):
+            events.append(("invalidate", stage, delete_artifacts))
+
+        def refresh_source_identity(self):
+            events.append(("refresh_source_identity",))
+
+    async def fake_inactive(job_id):
+        events.append(("inactive", job_id))
+
+    async def fake_dispatch(run):
+        events.append(("dispatch", run.job_id))
+
+    fake_run = FakeRun()
+    monkeypatch.setattr(api, "_assert_job_inactive", fake_inactive)
+    monkeypatch.setattr(api, "_load_run", lambda job_id: fake_run)
+    monkeypatch.setattr(api, "_dispatch_existing_run", fake_dispatch)
+
+    result = await api.rerun_localization_job(
+        "job-source-reset",
+        api.RerunRequest(from_stage="separation"),
+    )
+
+    assert result["from_stage"] == "separation"
+    assert events == [
+        ("inactive", "job-source-reset"),
+        ("invalidate", "separation", True),
+        ("refresh_source_identity",),
+        ("dispatch", "job-source-reset"),
+    ]

@@ -972,11 +972,18 @@ async def run_tool_translate(
         else:
             source_path = run.source_path
             if not source_path.exists():
-                source_path = run.ensure_source_copy(original_input)
+                raise RuntimeError(
+                    "Persisted source media is missing; existing localization "
+                    "artifacts cannot be safely resumed. Rerun from separation."
+                )
             if profile_override:
                 run.update_effective_profile(profile.model_dump())
             if request_snapshot:
                 run.update_request({**run.request, **request_snapshot})
+
+        # Source content, not its pathname, is the resume boundary. A file may
+        # be overwritten in-place while stale C5/C6 artifacts still exist.
+        run.verify_source_identity()
 
         # Never clean the persisted source snapshot.
         cleanup = [
