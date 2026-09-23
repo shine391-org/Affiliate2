@@ -172,3 +172,25 @@ def test_azure_ssml_uses_selected_voice_locale(monkeypatch, tmp_path):
     ))
     assert out.exists()
     assert "xml:lang='en-US'" in captured["content"]
+
+
+
+def test_edge_speed_one_maps_to_native_zero_percent(monkeypatch, tmp_path):
+    captured = {}
+
+    class FakeCommunicate:
+        def __init__(self, text, voice, rate):
+            captured["rate"] = rate
+
+        async def save(self, path):
+            from pathlib import Path
+            Path(path).write_bytes(b"mp3")
+
+    monkeypatch.setattr(edge_tts_service.edge_tts, "Communicate", FakeCommunicate)
+    out = asyncio.run(edge_tts_service.generate_voice(
+        "xin chào",
+        output_path=tmp_path / "edge.mp3",
+        speed=1.0,
+    ))
+    assert out.exists()
+    assert captured["rate"] == "+0%"

@@ -11,7 +11,11 @@ from pydantic import BaseModel, Field
 
 from backend.config import settings
 from backend.core.localization import LocalizationProfile, LocalizationTranscript
-from backend.services.localization_stage_service import LocalizationRun, STAGES
+from backend.services.localization_stage_service import (
+    MANIFEST_VERSION,
+    LocalizationRun,
+    STAGES,
+)
 
 router = APIRouter(prefix="/localization", tags=["localization"])
 
@@ -178,6 +182,8 @@ async def localization_exceptions(limit: int = 50):
             data = json.loads(manifest.read_text(encoding="utf-8"))
         except Exception:
             continue
+        if int(data.get("version") or 0) != MANIFEST_VERSION:
+            continue
         stages = data.get("stages") or {}
         qc = stages.get("qc") or {}
         qc_status = (qc.get("metadata") or {}).get("status")
@@ -211,8 +217,17 @@ async def localization_expert_override(job_id: str, body: ExpertOverrideRequest)
             profile = LocalizationProfile.model_validate(merged)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Invalid profile override: {exc}") from exc
-        run.update_effective_profile(profile.model_dump())
         stage = _profile_invalidation(set(body.profile_updates))
+        if body.segments and stage in {"separation", "asr", "semantic", "translation"}:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Cannot combine upstream profile changes with segment overrides "
+                    "because the segment IDs may be regenerated. Apply the profile "
+                    "change and rerun first, then edit the resulting segments."
+                ),
+            )
+        run.update_effective_profile(profile.model_dump())
         if stage:
             invalidations.append(stage)
 

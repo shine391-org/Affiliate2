@@ -77,3 +77,16 @@ def test_chunk_regeneration_can_invalidate_without_deleting_raw_files(stage_root
     run.invalidate_from("dubbing", delete_artifacts=False)
     assert raw.exists()
     assert run.record("dubbing")["status"] == "invalidated"
+
+
+
+def test_old_manifest_version_is_rejected_instead_of_resumed(stage_root, tmp_path):
+    source = tmp_path / "input.mp4"
+    source.write_bytes(b"x")
+    run = stages.LocalizationRun("job-old", source_path=str(source))
+    data = json.loads(run.manifest_path.read_text(encoding="utf-8"))
+    data["version"] = stages.MANIFEST_VERSION - 1
+    run.manifest_path.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="incompatible"):
+        stages.LocalizationRun.load("job-old")

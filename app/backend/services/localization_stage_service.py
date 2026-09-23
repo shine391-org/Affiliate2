@@ -17,6 +17,8 @@ from typing import Any
 
 from backend.config import settings
 
+MANIFEST_VERSION = 2
+
 STAGES = (
     "separation",
     "asr",
@@ -62,7 +64,7 @@ class LocalizationRun:
             if not source_path:
                 raise ValueError("source_path is required for a new localization run")
             self.data = {
-                "version": 1,
+                "version": MANIFEST_VERSION,
                 "job_id": job_id,
                 "source_path": str(Path(source_path).resolve()),
                 "effective_profile": effective_profile or {},
@@ -82,6 +84,13 @@ class LocalizationRun:
             data = json.loads(self.manifest_path.read_text(encoding="utf-8"))
         except Exception as exc:
             raise RuntimeError(f"Localization manifest is unreadable: {self.manifest_path}") from exc
+        version = int(data.get("version") or 0)
+        if version != MANIFEST_VERSION:
+            raise RuntimeError(
+                f"Localization manifest version {version} is incompatible with "
+                f"current pipeline version {MANIFEST_VERSION}; start a fresh "
+                "localization job so stale artifacts are not resumed."
+            )
         for name in STAGES:
             data.setdefault("stages", {}).setdefault(name, asdict(StageRecord()))
         return data
