@@ -152,6 +152,61 @@ def _merge_group(segments: list[LocalizationSegment], group_index: int) -> Local
     )
 
 
+def _collapse_ws(text: str) -> str:
+    return " ".join((text or "").split()).strip()
+
+
+def _timed_words(transcript: LocalizationTranscript) -> list[dict]:
+    """Flatten source words with stable IDs, timestamps and parent speaker."""
+    out: list[dict] = []
+    number = 1
+    for seg in transcript.segments:
+        for raw in seg.source_words:
+            if not isinstance(raw, dict):
+                continue
+            start = _word_ms(raw, "start")
+            end = _word_ms(raw, "end")
+            text = str(raw.get("word") or "").strip()
+            if start is None or end is None or end <= start or not text:
+                continue
+            out.append({
+                "id": f"w{number:05d}",
+                "text": text,
+                "start_ms": start,
+                "end_ms": end,
+                "speaker_id": seg.speaker_id,
+                "raw": raw,
+            })
+            number += 1
+    return out
+
+
+def _word_groups_to_segments(
+    groups: list[list[str]],
+    words: list[dict],
+    *,
+    start_group_index: int = 1,
+) -> list[LocalizationSegment]:
+    by_id = {w["id"]: w for w in words}
+    out: list[LocalizationSegment] = []
+    for offset, ids in enumerate(groups):
+        group = [by_id[word_id] for word_id in ids]
+        speaker_ids = {w["speaker_id"] for w in group}
+        speaker_id = next(iter(speaker_ids)) if len(speaker_ids) == 1 else None
+        # Word tokens from faster-whisper are often already whitespace-aware,
+        # but stripping/collapsing gives stable text across engines.
+        text = _collapse_ws(" ".join(w["text"] for w in group))
+        out.append(LocalizationSegment(
+            id=f"sem-{start_group_index + offset:04d}",
+            speaker_id=speaker_id,
+            source_text=text,
+            source_start_ms=group[0]["start_ms"],
+            source_end_ms=group[-1]["end_ms"],
+            source_words=[w["raw"] for w in group],
+        ))
+    return out
+
+
 def _validate_group_ids(
     payload,
     expected_ids: list[str],
@@ -174,19 +229,129 @@ def _validate_group_ids(
     return groups
 
 
+async def _refine_words_with_ai(
+    transcript: LocalizationTranscript,
+    ai,
+    *,
+    max_words_per_window: int = 60,
+) -> LocalizationTranscript | None:
+    """SmartSub-style word-tier semantic segmentation.
+
+    AI can only group stable word IDs. Exact token order/coverage is validated,
+    so it cannot rewrite source content. Returns None when word timing is not
+    trustworthy enough and caller should use cue-tier grouping instead.
+    """
+    words = _timed_words(transcript)
+    if len(words) < 2:
+        return None
+
+    # If a meaningful portion of transcript text has no timed words, word-tier
+    # segmentation would silently drop source content. Require approximate
+    # coverage before using this tier.
+    word_text = _collapse_ws(" ".join(w["text"] for w in words))
+    source_text = _collapse_ws(
+        transcript.text or " ".join(seg.source_text for seg in transcript.segments)
+    )
+    if not word_text or not source_text:
+        return None
+    compact_words = re.sub(r"\s+", "", word_text).lower()
+    compact_source = re.sub(r"\s+", "", source_text).lower()
+    if compact_source and len(compact_words) / max(len(compact_source), 1) < 0.80:
+        return None
+
+    output: list[LocalizationSegment] = []
+    next_group_index = 1
+    for start in range(0, len(words), max_words_per_window):
+        window = words[start:start + max_words_per_window]
+        if len(window) == 1:
+            groups = [[window[0]["id"]]]
+        else:
+            public_items = [
+                {
+                    "id": w["id"],
+                    "text": w["text"],
+                    "start_ms": w["start_ms"],
+                    "end_ms": w["end_ms"],
+                    "speaker_id": w["speaker_id"],
+                }
+                for w in window
+            ]
+            prompt = f"""You are segmenting a word-timestamped transcript into semantic units.
+
+You may ONLY group adjacent WORD IDs. Do not rewrite, translate, omit, duplicate, or reorder words.
+
+Create natural thought/sentence units suitable for translation and subtitles.
+Prefer boundaries at punctuation, complete thoughts, meaningful pauses, and speaker changes.
+Avoid one-word fragments unless they are truly standalone.
+
+INPUT WORDS:
+{__import__("json").dumps(public_items, ensure_ascii=False)}
+
+Return ONLY JSON:
+[{{"ids":["w00001","w00002"]}}, {{"ids":["w00003"]}}]
+Every input word ID must appear exactly once and in the same order."""
+
+            try:
+                raw = await ai.chat(
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=1800,
+                )
+                text = (raw or "").strip()
+                if text.startswith("```"):
+                    lines = text.splitlines()
+                    lines = lines[1:] if lines else lines
+                    if lines and lines[-1].strip().startswith("```"):
+                        lines = lines[:-1]
+                    text = "\n".join(lines).strip()
+                payload = __import__("json").loads(text)
+                groups = _validate_group_ids(payload, [w["id"] for w in window])
+
+                # Do not allow an AI group to cross a known speaker boundary.
+                by_id = {w["id"]: w for w in window}
+                for ids in groups:
+                    known = {
+                        by_id[word_id]["speaker_id"]
+                        for word_id in ids
+                        if by_id[word_id]["speaker_id"] is not None
+                    }
+                    if len(known) > 1:
+                        raise ValueError("semantic group crosses speaker boundary")
+            except Exception:
+                # Window-level fallback preserves every word and real timestamp.
+                groups = [[w["id"]] for w in window]
+
+        generated = _word_groups_to_segments(
+            groups,
+            window,
+            start_group_index=next_group_index,
+        )
+        output.extend(generated)
+        next_group_index += len(generated)
+
+    refined = transcript.model_copy(deep=True)
+    refined.segments = output
+    refined.text = " ".join(seg.source_text for seg in output).strip()
+    return refined
+
+
 async def refine_semantic_cues_with_ai(
     transcript: LocalizationTranscript,
     ai,
     *,
     window_size: int = 12,
 ) -> LocalizationTranscript:
-    """SmartSub-style AI boundary refinement with strict structural validation.
+    """SmartSub/VideoLingo-style boundary refinement with validated fallback.
 
-    The model is never allowed to rewrite source text. It can only group
-    existing cue IDs. Any invalid/provider response degrades to the deterministic
-    normalized cues for that window.
+    Prefer real word timestamps, allowing semantic boundaries inside raw ASR
+    segments. When word coverage is incomplete, fall back to grouping existing
+    deterministic cues. In neither tier may AI rewrite source text.
     """
     base = normalize_semantic_cues(transcript)
+
+    word_refined = await _refine_words_with_ai(base, ai)
+    if word_refined is not None:
+        return word_refined
+
     if len(base.segments) <= 1:
         return base
 
@@ -205,6 +370,7 @@ async def refine_semantic_cues_with_ai(
                 "text": seg.source_text,
                 "start_ms": seg.source_start_ms,
                 "end_ms": seg.source_end_ms,
+                "speaker_id": seg.speaker_id,
             }
             for seg in window
         ]
@@ -215,9 +381,9 @@ You may ONLY group adjacent cue IDs. You MUST NOT rewrite, translate, omit, dupl
 Prefer a new group at:
 - a complete thought or sentence boundary;
 - a meaningful pause/topic turn;
-- a speaker change when visible in the IDs/data.
+- a speaker change.
 
-Merge tiny fragments that depend on neighboring words. Avoid creating overly long groups.
+Merge tiny fragments that depend on neighboring words. Avoid overly long groups.
 
 INPUT:
 {__import__("json").dumps(items, ensure_ascii=False)}
@@ -240,6 +406,16 @@ Every input ID must appear exactly once and in the same order."""
                 text = "\n".join(lines).strip()
             payload = __import__("json").loads(text)
             groups = _validate_group_ids(payload, [seg.id for seg in window])
+
+            by_id = {seg.id: seg for seg in window}
+            for ids in groups:
+                speakers = {
+                    by_id[seg_id].speaker_id
+                    for seg_id in ids
+                    if by_id[seg_id].speaker_id is not None
+                }
+                if len(speakers) > 1:
+                    raise ValueError("semantic group crosses speaker boundary")
         except Exception:
             groups = [[seg.id] for seg in window]
 

@@ -86,3 +86,64 @@ async def test_ai_refine_invalid_rewrite_shape_falls_back_without_data_loss():
     ai = _GroupingAI('[{"ids":["s2","s1"]}]')
     got = await refine_semantic_cues_with_ai(tx, ai)
     assert [s.source_text for s in got.segments] == ["one", "two"]
+
+
+@pytest.mark.asyncio
+async def test_ai_word_tier_can_split_inside_raw_asr_segment_without_rewriting():
+    from backend.services.semantic_segmentation import refine_semantic_cues_with_ai
+
+    words = [
+        {"word": "Hello", "start": 0.0, "end": 0.4},
+        {"word": "there.", "start": 0.4, "end": 0.9},
+        {"word": "Next", "start": 1.1, "end": 1.5},
+        {"word": "idea.", "start": 1.5, "end": 2.0},
+    ]
+    tx = LocalizationTranscript(
+        text="Hello there. Next idea.",
+        segments=[
+            LocalizationSegment(
+                id="raw1",
+                source_text="Hello there. Next idea.",
+                source_start_ms=0,
+                source_end_ms=2000,
+                source_words=words,
+            )
+        ],
+    )
+    ai = _GroupingAI(
+        '[{"ids":["w00001","w00002"]},{"ids":["w00003","w00004"]}]'
+    )
+    got = await refine_semantic_cues_with_ai(tx, ai)
+    assert len(got.segments) == 2
+    assert got.segments[0].source_text == "Hello there."
+    assert got.segments[0].source_start_ms == 0
+    assert got.segments[0].source_end_ms == 900
+    assert got.segments[1].source_text == "Next idea."
+    assert got.segments[1].source_start_ms == 1100
+    assert got.segments[1].source_end_ms == 2000
+
+
+@pytest.mark.asyncio
+async def test_ai_word_tier_invalid_ids_falls_back_without_losing_words():
+    from backend.services.semantic_segmentation import refine_semantic_cues_with_ai
+
+    words = [
+        {"word": "one", "start": 0.0, "end": 0.5},
+        {"word": "two", "start": 0.5, "end": 1.0},
+    ]
+    tx = LocalizationTranscript(
+        text="one two",
+        segments=[
+            LocalizationSegment(
+                id="raw1", source_text="one two",
+                source_start_ms=0, source_end_ms=1000,
+                source_words=words,
+            )
+        ],
+    )
+    ai = _GroupingAI('[{"ids":["w00002","w00001"]}]')
+    got = await refine_semantic_cues_with_ai(tx, ai)
+    assert [s.source_text for s in got.segments] == ["one", "two"]
+    assert [(s.source_start_ms, s.source_end_ms) for s in got.segments] == [
+        (0, 500), (500, 1000)
+    ]
