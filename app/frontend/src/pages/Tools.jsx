@@ -17,6 +17,8 @@ import GraphicEqIcon from "@mui/icons-material/GraphicEq"
 import TransformIcon from "@mui/icons-material/Transform"
 import LightbulbOutlinedIcon from "@mui/icons-material/LightbulbOutlined"
 import TranslateOutlinedIcon from "@mui/icons-material/TranslateOutlined"
+import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined"
+import PlaylistAddCheckOutlinedIcon from "@mui/icons-material/PlaylistAddCheckOutlined"
 import MovieFilterOutlinedIcon from "@mui/icons-material/MovieFilterOutlined"
 import VideocamOutlinedIcon from "@mui/icons-material/VideocamOutlined"
 import HeadphonesOutlinedIcon from "@mui/icons-material/HeadphonesOutlined"
@@ -179,6 +181,20 @@ const TOOLS = [
     title: "Translate + Dub",
     description: "Translate captions to 19+ languages or dub the audio entirely.",
     icon: <TranslateOutlinedIcon />,
+    category: "subtitles",
+  },
+  {
+    id: "localization-batch",
+    title: "Localization Batch",
+    description: "Run one HQ localization profile across up to 20 videos with persisted resume state.",
+    icon: <PlaylistAddCheckOutlinedIcon />,
+    category: "subtitles",
+  },
+  {
+    id: "localization-review",
+    title: "Localization Review",
+    description: "Open QC exceptions, edit translation/timing/voice, regenerate chunks, and rerun downstream stages.",
+    icon: <FactCheckOutlinedIcon />,
     category: "subtitles",
   },
   {
