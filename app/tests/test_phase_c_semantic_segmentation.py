@@ -252,3 +252,78 @@ async def test_invalid_ai_grouping_still_preserves_word_speaker_boundary():
     )
     assert [s.speaker_id for s in got.segments] == ["A", "B"]
     assert [s.source_text for s in got.segments] == ["hello there", "yes indeed"]
+
+@pytest.mark.asyncio
+async def test_word_tier_provider_failure_opens_stage_circuit_breaker():
+    from backend.services.semantic_segmentation import refine_semantic_cues_with_ai
+
+    words = [
+        {
+            "word": f" w{i}",
+            "start": i * 0.1,
+            "end": (i + 1) * 0.1,
+        }
+        for i in range(121)
+    ]
+    text = " ".join(f"w{i}" for i in range(121))
+    tx = LocalizationTranscript(
+        text=text,
+        segments=[LocalizationSegment(
+            id="raw1",
+            source_text=text,
+            source_start_ms=0,
+            source_end_ms=12100,
+            source_words=words,
+        )],
+    )
+
+    class FailingAI:
+        def __init__(self):
+            self.calls = 0
+
+        async def chat(self, *args, **kwargs):
+            self.calls += 1
+            raise TimeoutError("semantic provider unavailable")
+
+    ai = FailingAI()
+    got = await refine_semantic_cues_with_ai(tx, ai)
+
+    assert ai.calls == 1
+    assert got.segments
+    assert "w0" in got.segments[0].source_text
+    assert "w120" in got.segments[-1].source_text
+
+
+@pytest.mark.asyncio
+async def test_cue_tier_provider_failure_skips_remaining_ai_windows():
+    from backend.services.semantic_segmentation import refine_semantic_cues_with_ai
+
+    tx = LocalizationTranscript(
+        text=" ".join(f"Cue {i}." for i in range(6)),
+        segments=[
+            LocalizationSegment(
+                id=f"s{i}",
+                source_text=f"Cue {i}.",
+                source_start_ms=i * 1200,
+                source_end_ms=i * 1200 + 1000,
+            )
+            for i in range(6)
+        ],
+    )
+
+    class FailingAI:
+        def __init__(self):
+            self.calls = 0
+
+        async def chat(self, *args, **kwargs):
+            self.calls += 1
+            raise ConnectionError("semantic provider unavailable")
+
+    ai = FailingAI()
+    got = await refine_semantic_cues_with_ai(tx, ai, window_size=2)
+
+    assert ai.calls == 1
+    assert [seg.source_text for seg in got.segments] == [
+        f"Cue {i}." for i in range(6)
+    ]
+
