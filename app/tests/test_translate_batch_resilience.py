@@ -42,6 +42,24 @@ def _runtime():
     )
 
 
+def _seed_reusable_chunk(work: Path, chunk_id: int, text: str, speaker_id: str):
+    runtime = _runtime()
+    path = work / f"chunk_{chunk_id:04d}.wav"
+    path.write_bytes(b"old")
+    identity = ls._chunk_synthesis_identity(
+        text=text,
+        runtime=runtime,
+        voice=runtime.default_voice,
+        target_language="Vietnamese",
+        speaker_id=speaker_id,
+        reference_audio=None,
+        reference_text=None,
+        reference_language=None,
+    )
+    ls._write_chunk_identity(path, identity)
+    return path
+
+
 def _transcript():
     return LocalizationTranscript(
         text="第一句 品牌很好",
@@ -371,8 +389,8 @@ async def test_c7_targeted_regeneration_reuses_other_raw_chunks(monkeypatch, tmp
     ])
     work = tmp_path / "work"
     work.mkdir()
-    (work / "chunk_0001.wav").write_bytes(b"old1")
-    (work / "chunk_0002.wav").write_bytes(b"old2")
+    _seed_reusable_chunk(work, 1, "một", "A")
+    _seed_reusable_chunk(work, 2, "hai", "B")
 
     monkeypatch.setattr(ls, "_profile_ai_client", lambda *_: object())
     monkeypatch.setattr(ls, "_tts_config", lambda *_: _runtime())
@@ -410,7 +428,8 @@ async def test_c7_targeted_regeneration_reuses_other_raw_chunks(monkeypatch, tmp
         regenerate_chunk_ids={2},
         reuse_existing_chunks=True,
     )
-    assert generated == ["chunk_0002.wav"]
+    assert generated == ["chunk_0002.pending.wav"]
+    assert (work / "chunk_0002.wav").read_bytes() == b"new"
 
 
 def test_c7_captions_use_fitted_target_timing_and_speaker():
@@ -904,8 +923,18 @@ async def test_c7_targeted_regeneration_never_rewrites_reused_chunk(
     ])
     work = tmp_path / "work"
     work.mkdir()
-    (work / "chunk_0001.wav").write_bytes(b"old1")
-    (work / "chunk_0002.wav").write_bytes(b"old2")
+    _seed_reusable_chunk(
+        work,
+        1,
+        "đây là câu rất dài dùng để buộc estimator muốn rewrite nhưng chunk này phải được reuse nguyên trạng",
+        "A",
+    )
+    _seed_reusable_chunk(
+        work,
+        2,
+        "đây cũng là câu dài để chunk mục tiêu được phép rewrite trước khi regenerate",
+        "B",
+    )
 
     monkeypatch.setattr(ls, "_profile_ai_client", lambda *_: object())
     monkeypatch.setattr(ls, "_tts_config", lambda *_: _runtime())
@@ -959,9 +988,98 @@ async def test_c7_targeted_regeneration_never_rewrites_reused_chunk(
     )
 
     assert adapted == [2]
-    assert generated == ["chunk_0002.wav"]
+    assert generated == ["chunk_0002.pending.wav"]
+    assert (work / "chunk_0002.wav").read_bytes() == b"new"
     assert result.transcript.segments[0].translated_text.startswith("đây là câu rất dài")
     assert result.transcript.segments[1].translated_text == "ngắn"
+
+
+@pytest.mark.asyncio
+async def test_c7_stale_raw_chunk_identity_forces_regeneration(monkeypatch, tmp_path):
+    tx = LocalizationTranscript(segments=[
+        LocalizationSegment(
+            id="s1",
+            speaker_id="A",
+            source_text="one",
+            translated_text="văn bản mới",
+            source_start_ms=0,
+            source_end_ms=1200,
+            translation_status="success",
+        )
+    ])
+    work = tmp_path / "work"
+    work.mkdir()
+    _seed_reusable_chunk(work, 1, "văn bản cũ", "A")
+
+    monkeypatch.setattr(ls, "_profile_ai_client", lambda *_: object())
+    monkeypatch.setattr(ls, "_tts_config", lambda *_: _runtime())
+
+    generated = []
+
+    async def fake_generate(text, *, output_path, **kwargs):
+        generated.append(text)
+        output_path.write_bytes(b"fresh")
+        return 500
+
+    def fake_fit(source, destination, speed_factor):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b"fit")
+        return destination
+
+    def fake_compose(chunks, *, total_duration_ms, output_path):
+        output_path.write_bytes(b"wav")
+        return output_path
+
+    monkeypatch.setattr(ls, "_generate_tts_chunk", fake_generate)
+    monkeypatch.setattr(ls, "_fit_chunk_audio_sync", fake_fit)
+    monkeypatch.setattr(ls, "_compose_chunk_track_sync", fake_compose)
+    monkeypatch.setattr(
+        "backend.services.video_utils.probe_duration",
+        lambda *a, **k: 2.0,
+    )
+
+    await ls.synthesize_timed_dub(
+        tx,
+        source_media=tmp_path / "source.mp4",
+        target_language="Vietnamese",
+        profile=_profile(),
+        user_settings=object(),
+        work_dir=work,
+        reuse_existing_chunks=True,
+    )
+
+    assert generated == ["văn bản mới"]
+    assert (work / "chunk_0001.wav").read_bytes() == b"fresh"
+
+
+@pytest.mark.asyncio
+async def test_atomic_chunk_regeneration_preserves_previous_audio_on_failure(
+    monkeypatch, tmp_path,
+):
+    target = tmp_path / "chunk_0001.wav"
+    target.write_bytes(b"previous-good-audio")
+
+    async def fail_generate(text, *, output_path, **kwargs):
+        output_path.write_bytes(b"partial-bad-audio")
+        raise RuntimeError("tts provider failed")
+
+    monkeypatch.setattr(ls, "_generate_tts_chunk", fail_generate)
+
+    with pytest.raises(RuntimeError, match="tts provider failed"):
+        await ls._generate_tts_chunk_atomic(
+            "new text",
+            output_path=target,
+            identity="new-identity",
+            runtime=_runtime(),
+            voice="vi",
+            profile=_profile(),
+            speaker_id="A",
+            target_language="Vietnamese",
+        )
+
+    assert target.read_bytes() == b"previous-good-audio"
+    assert not (tmp_path / "chunk_0001.pending.wav").exists()
+
 
 
 @pytest.mark.asyncio
