@@ -171,11 +171,20 @@ class LocalizationRun:
             self.data["source_identity"] = current
             self._write()
             return current
+        if not isinstance(expected, dict):
+            raise RuntimeError(
+                "Localization source identity is invalid. Existing artifacts cannot "
+                "be safely resumed; rerun from separation using the current source media."
+            )
 
         current = _source_identity(path)
+        try:
+            expected_size = int(expected.get("size_bytes"))
+        except (TypeError, ValueError):
+            expected_size = -1
         if (
             str(expected.get("sha256") or "") != current["sha256"]
-            or int(expected.get("size_bytes") or -1) != current["size_bytes"]
+            or expected_size != current["size_bytes"]
         ):
             raise RuntimeError(
                 "Persisted source media has changed since this localization run was "

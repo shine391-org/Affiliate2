@@ -80,6 +80,18 @@ def test_legacy_completed_run_without_source_identity_fails_closed(stage_root, t
         loaded.verify_source_identity()
 
 
+def test_malformed_source_identity_fails_closed(stage_root, tmp_path):
+    source = tmp_path / "input.mp4"
+    source.write_bytes(b"video")
+    run = stages.LocalizationRun("job-bad-identity", source_path=str(source))
+    run.ensure_source_copy(source)
+    run.data["source_identity"] = "not-a-valid-identity"
+    run._write()
+
+    with pytest.raises(RuntimeError, match="identity is invalid"):
+        run.verify_source_identity()
+
+
 def test_full_invalidation_can_accept_intentionally_replaced_source(stage_root, tmp_path):
     source = tmp_path / "input.mp4"
     source.write_bytes(b"video-a")
