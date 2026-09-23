@@ -45,13 +45,14 @@ _ASR_KEYS = {
 }
 _SEMANTIC_KEYS = {"semantic_segmentation"}
 _TRANSLATION_KEYS = {
-    "translation_provider", "translation_model", "translation_preset",
-    "translation_instructions", "glossary",
+    "translation_provider", "translation_model", "translation_base_url",
+    "translation_preset", "translation_instructions", "glossary",
 }
 _DUBBING_KEYS = {
-    "tts_provider", "tts_model", "tts_voice", "speaker_voices",
-    "speaker_reference_audio", "tts_reference_audio", "tts_reference_text",
-    "tts_reference_language", "dub_min_cue_duration_ms",
+    "tts_provider", "tts_model", "tts_voice", "tts_base_url", "tts_region",
+    "speaker_voices", "speaker_reference_audio", "tts_reference_audio",
+    "tts_reference_text", "tts_reference_language", "voice_clone_reference_mode",
+    "dub_min_cue_duration_ms",
     "dub_max_chunk_size", "dub_gap_tolerance_ms", "dub_speed_accept",
     "dub_speed_max", "dub_rewrite_attempts", "video_retime_mode",
     "video_retime_max_slowdown",
