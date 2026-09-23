@@ -1,6 +1,6 @@
 # PROJECT_STATUS.md
 
-## Overall status: PHASE C C4–C11 TECHNICAL PASS — C12 IMPLEMENTED / LOCAL QA PENDING — C13 ACCEPTANCE PENDING
+## Overall status: PHASE C C4–C12 TECHNICAL PASS — C13 REAL-MEDIA ACCEPTANCE ACTIVE
 
 Phase A and Phase B are complete and merged to `master`.
 
@@ -82,7 +82,7 @@ GPT-SoVITS can use manual reference audio or automatically extract reference spe
 Verified engineering evidence includes real C7 timing success without relaxing profile limits, HQ mix/final render, one final visual encode, QC without failures, source provenance protection, and C11 targeted regeneration isolation. Broader perceptual/multi-sample acceptance remains C13.
 
 ### C12 — Intelligence convergence
-**IMPLEMENTED / LOCAL QA PENDING.**
+**QA PASS.**
 
 Candidate Intelligence now routes through canonical application services for:
 - source-best-first media download via `backend.services.ytdlp_service`;
@@ -91,10 +91,12 @@ Candidate Intelligence now routes through canonical application services for:
 
 The old `src/radar/intel/media.py`, `transcribe.py`, and `ai_analyze.py` are compatibility adapters only. Their duplicate platform downloader, standalone faster-whisper model owner, and direct OpenAI-compatible HTTP client have been removed.
 
-The Radar CLI/report/cache contract remains intact during this transition. DB convergence remains Phase G.
+The Radar CLI/report/cache contract remains intact during this transition. Local QA at `8e15807` passed focused Candidate Intelligence, legacy Intel, Analyzer, AI provider, Radar enrichment, cache reuse, real canonical ASR, real Gemma/LM Studio AI, failure isolation, and canonical ownership checks. DB convergence remains Phase G.
 
-### C13
-Final acceptance = same regression sample + representative real supported videos supplied by the user, including fast speech, music-heavy and multi-speaker material.
+### C13 — Final real-media acceptance
+**ACTIVE.**
+
+Final acceptance = same regression sample + representative real supported videos supplied by the user, including fast speech, music-heavy, multi-speaker, longer-form, and normal product/review material. C13 is an acceptance campaign, not a new media engine: fix only evidence-backed defects and do not relax quality thresholds to obtain a pass.
 
 See:
 - `docs/PHASE_C.md`
