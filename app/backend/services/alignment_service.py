@@ -10,6 +10,7 @@ speaker_id remains stable for dubbing voice selection.
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +28,31 @@ class AlignmentReport:
     diarization_reason: str | None = None
     speaker_count: int = 0
     device: str = "cpu"
+
+
+def _ensure_torch_checkpoint_compat():
+    """Match VideoLingo's WhisperX/PyTorch>=2.6 compatibility guard.
+
+    PyTorch changed torch.load's default to weights_only=True. Trusted
+    WhisperX/pyannote checkpoints may contain OmegaConf objects and fail under
+    that default. Patch only the default case; callers that explicitly choose
+    weights_only keep their requested behavior.
+    """
+    import torch
+
+    current = torch.load
+    if getattr(current, "_affiliate2_weights_compat", False):
+        return torch
+
+    @functools.wraps(current)
+    def compatible_load(*args, **kwargs):
+        if kwargs.get("weights_only") is None:
+            kwargs["weights_only"] = False
+        return current(*args, **kwargs)
+
+    compatible_load._affiliate2_weights_compat = True
+    torch.load = compatible_load
+    return torch
 
 
 def _device() -> str:
@@ -153,7 +179,7 @@ def _align_sync(
         return transcript.model_copy(deep=True), AlignmentReport()
 
     try:
-        import torch
+        torch = _ensure_torch_checkpoint_compat()
         import whisperx
     except ImportError as exc:
         raise RuntimeError(

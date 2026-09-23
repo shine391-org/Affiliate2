@@ -54,3 +54,23 @@ def test_aligned_transcript_preserves_word_times_and_primary_speaker():
     assert got.segments[0].source_words[0]["speaker_id"] == "SPEAKER_00"
     assert got.segments[0].source_start_ms == 0
     assert got.segments[0].source_end_ms == 1000
+
+
+
+def test_torch_checkpoint_compat_sets_weights_only_false_by_default(monkeypatch):
+    import torch
+    from backend.services import alignment_service as alignment
+
+    seen = {}
+
+    def fake_load(*args, **kwargs):
+        seen["weights_only"] = kwargs.get("weights_only")
+        return "ok"
+
+    monkeypatch.setattr(torch, "load", fake_load)
+    patched = alignment._ensure_torch_checkpoint_compat()
+    assert patched.load("checkpoint.pt") == "ok"
+    assert seen["weights_only"] is False
+
+    patched.load("checkpoint.pt", weights_only=True)
+    assert seen["weights_only"] is True
