@@ -860,176 +860,450 @@ async def run_tool_translate(
     user_id: str = "local",
     target_aspect: str | None = None,
     profile_id: str | None = None,
+    profile_override: dict | None = None,
 ):
-    """Canonical Phase-C localization runner used by the Translate tool."""
+    """Canonical resumable Phase-C localization runner.
+
+    Expensive stages persist under storage/localization_jobs/<job_id>. A rerun
+    resumes completed artifacts or invalidates from a user-selected downstream
+    stage; there is no second job system.
+    """
+    import json as _json
     import shutil
     from dataclasses import asdict
 
     from backend.api.tools import tool_out_path
     from backend.config import settings
-    from backend.core.localization import LocalizationProfile
+    from backend.core.localization import LocalizationProfile, LocalizationTranscript
+    from backend.services.localization_qc_service import evaluate_localization_qc
     from backend.services.localization_service import (
         caption_segments_from_localization,
-        mix_dub_with_video,
+        mix_dub_audio,
         prepare_semantic_transcript,
         resolve_localization_profile,
         synthesize_timed_dub,
         transcribe_for_localization,
         translate_transcript,
     )
+    from backend.services.localization_stage_service import LocalizationRun
 
     target_language = _LANG_NAME_MAP.get(
         target_language.strip().lower(), target_language.strip()
     )
+    is_dub = mode == "full_dub"
+    request_snapshot = {
+        "target_language": target_language,
+        "mode": mode,
+        "voice_id": voice_id,
+        "caption_style": caption_style,
+        "emoji_style": emoji_style,
+        "target_aspect": target_aspect,
+        "profile_id": profile_id,
+    }
     logger.info(
         "TASK START tool:translate | job=%s target=%s mode=%s profile=%s",
         job_id[:8], target_language, mode, profile_id or "default",
     )
 
-    cleanup: list[Path] = [in_path]
-    work_dir = settings.TMP_DIR / f"{job_id}_localization"
+    original_input = Path(in_path)
+    cleanup: list[Path] = [original_input]
+    current_stage = "separation"
+    run = None
 
     try:
         user_settings = await _load_user_settings(user_id)
-        profile = resolve_localization_profile(user_settings, profile_id)
 
-        # Tool controls are job-level overrides on the saved profile.
-        updates = {}
-        if voice_id:
-            updates["tts_voice"] = voice_id
-        if caption_style:
-            updates["caption_style"] = caption_style
-        if target_aspect:
-            updates["target_aspect"] = target_aspect
-        elif profile_id is None:
-            # Preserve the existing manual Translate-tool behavior: omitting
-            # target_aspect means "keep source geometry". Automation/C9 passes
-            # a profile_id and therefore uses the profile's target aspect.
-            updates["target_aspect"] = "source"
-        if updates:
-            profile = LocalizationProfile.model_validate({
-                **profile.model_dump(),
-                **updates,
-            })
+        # Existing reruns use their effective profile snapshot. An explicit
+        # profile_override is the C11 expert path.
+        try:
+            run = LocalizationRun.load(job_id)
+            stored_profile = run.effective_profile
+        except ValueError:
+            run = None
+            stored_profile = {}
 
-        is_dub = mode == "full_dub"
-        background_file = None
-        asr_input = in_path
+        if profile_override:
+            profile = LocalizationProfile.model_validate(profile_override)
+        elif stored_profile:
+            profile = LocalizationProfile.model_validate(stored_profile)
+        else:
+            profile = resolve_localization_profile(user_settings, profile_id)
 
-        # YouDub-derived HQ path: separate first, then transcribe the vocal
-        # stem and later mix Vietnamese dub against clean background/music.
-        if is_dub and profile.audio_mode == "hq_clean":
-            await _tool_progress(job_id, 6, "Separating vocals/background for HQ clean dub...", user_id)
-            from backend.services.audio_separation_service import separate_vocals_background
-            vocals_file, background_file = await separate_vocals_background(
-                in_path,
-                work_dir / "separation",
+            # Manual tool controls are job-level overrides on the saved profile.
+            updates = {}
+            if voice_id:
+                updates["tts_voice"] = voice_id
+            if caption_style:
+                updates["caption_style"] = caption_style
+            if target_aspect:
+                updates["target_aspect"] = target_aspect
+            elif profile_id is None:
+                updates["target_aspect"] = "source"
+            if updates:
+                profile = LocalizationProfile.model_validate({
+                    **profile.model_dump(),
+                    **updates,
+                })
+
+        if run is None:
+            run = LocalizationRun(
+                job_id,
+                source_path=str(original_input),
+                effective_profile=profile.model_dump(),
+                request=request_snapshot,
             )
-            asr_input = vocals_file
+            source_path = run.ensure_source_copy(original_input)
+        else:
+            source_path = run.source_path
+            if not source_path.exists():
+                source_path = run.ensure_source_copy(original_input)
+            if profile_override:
+                run.update_effective_profile(profile.model_dump())
+            if request_snapshot:
+                run.update_request({**run.request, **request_snapshot})
 
-        await _tool_progress(
-            job_id, 16,
-            f"Transcribing with {profile.asr_model or profile.asr_quality}...",
-            user_id,
-        )
-        transcript = await transcribe_for_localization(asr_input, profile)
+        # Never clean the persisted source snapshot.
+        cleanup = [
+            path for path in cleanup
+            if path.resolve() != source_path.resolve()
+        ]
+
+        # ── C8 separation ────────────────────────────────────────────────
+        background_file = None
+        asr_input = source_path
+        current_stage = "separation"
+        if is_dub and profile.audio_mode == "hq_clean":
+            if run.is_complete("separation", ("vocals", "background")):
+                vocals_file = run.artifact("separation", "vocals")
+                background_file = run.artifact("separation", "background")
+            else:
+                await _tool_progress(
+                    job_id, 6,
+                    "Separating vocals/background for HQ clean dub...",
+                    user_id,
+                )
+                run.start("separation")
+                try:
+                    from backend.services.audio_separation_service import (
+                        separate_vocals_background,
+                    )
+                    vocals_file, background_file = await separate_vocals_background(
+                        source_path,
+                        run.stage_dir("separation"),
+                    )
+                    run.complete(
+                        "separation",
+                        artifacts={
+                            "vocals": vocals_file,
+                            "background": background_file,
+                        },
+                        metadata={"model": "htdemucs_ft"},
+                    )
+                except Exception as exc:
+                    run.fail("separation", exc)
+                    raise
+            asr_input = vocals_file
+        elif not run.is_complete("separation"):
+            run.mark_complete_without_artifacts(
+                "separation",
+                metadata={"skipped": True, "reason": "clean_separation_not_required"},
+            )
+
+        # ── C5 ASR + WhisperX alignment/diarization ─────────────────────
+        current_stage = "asr"
+        if run.is_complete("asr", ("transcript",)):
+            transcript = LocalizationTranscript.model_validate(
+                run.load_json("asr", "transcript")
+            )
+        else:
+            await _tool_progress(
+                job_id, 16,
+                f"Transcribing/alignment with {profile.asr_model or profile.asr_quality}...",
+                user_id,
+            )
+            run.start("asr")
+            try:
+                transcript = await transcribe_for_localization(asr_input, profile)
+                path = run.save_json("asr", "transcript.json", transcript.model_dump())
+                run.complete(
+                    "asr",
+                    artifacts={"transcript": path},
+                    metadata=transcript.metadata,
+                )
+            except Exception as exc:
+                run.fail("asr", exc)
+                raise
         source_segment_count = len(transcript.segments)
 
-        transcript = await prepare_semantic_transcript(
-            transcript,
-            profile=profile,
-            user_settings=user_settings,
-        )
+        # ── C6 semantic segmentation ────────────────────────────────────
+        current_stage = "semantic"
+        if run.is_complete("semantic", ("transcript",)):
+            transcript = LocalizationTranscript.model_validate(
+                run.load_json("semantic", "transcript")
+            )
+        else:
+            await _tool_progress(job_id, 26, "Building semantic speech cues...", user_id)
+            run.start("semantic")
+            try:
+                transcript = await prepare_semantic_transcript(
+                    transcript,
+                    profile=profile,
+                    user_settings=user_settings,
+                )
+                path = run.save_json(
+                    "semantic", "transcript.json", transcript.model_dump()
+                )
+                run.complete(
+                    "semantic",
+                    artifacts={"transcript": path},
+                    metadata={"semantic_cue_count": len(transcript.segments)},
+                )
+            except Exception as exc:
+                run.fail("semantic", exc)
+                raise
 
-        await _tool_progress(
-            job_id, 32,
-            f"Translating {len(transcript.segments)} semantic cues...",
-            user_id,
-        )
-        localized = await translate_transcript(
-            transcript,
-            target_language=target_language,
-            profile=profile,
-            user_settings=user_settings,
-            for_dub=is_dub,
-        )
+        # ── C6 contextual translation ───────────────────────────────────
+        current_stage = "translation"
+        if run.is_complete("translation", ("transcript",)):
+            localized = LocalizationTranscript.model_validate(
+                run.load_json("translation", "transcript")
+            )
+        else:
+            await _tool_progress(
+                job_id, 36,
+                f"Translating {len(transcript.segments)} semantic cues...",
+                user_id,
+            )
+            run.start("translation")
+            try:
+                localized = await translate_transcript(
+                    transcript,
+                    target_language=target_language,
+                    profile=profile,
+                    user_settings=user_settings,
+                    for_dub=is_dub,
+                )
+                path = run.save_json(
+                    "translation", "transcript.json", localized.model_dump()
+                )
+                run.complete(
+                    "translation",
+                    artifacts={"transcript": path},
+                    metadata={
+                        "translated_count": sum(
+                            1 for s in localized.segments
+                            if s.translation_status == "success"
+                        ),
+                    },
+                )
+            except Exception as exc:
+                run.fail("translation", exc)
+                raise
 
-        captioned_input = in_path
         timing_issues: list[dict] = []
+        video_slowdown = 1.0
+        dub_chunk_count = 0
+        max_dubbing_speed = 1.0
+        dubbing_rewrite_count = 0
+        dub_track = None
 
+        # ── C7 smart dubbing ────────────────────────────────────────────
+        current_stage = "dubbing"
         if is_dub:
-            await _tool_progress(
-                job_id, 50,
-                "Synthesizing and fitting timed dubbing blocks...",
-                user_id,
+            if run.is_complete("dubbing", ("transcript", "dub_track")):
+                localized = LocalizationTranscript.model_validate(
+                    run.load_json("dubbing", "transcript")
+                )
+                dub_track = run.artifact("dubbing", "dub_track")
+                meta = run.record("dubbing").get("metadata") or {}
+                timing_issues = list(meta.get("issues") or [])
+                video_slowdown = float(meta.get("video_slowdown") or 1.0)
+                dub_chunk_count = int(meta.get("chunk_count") or 0)
+                max_dubbing_speed = float(meta.get("max_speed_factor") or 1.0)
+                dubbing_rewrite_count = int(meta.get("rewrite_count") or 0)
+            else:
+                await _tool_progress(
+                    job_id, 52,
+                    "Planning chunks, synthesizing and fitting HQ dubbing...",
+                    user_id,
+                )
+                run.start("dubbing")
+                try:
+                    dub = await synthesize_timed_dub(
+                        localized,
+                        source_media=source_path,
+                        target_language=target_language,
+                        profile=profile,
+                        user_settings=user_settings,
+                        work_dir=run.stage_dir("dubbing"),
+                        fail_on_overflow=True,
+                    )
+                    localized = dub.transcript
+                    dub_track = dub.dub_track
+                    timing_issues = dub.issues
+                    video_slowdown = dub.video_slowdown
+                    dub_chunk_count = dub.chunk_count
+                    max_dubbing_speed = dub.max_speed_factor
+                    dubbing_rewrite_count = dub.rewrite_count
+                    transcript_path = run.save_json(
+                        "dubbing", "transcript.json", localized.model_dump()
+                    )
+                    plan_path = run.save_json(
+                        "dubbing", "plan.json",
+                        [asdict(x) for x in (dub.plan or [])],
+                    )
+                    chunks_path = run.save_json(
+                        "dubbing", "chunks.json",
+                        [asdict(x) for x in (dub.chunks or [])],
+                    )
+                    run.complete(
+                        "dubbing",
+                        artifacts={
+                            "transcript": transcript_path,
+                            "dub_track": dub_track,
+                            "plan": plan_path,
+                            "chunks": chunks_path,
+                        },
+                        metadata={
+                            "issues": timing_issues,
+                            "video_slowdown": video_slowdown,
+                            "chunk_count": dub_chunk_count,
+                            "max_speed_factor": max_dubbing_speed,
+                            "rewrite_count": dubbing_rewrite_count,
+                        },
+                    )
+                except Exception as exc:
+                    run.fail("dubbing", exc)
+                    raise
+        elif not run.is_complete("dubbing"):
+            run.mark_complete_without_artifacts(
+                "dubbing", metadata={"skipped": True, "mode": mode}
             )
-            dub = await synthesize_timed_dub(
-                localized,
-                source_media=in_path,
-                target_language=target_language,
-                profile=profile,
-                user_settings=user_settings,
-                work_dir=work_dir,
-                fail_on_overflow=True,
-            )
-            localized = dub.transcript
-            timing_issues = dub.issues
 
-            await _tool_progress(
-                job_id, 70,
-                "Mixing fitted dub with clean background..." if profile.audio_mode == "hq_clean"
-                else "Mixing fitted dub with ducked source audio...",
-                user_id,
+        # ── C8 clean audio mix; still no video encode ───────────────────
+        current_stage = "audio_mix"
+        mixed_audio = None
+        if is_dub:
+            if run.is_complete("audio_mix", ("mixed_audio",)):
+                mixed_audio = run.artifact("audio_mix", "mixed_audio")
+            else:
+                await _tool_progress(job_id, 70, "Mixing clean localized audio...", user_id)
+                run.start("audio_mix")
+                try:
+                    mixed_audio = run.artifact_path("audio_mix", "mixed_audio.wav")
+                    await mix_dub_audio(
+                        source_path,
+                        dub_track,
+                        mixed_audio,
+                        profile,
+                        background_file=background_file,
+                        video_slowdown=video_slowdown,
+                    )
+                    run.complete(
+                        "audio_mix",
+                        artifacts={"mixed_audio": mixed_audio},
+                        metadata={
+                            "audio_mode": profile.audio_mode,
+                            "video_slowdown": video_slowdown,
+                        },
+                    )
+                except Exception as exc:
+                    run.fail("audio_mix", exc)
+                    raise
+        elif not run.is_complete("audio_mix"):
+            run.mark_complete_without_artifacts(
+                "audio_mix", metadata={"skipped": True, "mode": mode}
             )
-            settings.TMP_DIR.mkdir(parents=True, exist_ok=True)
-            dubbed_video = settings.TMP_DIR / f"{job_id}_dubbed.mp4"
-            cleanup.append(dubbed_video)
-            await mix_dub_with_video(
-                in_path,
-                dub.dub_track,
-                dubbed_video,
-                profile,
-                background_file=background_file,
-            )
-            captioned_input = dubbed_video
 
-        # Geometry + captions share one final H.264 encode. The dub/mix step
-        # stream-copies the video, so audio work cannot soften source pixels.
-        effective_aspect = profile.target_aspect
-        await _tool_progress(job_id, 84, "Rendering final localized video...", user_id)
+        # ── C8 one and only lossy visual encode ─────────────────────────
+        current_stage = "final_render"
         from backend.services.caption_service import generate_captions_ass, burn_captions
 
         render_segments = caption_segments_from_localization(localized)
         if not render_segments:
             raise RuntimeError("Localization produced no captionable target segments.")
 
-        caption_aspect = (
-            effective_aspect
-            if effective_aspect and effective_aspect != "source"
-            else await _probe_aspect_ratio(captioned_input)
-        )
-        ass_path = await generate_captions_ass(
-            render_segments,
-            style=profile.caption_style,
-            aspect_ratio=caption_aspect,
-            emoji_style=emoji_style,
-        )
-        cleanup.append(ass_path)
+        effective_aspect = profile.target_aspect
+        if run.is_complete("final_render", ("final_video",)):
+            persisted_final = run.artifact("final_render", "final_video")
+            out_path = tool_out_path(job_id, ".mp4")
+            if persisted_final.resolve() != out_path.resolve():
+                shutil.copy2(persisted_final, out_path)
+        else:
+            await _tool_progress(job_id, 84, "Rendering final localized video...", user_id)
+            run.start("final_render")
+            try:
+                caption_aspect = (
+                    effective_aspect
+                    if effective_aspect and effective_aspect != "source"
+                    else await _probe_aspect_ratio(source_path)
+                )
+                ass_path = run.artifact_path("final_render", "captions.ass")
+                await generate_captions_ass(
+                    render_segments,
+                    style=profile.caption_style,
+                    aspect_ratio=caption_aspect,
+                    emoji_style=emoji_style,
+                    output_path=ass_path,
+                )
+                out_path = tool_out_path(job_id, ".mp4")
+                rendered = await burn_captions(
+                    source_path,
+                    ass_path,
+                    out_path,
+                    render_profile=profile.render_profile,
+                    target_aspect=effective_aspect,
+                    reframe_method="auto",
+                    external_audio=mixed_audio,
+                    video_slowdown=video_slowdown if is_dub else 1.0,
+                )
+                if rendered != out_path or not out_path.exists():
+                    raise RuntimeError("Final localization render failed.")
+                run.complete(
+                    "final_render",
+                    artifacts={
+                        "final_video": out_path,
+                        "captions": ass_path,
+                    },
+                    metadata={
+                        "video_slowdown": video_slowdown if is_dub else 1.0,
+                        "render_profile": profile.render_profile,
+                    },
+                )
+            except Exception as exc:
+                run.fail("final_render", exc)
+                raise
 
-        out_path = tool_out_path(job_id, ".mp4")
-        rendered = await burn_captions(
-            captioned_input,
-            ass_path,
-            out_path,
-            render_profile=profile.render_profile,
-            target_aspect=effective_aspect,
-            reframe_method="auto",
-        )
-        if rendered != out_path or not out_path.exists():
-            raise RuntimeError("Final localization render failed.")
+        # ── C10 automatic QC + exception gate ───────────────────────────
+        current_stage = "qc"
+        if run.is_complete("qc", ("report",)):
+            qc = run.load_json("qc", "report")
+        else:
+            await _tool_progress(job_id, 94, "Running localization quality checks...", user_id)
+            run.start("qc")
+            try:
+                qc_report = await asyncio.to_thread(
+                    evaluate_localization_qc,
+                    source_video=source_path,
+                    final_video=out_path,
+                    transcript=localized,
+                    profile=profile,
+                    video_slowdown=video_slowdown if is_dub else 1.0,
+                    timing_issues=timing_issues,
+                )
+                qc = qc_report.as_dict()
+                report_path = run.save_json("qc", "report.json", qc)
+                run.complete(
+                    "qc",
+                    artifacts={"report": report_path},
+                    metadata={"status": qc["status"]},
+                )
+            except Exception as exc:
+                run.fail("qc", exc)
+                raise
 
         from backend.services.video_utils import probe_duration
-        src_dur = await asyncio.to_thread(probe_duration, in_path)
+        src_dur = await asyncio.to_thread(probe_duration, source_path)
         final_dur = await asyncio.to_thread(probe_duration, out_path)
 
         await _tool_success(
@@ -1041,27 +1315,39 @@ async def run_tool_translate(
                 "target_language": target_language,
                 "mode": mode,
                 "localization_profile": profile.id,
+                "localization_manifest": str(run.manifest_path),
                 "asr_quality": profile.asr_quality,
                 "asr_model": profile.asr_model,
+                "alignment_mode": profile.alignment_mode,
+                "diarization_mode": profile.diarization_mode,
                 "render_profile": profile.render_profile,
                 "audio_mode": profile.audio_mode if is_dub else None,
                 "source_asr_segment_count": source_segment_count,
                 "semantic_cue_count": len(localized.segments),
-                "dubbing_chunk_count": dub.chunk_count if is_dub else 0,
-                "max_dubbing_speed_factor": dub.max_speed_factor if is_dub else 1.0,
-                "dubbing_rewrite_count": dub.rewrite_count if is_dub else 0,
-                "preserve_background": profile.preserve_background if is_dub else False,
+                "dubbing_chunk_count": dub_chunk_count,
+                "max_dubbing_speed_factor": max_dubbing_speed,
+                "dubbing_rewrite_count": dubbing_rewrite_count,
+                "video_slowdown": video_slowdown,
                 "timing_issue_count": len(timing_issues),
+                "qc_status": qc.get("status"),
+                "qc_failures": qc.get("failures", []),
+                "qc_warnings": qc.get("warnings", []),
                 "source_duration": src_dur,
                 "final_duration": final_dur,
                 "duration_ratio": round(final_dur / src_dur, 4) if src_dur > 0 else 1.0,
             },
         )
-        logger.info("TASK DONE  tool:translate | job=%s", job_id[:8])
+        logger.info(
+            "TASK DONE tool:translate | job=%s qc=%s",
+            job_id[:8], qc.get("status"),
+        )
     except Exception as e:
+        if run is not None:
+            try:
+                run.fail(current_stage, e)
+            except Exception:
+                logger.debug("Could not record localization stage failure", exc_info=True)
         await _tool_fail(job_id, e, cleanup, user_id, "translate")
-    finally:
-        shutil.rmtree(work_dir, ignore_errors=True)
 
 
 # ── Hook analysis (Whisper first 10s → AI score) ───────────────────────────

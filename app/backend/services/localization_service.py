@@ -430,7 +430,10 @@ def _voice_for_chunk(
     profile: LocalizationProfile,
     runtime: TTSRuntimeConfig,
     speaker_id: str | None,
+    explicit_voice: str | None = None,
 ) -> str:
+    if explicit_voice:
+        return explicit_voice
     if speaker_id and speaker_id in profile.speaker_voices:
         return profile.speaker_voices[speaker_id]
     return runtime.default_voice
@@ -656,17 +659,23 @@ async def synthesize_timed_dub(
         speed_max=profile.dub_speed_max,
         rewrite_max_attempts=profile.dub_rewrite_attempts,
     )
-    cues = [
-        DubbingCue(
+    cues = []
+    for i, seg in enumerate(valid_segments):
+        override = seg.overrides or {}
+        start_ms = int(override.get("target_start_ms", seg.source_start_ms))
+        end_ms = int(override.get("target_end_ms", seg.source_end_ms))
+        if end_ms <= start_ms:
+            raise ValueError(f"Invalid expert timing override for {seg.id}")
+        cues.append(DubbingCue(
             index=i + 1,
             segment_id=seg.id,
-            start_ms=seg.source_start_ms,
-            end_ms=seg.source_end_ms,
+            start_ms=start_ms,
+            end_ms=end_ms,
             text=seg.translated_text or "",
             speaker_id=seg.speaker_id,
-        )
-        for i, seg in enumerate(valid_segments)
-    ]
+            voice_id=(str(override.get("voice_id")).strip() or None)
+                if override.get("voice_id") is not None else None,
+        ))
     plan, chunks = build_plan(cues, config, language=target_language)
     chunks = borrow_following_silence(
         chunks,
@@ -681,7 +690,8 @@ async def synthesize_timed_dub(
 
     for chunk in chunks:
         speaker_id = _chunk_speaker(plan, chunk)
-        voice = _voice_for_chunk(profile, runtime, speaker_id)
+        explicit_voice = chunk.voice_id
+        voice = _voice_for_chunk(profile, runtime, speaker_id, explicit_voice)
         path = work_dir / f"chunk_{chunk.id:04d}.wav"
         raw_paths[chunk.id] = path
         block_paths.append(path)

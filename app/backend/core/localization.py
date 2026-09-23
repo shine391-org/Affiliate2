@@ -25,6 +25,9 @@ class LocalizationProfile(BaseModel):
     asr_provider: Literal["faster_whisper"] = "faster_whisper"
     asr_model: str | None = None
     asr_quality: Literal["fast", "balanced", "accurate", "best"] = "best"
+    alignment_mode: Literal["off", "whisperx"] = "whisperx"
+    diarization_mode: Literal["off", "auto", "whisperx"] = "auto"
+    diarization_speakers: int | None = Field(default=None, ge=1, le=16)
 
     # None = inherit the global AI/TTS setting. This avoids duplicating keys or
     # provider connection data inside every profile.
@@ -39,6 +42,11 @@ class LocalizationProfile(BaseModel):
     tts_provider: str | None = None
     tts_model: str | None = None
     tts_voice: str | None = None
+    speaker_voices: dict[str, str] = Field(default_factory=dict)
+    speaker_reference_audio: dict[str, str] = Field(default_factory=dict)
+    tts_reference_audio: str | None = None
+    tts_reference_text: str | None = None
+    tts_reference_language: str | None = None
 
     # Donor-derived semantic/dubbing policy. These values mirror the proven
     # OpenCreator smart-dubbing defaults unless Affiliate2 has a product reason
@@ -53,6 +61,8 @@ class LocalizationProfile(BaseModel):
     dub_rewrite_attempts: int = Field(default=2, ge=0, le=5)
 
     audio_mode: Literal["hq_clean", "fast_duck"] = "hq_clean"
+    video_retime_mode: Literal["off", "fallback"] = "fallback"
+    video_retime_max_slowdown: float = Field(default=1.12, ge=1.0, le=1.35)
     preserve_background: bool = True
     background_gain_db: float = Field(default=-6.0, ge=-40.0, le=6.0)
     dub_gain_db: float = Field(default=0.0, ge=-20.0, le=12.0)
@@ -90,6 +100,8 @@ class LocalizationProfile(BaseModel):
     def validate_dubbing_policy(self):
         if self.dub_speed_accept > self.dub_speed_max:
             raise ValueError("dub_speed_accept must be <= dub_speed_max")
+        if self.video_retime_max_slowdown < 1.0:
+            raise ValueError("video_retime_max_slowdown must be >= 1.0")
         return self
 
     @field_validator("glossary")
@@ -210,6 +222,7 @@ class LocalizationSegment(BaseModel):
     # Source-language word timings remain useful for alignment/inspection, but
     # they are never reused as target-language caption words.
     source_words: list[dict] = Field(default_factory=list)
+    overrides: dict = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_timeline(self):
@@ -231,6 +244,7 @@ class LocalizationTranscript(BaseModel):
     language: str | None = None
     source: str | None = None
     segments: list[LocalizationSegment] = Field(default_factory=list)
+    metadata: dict = Field(default_factory=dict)
     metadata: dict = Field(default_factory=dict)
 
 

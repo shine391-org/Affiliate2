@@ -45,6 +45,8 @@ class DubbingCue:
     start_ms: int
     end_ms: int
     text: str
+    speaker_id: str | None = None
+    voice_id: str | None = None
 
     @property
     def duration_ms(self) -> int:
@@ -59,6 +61,8 @@ class PlanItem:
     original_end_ms: int
     original_text: str
     spoken_text: str
+    speaker_id: str | None = None
+    voice_id: str | None = None
     estimated_duration_ms: int = 0
     actual_duration_ms: int = 0
     target_start_ms: int = 0
@@ -156,6 +160,8 @@ def build_plan(
             original_end_ms=cue.end_ms,
             original_text=cue.text,
             spoken_text=clean_text_for_speech(cue.text),
+            speaker_id=cue.speaker_id,
+            voice_id=cue.voice_id,
             estimated_duration_ms=estimate_spoken_ms(cue.text, language),
         )
         for cue in ordered
@@ -187,10 +193,22 @@ def build_plan(
             bool(_STRONG_END.search(prev.text))
             and prev.duration_ms >= config.min_cue_duration_ms
         )
+        speaker_change = (
+            prev.speaker_id is not None
+            and cue.speaker_id is not None
+            and prev.speaker_id != cue.speaker_id
+        )
+        voice_change = (
+            prev.voice_id is not None
+            and cue.voice_id is not None
+            and prev.voice_id != cue.voice_id
+        )
         must_split = (
             len(current.item_indexes) >= config.max_chunk_size
             or not should_merge_short
             or strong_boundary
+            or speaker_change
+            or voice_change
         )
         if must_split:
             chunks.append(current)

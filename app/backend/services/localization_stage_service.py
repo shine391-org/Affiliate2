@@ -90,11 +90,30 @@ class LocalizationRun:
         self.data["updated_at"] = _utc()
         tmp = self.manifest_path.with_suffix(".json.tmp")
         tmp.write_text(
-            json.dumps(self.data, ensure_ascii=False, indent=2, default=str) + "
-",
+            json.dumps(self.data, ensure_ascii=False, indent=2, default=str) + "\n",
             encoding="utf-8",
         )
         tmp.replace(self.manifest_path)
+
+    def ensure_source_copy(self, source: Path | str) -> Path:
+        """Persist the uploaded/source media so resume survives temp cleanup."""
+        source = Path(source).resolve()
+        current = Path(self.data["source_path"]).resolve()
+        try:
+            if current.exists() and current.is_relative_to(self.root.resolve()):
+                return current
+        except (OSError, ValueError):
+            pass
+
+        suffix = source.suffix.lower() or ".mp4"
+        target = self.root / f"source{suffix}"
+        if source != target.resolve():
+            tmp = target.with_suffix(target.suffix + ".tmp")
+            shutil.copy2(source, tmp)
+            tmp.replace(target)
+        self.data["source_path"] = str(target.resolve())
+        self._write()
+        return target
 
     @property
     def source_path(self) -> Path:
@@ -174,6 +193,23 @@ class LocalizationRun:
         )
         self._write()
 
+    def mark_complete_without_artifacts(
+        self,
+        stage: str,
+        *,
+        metadata: dict | None = None,
+    ) -> None:
+        self._check_stage(stage)
+        record = self.record(stage)
+        record.update(
+            status="complete",
+            completed_at=_utc(),
+            error=None,
+            artifacts={},
+            metadata=metadata or {},
+        )
+        self._write()
+
     def fail(self, stage: str, error: Exception | str) -> None:
         record = self.record(stage)
         record.update(
@@ -214,8 +250,7 @@ class LocalizationRun:
         path = self.artifact_path(stage, name)
         tmp = path.with_suffix(path.suffix + ".tmp")
         tmp.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "
-",
+            json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n",
             encoding="utf-8",
         )
         tmp.replace(path)
