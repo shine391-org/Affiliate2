@@ -1163,7 +1163,9 @@ async def run_tool_translate(
                         work_dir=run.stage_dir("dubbing"),
                         fail_on_overflow=True,
                         regenerate_chunk_ids=regenerate_chunk_ids,
-                        reuse_existing_chunks=bool(regenerate_chunk_ids),
+                        # Safe on normal resume too: C7 validates a synthesis
+                        # identity sidecar before reusing any raw chunk.
+                        reuse_existing_chunks=True,
                         reference_media=asr_input,
                     )
                     localized = dub.transcript
