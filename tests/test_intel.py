@@ -20,6 +20,7 @@ from radar.intel.ai_analyze import _extract_json
 from radar.intel.media import candidate_dir, fetch_media
 from radar.intel.report import _risk_badge, build_report
 from radar.intel.pipeline import run_intelligence
+import radar.intel.pipeline as intel_pipeline
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +177,63 @@ def test_build_report():
 # ---------------------------------------------------------------------------
 # pipeline: failure does not block batch (mocked)
 # ---------------------------------------------------------------------------
+
+def test_pipeline_sync_entrypoint_uses_converged_async_stages(monkeypatch, tmp_path):
+    seen = []
+
+    monkeypatch.setattr(
+        intel_pipeline,
+        "candidate_dir",
+        lambda platform, content_id: tmp_path / f"{platform}_{content_id}",
+    )
+
+    async def fake_media(platform, content_id, canonical_url):
+        seen.append(("media", content_id))
+        directory = tmp_path / f"{platform}_{content_id}"
+        directory.mkdir(parents=True, exist_ok=True)
+        return {"status": "MEDIA_UNAVAILABLE", "path": None, "meta": {"reason": "fixture"}}
+
+    async def fake_ai(metadata, transcript, out_path, force=False):
+        seen.append(("ai", metadata["content_id"]))
+        return {
+            "status": "SUCCESS",
+            "data": {"topic": metadata["content_id"]},
+            "model_stats": {"calls": 1, "retries": 0},
+        }
+
+    monkeypatch.setattr(intel_pipeline, "fetch_media_async", fake_media)
+    monkeypatch.setattr(intel_pipeline, "analyze_candidate_async", fake_ai)
+
+    summary = run_intelligence([
+        {
+            "platform": "douyin",
+            "content_id": "one",
+            "title": "One",
+            "canonical_url": "https://example.invalid/one",
+            "latest_metrics": {},
+            "breakdown": {},
+            "total_score": 1,
+            "confidence": 0.1,
+        },
+        {
+            "platform": "bilibili",
+            "content_id": "two",
+            "title": "Two",
+            "canonical_url": "https://example.invalid/two",
+            "latest_metrics": {},
+            "breakdown": {},
+            "total_score": 2,
+            "confidence": 0.2,
+        },
+    ], verbose=False)
+
+    assert summary["requested"] == 2
+    assert summary["intelligence_generated"] == 2
+    assert seen == [
+        ("media", "one"), ("ai", "one"),
+        ("media", "two"), ("ai", "two"),
+    ]
+
 
 def test_pipeline_failure_isolated():
     """A candidate with unknown platform gets MEDIA_UNAVAILABLE but batch continues."""
