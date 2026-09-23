@@ -42,7 +42,7 @@ Acceptance:
 
 ## Phase C — Media, AI & Automated HQ Localization
 
-Status: **STARTED 🚧**
+Status: **C4–C11 TECHNICAL PASS; C12 IMPLEMENTED / LOCAL QA PENDING; C13 PENDING 🚧**
 
 Detailed scope:
 `docs/PHASE_C.md`
@@ -183,7 +183,7 @@ It must not be a second pipeline or a CapCut clone.
 
 ### C12 — intelligence convergence
 
-Produce one canonical intelligence path from the same media/transcript/provider abstractions.
+Implementation now routes the transitional Radar Candidate Intelligence pipeline through the canonical app media downloader, Whisper service, and AI provider abstraction while preserving the existing Radar CLI/report/cache contract. The legacy intelligence modules are compatibility adapters rather than independent owners of downloader/ASR/provider logic.
 
 Affiliate2-specific output may include:
 
