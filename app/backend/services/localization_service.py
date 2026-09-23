@@ -376,33 +376,99 @@ async def translate_transcript(
     return out
 
 
+_DEFAULT_SPEECH_VOICES = {
+    "vi": "vi-VN-HoaiMyNeural",
+    "vietnamese": "vi-VN-HoaiMyNeural",
+    "en": "en-US-AndrewMultilingualNeural",
+    "english": "en-US-AndrewMultilingualNeural",
+    "es": "es-ES-XimenaNeural",
+    "spanish": "es-ES-XimenaNeural",
+    "fr": "fr-FR-VivienneMultilingualNeural",
+    "french": "fr-FR-VivienneMultilingualNeural",
+    "de": "de-DE-SeraphinaMultilingualNeural",
+    "german": "de-DE-SeraphinaMultilingualNeural",
+    "it": "it-IT-GiuseppeMultilingualNeural",
+    "italian": "it-IT-GiuseppeMultilingualNeural",
+    "pt": "pt-BR-ThalitaMultilingualNeural",
+    "portuguese": "pt-BR-ThalitaMultilingualNeural",
+    "ja": "ja-JP-NanamiNeural",
+    "japanese": "ja-JP-NanamiNeural",
+    "ko": "ko-KR-HyunsuMultilingualNeural",
+    "korean": "ko-KR-HyunsuMultilingualNeural",
+    "zh": "zh-CN-XiaoxiaoNeural",
+    "chinese": "zh-CN-XiaoxiaoNeural",
+    "nl": "nl-NL-ColetteNeural",
+    "dutch": "nl-NL-ColetteNeural",
+    "pl": "pl-PL-ZofiaNeural",
+    "polish": "pl-PL-ZofiaNeural",
+    "ru": "ru-RU-SvetlanaNeural",
+    "russian": "ru-RU-SvetlanaNeural",
+    "ar": "ar-SA-ZariyahNeural",
+    "arabic": "ar-SA-ZariyahNeural",
+    "hi": "hi-IN-SwaraNeural",
+    "hindi": "hi-IN-SwaraNeural",
+    "tr": "tr-TR-EmelNeural",
+    "turkish": "tr-TR-EmelNeural",
+    "sv": "sv-SE-SofieNeural",
+    "swedish": "sv-SE-SofieNeural",
+    "da": "da-DK-ChristelNeural",
+    "danish": "da-DK-ChristelNeural",
+    "no": "nb-NO-PernilleNeural",
+    "norwegian": "nb-NO-PernilleNeural",
+    "fi": "fi-FI-NooraNeural",
+    "finnish": "fi-FI-NooraNeural",
+}
+
+
+def _default_speech_voice(target_language: str) -> str:
+    key = (target_language or "").strip().lower()
+    return _DEFAULT_SPEECH_VOICES.get(key, "en-US-AndrewMultilingualNeural")
+
+
 def _tts_config(user_settings, profile: LocalizationProfile, target_language: str) -> TTSRuntimeConfig:
     from backend.core.crypto import decrypt_safe
     from backend.services.tts_service import DEFAULT_VOICES, TTSProvider
 
-    raw_provider = (
-        profile.tts_provider
-        or getattr(user_settings, "tts_provider", None)
-        or TTSProvider.EDGE_TTS.value
+    configured_provider = (
+        getattr(user_settings, "tts_provider", None)
+        if user_settings is not None
+        else None
     )
+    requested_provider = (profile.tts_provider or "").strip().lower() or None
+    configured_provider = (configured_provider or "").strip().lower() or None
+
+    # Settings own one TTS connection/credential slot. A profile may pin that
+    # provider, but it must never reinterpret another provider's secret or
+    # endpoint.
+    if requested_provider and configured_provider and requested_provider != configured_provider:
+        raise ValueError(
+            f"Profile requests TTS provider '{requested_provider}', but Settings "
+            f"configure '{configured_provider}'. Configure that TTS provider first."
+        )
+
+    raw_provider = requested_provider or configured_provider or TTSProvider.EDGE_TTS.value
     try:
         provider = TTSProvider(raw_provider)
     except ValueError as exc:
         raise ValueError(f"Unsupported TTS provider: {raw_provider}") from exc
 
-    voice = (
+    # Do not inherit preferred_voice_id: it is the legacy generator voice slot
+    # and often contains an ElevenLabs ID that is invalid for Edge/Azure/OpenAI.
+    explicit_voice = (
         profile.tts_voice
         or getattr(user_settings, "preferred_tts_voice", None)
-        or getattr(user_settings, "preferred_voice_id", None)
-        or DEFAULT_VOICES.get(provider, "")
     )
-    if (
-        not profile.tts_voice
-        and not getattr(user_settings, "preferred_tts_voice", None)
-        and provider == TTSProvider.EDGE_TTS
-        and target_language.lower() in {"vi", "vietnamese", "tiếng việt", "tieng viet"}
-    ):
-        voice = "vi-VN-HoaiMyNeural"
+    if explicit_voice:
+        voice = explicit_voice
+    elif provider in {TTSProvider.EDGE_TTS, TTSProvider.AZURE}:
+        voice = _default_speech_voice(target_language)
+    else:
+        voice = DEFAULT_VOICES.get(provider, "")
+
+    if provider == TTSProvider.ELEVENLABS and not voice:
+        raise ValueError(
+            "ElevenLabs TTS requires a voice ID in Settings or the Localization Profile."
+        )
 
     api_key = ""
     encrypted_tts = getattr(user_settings, "tts_api_key_encrypted", None)
