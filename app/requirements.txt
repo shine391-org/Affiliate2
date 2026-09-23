@@ -87,6 +87,14 @@ Pillow>=12.2.0,<13.0
 # Multi-TTS providers
 edge-tts>=6.1.0
 
+# HQ clean-dub audio separation.
+# Demucs is intentionally part of the Phase-C HQ profile: YouDub's proven
+# localization pipeline separates vocals/background before dubbing instead of
+# relying on ducking to hide the source language.
+demucs>=4.0.1,<5
+soundfile>=0.12.1,<1
+numpy>=1.26,<3
+
 # TikTok upload (cookie fallback)
 tiktok-uploader>=1.2.0
 playwright>=1.59.0

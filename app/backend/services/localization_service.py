@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import math
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -59,8 +58,8 @@ class LocalizationTimingError(RuntimeError):
         self.issues = issues
         preview = "; ".join(
             (
-                f"{x.get('segment_id')}: overflow {x.get('overflow_ms', 0)}ms"
-                if x.get("reason") == "timing_overflow"
+                f"chunk {x.get('chunk_id')}: speed {x.get('required_speed', '?')}x"
+                if x.get("chunk_id") is not None
                 else f"{x.get('segment_id')}: {x.get('reason')}"
             )
             for x in issues[:5]
@@ -74,6 +73,9 @@ class TimedDubResult:
     dub_track: Path
     block_paths: list[Path]
     issues: list[dict]
+    chunk_count: int = 0
+    max_speed_factor: float = 1.0
+    rewrite_count: int = 0
 
 
 def resolve_localization_profile(user_settings, profile_id: str | None = None) -> LocalizationProfile:
@@ -112,7 +114,7 @@ async def transcribe_for_localization(
 
 
 def _profile_ai_client(user_settings, profile: LocalizationProfile):
-    from backend.core.ai_provider import AIProvider, COMPATIBLE_PRESETS, get_ai_client
+    from backend.core.ai_provider import AIProvider, get_ai_client
 
     ai = get_ai_client(user_settings)
     requested = (profile.translation_provider or "").strip().lower()
@@ -619,6 +621,9 @@ async def synthesize_timed_dub(
         dub_track=dub_track,
         block_paths=block_paths,
         issues=issues,
+        chunk_count=len(fitted_chunks),
+        max_speed_factor=report.max_speed_factor,
+        rewrite_count=report.rewrite_count,
     )
 
 
@@ -627,33 +632,51 @@ def _mix_dub_with_video_sync(
     dub_track: Path,
     output_path: Path,
     *,
+    audio_mode: str,
+    background_file: Path | None,
     preserve_background: bool,
     background_gain_db: float,
     dub_gain_db: float,
 ) -> Path:
+    """Mix target dub while stream-copying the picture.
+
+    hq_clean: mix against Demucs background stem (source speech removed).
+    fast_duck: retain legacy source-audio sidechain ducking as preview/fallback.
+    """
     from backend.services.ffmpeg_service import has_audio_stream_sync
 
-    has_source_audio = has_audio_stream_sync(source_video)
-    cmd = ["ffmpeg", "-y", "-i", str(source_video), "-i", str(dub_track)]
-
-    if preserve_background and has_source_audio:
-        # Baseline without a separator: duck the original only while the dub is
-        # speaking, preserving ambience/music in gaps. C8 QA decides whether
-        # source-speech bleed requires promotion to Demucs/separation.
-        fc = (
-            f"[0:a]volume={background_gain_db}dB[bg];"
-            f"[1:a]volume={dub_gain_db}dB[dub];"
-            "[bg][dub]sidechaincompress=threshold=0.025:ratio=12:"
-            "attack=15:release=220[ducked];"
-            "[ducked][dub]amix=inputs=2:duration=longest:normalize=0,"
-            "alimiter=limit=0.95[mix]"
-        )
-        cmd += [
-            "-filter_complex", fc,
+    if audio_mode == "hq_clean":
+        if background_file is None or not background_file.exists():
+            raise RuntimeError("HQ clean dub requires a separated background track.")
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", str(source_video),
+            "-i", str(dub_track),
+            "-i", str(background_file),
+            "-filter_complex",
+            (
+                f"[1:a]volume={dub_gain_db}dB[dub];"
+                f"[2:a]volume={background_gain_db}dB[bg];"
+                "[dub][bg]amix=inputs=2:duration=longest:normalize=0,"
+                "alimiter=limit=0.95[mix]"
+            ),
             "-map", "0:v:0", "-map", "[mix]",
         ]
     else:
-        cmd += ["-map", "0:v:0", "-map", "1:a:0"]
+        has_source_audio = has_audio_stream_sync(source_video)
+        cmd = ["ffmpeg", "-y", "-i", str(source_video), "-i", str(dub_track)]
+        if preserve_background and has_source_audio:
+            fc = (
+                f"[0:a]volume={background_gain_db}dB[bg];"
+                f"[1:a]volume={dub_gain_db}dB[dub];"
+                "[bg][dub]sidechaincompress=threshold=0.025:ratio=12:"
+                "attack=15:release=220[ducked];"
+                "[ducked][dub]amix=inputs=2:duration=longest:normalize=0,"
+                "alimiter=limit=0.95[mix]"
+            )
+            cmd += ["-filter_complex", fc, "-map", "0:v:0", "-map", "[mix]"]
+        else:
+            cmd += ["-map", "0:v:0", "-map", "1:a:0"]
 
     cmd += [
         "-c:v", "copy",
@@ -673,8 +696,10 @@ async def mix_dub_with_video(
     dub_track: Path,
     output_path: Path,
     profile: LocalizationProfile,
+    *,
+    background_file: Path | None = None,
 ) -> Path:
-    """C8 baseline mix. Video is stream-copied: audio work cannot soften pixels."""
+    """C8 donor-derived mix; audio-only stages never re-encode video."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.unlink(missing_ok=True)
     return await asyncio.to_thread(
@@ -682,6 +707,8 @@ async def mix_dub_with_video(
         source_video,
         dub_track,
         output_path,
+        audio_mode=profile.audio_mode,
+        background_file=background_file,
         preserve_background=profile.preserve_background,
         background_gain_db=profile.background_gain_db,
         dub_gain_db=profile.dub_gain_db,

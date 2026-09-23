@@ -39,10 +39,20 @@ class LocalizationProfile(BaseModel):
     tts_provider: str | None = None
     tts_model: str | None = None
     tts_voice: str | None = None
-    tts_rate_policy: Literal["auto", "natural", "strict"] = "auto"
 
-    timing_policy: Literal["safe_fit", "strict"] = "safe_fit"
-    timing_tolerance_ms: int = Field(default=250, ge=0, le=2000)
+    # Donor-derived semantic/dubbing policy. These values mirror the proven
+    # OpenCreator smart-dubbing defaults unless Affiliate2 has a product reason
+    # to differ. Provider-level TTS speed is no longer relied on for fitting;
+    # measured chunk audio is fitted after synthesis.
+    semantic_segmentation: bool = True
+    dub_min_cue_duration_ms: int = Field(default=2500, ge=250, le=10000)
+    dub_max_chunk_size: int = Field(default=5, ge=1, le=12)
+    dub_gap_tolerance_ms: int = Field(default=1500, ge=0, le=5000)
+    dub_speed_accept: float = Field(default=1.15, ge=1.0, le=2.0)
+    dub_speed_max: float = Field(default=1.30, ge=1.0, le=2.0)
+    dub_rewrite_attempts: int = Field(default=2, ge=0, le=5)
+
+    audio_mode: Literal["hq_clean", "fast_duck"] = "hq_clean"
     preserve_background: bool = True
     background_gain_db: float = Field(default=-6.0, ge=-40.0, le=6.0)
     dub_gain_db: float = Field(default=0.0, ge=-20.0, le=12.0)
@@ -75,6 +85,12 @@ class LocalizationProfile(BaseModel):
         if len(value) > 8000:
             raise ValueError("Translation instructions are too long (max 8000 chars).")
         return value
+
+    @model_validator(mode="after")
+    def validate_dubbing_policy(self):
+        if self.dub_speed_accept > self.dub_speed_max:
+            raise ValueError("dub_speed_accept must be <= dub_speed_max")
+        return self
 
     @field_validator("glossary")
     @classmethod

@@ -875,6 +875,7 @@ async def run_tool_translate(
         transcribe_for_localization,
         translate_transcript,
     )
+    from backend.services.semantic_segmentation import normalize_semantic_cues
 
     target_language = _LANG_NAME_MAP.get(
         target_language.strip().lower(), target_language.strip()
@@ -910,17 +911,35 @@ async def run_tool_translate(
                 **updates,
             })
 
+        is_dub = mode == "full_dub"
+        background_file = None
+        asr_input = in_path
+
+        # YouDub-derived HQ path: separate first, then transcribe the vocal
+        # stem and later mix Vietnamese dub against clean background/music.
+        if is_dub and profile.audio_mode == "hq_clean":
+            await _tool_progress(job_id, 6, "Separating vocals/background for HQ clean dub...", user_id)
+            from backend.services.audio_separation_service import separate_vocals_background
+            vocals_file, background_file = await separate_vocals_background(
+                in_path,
+                work_dir / "separation",
+            )
+            asr_input = vocals_file
+
         await _tool_progress(
-            job_id, 8,
+            job_id, 16,
             f"Transcribing with {profile.asr_model or profile.asr_quality}...",
             user_id,
         )
-        transcript = await transcribe_for_localization(in_path, profile)
+        transcript = await transcribe_for_localization(asr_input, profile)
+        source_segment_count = len(transcript.segments)
 
-        is_dub = mode == "full_dub"
+        if profile.semantic_segmentation:
+            transcript = normalize_semantic_cues(transcript)
+
         await _tool_progress(
-            job_id, 30,
-            f"Translating {len(transcript.segments)} timed segments...",
+            job_id, 32,
+            f"Translating {len(transcript.segments)} semantic cues...",
             user_id,
         )
         localized = await translate_transcript(
@@ -952,11 +971,22 @@ async def run_tool_translate(
             localized = dub.transcript
             timing_issues = dub.issues
 
-            await _tool_progress(job_id, 70, "Mixing dub with source ambience...", user_id)
+            await _tool_progress(
+                job_id, 70,
+                "Mixing fitted dub with clean background..." if profile.audio_mode == "hq_clean"
+                else "Mixing fitted dub with ducked source audio...",
+                user_id,
+            )
             settings.TMP_DIR.mkdir(parents=True, exist_ok=True)
             dubbed_video = settings.TMP_DIR / f"{job_id}_dubbed.mp4"
             cleanup.append(dubbed_video)
-            await mix_dub_with_video(in_path, dub.dub_track, dubbed_video, profile)
+            await mix_dub_with_video(
+                in_path,
+                dub.dub_track,
+                dubbed_video,
+                profile,
+                background_file=background_file,
+            )
             captioned_input = dubbed_video
 
         # Geometry + captions share one final H.264 encode. The dub/mix step
@@ -1010,6 +1040,12 @@ async def run_tool_translate(
                 "asr_quality": profile.asr_quality,
                 "asr_model": profile.asr_model,
                 "render_profile": profile.render_profile,
+                "audio_mode": profile.audio_mode if is_dub else None,
+                "source_asr_segment_count": source_segment_count,
+                "semantic_cue_count": len(localized.segments),
+                "dubbing_chunk_count": dub.chunk_count if is_dub else 0,
+                "max_dubbing_speed_factor": dub.max_speed_factor if is_dub else 1.0,
+                "dubbing_rewrite_count": dub.rewrite_count if is_dub else 0,
                 "preserve_background": profile.preserve_background if is_dub else False,
                 "timing_issue_count": len(timing_issues),
                 "source_duration": src_dur,

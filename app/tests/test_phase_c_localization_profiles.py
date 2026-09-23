@@ -21,7 +21,13 @@ def test_default_profile_is_hq_and_quality_first():
     assert profile.asr_provider == "faster_whisper"
     assert profile.asr_model is None
     assert profile.asr_quality == "best"
-    assert profile.timing_policy == "safe_fit"
+    assert profile.semantic_segmentation is True
+    assert profile.dub_min_cue_duration_ms == 2500
+    assert profile.dub_max_chunk_size == 5
+    assert profile.dub_gap_tolerance_ms == 1500
+    assert profile.dub_speed_accept == 1.15
+    assert profile.dub_speed_max == 1.30
+    assert profile.audio_mode == "hq_clean"
     assert profile.render_profile == "hq"
     assert profile.qc_profile == "strict"
 
@@ -36,12 +42,16 @@ def test_profile_round_trips_as_one_json_payload():
 def test_profile_upsert_replaces_by_id_without_duplicates():
     store = default_profile_store()
     edited = LocalizationProfile(
-        **{**store.profiles[0].model_dump(), "name": "HQ Custom", "timing_tolerance_ms": 400}
+        **{
+            **store.profiles[0].model_dump(),
+            "name": "HQ Custom",
+            "dub_speed_max": 1.25,
+        }
     )
     store = upsert_profile(store, edited)
     assert len(store.profiles) == 1
     assert store.profiles[0].name == "HQ Custom"
-    assert store.profiles[0].timing_tolerance_ms == 400
+    assert store.profiles[0].dub_speed_max == 1.25
 
 
 def test_delete_default_moves_default_to_remaining_profile():
@@ -78,14 +88,24 @@ def test_corrupt_store_falls_back_instead_of_bricking_settings():
     assert load_profile_store(json.dumps({"profiles": []})).profiles
 
 
-def test_profile_accepts_explicit_asr_model_and_strict_timing():
+def test_profile_accepts_explicit_asr_model_and_fast_audio_mode():
     profile = LocalizationProfile(
         id="accurate-local",
         name="Accurate Local",
         asr_provider="faster_whisper",
         asr_model="large-v3",
         asr_quality="best",
-        timing_policy="strict",
+        audio_mode="fast_duck",
     )
     assert profile.asr_model == "large-v3"
-    assert profile.timing_policy == "strict"
+    assert profile.audio_mode == "fast_duck"
+
+
+def test_profile_rejects_invalid_speed_policy():
+    with pytest.raises(ValueError, match="dub_speed_accept"):
+        LocalizationProfile(
+            id="bad-speed",
+            name="Bad Speed",
+            dub_speed_accept=1.4,
+            dub_speed_max=1.2,
+        )

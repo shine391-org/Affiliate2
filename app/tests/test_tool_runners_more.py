@@ -656,25 +656,49 @@ class TestAutoZoom:
 class TestTranslate:
     async def test_no_speech_routes_to_fail(self, terminal_spies, out_dir):
         with patch.object(trun, "_load_user_settings", new=AsyncMock(return_value=None)), \
-             patch("backend.services.whisper_service.whisper_service.transcribe",
-                   new=AsyncMock(return_value={"segments": []})):
+             patch("backend.services.localization_service.transcribe_for_localization",
+                   new=AsyncMock(side_effect=ValueError("No speech detected"))):
             await trun.run_tool_translate("j1", IN, "Spanish", "captions_only", "", "viral", "auto")
         terminal_spies["fail"].assert_awaited()
 
     async def test_captions_only_happy(self, terminal_spies, out_dir):
-        async def _burn(inp, ass, out):
+        from backend.core.localization import LocalizationSegment, LocalizationTranscript
+
+        source = LocalizationTranscript(
+            text="hi",
+            language="en",
+            source="whisper",
+            segments=[
+                LocalizationSegment(
+                    id="s1", source_text="hi",
+                    source_start_ms=0, source_end_ms=1000,
+                )
+            ],
+        )
+        localized = source.model_copy(deep=True)
+        localized.segments[0].translated_text = "hola"
+        localized.segments[0].translation_status = "success"
+        localized.segments[0].target_start_ms = 0
+        localized.segments[0].target_end_ms = 1000
+        localized.segments[0].timing_status = "fit"
+
+        async def _burn(inp, ass, out, **kwargs):
             Path(out).write_bytes(b"x")
+            return Path(out)
 
         with patch.object(trun, "_load_user_settings", new=AsyncMock(return_value=None)), \
-             patch("backend.services.whisper_service.whisper_service.transcribe",
-                   new=AsyncMock(return_value={"segments": [{"start": 0, "end": 1, "text": "hi"}]})), \
-             patch.object(trun, "_translate_segments",
-                          new=AsyncMock(return_value=[{"start": 0, "end": 1, "text": "hola"}])), \
+             patch("backend.services.localization_service.transcribe_for_localization",
+                   new=AsyncMock(return_value=source)), \
+             patch("backend.services.semantic_segmentation.normalize_semantic_cues",
+                   side_effect=lambda tx: tx), \
+             patch("backend.services.localization_service.translate_transcript",
+                   new=AsyncMock(return_value=localized)), \
              patch.object(trun, "_probe_aspect_ratio", new=AsyncMock(return_value="9:16")), \
              patch("backend.services.caption_service.generate_captions_ass",
                    new=AsyncMock(return_value=out_dir / "x.ass")), \
              patch("backend.services.caption_service.burn_captions",
-                   new=AsyncMock(side_effect=_burn)):
+                   new=AsyncMock(side_effect=_burn)), \
+             patch("backend.services.video_utils.probe_duration", return_value=1.0):
             await trun.run_tool_translate("j1", IN, "Spanish", "captions_only", "", "viral", "auto")
         terminal_spies["success"].assert_awaited()
 
