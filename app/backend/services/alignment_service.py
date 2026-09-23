@@ -147,6 +147,7 @@ def _align_sync(
     media_path: Path,
     transcript: LocalizationTranscript,
     profile: LocalizationProfile,
+    huggingface_token: str = "",
 ) -> tuple[LocalizationTranscript, AlignmentReport]:
     if profile.alignment_mode == "off" and profile.diarization_mode == "off":
         return transcript.model_copy(deep=True), AlignmentReport()
@@ -196,7 +197,7 @@ def _align_sync(
 
     diar_segments: list[dict] = []
     if profile.diarization_mode != "off":
-        token = (settings.HUGGINGFACE_TOKEN or "").strip()
+        token = (huggingface_token or settings.HUGGINGFACE_TOKEN or "").strip()
         if not token:
             if profile.diarization_mode == "whisperx":
                 raise RuntimeError(
@@ -240,10 +241,13 @@ async def align_localization_transcript(
     media_path: Path | str,
     transcript: LocalizationTranscript,
     profile: LocalizationProfile,
+    *,
+    huggingface_token: str = "",
 ) -> tuple[LocalizationTranscript, AlignmentReport]:
     return await asyncio.to_thread(
         _align_sync,
         Path(media_path),
         transcript,
         profile,
+        huggingface_token,
     )

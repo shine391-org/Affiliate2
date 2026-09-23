@@ -66,3 +66,51 @@ async def test_final_caption_reframe_is_one_video_encode(monkeypatch, tmp_path):
     assert "ass=" in command
     assert "1080:1920" in command
     assert "-crf 18" in command
+
+
+@pytest.mark.asyncio
+async def test_final_retime_external_audio_reframe_caption_share_one_encode(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from backend.services import caption_service
+
+    video = tmp_path / "source.mp4"
+    mixed = tmp_path / "mixed.wav"
+    ass = tmp_path / "captions.ass"
+    out = tmp_path / "out.mp4"
+    video.write_bytes(b"video")
+    mixed.write_bytes(b"audio")
+    ass.write_text("[Script Info]\n", encoding="utf-8")
+
+    monkeypatch.setattr(caption_service, "_ffmpeg_has_ass", True)
+    monkeypatch.setattr("backend.services.video_utils.probe_duration", lambda *a, **k: 10.0)
+
+    async def fake_dims(_):
+        return (1920, 1080)
+    monkeypatch.setattr("backend.services.ffmpeg_service._probe_dimensions", fake_dims)
+
+    calls = []
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        out.write_bytes(b"rendered")
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(caption_service.subprocess, "run", fake_run)
+
+    rendered = await caption_service.burn_captions(
+        video,
+        ass,
+        out,
+        render_profile="hq",
+        target_aspect="9:16",
+        external_audio=mixed,
+        video_slowdown=1.08,
+    )
+    assert rendered == out
+    assert len(calls) == 1
+    command = " ".join(calls[0])
+    assert str(mixed) in command
+    assert "setpts=1.08000000*PTS" in command
+    assert "ass=" in command
+    assert "1080:1920" in command
+    assert "-map 1:a:0" in command
+    assert "-crf 18" in command

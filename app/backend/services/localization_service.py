@@ -120,6 +120,7 @@ async def transcribe_for_localization(
     profile: LocalizationProfile,
     *,
     language: str | None = None,
+    user_settings=None,
 ) -> LocalizationTranscript:
     """C5: faster-whisper transcription followed by optional WhisperX alignment."""
     from backend.services.whisper_service import whisper_service
@@ -141,10 +142,15 @@ async def transcribe_for_localization(
 
     if profile.alignment_mode != "off" or profile.diarization_mode != "off":
         from backend.services.alignment_service import align_localization_transcript
+        hf_token = ""
+        if user_settings is not None and getattr(user_settings, "huggingface_token_encrypted", None):
+            from backend.core.crypto import decrypt_safe
+            hf_token = decrypt_safe(user_settings.huggingface_token_encrypted) or ""
         transcript, report = await align_localization_transcript(
             media_path,
             transcript,
             profile,
+            huggingface_token=hf_token,
         )
         transcript.metadata["alignment"] = asdict(report)
     return transcript

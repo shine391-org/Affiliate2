@@ -6,13 +6,22 @@ from backend.services.dubbing_planner import (
     DubbingConfig,
     DubbingCue,
     atempo_filter,
+    borrow_following_silence,
     build_plan,
     fit_timeline,
 )
 
 
-def _cue(index, start, end, text):
-    return DubbingCue(index=index, segment_id=f"s{index}", start_ms=start, end_ms=end, text=text)
+def _cue(index, start, end, text, speaker=None, voice=None):
+    return DubbingCue(
+        index=index,
+        segment_id=f"s{index}",
+        start_ms=start,
+        end_ms=end,
+        text=text,
+        speaker_id=speaker,
+        voice_id=voice,
+    )
 
 
 def test_planner_merges_short_adjacent_cues_like_opencreator():
@@ -35,7 +44,6 @@ def test_planner_does_not_merge_long_cues_only_because_gap_is_small():
         _cue(2, 3200, 6200, "second long sentence"),
     ], cfg)
     assert len(chunks) == 2
-    assert plan[0].chunk_id != plan[1].chunk_id
 
 
 def test_planner_respects_max_chunk_size():
@@ -46,6 +54,37 @@ def test_planner_respects_max_chunk_size():
         _cue(3, 1200, 1700, "three"),
     ], cfg)
     assert [len(c.item_indexes) for c in chunks] == [2, 1]
+
+
+def test_speaker_change_is_hard_chunk_boundary():
+    cfg = DubbingConfig()
+    plan, chunks = build_plan([
+        _cue(1, 0, 500, "one", speaker="A"),
+        _cue(2, 520, 1000, "two", speaker="B"),
+    ], cfg)
+    assert len(chunks) == 2
+    assert plan[0].chunk_id != plan[1].chunk_id
+    assert chunks[0].speaker_id == "A"
+    assert chunks[1].speaker_id == "B"
+
+
+def test_explicit_voice_change_is_hard_chunk_boundary():
+    cfg = DubbingConfig()
+    _, chunks = build_plan([
+        _cue(1, 0, 500, "one", speaker="A", voice="v1"),
+        _cue(2, 520, 1000, "two", speaker="A", voice="v2"),
+    ], cfg)
+    assert len(chunks) == 2
+    assert [c.voice_id for c in chunks] == ["v1", "v2"]
+
+
+def test_borrow_following_silence_never_crosses_next_speech():
+    chunks = [
+        type("C", (), {"end_ms": 500, "start_ms": 0})(),
+        type("C", (), {"end_ms": 1500, "start_ms": 1200})(),
+    ]
+    borrow_following_silence(chunks, max_borrow_ms=400)
+    assert chunks[0].end_ms == 900
 
 
 def test_fit_timeline_is_monotonic_and_uses_measured_chunk_duration():
@@ -64,14 +103,13 @@ def test_fit_timeline_is_monotonic_and_uses_measured_chunk_duration():
     assert report.failed_chunk_ids == []
 
 
-def test_fit_reports_over_max_instead_of_silently_forcing_extreme_speed():
+def test_fit_reports_over_max_instead_of_forcing_extreme_speed():
     cfg = DubbingConfig(speed_accept=1.15, speed_max=1.30)
     plan, chunks = build_plan([_cue(1, 0, 1000, "short")], cfg)
     chunks[0].actual_duration_ms = 2000
     fitted, fitted_chunks, report = fit_timeline(plan, chunks, cfg)
     assert report.failed_chunk_ids == [1]
     assert report.max_speed_factor == 2.0
-    # Raw required factor is evidence only; actual fit is capped at quality ceiling.
     assert fitted_chunks[0].speed_factor == 1.30
     assert fitted[0].speed_factor == 1.30
 

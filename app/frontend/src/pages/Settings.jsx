@@ -6,9 +6,11 @@ import MonitorHeartIcon from "@mui/icons-material/MonitorHeartOutlined"
 import KeyIcon from "@mui/icons-material/VpnKeyOutlined"
 import SmartToyIcon from "@mui/icons-material/SmartToyOutlined"
 import MovieFilterIcon from "@mui/icons-material/MovieFilterOutlined"
+import RecordVoiceOverOutlinedIcon from "@mui/icons-material/RecordVoiceOverOutlined"
 import HealthDashboard from "../components/settings/HealthDashboard"
 import MotionGraphicsSection from "../components/settings/MotionGraphicsSection"
 import AIProviderSection from "../components/settings/AIProviderSection"
+import TTSProviderSection from "../components/settings/TTSProviderSection"
 import ServiceKeysSection from "../components/settings/ServiceKeysSection"
 import useSettings from "../hooks/useSettings"
 
@@ -107,6 +109,15 @@ export default function Settings() {
           accentColor="#0d9f6e"
         >
           <AIProviderSection settings={settings} updateSettings={updateSettings} />
+        </Section>
+
+        <Section
+          icon={<RecordVoiceOverOutlinedIcon sx={{ fontSize: 20 }} />}
+          title="Localization Voice / TTS"
+          description="HQ TTS provider, model, endpoint and BYOK credentials for donor-derived dubbing"
+          accentColor="#9333ea"
+        >
+          <TTSProviderSection settings={settings} updateSettings={updateSettings} />
         </Section>
 
         {/* Service API Keys (BYOK) */}

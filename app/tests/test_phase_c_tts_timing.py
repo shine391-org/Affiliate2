@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import sys
-import types
 
 import pytest
 
@@ -18,6 +16,17 @@ def test_edge_tts_rejects_extreme_speed_before_network(tmp_path):
             output_path=tmp_path / "x.mp3",
             speed=1.5,
         ))
+
+
+def test_tts_provider_registry_covers_hq_and_clone_paths():
+    assert {
+        TTSProvider.EDGE_TTS,
+        TTSProvider.OPENAI_TTS,
+        TTSProvider.OPENAI_COMPATIBLE,
+        TTSProvider.AZURE,
+        TTSProvider.ELEVENLABS,
+        TTSProvider.GPT_SOVITS,
+    } == set(TTSProvider)
 
 
 def test_tts_service_passes_speed_to_edge(monkeypatch, tmp_path):
@@ -39,23 +48,99 @@ def test_tts_service_passes_speed_to_edge(monkeypatch, tmp_path):
     assert seen["speed"] == 1.08
 
 
-def test_openai_tts_speed_is_forwarded(monkeypatch, tmp_path):
+def test_openai_compatible_dispatches_endpoint_model_voice_and_key(monkeypatch, tmp_path):
     seen = {}
 
-    async def fake_generate(text, voice_id=None, api_key="", output_path=None,
-                            model="tts-1", speed=1.0, **kwargs):
-        seen.update(model=model, speed=speed)
-        output_path.write_bytes(b"x")
-        return output_path
+    async def fake_generate(text, **kwargs):
+        seen.update(kwargs)
+        kwargs["output_path"].write_bytes(b"x")
+        return kwargs["output_path"]
 
-    monkeypatch.setattr("backend.services.openai_tts_service.generate_voice", fake_generate)
+    monkeypatch.setattr(
+        "backend.services.openai_compatible_tts_service.generate_voice",
+        fake_generate,
+    )
     out = asyncio.run(generate_tts(
-        "hello",
-        provider=TTSProvider.OPENAI_TTS,
-        api_key="test",
-        output_path=tmp_path / "o.mp3",
-        model="tts-1-hd",
-        speed=1.06,
+        "xin chào",
+        provider=TTSProvider.OPENAI_COMPATIBLE,
+        api_key="k",
+        base_url="http://localhost:9000/v1",
+        voice_id="voice-a",
+        model="model-a",
+        output_path=tmp_path / "c.wav",
     ))
     assert out.exists()
-    assert seen == {"model": "tts-1-hd", "speed": 1.06}
+    assert seen["api_key"] == "k"
+    assert seen["base_url"] == "http://localhost:9000/v1"
+    assert seen["voice_id"] == "voice-a"
+    assert seen["model"] == "model-a"
+
+
+def test_azure_dispatches_region(monkeypatch, tmp_path):
+    seen = {}
+
+    async def fake_generate(text, **kwargs):
+        seen.update(kwargs)
+        kwargs["output_path"].write_bytes(b"x")
+        return kwargs["output_path"]
+
+    monkeypatch.setattr("backend.services.azure_tts_service.generate_voice", fake_generate)
+    out = asyncio.run(generate_tts(
+        "xin chào",
+        provider=TTSProvider.AZURE,
+        api_key="azure-key",
+        region="southeastasia",
+        voice_id="vi-VN-HoaiMyNeural",
+        output_path=tmp_path / "a.wav",
+    ))
+    assert out.exists()
+    assert seen["region"] == "southeastasia"
+    assert seen["api_key"] == "azure-key"
+
+
+def test_elevenlabs_dispatches_multilingual_model(monkeypatch, tmp_path):
+    seen = {}
+
+    async def fake_generate(text, **kwargs):
+        seen.update(kwargs)
+        kwargs["output_path"].write_bytes(b"x")
+        return kwargs["output_path"]
+
+    monkeypatch.setattr("backend.services.elevenlabs_tts_service.generate_voice", fake_generate)
+    out = asyncio.run(generate_tts(
+        "xin chào",
+        provider=TTSProvider.ELEVENLABS,
+        api_key="eleven-key",
+        voice_id="voice-id",
+        model="eleven_multilingual_v2",
+        output_path=tmp_path / "e.mp3",
+    ))
+    assert out.exists()
+    assert seen["model"] == "eleven_multilingual_v2"
+    assert seen["voice_id"] == "voice-id"
+
+
+def test_gpt_sovits_dispatches_reference_audio_and_languages(monkeypatch, tmp_path):
+    seen = {}
+
+    async def fake_generate(text, **kwargs):
+        seen.update(kwargs)
+        kwargs["output_path"].write_bytes(b"x")
+        return kwargs["output_path"]
+
+    monkeypatch.setattr("backend.services.gpt_sovits_service.generate_voice", fake_generate)
+    out = asyncio.run(generate_tts(
+        "xin chào",
+        provider=TTSProvider.GPT_SOVITS,
+        base_url="http://127.0.0.1:9880",
+        output_path=tmp_path / "g.wav",
+        reference_audio="ref.wav",
+        reference_text="hello",
+        reference_language="en",
+        target_language="vi",
+    ))
+    assert out.exists()
+    assert seen["reference_audio"] == "ref.wav"
+    assert seen["prompt_text"] == "hello"
+    assert seen["prompt_language"] == "en"
+    assert seen["text_language"] == "vi"

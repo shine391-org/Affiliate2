@@ -1023,7 +1023,11 @@ async def run_tool_translate(
             )
             run.start("asr")
             try:
-                transcript = await transcribe_for_localization(asr_input, profile)
+                transcript = await transcribe_for_localization(
+                    asr_input,
+                    profile,
+                    user_settings=user_settings,
+                )
                 path = run.save_json("asr", "transcript.json", transcript.model_dump())
                 run.complete(
                     "asr",

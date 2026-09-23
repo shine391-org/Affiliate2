@@ -13,20 +13,23 @@ from backend.core.localization import (
 )
 
 
-def test_default_profile_is_hq_and_quality_first():
+def test_default_profile_is_full_hq_donor_stack():
     store = default_profile_store()
     profile = store.profiles[0]
-    assert profile.id == store.default_profile_id
+    assert profile.id == store.default_profile_id == "vi-affiliate-hq"
     assert profile.download_quality == "best"
     assert profile.asr_provider == "faster_whisper"
-    assert profile.asr_model is None
     assert profile.asr_quality == "best"
+    assert profile.alignment_mode == "whisperx"
+    assert profile.diarization_mode == "auto"
     assert profile.semantic_segmentation is True
     assert profile.dub_min_cue_duration_ms == 2500
     assert profile.dub_max_chunk_size == 5
     assert profile.dub_gap_tolerance_ms == 1500
     assert profile.dub_speed_accept == 1.15
     assert profile.dub_speed_max == 1.30
+    assert profile.video_retime_mode == "fallback"
+    assert profile.video_retime_max_slowdown == 1.12
     assert profile.audio_mode == "hq_clean"
     assert profile.render_profile == "hq"
     assert profile.qc_profile == "strict"
@@ -34,24 +37,22 @@ def test_default_profile_is_hq_and_quality_first():
 
 def test_profile_round_trips_as_one_json_payload():
     store = default_profile_store()
-    raw = store.model_dump_json()
-    restored = load_profile_store(raw)
+    restored = load_profile_store(store.model_dump_json())
     assert restored == store
 
 
 def test_profile_upsert_replaces_by_id_without_duplicates():
     store = default_profile_store()
-    edited = LocalizationProfile(
-        **{
-            **store.profiles[0].model_dump(),
-            "name": "HQ Custom",
-            "dub_speed_max": 1.25,
-        }
-    )
+    edited = LocalizationProfile.model_validate({
+        **store.profiles[0].model_dump(),
+        "name": "HQ Custom",
+        "dub_speed_max": 1.25,
+        "speaker_voices": {"SPEAKER_00": "voice-a"},
+    })
     store = upsert_profile(store, edited)
     assert len(store.profiles) == 1
     assert store.profiles[0].name == "HQ Custom"
-    assert store.profiles[0].dub_speed_max == 1.25
+    assert store.profiles[0].speaker_voices == {"SPEAKER_00": "voice-a"}
 
 
 def test_delete_default_moves_default_to_remaining_profile():
@@ -88,17 +89,22 @@ def test_corrupt_store_falls_back_instead_of_bricking_settings():
     assert load_profile_store(json.dumps({"profiles": []})).profiles
 
 
-def test_profile_accepts_explicit_asr_model_and_fast_audio_mode():
+def test_profile_accepts_multi_speaker_and_clone_reference_config():
     profile = LocalizationProfile(
-        id="accurate-local",
-        name="Accurate Local",
-        asr_provider="faster_whisper",
-        asr_model="large-v3",
-        asr_quality="best",
-        audio_mode="fast_duck",
+        id="multi",
+        name="Multi",
+        diarization_mode="whisperx",
+        diarization_speakers=2,
+        speaker_voices={"SPEAKER_00": "voice-a", "SPEAKER_01": "voice-b"},
+        speaker_reference_audio={"SPEAKER_00": "a.wav"},
+        tts_provider="gpt_sovits",
+        tts_reference_audio="fallback.wav",
+        tts_reference_text="reference text",
+        tts_reference_language="en",
     )
-    assert profile.asr_model == "large-v3"
-    assert profile.audio_mode == "fast_duck"
+    assert profile.diarization_speakers == 2
+    assert profile.speaker_voices["SPEAKER_01"] == "voice-b"
+    assert profile.tts_provider == "gpt_sovits"
 
 
 def test_profile_rejects_invalid_speed_policy():
@@ -108,4 +114,13 @@ def test_profile_rejects_invalid_speed_policy():
             name="Bad Speed",
             dub_speed_accept=1.4,
             dub_speed_max=1.2,
+        )
+
+
+def test_profile_rejects_excessive_video_slowdown():
+    with pytest.raises(ValueError):
+        LocalizationProfile(
+            id="bad-retime",
+            name="Bad Retime",
+            video_retime_max_slowdown=1.5,
         )

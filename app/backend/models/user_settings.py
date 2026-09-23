@@ -19,6 +19,7 @@ class UserSettings(Base, TimestampMixin):
 
     # ── Service API keys (BYOK — override .env per-user) ──
     youtube_api_key_encrypted = Column(Text, nullable=True)         # YouTube Data API v3 key
+    huggingface_token_encrypted = Column(Text, nullable=True)        # WhisperX/pyannote gated diarization models
 
     # ── Scout credentials (user-specific cookies) ──────
     douyin_cookie_encrypted = Column(Text, nullable=True)

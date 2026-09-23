@@ -654,15 +654,42 @@ class TestAutoZoom:
 
 @pytest.mark.asyncio
 class TestTranslate:
-    async def test_no_speech_routes_to_fail(self, terminal_spies, out_dir):
+    async def test_no_speech_routes_to_fail(self, terminal_spies, out_dir, monkeypatch):
+        from types import SimpleNamespace
+        import backend.services.localization_stage_service as stage_service
+
+        source = out_dir / "input.mp4"
+        source.write_bytes(b"video")
+        monkeypatch.setattr(
+            stage_service,
+            "settings",
+            SimpleNamespace(STORAGE_ROOT=out_dir),
+        )
+
         with patch.object(trun, "_load_user_settings", new=AsyncMock(return_value=None)), \
              patch("backend.services.localization_service.transcribe_for_localization",
                    new=AsyncMock(side_effect=ValueError("No speech detected"))):
-            await trun.run_tool_translate("j1", IN, "Spanish", "captions_only", "", "viral", "auto")
+            await trun.run_tool_translate(
+                "j1", source, "Spanish", "captions_only", "", "viral", "auto"
+            )
         terminal_spies["fail"].assert_awaited()
+        manifest = out_dir / "localization_jobs" / "j1" / "manifest.json"
+        assert manifest.exists()
 
-    async def test_captions_only_happy(self, terminal_spies, out_dir):
+    async def test_captions_only_happy_persists_stages_and_qc(
+        self, terminal_spies, out_dir, monkeypatch,
+    ):
+        from types import SimpleNamespace
+        import backend.services.localization_stage_service as stage_service
         from backend.core.localization import LocalizationSegment, LocalizationTranscript
+
+        source_path = out_dir / "input.mp4"
+        source_path.write_bytes(b"video")
+        monkeypatch.setattr(
+            stage_service,
+            "settings",
+            SimpleNamespace(STORAGE_ROOT=out_dir),
+        )
 
         source = LocalizationTranscript(
             text="hi",
@@ -681,10 +708,26 @@ class TestTranslate:
         localized.segments[0].target_start_ms = 0
         localized.segments[0].target_end_ms = 1000
         localized.segments[0].timing_status = "fit"
+        localized.segments[0].qc_status = "pass"
+
+        async def _ass(segments, **kwargs):
+            out = Path(kwargs["output_path"])
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text("[Script Info]\n", encoding="utf-8")
+            return out
 
         async def _burn(inp, ass, out, **kwargs):
-            Path(out).write_bytes(b"x")
+            Path(out).write_bytes(b"rendered")
             return Path(out)
+
+        qc_report = SimpleNamespace(
+            as_dict=lambda: {
+                "status": "READY",
+                "failures": [],
+                "warnings": [],
+                "metrics": {},
+            }
+        )
 
         with patch.object(trun, "_load_user_settings", new=AsyncMock(return_value=None)), \
              patch("backend.services.localization_service.transcribe_for_localization",
@@ -695,12 +738,25 @@ class TestTranslate:
                    new=AsyncMock(return_value=localized)), \
              patch.object(trun, "_probe_aspect_ratio", new=AsyncMock(return_value="9:16")), \
              patch("backend.services.caption_service.generate_captions_ass",
-                   new=AsyncMock(return_value=out_dir / "x.ass")), \
+                   new=AsyncMock(side_effect=_ass)), \
              patch("backend.services.caption_service.burn_captions",
                    new=AsyncMock(side_effect=_burn)), \
+             patch("backend.services.localization_qc_service.evaluate_localization_qc",
+                   return_value=qc_report), \
              patch("backend.services.video_utils.probe_duration", return_value=1.0):
-            await trun.run_tool_translate("j1", IN, "Spanish", "captions_only", "", "viral", "auto")
+            await trun.run_tool_translate(
+                "j1", source_path, "Spanish", "captions_only", "", "viral", "auto"
+            )
+
         terminal_spies["success"].assert_awaited()
+        manifest_path = out_dir / "localization_jobs" / "j1" / "manifest.json"
+        assert manifest_path.exists()
+        import json
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        assert manifest["stages"]["asr"]["status"] == "complete"
+        assert manifest["stages"]["translation"]["status"] == "complete"
+        assert manifest["stages"]["final_render"]["status"] == "complete"
+        assert manifest["stages"]["qc"]["metadata"]["status"] == "READY"
 
 
 # ── hook analysis (writes to job output, not a file) ────────────────────────

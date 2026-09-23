@@ -1,21 +1,17 @@
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
-  Box, Stack, Typography, FormControl, InputLabel, Select, MenuItem,
-  RadioGroup, Radio, FormControlLabel, Alert, IconButton, Tooltip,
-  CircularProgress,
+  Alert, Box, FormControl, FormControlLabel, InputLabel, MenuItem,
+  Radio, RadioGroup, Select, Stack, TextField, Typography,
 } from "@mui/material"
-import { GlassPanel } from "../../utils/glassFx"
 import TranslateOutlinedIcon from "@mui/icons-material/TranslateOutlined"
-import VolumeUpOutlinedIcon from "@mui/icons-material/VolumeUpOutlined"
-import StopIcon from "@mui/icons-material/Stop"
 import http from "../../api/http"
-import useAppStore from "../../store/appStore"
 import { CAPTION_STYLES } from "../../components/tools/captionOptions"
+import LocalizationExpertPanel from "../../components/tools/LocalizationExpertPanel"
 import ToolRunner from "../../components/tools/ToolRunner"
 import useDocumentTitle from "../../hooks/useDocumentTitle"
 
-// Mirror of backend's SUPPORTED_LANGUAGES.
 const LANGUAGES = [
+  { code: "vi", name: "Vietnamese" },
   { code: "en", name: "English" },
   { code: "es", name: "Spanish" },
   { code: "fr", name: "French" },
@@ -35,197 +31,140 @@ const LANGUAGES = [
   { code: "da", name: "Danish" },
   { code: "no", name: "Norwegian" },
   { code: "fi", name: "Finnish" },
-  { code: "vi", name: "Vietnamese" },
-]
-
-// ⚠️ These have to be voices the DUB ENGINE accepts, and the dub runs on
-// Edge TTS. They used to be Gemini names (Kore, Puck, Zephyr, …), which
-// edge_tts rejects outright with `ValueError: Invalid voice 'Kore'` — so full
-// dub failed for every voice the page offered, whichever one you picked.
-// Derived from edge_tts_service.RECOMMENDED_VOICES and pinned by
-// tests/test_voice_vocabulary_parity.py. Multilingual voices lead: this is the
-// TRANSLATE page, and only they speak the target language.
-const DUB_VOICES = [
-  { id: "en-US-AndrewMultilingualNeural", label: "Andrew (Male, natural)" },
-  { id: "en-US-AvaMultilingualNeural", label: "Ava (Female, natural)" },
-  { id: "en-US-BrianMultilingualNeural", label: "Brian (Male, warm)" },
-  { id: "en-US-EmmaMultilingualNeural", label: "Emma (Female, clear)" },
-  { id: "en-US-AriaNeural", label: "Aria (Female, classic)" },
-  { id: "en-US-GuyNeural", label: "Guy (Male, classic)" },
-  { id: "en-US-JennyNeural", label: "Jenny (Female, friendly)" },
-  { id: "vi-VN-HoaiMyNeural", label: "Hoài My (Female, Vietnamese)" },
-  { id: "vi-VN-NamMinhNeural", label: "Nam Minh (Male, Vietnamese)" },
 ]
 
 export default function ToolTranslate() {
   useDocumentTitle("Translate + Dub")
-  const showSnackbar = useAppStore((s) => s.showSnackbar)
-  const [target, setTarget] = useState("es")
-  const [mode, setMode] = useState("captions_only")  // "captions_only" | "full_dub"
-  const [voiceId, setVoiceId] = useState(DUB_VOICES[0].id)
+  const [target, setTarget] = useState("vi")
+  const [mode, setMode] = useState("full_dub")
+  const [voiceId, setVoiceId] = useState("")
   const [captionStyle, setCaptionStyle] = useState("viral")
   const [emojiStyle, setEmojiStyle] = useState("moderate")
+  const [profileId, setProfileId] = useState("")
+  const [profiles, setProfiles] = useState([])
+  const [profileDefault, setProfileDefault] = useState("")
 
-  // Voice preview — same pattern as Voiceover.jsx
-  const [previewVoice, setPreviewVoice] = useState(null)
-  const [previewLoading, setPreviewLoading] = useState(null)
-  const [audioRef, setAudioRef] = useState(null)
-  const [blobUrlRef, setBlobUrlRef] = useState(null)
+  useEffect(() => {
+    let alive = true
+    http.get("/api/settings/localization-profiles")
+      .then(({ data }) => {
+        if (!alive) return
+        setProfiles(data?.profiles || [])
+        setProfileDefault(data?.default_profile_id || "")
+        setProfileId(data?.default_profile_id || "")
+      })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [])
 
-  const stopPreview = () => {
-    if (audioRef) { audioRef.pause(); audioRef.src = "" }
-    if (blobUrlRef) { URL.revokeObjectURL(blobUrlRef); setBlobUrlRef(null) }
-    setPreviewVoice(null)
-  }
+  const selectedProfile = useMemo(
+    () => profiles.find((p) => p.id === profileId),
+    [profiles, profileId],
+  )
 
-  const playPreview = async (voice) => {
-    if (previewVoice === voice) { stopPreview(); return }
-    stopPreview()
-    setPreviewLoading(voice)
-    try {
-      const res = await http.post(
-        "/api/tts/preview",
-        // The dub runs on Edge TTS, so the preview must too — previewing
-        // one engine and dubbing with another is how the lists drifted
-        // apart in the first place.
-        { provider: "edge_tts", voice_id: voice },
-        { responseType: "blob" },
-      )
-      const url = URL.createObjectURL(res.data)
-      setBlobUrlRef(url)
-      const audio = new Audio(url)
-      audio.onended = () => { setPreviewVoice(null); URL.revokeObjectURL(url); setBlobUrlRef(null) }
-      audio.onerror = () => { showSnackbar("Couldn't play preview", "error"); setPreviewVoice(null) }
-      setAudioRef(audio)
-      await audio.play()
-      setPreviewVoice(voice)
-    } catch (e) {
-      showSnackbar(`Preview failed: ${e.response?.data?.detail || e.message}`, "error")
-    } finally {
-      setPreviewLoading(null)
-    }
-  }
-
-  const fieldBuilder = () => {
-    const fields = {
-      target_language: target,
-      mode,
-      caption_style: captionStyle,
-      emoji_style: emojiStyle,
-    }
-    if (mode === "full_dub") fields.voice_id = voiceId
-    return fields
-  }
+  const fields = () => ({
+    target_language: target,
+    mode,
+    caption_style: captionStyle,
+    emoji_style: emojiStyle,
+    profile_id: profileId || profileDefault || undefined,
+    voice_id: mode === "full_dub" && voiceId.trim() ? voiceId.trim() : undefined,
+  })
 
   const targetName = LANGUAGES.find((l) => l.code === target)?.name || target
 
   return (
     <ToolRunner
       title="Translate + Dub"
-      description={`Translate captions and optionally dub the audio into ${LANGUAGES.length}+ languages`}
+      description="Donor-derived semantic translation, smart dubbing, clean background audio and HQ render"
       icon={<TranslateOutlinedIcon fontSize="large" />}
       endpoint="/api/tools/translate"
-      fieldBuilder={fieldBuilder}
-      processLabel={mode === "full_dub" ? `Translate + dub to ${targetName}` : `Translate captions to ${targetName}`}
+      fieldBuilder={fields}
+      processLabel={mode === "full_dub" ? "HQ translate + dub to " + targetName : "Translate captions to " + targetName}
+      resultPreview={(jobId) => <LocalizationExpertPanel jobId={jobId} />}
     >
       <Stack spacing={2.5}>
-        {/* Target language */}
-        <FormControl size="small" sx={{ minWidth: 220 }}>
-          <InputLabel>Target language</InputLabel>
-          <Select value={target} label="Target language" onChange={(e) => setTarget(e.target.value)}>
-            {LANGUAGES.map((l) => (
-              <MenuItem key={l.code} value={l.code}>{l.name}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+          <FormControl size="small" fullWidth>
+            <InputLabel>Target language</InputLabel>
+            <Select value={target} label="Target language" onChange={(e) => setTarget(e.target.value)}>
+              {LANGUAGES.map((l) => <MenuItem key={l.code} value={l.code}>{l.name}</MenuItem>)}
+            </Select>
+          </FormControl>
 
-        {/* Mode picker */}
+          <FormControl size="small" fullWidth>
+            <InputLabel>Localization profile</InputLabel>
+            <Select value={profileId} label="Localization profile" onChange={(e) => setProfileId(e.target.value)}>
+              {profiles.map((p) => <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>)}
+            </Select>
+          </FormControl>
+        </Stack>
+
+        {selectedProfile && (
+          <Alert severity="info" variant="outlined">
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>{selectedProfile.name}</Typography>
+            <Typography variant="caption" color="text.secondary">
+              ASR {selectedProfile.asr_quality}
+              {" · alignment " + (selectedProfile.alignment_mode || "off")}
+              {" · diarization " + (selectedProfile.diarization_mode || "off")}
+              {" · audio " + selectedProfile.audio_mode}
+              {" · render " + selectedProfile.render_profile}
+              {" · speed ceiling " + Number(selectedProfile.dub_speed_max || 1.3).toFixed(2) + "×"}
+            </Typography>
+          </Alert>
+        )}
+
         <Box>
           <Typography variant="caption" sx={{ fontWeight: 600, display: "block", mb: 0.75 }}>
-            What to translate
+            Localization mode
           </Typography>
           <RadioGroup value={mode} onChange={(e) => setMode(e.target.value)}>
-            <GlassPanel sx={{ p: 1, mb: 0.75, cursor: "pointer" }}
-              onClick={() => setMode("captions_only")}>
-              <FormControlLabel
-                value="captions_only"
-                control={<Radio size="small" />}
-                label={
-                  <Box>
-                    <Typography variant="body2" sx={{ fontWeight: 600, fontSize: "0.85rem" }}>
-                      Translated captions only
-                    </Typography>
-                    <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                      Keeps original audio. Burns {targetName} captions on top. Faster, cheaper.
-                    </Typography>
-                  </Box>
-                }
-              />
-            </GlassPanel>
-            <GlassPanel sx={{ p: 1, cursor: "pointer" }}
-              onClick={() => setMode("full_dub")}>
-              <FormControlLabel
-                value="full_dub"
-                control={<Radio size="small" />}
-                label={
-                  <Box>
-                    <Typography variant="body2" sx={{ fontWeight: 600, fontSize: "0.85rem" }}>
-                      Full dub (audio + captions)
-                    </Typography>
-                    <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                      Replaces audio with {targetName} voiceover. Adds matching captions.
-                    </Typography>
-                  </Box>
-                }
-              />
-            </GlassPanel>
+            <FormControlLabel
+              value="full_dub"
+              control={<Radio size="small" />}
+              label={
+                <Box>
+                  <Typography variant="body2" sx={{ fontWeight: 600 }}>HQ full dub</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Clean vocal/background separation, semantic translation, measured TTS fitting and final-timing captions.
+                  </Typography>
+                </Box>
+              }
+            />
+            <FormControlLabel
+              value="captions_only"
+              control={<Radio size="small" />}
+              label={
+                <Box>
+                  <Typography variant="body2" sx={{ fontWeight: 600 }}>Translated captions only</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Keep original audio; use the same semantic translation pipeline for captions.
+                  </Typography>
+                </Box>
+              }
+            />
           </RadioGroup>
         </Box>
 
-        {/* Voice picker — only relevant for full_dub */}
         {mode === "full_dub" && (
-          <FormControl size="small" sx={{ minWidth: 260 }}>
-            <InputLabel>Voice (multilingual)</InputLabel>
-            <Select
-              value={voiceId}
-              label="Voice (multilingual)"
-              onChange={(e) => setVoiceId(e.target.value)}
-              renderValue={(v) => DUB_VOICES.find((d) => d.id === v)?.label || v}
-            >
-              {DUB_VOICES.map(({ id: v, label }) => {
-                const isPlaying = previewVoice === v
-                const isLoading = previewLoading === v
-                return (
-                  <MenuItem key={v} value={v} sx={{ display: "flex", alignItems: "center", gap: 1, pr: 1 }}>
-                    <Box sx={{ flex: 1 }}>{label}</Box>
-                    <Tooltip title={isPlaying ? "Stop preview" : "Preview voice"} placement="left" arrow>
-                      <IconButton
-                        size="small"
-                        onMouseDown={(e) => e.stopPropagation()}
-                        onClick={(e) => { e.stopPropagation(); playPreview(v) }}
-                        sx={{ p: 0.25, color: isPlaying ? "primary.main" : "text.secondary" }}
-                      >
-                        {isLoading ? <CircularProgress size={14} />
-                         : isPlaying ? <StopIcon sx={{ fontSize: 18 }} />
-                         : <VolumeUpOutlinedIcon sx={{ fontSize: 18 }} />}
-                      </IconButton>
-                    </Tooltip>
-                  </MenuItem>
-                )
-              })}
-            </Select>
-          </FormControl>
+          <TextField
+            label="Voice override (optional)"
+            size="small"
+            value={voiceId}
+            onChange={(e) => setVoiceId(e.target.value)}
+            placeholder="Leave empty to use profile / speaker voice mapping"
+            helperText="Works with the provider configured in Settings. Expert mode can override individual segments after rendering."
+          />
         )}
 
-        {/* Caption style */}
-        <Stack direction="row" spacing={2} flexWrap="wrap">
-          <FormControl size="small" sx={{ minWidth: 140 }}>
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+          <FormControl size="small" fullWidth>
             <InputLabel>Caption style</InputLabel>
             <Select value={captionStyle} label="Caption style" onChange={(e) => setCaptionStyle(e.target.value)}>
               {CAPTION_STYLES.map((s) => <MenuItem key={s.value} value={s.value}>{s.label}</MenuItem>)}
             </Select>
           </FormControl>
-          <FormControl size="small" sx={{ minWidth: 140 }}>
+          <FormControl size="small" fullWidth>
             <InputLabel>Emoji intensity</InputLabel>
             <Select value={emojiStyle} label="Emoji intensity" onChange={(e) => setEmojiStyle(e.target.value)}>
               <MenuItem value="none">None</MenuItem>
@@ -236,20 +175,12 @@ export default function ToolTranslate() {
           </FormControl>
         </Stack>
 
-        {/* Notes */}
-        <Alert severity="info" variant="outlined" sx={{ fontSize: "0.78rem" }}>
-          {mode === "full_dub" ? (
-            <>
-              The dubbed voiceover may run slightly longer or shorter than the original audio.
-              ViralMint applies a small speed-up (up to 1.15×) to fit; beyond that the original
-              video duration wins and any extra dub at the end is trimmed.
-            </>
-          ) : (
-            <>
-              Captions are generated with the same timestamps as the original speech, so they
-              stay in sync. Original audio plays unchanged.
-            </>
-          )}
+        <Alert severity="success" variant="outlined">
+          HQ mode no longer drops a line because one Whisper cue is too short.
+          Adjacent cues are planned into dubbing chunks; generated TTS is measured,
+          rewritten when necessary, fitted after synthesis, and can use bounded
+          video retiming only as a last resort. The result panel exposes QC and
+          expert rerun controls without re-uploading the source.
         </Alert>
       </Stack>
     </ToolRunner>

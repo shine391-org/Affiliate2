@@ -10,6 +10,7 @@ import EditIcon from "@mui/icons-material/EditOutlined"
 import DeleteIcon from "@mui/icons-material/DeleteOutlineOutlined"
 import CheckCircleIcon from "@mui/icons-material/CheckCircleOutline"
 import YouTubeIcon from "@mui/icons-material/YouTube"
+import HubOutlinedIcon from "@mui/icons-material/HubOutlined"
 import useAppStore from "../../store/appStore"
 
 /**
@@ -27,6 +28,17 @@ const SERVICES = [
     placeholder: "AIzaSy...",
     docsHref: "https://console.cloud.google.com/apis/credentials",
     docsHint: "Get a free key at Google Cloud Console → Credentials → Create API key (10K units/day free)",
+  },
+  {
+    id: "huggingface",
+    label: "Hugging Face",
+    description: "Unlocks gated pyannote/WhisperX speaker diarization models for HQ multi-speaker localization",
+    icon: <HubOutlinedIcon sx={{ color: "#f59e0b", fontSize: 28 }} />,
+    settingsKey: "huggingface_token",
+    setFlag: "huggingface_token_set",
+    placeholder: "hf_...",
+    docsHref: "https://huggingface.co/settings/tokens",
+    docsHint: "Use a read token with access to the diarization model licenses required by WhisperX/pyannote",
   },
   // To add more services later, append:
   // { id: "pexels", label: "Pexels API", description: "Stock footage", ...,
