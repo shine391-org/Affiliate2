@@ -100,6 +100,7 @@ class TimedDubResult:
     issues: list[dict]
     chunk_count: int = 0
     max_speed_factor: float = 1.0
+    max_fitted_speed_factor: float = 1.0
     rewrite_count: int = 0
     video_slowdown: float = 1.0
     plan: list[PlanItem] | None = None
@@ -917,6 +918,7 @@ async def synthesize_timed_dub(
         required_speed(c.actual_duration_ms, c.available_ms)
         for c in chunks
     ]
+    max_raw_required_speed = max([1.0, *raw_required])
     needed_slowdown = max(
         [1.0] + [speed / config.speed_max for speed in raw_required if speed > config.speed_max]
     )
@@ -994,9 +996,11 @@ async def synthesize_timed_dub(
         total_duration_ms=total_duration_ms,
         output_path=dub_track,
     )
+    max_fitted_speed = max([1.0, *[c.speed_factor for c in fitted_chunks]])
     out.metadata["dubbing"] = {
         "chunk_count": len(fitted_chunks),
-        "max_required_speed": report.max_speed_factor,
+        "max_raw_required_speed": max_raw_required_speed,
+        "max_fitted_speed": max_fitted_speed,
         "rewrite_count": rewrite_count,
         "video_slowdown": video_slowdown,
         "issues": issues,
@@ -1007,7 +1011,8 @@ async def synthesize_timed_dub(
         block_paths=block_paths,
         issues=issues,
         chunk_count=len(fitted_chunks),
-        max_speed_factor=report.max_speed_factor,
+        max_speed_factor=max_raw_required_speed,
+        max_fitted_speed_factor=max_fitted_speed,
         rewrite_count=rewrite_count,
         video_slowdown=video_slowdown,
         plan=fitted_plan,

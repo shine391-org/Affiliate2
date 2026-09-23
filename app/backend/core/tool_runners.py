@@ -1108,6 +1108,7 @@ async def run_tool_translate(
         video_slowdown = 1.0
         dub_chunk_count = 0
         max_dubbing_speed = 1.0
+        max_fitted_dubbing_speed = 1.0
         dubbing_rewrite_count = 0
         dub_track = None
 
@@ -1123,7 +1124,8 @@ async def run_tool_translate(
                 timing_issues = list(meta.get("issues") or [])
                 video_slowdown = float(meta.get("video_slowdown") or 1.0)
                 dub_chunk_count = int(meta.get("chunk_count") or 0)
-                max_dubbing_speed = float(meta.get("max_speed_factor") or 1.0)
+                max_dubbing_speed = float(meta.get("max_raw_required_speed") or meta.get("max_speed_factor") or 1.0)
+                max_fitted_dubbing_speed = float(meta.get("max_fitted_speed_factor") or 1.0)
                 dubbing_rewrite_count = int(meta.get("rewrite_count") or 0)
             else:
                 await _tool_progress(
@@ -1154,6 +1156,7 @@ async def run_tool_translate(
                     video_slowdown = dub.video_slowdown
                     dub_chunk_count = dub.chunk_count
                     max_dubbing_speed = dub.max_speed_factor
+                    max_fitted_dubbing_speed = dub.max_fitted_speed_factor
                     dubbing_rewrite_count = dub.rewrite_count
                     transcript_path = run.save_json(
                         "dubbing", "transcript.json", localized.model_dump()
@@ -1178,7 +1181,8 @@ async def run_tool_translate(
                             "issues": timing_issues,
                             "video_slowdown": video_slowdown,
                             "chunk_count": dub_chunk_count,
-                            "max_speed_factor": max_dubbing_speed,
+                            "max_raw_required_speed": max_dubbing_speed,
+                            "max_fitted_speed_factor": max_fitted_dubbing_speed,
                             "rewrite_count": dubbing_rewrite_count,
                         },
                     )
@@ -1341,6 +1345,7 @@ async def run_tool_translate(
                 "semantic_cue_count": len(localized.segments),
                 "dubbing_chunk_count": dub_chunk_count,
                 "max_dubbing_speed_factor": max_dubbing_speed,
+                "max_fitted_dubbing_speed_factor": max_fitted_dubbing_speed,
                 "dubbing_rewrite_count": dubbing_rewrite_count,
                 "video_slowdown": video_slowdown,
                 "timing_issue_count": len(timing_issues),
