@@ -71,8 +71,8 @@ def test_fit_reports_over_max_instead_of_silently_forcing_extreme_speed():
     fitted, fitted_chunks, report = fit_timeline(plan, chunks, cfg)
     assert report.failed_chunk_ids == [1]
     assert report.max_speed_factor == 2.0
-    assert fitted_chunks[0].speed_factor == 2.0
-    # Plan is capped at quality ceiling; caller must not assemble a failed chunk.
+    # Raw required factor is evidence only; actual fit is capped at quality ceiling.
+    assert fitted_chunks[0].speed_factor == 1.30
     assert fitted[0].speed_factor == 1.30
 
 

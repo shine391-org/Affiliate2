@@ -245,7 +245,6 @@ def fit_timeline(
             raise ValueError(f"chunk {chunk.id} has non-positive window")
 
         speed = required_speed(chunk.actual_duration_ms, chunk.available_ms)
-        chunk.speed_factor = speed
         report.max_speed_factor = max(report.max_speed_factor, speed)
 
         if speed > config.speed_accept:
@@ -261,6 +260,7 @@ def fit_timeline(
         # Never silently force beyond the quality ceiling. Caller must rewrite,
         # regenerate, or route to review before assembly.
         applied = min(speed, config.speed_max)
+        chunk.speed_factor = applied
         fitted_total = round(chunk.actual_duration_ms / applied)
 
         weights: list[float] = []
