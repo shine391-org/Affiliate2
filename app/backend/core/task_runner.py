@@ -364,7 +364,8 @@ async def _download_single_video_to_db(job_id: str, url: str, title: str, user_i
     Returns a delivery summary:
         {"id": DownloadedVideo.id, "title": str,
          "height": int|None, "requested_quality": str|None, "ext": str|None,
-         "subtitle_files": [str], "extras_dropped": bool}
+         "subtitle_files": [str], "extras_dropped": bool,
+         "download_source": str}
 
     `id` is what chaining callers need; the rest is what the user actually GOT
     vs what the per-download `options` asked for (a quality cap degrades to
@@ -521,6 +522,7 @@ async def _download_single_video_to_db(job_id: str, url: str, title: str, user_i
             # ("test_vid.en.srt") without spilling filesystem layout into cards.
             "subtitle_files": [Path(p).name for p in dl_result.get("kept_subtitle_paths") or []],
             "extras_dropped": bool(dl_result.get("option_postprocessors_dropped")),
+            "download_source": dl_result.get("download_source") or "yt_dlp",
         }
 
 
