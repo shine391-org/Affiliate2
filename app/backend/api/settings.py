@@ -16,6 +16,11 @@ from backend.models.user_settings import UserSettings
 from backend.core.crypto import encrypt, decrypt_safe
 from backend.core.http_utils import get_user_agent
 from backend.config import settings as app_settings
+from backend.services.download_browser_session import (
+    SUPPORTED_DOWNLOAD_BROWSERS,
+    normalize_download_browser,
+    normalize_download_profile,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -37,6 +42,8 @@ class SettingsResponse(BaseModel):
     # OAuth / cookie status
     douyin_cookie_set: bool = False
     tiktok_cookie_set: bool = False
+    download_cookie_browser: str = "auto"
+    download_cookie_profile: Optional[str] = None
     youtube_channel_title: Optional[str] = None
     youtube_connected: bool = False
     tiktok_upload_connected: bool = False
@@ -73,6 +80,11 @@ class SettingsUpdate(BaseModel):
     # Send empty string to clear a stored key.
     youtube_api_key: Optional[str] = None
     huggingface_token: Optional[str] = None
+
+    # Canonical yt-dlp browser session. Cookies are never copied into this
+    # request/model; only the local browser/profile selector is persisted.
+    download_cookie_browser: Optional[str] = None
+    download_cookie_profile: Optional[str] = None
 
     # Preferences
     preferred_voice_id: Optional[str] = None
@@ -115,6 +127,8 @@ async def get_settings():
         huggingface_token_set=bool(s.huggingface_token_encrypted),
         douyin_cookie_set=bool(s.douyin_cookie_encrypted),
         tiktok_cookie_set=bool(s.tiktok_cookie_encrypted),
+        download_cookie_browser=normalize_download_browser(s.download_cookie_browser),
+        download_cookie_profile=normalize_download_profile(s.download_cookie_profile),
         youtube_channel_title=s.youtube_channel_title,
         youtube_connected=bool(s.youtube_credentials_json_encrypted),
         tiktok_upload_connected=bool(s.tiktok_upload_token_encrypted),
@@ -169,6 +183,17 @@ async def update_settings(update: SettingsUpdate):
             s.youtube_api_key_encrypted = encrypt(update.youtube_api_key) if update.youtube_api_key else None
         if update.huggingface_token is not None:
             s.huggingface_token_encrypted = encrypt(update.huggingface_token) if update.huggingface_token else None
+
+        if update.download_cookie_browser is not None:
+            try:
+                s.download_cookie_browser = normalize_download_browser(update.download_cookie_browser)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{exc}. Choose one of: {', '.join(SUPPORTED_DOWNLOAD_BROWSERS)}",
+                )
+        if update.download_cookie_profile is not None:
+            s.download_cookie_profile = normalize_download_profile(update.download_cookie_profile)
 
         # Preference fields
         if update.preferred_voice_id is not None:
@@ -458,6 +483,37 @@ async def tiktok_upload_callback(code: str = Query(...), state: str = Query(None
         return RedirectResponse(f"/?tiktok_error={str(e)[:200]}")
 
 
+class DownloadSessionProbeRequest(BaseModel):
+    browser: Optional[str] = None
+    profile: Optional[str] = None
+
+
+@router.post("/settings/download-session/test")
+async def test_download_session(body: DownloadSessionProbeRequest):
+    """Verify that yt-dlp can read the selected local browser/profile."""
+    if body.browser is None:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(UserSettings).where(UserSettings.user_id == "local")
+            )
+            row = result.scalar_one_or_none()
+        browser = normalize_download_browser(
+            getattr(row, "download_cookie_browser", None)
+        )
+        profile = normalize_download_profile(
+            getattr(row, "download_cookie_profile", None)
+        )
+    else:
+        try:
+            browser = normalize_download_browser(body.browser)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        profile = normalize_download_profile(body.profile)
+
+    from backend.services.ytdlp_service import probe_browser_session
+    return await probe_browser_session(browser, profile)
+
+
 @router.post("/settings/test-cookie")
 async def test_cookie(body: dict):
     """Test a platform session cookie."""
@@ -507,31 +563,20 @@ async def get_health():
 
     health = {}
 
-    # Cookie health
+    # Canonical downloader browser-session health. Old per-platform cookie
+    # fields remain for backward compatibility but no longer define downloader
+    # readiness.
     async with AsyncSessionLocal() as db:
         res = await db.execute(
             select(UserSettings).where(UserSettings.user_id == "local")
         )
         s = res.scalar_one_or_none()
 
-    if s:
-        for platform, cookie_field, set_at_field in [
-            ("douyin_cookie", "douyin_cookie_encrypted", "douyin_cookie_set_at"),
-            ("tiktok_cookie", "tiktok_cookie_encrypted", "tiktok_cookie_set_at"),
-        ]:
-            cookie = getattr(s, cookie_field, None) if s else None
-            set_at = getattr(s, set_at_field, None) if s else None
-            if cookie and set_at:
-                age = (datetime.utcnow() - set_at).days
-                status = "valid" if age < 25 else ("expiring_soon" if age < 30 else "expired")
-                health[platform] = {"status": status, "age_days": age}
-            elif cookie:
-                health[platform] = {"status": "unknown_age"}
-            else:
-                health[platform] = {"status": "not_configured"}
-    else:
-        health["douyin_cookie"] = {"status": "not_configured"}
-        health["tiktok_cookie"] = {"status": "not_configured"}
+    from backend.services.ytdlp_service import browser_session_health
+    health["download_session"] = browser_session_health(
+        normalize_download_browser(getattr(s, "download_cookie_browser", None)),
+        normalize_download_profile(getattr(s, "download_cookie_profile", None)),
+    )
 
     # ImageMagick
     if shutil.which("magick") or shutil.which("convert"):
