@@ -182,6 +182,7 @@ async def get_downloaded(video_id: str):
             "transcript": video.transcript,
             "transcript_language": video.transcript_language,
             "transcript_source": video.transcript_source,
+            "transcript_segments": _safe_json(video.transcript_segments_json, []),
             "insights": insights,
             "insights_json": video.insights_json,
             "segment_analysis": _safe_json(video.segment_analysis_json),
