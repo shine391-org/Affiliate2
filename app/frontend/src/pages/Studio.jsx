@@ -16,11 +16,8 @@ import {
   studioAssetProviderHref,
 } from "../studioReadinessModel"
 
-function ReservedMode({ mode, source, context, navigate }) {
-  const contract = STUDIO_READINESS[mode]
-  const smart = mode === "smart-cut"
-  const transcript = context?.transcript
-  const timeline = context?.timeline
+function CreativeRemakeReserved({ source, context, navigate }) {
+  const contract = STUDIO_READINESS.remake
 
   return (
     <Box sx={{ maxWidth: 1040, mx: "auto", p: { xs: 2, md: 3 } }}>
@@ -35,7 +32,7 @@ function ReservedMode({ mode, source, context, navigate }) {
         </Stack>
 
         <Alert severity="info" variant="outlined">
-          This is a readiness surface only. No {smart ? "Smart Cut" : "Creative Remake"} processing exists yet; Phase {contract.phase} must plug into this same Studio/source contract instead of creating another app.
+          This is a readiness surface only. No Creative Remake processing exists yet; Phase {contract.phase} must plug into this same Studio/source contract instead of creating another app.
         </Alert>
 
         {!source ? (
@@ -52,58 +49,32 @@ function ReservedMode({ mode, source, context, navigate }) {
               </Stack>
             </Paper>
 
-            {smart ? (
-              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 1.5 }}>
-                <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-                  <Typography variant="subtitle2">Canonical transcript</Typography>
-                  <Typography variant="body2" sx={{ mt: 0.75 }}>
-                    {transcript?.available
-                      ? `${transcript.segments.length} timed segments · ${transcript.language || "language unknown"} · ${transcript.source || "source unknown"}`
-                      : "No persisted transcript is available for this source yet."}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Phase D may create missing transcript data through the canonical ASR service, but must not add another ASR owner.
-                  </Typography>
-                </Paper>
-                <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-                  <Typography variant="subtitle2">Timeline safety</Typography>
-                  <Typography variant="body2" sx={{ mt: 0.75 }}>
-                    {timeline?.transcript_end_ms != null
-                      ? `Transcript ends at ${(timeline.transcript_end_ms / 1000).toFixed(2)}s · ${timeline.within_source ? "inside source timeline" : "timeline mismatch"}`
-                      : "No timed transcript to validate yet."}
-                  </Typography>
-                  {timeline && !timeline.within_source && <Alert severity="error" sx={{ mt: 1 }}>Transcript extends beyond the canonical source. Phase D must treat this as a provenance/timeline blocker.</Alert>}
-                </Paper>
-              </Box>
-            ) : (
-              <>
-                <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-                  <Typography variant="subtitle2">Storyboard approval contract</Typography>
-                  <Typography variant="body2" sx={{ mt: 0.75 }}>
-                    Phase E must persist source → scene map → creative beats → asset map → storyboard, then stop for explicit human approval before composition/render.
-                  </Typography>
-                  <Button size="small" sx={{ mt: 1 }} disabled>Storyboard review · Phase E</Button>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.75 }}>
-                    The Review contract is reserved, but the queue stays disabled until a real Creative Remake engine registers live exceptions.
-                  </Typography>
-                </Paper>
-                <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-                  <Typography variant="subtitle2">Contextual asset providers</Typography>
-                  <Typography variant="caption" color="text.secondary">Existing providers stay secondary capabilities; Creative Remake may call them from this project context.</Typography>
-                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ mt: 1.25 }}>
-                    {STUDIO_ASSET_PROVIDERS.map((provider) => (
-                      <Button
-                        key={provider.id}
-                        variant="outlined"
-                        onClick={() => navigate(studioAssetProviderHref(provider, source.id))}
-                      >
-                        {provider.label}
-                      </Button>
-                    ))}
-                  </Stack>
-                </Paper>
-              </>
-            )}
+            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+              <Typography variant="subtitle2">Storyboard approval contract</Typography>
+              <Typography variant="body2" sx={{ mt: 0.75 }}>
+                Phase E must persist source → scene map → creative beats → asset map → storyboard, then stop for explicit human approval before composition/render.
+              </Typography>
+              <Button size="small" sx={{ mt: 1 }} disabled>Storyboard review · Phase E</Button>
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.75 }}>
+                The Review contract is reserved, but the queue stays disabled until a real Creative Remake engine registers live exceptions.
+              </Typography>
+            </Paper>
+
+            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+              <Typography variant="subtitle2">Contextual asset providers</Typography>
+              <Typography variant="caption" color="text.secondary">Existing providers stay secondary capabilities; Creative Remake may call them from this project context.</Typography>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ mt: 1.25 }}>
+                {STUDIO_ASSET_PROVIDERS.map((provider) => (
+                  <Button
+                    key={provider.id}
+                    variant="outlined"
+                    onClick={() => navigate(studioAssetProviderHref(provider, source.id))}
+                  >
+                    {provider.label}
+                  </Button>
+                ))}
+              </Stack>
+            </Paper>
 
             <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
               <Typography variant="subtitle2">Reserved workflow</Typography>
@@ -222,7 +193,7 @@ export default function Studio() {
         {mode === "localize" && <StudioLocalize source={source} sourcesLoading={loading} />}
         {mode === "manual" && <ClipStudio key="manual" workflow="manual" />}
         {mode === "smart-cut" && <ClipStudio key="smart-cut" workflow="smart-cut" />}
-        {mode === "remake" && <ReservedMode mode={mode} source={source} context={sourceContext} navigate={navigate} />}
+        {mode === "remake" && <CreativeRemakeReserved source={source} context={sourceContext} navigate={navigate} />}
       </Box>
     </Box>
   )
