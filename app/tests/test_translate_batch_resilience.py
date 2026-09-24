@@ -280,6 +280,67 @@ def _patch_dub_io(monkeypatch, tmp_path, durations, generated=None):
 
 
 @pytest.mark.asyncio
+async def test_c7_rewrite_prompt_keeps_locked_core_and_uses_its_own_profile_instructions():
+    class CaptureAI:
+        def __init__(self):
+            self.prompt = ""
+
+        async def chat(self, messages, **kwargs):
+            self.prompt = messages[0]["content"]
+            return json.dumps([{"id": "s1", "text": "ngắn"}], ensure_ascii=False)
+
+    ai = CaptureAI()
+    plan = [
+        ls.PlanItem(
+            index=0,
+            segment_id="s1",
+            original_start_ms=0,
+            original_end_ms=1000,
+            original_text="một câu rất dài",
+            spoken_text="một câu rất dài",
+            estimated_duration_ms=1800,
+        )
+    ]
+    chunk = ls.DubbingChunk(
+        id=1,
+        item_indexes=[0],
+        start_ms=0,
+        end_ms=1000,
+    )
+    segment = LocalizationSegment(
+        id="s1",
+        source_text="原文",
+        translated_text="một câu rất dài",
+        source_start_ms=0,
+        source_end_ms=1000,
+        translation_status="success",
+    )
+    profile = _profile(
+        translation_instructions="C6 ONLY SENTINEL",
+        rewrite_instructions="C7 ONLY SENTINEL",
+    )
+
+    changed = await ls._adapt_chunk_items(
+        ai,
+        plan=plan,
+        chunk=chunk,
+        segment_by_id={"s1": segment},
+        target_language="Vietnamese",
+        target_ms=1000,
+        profile=profile,
+        state={"measured_duration_ms": 1800, "attempt": 1},
+    )
+
+    assert changed is True
+    assert "C7 ONLY SENTINEL" in ai.prompt
+    assert "C6 ONLY SENTINEL" not in ai.prompt
+    assert "Preserve every item ID and order." in ai.prompt
+    assert "Preserve essential meaning, names, numbers and factual claims." in ai.prompt
+    assert "core rules above remain mandatory" in ai.prompt
+    assert segment.translated_text == "ngắn"
+
+
+@pytest.mark.asyncio
 async def test_c7_short_whisper_cues_become_one_tts_chunk(monkeypatch, tmp_path):
     tx = LocalizationTranscript(
         text="Yes and then continue",
