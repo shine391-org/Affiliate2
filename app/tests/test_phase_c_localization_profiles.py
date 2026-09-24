@@ -4,6 +4,8 @@ import json
 import pytest
 
 from backend.core.localization import (
+    DEFAULT_REWRITE_GUARDRAILS,
+    DEFAULT_TRANSLATION_GUARDRAILS,
     LocalizationProfile,
     default_profile_store,
     delete_profile,
@@ -26,6 +28,8 @@ def test_default_profile_is_full_hq_donor_stack():
     assert profile.translation_preset == "natural_vietnamese"
     assert profile.rewrite_model is None
     assert profile.rewrite_instructions == ""
+    assert profile.translation_guardrails == DEFAULT_TRANSLATION_GUARDRAILS
+    assert profile.rewrite_guardrails == DEFAULT_REWRITE_GUARDRAILS
     assert profile.dub_min_cue_duration_ms == 2500
     assert profile.dub_max_chunk_size == 5
     assert profile.dub_gap_tolerance_ms == 1500
@@ -52,6 +56,30 @@ def test_profile_can_pin_translation_and_rewrite_models_independently():
     assert profile.translation_model == "translator-large"
     assert profile.rewrite_model == "rewrite-small"
     assert profile.rewrite_instructions == "Keep the product facts; remove filler first."
+
+
+def test_profile_guardrails_are_editable_but_cannot_be_empty():
+    profile = LocalizationProfile(
+        id="guardrails",
+        name="Guardrails",
+        translation_guardrails="- Keep source facts exact.",
+        rewrite_guardrails="- Keep numbers and negation exact.",
+    )
+    assert profile.translation_guardrails == "- Keep source facts exact."
+    assert profile.rewrite_guardrails == "- Keep numbers and negation exact."
+
+    with pytest.raises(ValueError, match="Translation guardrails cannot be empty"):
+        LocalizationProfile(
+            id="bad-c6",
+            name="Bad C6",
+            translation_guardrails="   ",
+        )
+    with pytest.raises(ValueError, match="Rewrite guardrails cannot be empty"):
+        LocalizationProfile(
+            id="bad-c7",
+            name="Bad C7",
+            rewrite_guardrails="",
+        )
 
 
 def test_profile_round_trips_as_one_json_payload():
