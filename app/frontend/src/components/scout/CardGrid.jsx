@@ -12,7 +12,7 @@ import NewspaperIcon from "@mui/icons-material/Newspaper"
 import BookmarkAddIcon from "@mui/icons-material/BookmarkAdd"
 import BookmarkAddedIcon from "@mui/icons-material/BookmarkAdded"
 import ContentCutIcon from "@mui/icons-material/ContentCutOutlined"
-import { candidateStatus } from "../../discoverModel"
+import { candidateStatus, thumbnailRequestKey } from "../../discoverModel"
 
 function ViralityChip({ score }) {
   const color = score >= 70 ? "success" : score >= 40 ? "warning" : "error"
@@ -86,8 +86,8 @@ export default function CardGrid({
   // broken-image glyph and the play button floating over nothing. Nothing can
   // un-expire the url; the card just has to stop claiming it has a picture.
   const [brokenThumbs, setBrokenThumbs] = useState(() => new Set())
-  const markThumbBroken = useCallback((id) => {
-    setBrokenThumbs((prev) => (prev.has(id) ? prev : new Set(prev).add(id)))
+  const markThumbBroken = useCallback((key) => {
+    setBrokenThumbs((prev) => (prev.has(key) ? prev : new Set(prev).add(key)))
   }, [])
   const showMore = useCallback(() => setVisibleCount((c) => c + PAGE_SIZE), [])
 
@@ -110,6 +110,7 @@ export default function CardGrid({
         const isSelected = selectedIds?.has(r.id)
         const isNews = r.platform === "news"
         const watchUrl = isNews ? null : getWatchUrl(r)
+        const thumbnailKey = thumbnailRequestKey(r)
 
         // Parse news description JSON for snippet/source
         let newsDesc = null
@@ -157,14 +158,15 @@ export default function CardGrid({
                 display: "flex", flexDirection: "column", justifyContent: "center", px: 2,
                 overflow: "hidden",
               }}>
-                {r.thumbnail_url && !brokenThumbs.has(r.id) ? (
+                {r.thumbnail_url && !brokenThumbs.has(thumbnailKey) ? (
                   <>
                     {/* Decorative wash behind the headline. A refused image
                         still paints the browser's broken glyph, so it takes
                         the same guard as the video thumbnail — faint, but a
                         smudge nobody can explain. */}
                     <CardMedia component="img" height={160} image={r.thumbnail_url} alt=""
-                      onError={() => markThumbBroken(r.id)}
+                      referrerPolicy="no-referrer"
+                      onError={() => markThumbBroken(thumbnailKey)}
                       sx={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.15 }} />
                     <Box sx={{ position: "relative", zIndex: 1 }}>
                       <NewspaperIcon sx={{ fontSize: 28, color: "warning.main", mb: 0.5 }} />
@@ -203,9 +205,10 @@ export default function CardGrid({
             ) : (
               /* ── Video thumbnail area ── */
               <Box sx={{ position: "relative", width: "100%", height: 160, "&:hover .play-icon": { transform: "scale(1.15)", opacity: 1 } }}>
-                {r.thumbnail_url && !brokenThumbs.has(r.id) ? (
+                {r.thumbnail_url && !brokenThumbs.has(thumbnailKey) ? (
                   <CardMedia component="img" height={160} image={r.thumbnail_url} alt={r.title}
-                    onError={() => markThumbBroken(r.id)} />
+                    referrerPolicy="no-referrer"
+                    onError={() => markThumbBroken(thumbnailKey)} />
                 ) : (
                   // A quiet plate, not an empty box: the play button and the
                   // metadata below still sit on this area, and they read as
