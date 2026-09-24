@@ -1129,6 +1129,9 @@ async def run_tool_translate(
                             1 for s in localized.segments
                             if s.translation_status == "success"
                         ),
+                        "translation_provider": profile.translation_provider,
+                        "translation_model": profile.translation_model,
+                        "translation_preset": profile.translation_preset,
                     },
                 )
             except Exception as exc:
@@ -1276,6 +1279,8 @@ async def run_tool_translate(
                             "max_raw_required_speed": max_dubbing_speed,
                             "max_fitted_speed_factor": max_fitted_dubbing_speed,
                             "rewrite_count": dubbing_rewrite_count,
+                            "rewrite_provider": profile.rewrite_provider,
+                            "rewrite_model": profile.rewrite_model,
                         },
                     )
                     if dubbing_rewrite_count:
@@ -1465,6 +1470,11 @@ async def run_tool_translate(
                 "max_dubbing_speed_factor": max_dubbing_speed,
                 "max_fitted_dubbing_speed_factor": max_fitted_dubbing_speed,
                 "dubbing_rewrite_count": dubbing_rewrite_count,
+                "translation_provider": profile.translation_provider,
+                "translation_model": profile.translation_model,
+                "translation_preset": profile.translation_preset,
+                "rewrite_provider": profile.rewrite_provider if is_dub else None,
+                "rewrite_model": profile.rewrite_model if is_dub else None,
                 "video_slowdown": video_slowdown,
                 "timing_issue_count": len(timing_issues),
                 "qc_status": qc.get("status"),
