@@ -7,6 +7,7 @@ import {
   adaptLocalizationException,
   adaptWorkflowException,
   formatReviewIssue,
+  normalizeReviewFilter,
   reviewItemMatches,
   reviewSelectionForItems,
 } from "./reviewModel.js"
@@ -34,10 +35,17 @@ test("review filters reserve future categories without fake counts", () => {
     REVIEW_FILTERS.map(({ value, enabled }) => [value, enabled]),
     [
       ["needs-review", true], ["translation", true], ["timing", true],
-      ["audio", true], ["storyboard", true], ["visual", true],
+      ["audio", true], ["storyboard", false], ["visual", false],
       ["qc", true], ["publish", false],
     ],
   )
+})
+
+test("future-only review filters fall back to the live queue", () => {
+  assert.equal(normalizeReviewFilter("storyboard"), "needs-review")
+  assert.equal(normalizeReviewFilter("visual"), "needs-review")
+  assert.equal(normalizeReviewFilter("audio"), "audio")
+  assert.equal(normalizeReviewFilter("unknown"), "needs-review")
 })
 
 test("Phase D and E review contracts are registered without fabricating live items", () => {
