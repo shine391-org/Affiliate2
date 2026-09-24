@@ -1,6 +1,6 @@
 # PROJECT_STATUS.md
 
-## Overall status: PHASE D SMART CUT QA PENDING — PHASE E E0 DONOR AUDIT COMPLETE
+## Overall status: PHASE D SMART CUT QA PENDING — PHASE F NEXT
 
 Phase A and Phase B are complete and merged to `master`.
 
@@ -167,7 +167,7 @@ See `docs/CONSOLIDATION_PLAN.md` and `docs/ARCHITECTURE.md`.
 
 ## Phase E — Creative Remake HQ
 
-**E0 DONOR AUDIT COMPLETE — E1 SOURCE SHOT MAP NEXT.**
+**DEFERRED / NOT IN CURRENT PRODUCT ROADMAP.**
 
 Audit result:
 
@@ -183,6 +183,10 @@ Audit result:
 - Direct TransNetV2 is deferred behind the same scene-map interface.
 - Remotion is reference-only and is not being added as a parallel renderer.
 
-Next implementation task: **E1 canonical source shot map**.
+The E0 donor audit is retained as reference only. Full Creative Remake is not
+being implemented now; current affiliate value is expected to come from
+Localization HQ + Smart Cut + publishing/performance learning.
 
-See `docs/PHASE_E_DONOR_AUDIT.md`.
+Next implementation phase: **Phase F — Review / Publish / Performance native migration**.
+
+See `docs/PHASE_E_DONOR_AUDIT.md` only if Creative Remake is reconsidered later.
