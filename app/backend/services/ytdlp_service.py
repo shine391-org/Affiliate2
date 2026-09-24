@@ -837,7 +837,7 @@ async def download_video(
             if "429" in error_str or "rate" in error_str:
                 _record_rate_limit()
                 raise RateLimitError(
-                    f"YouTube is rate-limiting downloads from this IP. "
+                    f"The source site is rate-limiting downloads from this IP. "
                     f"Try again in a few minutes. (Error: {error})"
                 )
             _record_download_failure()
@@ -891,7 +891,7 @@ async def download_video(
                         _cleanup_partial_files(output_dir, file_stem)
                         _record_rate_limit()
                         raise RateLimitError(
-                            f"YouTube is rate-limiting downloads from this IP. "
+                            f"The source site is rate-limiting downloads from this IP. "
                             f"Try again in a few minutes. (Error: {e})"
                         )
 
@@ -1258,8 +1258,13 @@ async def get_video_info(url: str, flat: bool = False) -> dict:
     cookie_session = await asyncio.to_thread(
         _inspect_browser_session, cookie_browser, cookie_profile
     )
-    if _is_bytedance_url(url) and not cookie_session.get("ok"):
-        logger.warning("ByteDance metadata probe blocked by unreadable browser session")
+    if _is_bytedance_url(url) and (
+        not cookie_session.get("ok")
+        or _required_bytedance_cookie_count(url, cookie_session) <= 0
+    ):
+        logger.warning(
+            "ByteDance metadata probe blocked by missing/unreadable matching browser session"
+        )
         return {}
 
     def _info():
