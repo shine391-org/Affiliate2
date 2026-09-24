@@ -1,3 +1,5 @@
+import pytest
+
 from backend.services.download_browser_session import (
     SUPPORTED_DOWNLOAD_BROWSERS,
     cookiesfrombrowser_value,
@@ -90,7 +92,9 @@ def test_bytedance_cookie_count_matches_the_requested_site():
 def test_legacy_plaintext_cookie_exports_are_removed(monkeypatch, tmp_path):
     from backend.services import ytdlp_service as svc
 
-    monkeypatch.setattr(svc.settings, "TMP_DIR", tmp_path)
+    monkeypatch.setattr(
+        type(svc.settings), "TMP_DIR", property(lambda self: tmp_path)
+    )
     legacy = tmp_path / "yt_cookies.txt"
     legacy.write_text("secret", encoding="utf-8")
     newer = tmp_path / "browser_cookies_edge_default.txt"
@@ -100,3 +104,83 @@ def test_legacy_plaintext_cookie_exports_are_removed(monkeypatch, tmp_path):
 
     assert not legacy.exists()
     assert not newer.exists()
+
+
+async def _fake_resolved_douyin(url: str):
+    from backend.services.douyin_media_resolver import ResolvedDouyinMedia
+    return ResolvedDouyinMedia(
+        url="https://v3-web.douyinvod.com/video.mp4?sig=abc",
+        headers={"Referer": url, "User-Agent": "Mozilla/5.0"},
+        source_url=url,
+    )
+
+
+def test_session_probe_cache_avoids_repeating_failed_dpapi_work(monkeypatch):
+    from backend.services import ytdlp_service as svc
+    import sys
+    import types
+
+    svc._BROWSER_SESSION_CACHE.clear()
+    monkeypatch.setattr(svc, "_resolve_cookie_browser", lambda browser: "edge")
+    calls = {"n": 0}
+
+    fake_ytdlp = types.ModuleType("yt_dlp")
+
+    class YDL:
+        def __init__(self, opts):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+
+    fake_ytdlp.YoutubeDL = YDL
+    fake_cookies = types.ModuleType("yt_dlp.cookies")
+
+    def load_cookies(*args, **kwargs):
+        calls["n"] += 1
+        raise RuntimeError("Failed to decrypt with DPAPI")
+
+    fake_cookies.load_cookies = load_cookies
+    monkeypatch.setitem(sys.modules, "yt_dlp", fake_ytdlp)
+    monkeypatch.setitem(sys.modules, "yt_dlp.cookies", fake_cookies)
+
+    first = svc._inspect_browser_session("edge", "Default")
+    second = svc._inspect_browser_session("edge", "Default")
+
+    assert first["ok"] is False
+    assert second["ok"] is False
+    assert calls["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_douyin_unreadable_cookie_store_uses_cdp_resolution(monkeypatch):
+    from backend.services import ytdlp_service as svc
+    from backend.services import douyin_media_resolver as resolver
+
+    monkeypatch.setattr(resolver, "resolve_douyin_media", _fake_resolved_douyin)
+    effective_url, headers, strategy = await svc._prepare_download_source(
+        "https://www.douyin.com/video/123",
+        {
+            "ok": False,
+            "detail": "Failed to decrypt with DPAPI",
+            "douyin_cookie_count": 0,
+            "tiktok_cookie_count": 0,
+        },
+    )
+
+    assert strategy == "douyin_cdp"
+    assert effective_url.startswith("https://v3-web.douyinvod.com/")
+    assert headers["Referer"] == "https://www.douyin.com/video/123"
+
+
+@pytest.mark.asyncio
+async def test_tiktok_does_not_borrow_douyin_cdp_fallback():
+    from backend.core.exceptions import DownloadError
+    from backend.services import ytdlp_service as svc
+
+    with pytest.raises(DownloadError, match="TikTok needs a readable"):
+        await svc._prepare_download_source(
+            "https://www.tiktok.com/@u/video/123",
+            {"ok": False, "tiktok_cookie_count": 0},
+        )
