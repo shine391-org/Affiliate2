@@ -151,6 +151,7 @@ def test_session_probe_cache_avoids_repeating_failed_dpapi_work(monkeypatch):
     assert first["ok"] is False
     assert second["ok"] is False
     assert calls["n"] == 1
+    svc._BROWSER_SESSION_CACHE.clear()
 
 
 @pytest.mark.asyncio
