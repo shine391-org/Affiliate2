@@ -42,7 +42,7 @@ const textToGlossary = (text) => {
 
 export default function LocalizationProfilesSection({ settings }) {
   const showSnackbar = useAppStore((s) => s.showSnackbar)
-  const [store, setStore] = useState({ profiles: [], default_profile_id: "" })
+  const [store, setStore] = useState({ profiles: [], default_profile_id: "", prompt_defaults: {} })
   const [selectedId, setSelectedId] = useState("")
   const [draft, setDraft] = useState(null)
   const [glossaryText, setGlossaryText] = useState("")
@@ -104,6 +104,10 @@ export default function LocalizationProfilesSection({ settings }) {
 
   const save = async () => {
     if (!draft) return
+    if (!draft.translation_guardrails?.trim() || !draft.rewrite_guardrails?.trim()) {
+      showSnackbar("C6 and C7 semantic guardrails cannot be empty", "error")
+      return
+    }
     setBusy(true)
     try {
       const payload = {
@@ -116,6 +120,8 @@ export default function LocalizationProfilesSection({ settings }) {
         rewrite_base_url: draft.rewrite_base_url?.trim() || null,
         translation_instructions: draft.translation_instructions || "",
         rewrite_instructions: draft.rewrite_instructions || "",
+        translation_guardrails: draft.translation_guardrails.trim(),
+        rewrite_guardrails: draft.rewrite_guardrails.trim(),
         glossary: textToGlossary(glossaryText),
       }
       const { data } = await http.post("/api/settings/localization-profiles", payload)
@@ -160,6 +166,8 @@ export default function LocalizationProfilesSection({ settings }) {
       rewrite_model: null,
       rewrite_base_url: null,
       rewrite_instructions: "",
+      translation_guardrails: base?.translation_guardrails || store.prompt_defaults?.translation_guardrails || "",
+      rewrite_guardrails: base?.rewrite_guardrails || store.prompt_defaults?.rewrite_guardrails || "",
     }
     setSelectedId(id)
     setDraft(next)
@@ -275,7 +283,7 @@ export default function LocalizationProfilesSection({ settings }) {
               helperText="Connection credentials remain in AI Connections."
             />
             <Alert severity="info" variant="outlined">
-              Core translation guardrails are locked by the app. Instructions below are appended per profile and cannot replace the fidelity, ID/order, no-invention or structured-output rules.
+              Translation instructions are additive. Semantic guardrails are editable in Prompt Guardrails below; the parser protocol (stable IDs/order and JSON shape) remains app-owned.
             </Alert>
             <TextField
               size="small" multiline minRows={4}
@@ -320,7 +328,7 @@ export default function LocalizationProfilesSection({ settings }) {
               placeholder={settings?.ai_base_url || "inherit Settings endpoint"}
             />
             <Alert severity="info" variant="outlined">
-              Core rewrite guardrails are locked by the app. The field below only adds profile-specific compression/style guidance; it cannot remove meaning-preservation, numbers/entities, stable IDs or JSON-output rules.
+              Rewrite instructions are additive. Semantic guardrails are editable in Prompt Guardrails below; the parser protocol (stable IDs/order and JSON shape) remains app-owned.
             </Alert>
             <TextField
               size="small" multiline minRows={4}
@@ -355,6 +363,80 @@ export default function LocalizationProfilesSection({ settings }) {
               </FormControl>
               <TextField size="small" type="number" fullWidth label="Max video slowdown" value={draft.video_retime_max_slowdown ?? 1.12} onChange={(e) => patch("video_retime_max_slowdown", Number(e.target.value))} inputProps={{ step: 0.01, min: 1, max: 1.35 }} />
             </Stack>
+          </Stack>
+        </AccordionDetails>
+      </Accordion>
+
+      <Accordion disableGutters>
+        <AccordionSummary expandIcon={<ExpandMoreOutlinedIcon />}>
+          <Box>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Prompt Guardrails (Advanced)</Typography>
+            <Typography variant="caption" color="text.secondary">Editable semantic rules per profile; stable IDs/order and JSON output protocol stay locked for parser safety</Typography>
+          </Box>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Stack spacing={2}>
+            <Alert severity="warning" variant="outlined">
+              These rules directly affect translation fidelity. Edit them when the policy is wrong, but keep both fields non-empty. Use Reset to restore the app-recommended defaults.
+            </Alert>
+
+            <Box>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }} sx={{ mb: 1 }}>
+                <Box sx={{ flex: 1 }}>
+                  <Typography variant="subtitle2">C6 translation semantic guardrails</Typography>
+                  <Typography variant="caption" color="text.secondary">Meaning/fidelity rules used before style, glossary and custom translation instructions.</Typography>
+                </Box>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  disabled={!store.prompt_defaults?.translation_guardrails}
+                  onClick={() => patch("translation_guardrails", store.prompt_defaults?.translation_guardrails || "")}
+                >
+                  Reset C6 default
+                </Button>
+              </Stack>
+              <TextField
+                size="small"
+                fullWidth
+                multiline
+                minRows={7}
+                label="C6 semantic guardrails"
+                value={draft.translation_guardrails || ""}
+                onChange={(e) => patch("translation_guardrails", e.target.value)}
+                error={!draft.translation_guardrails?.trim()}
+                helperText="Editable. Structural rules for stable IDs/order and JSON output are not part of this field and remain locked in code."
+              />
+            </Box>
+
+            <Divider />
+
+            <Box>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }} sx={{ mb: 1 }}>
+                <Box sx={{ flex: 1 }}>
+                  <Typography variant="subtitle2">C7 duration-rewrite semantic guardrails</Typography>
+                  <Typography variant="caption" color="text.secondary">Meaning-preservation rules applied before profile-specific compression/style instructions.</Typography>
+                </Box>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  disabled={!store.prompt_defaults?.rewrite_guardrails}
+                  onClick={() => patch("rewrite_guardrails", store.prompt_defaults?.rewrite_guardrails || "")}
+                >
+                  Reset C7 default
+                </Button>
+              </Stack>
+              <TextField
+                size="small"
+                fullWidth
+                multiline
+                minRows={7}
+                label="C7 semantic guardrails"
+                value={draft.rewrite_guardrails || ""}
+                onChange={(e) => patch("rewrite_guardrails", e.target.value)}
+                error={!draft.rewrite_guardrails?.trim()}
+                helperText="Editable. Stable IDs/order and JSON output remain locked so C7 cannot break the persisted pipeline contract."
+              />
+            </Box>
           </Stack>
         </AccordionDetails>
       </Accordion>
