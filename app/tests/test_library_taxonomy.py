@@ -126,7 +126,7 @@ def test_the_frontend_taxonomy_mirror_does_not_drift():
     assert not disagree, f"label/media/origin disagree between the two maps: {disagree}"
 
 
-def test_phase_d_e_reserved_derivatives_have_canonical_library_identity():
+def test_phase_d_smart_cut_and_phase_e_reserved_remake_have_canonical_library_identity():
     from backend.services.library_taxonomy import classify
 
     smart = classify("smart_cut")
