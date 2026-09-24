@@ -97,11 +97,26 @@ The old `src/radar/intel/media.py`, `transcribe.py`, and `ai_analyze.py` are com
 The Radar CLI/report/cache contract remains intact during this transition. Local QA at `8e15807` passed focused Candidate Intelligence, legacy Intel, Analyzer, AI provider, Radar enrichment, cache reuse, real canonical ASR, real Gemma/LM Studio AI, failure isolation, and canonical ownership checks. DB convergence remains Phase G.
 
 ### C13 — Final real-media acceptance
-**ACTIVE — translation quality hardening before broader sample campaign.**
+**ACTIVE — translation quality hardening + real-media defect triage.**
 
-Final acceptance = same regression sample + representative real supported videos supplied by the user, including fast speech, music-heavy, multi-speaker, longer-form, and normal product/review material. C13 is an acceptance campaign, not a new media engine: fix only evidence-backed defects and do not relax quality thresholds to obtain a pass.
+Real-media regression campaign in progress against fast-speech, music-heavy,
+multi-speaker, and longer-form samples. The 2026-09-23 run reproduced the
+perceptual rejection and confirmed the structural defects below; each is
+tracked as a discrete, evidence-backed defect rather than a quality downgrade.
 
-Historical regression is technically healthy (timing/media/resume), but user perceptual review rejected the Vietnamese translation quality. C13 therefore pauses broader samples until C6 translation quality is revalidated. Hardening now includes fidelity-first default prompting, independent C6 translation vs C7 rewrite model routing, editable Localization Profiles in Settings, and an optional pre-dubbing translation review gate.
+Known defects (with evidence):
+- **C13-TT-01** Fast-speech timing warnings (`high_speech_speed`, 2 chunks for
+  `qa-c13-regression-20260924-0610`) — accepted as reviewable via the Review
+  queue instead of silently clamped.
+- **C13-AI-02** Edge TTS preview tier flagged (`preview_tts_provider`) —
+  surfaced in Review with human-quality approval gate.
+- **C13-TR-03** Vietnamese translation fidelity regression on fast product
+  review dialogue — under revalidation via independent C6 translation vs C7
+  rewrite routing.
+
+The Review workspace adapts these QC items into a generic envelope with
+Translation/Timing/Audio/QC filters so each defect is independently inspectable
+and rerunnable through the Expert panel.
 
 See:
 - `docs/PHASE_C.md`
