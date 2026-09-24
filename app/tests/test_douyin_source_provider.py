@@ -1,6 +1,8 @@
 """Focused tests for the canonical app-native Douyin provider."""
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -232,23 +234,17 @@ async def test_douyin_unusable_context_does_not_abort_remaining_contexts():
 async def test_douyin_search_uses_ten_item_page_step_even_when_request_count_is_fifteen():
     provider = DouyinProvider()
     offsets = []
-
-    class Chromium:
-        async def connect_over_cdp(self, *args, **kwargs):
-            return object()
-
-    class Playwright:
-        chromium = Chromium()
-
-    class PlaywrightCM:
-        async def __aenter__(self):
-            return Playwright()
-
-        async def __aexit__(self, *args):
-            return False
-
     context = object()
     page = object()
+
+    @asynccontextmanager
+    async def fake_session(*args, **kwargs):
+        yield SimpleNamespace(
+            context=context,
+            page=page,
+            cookie_dict={},
+            ms_token=None,
+        )
 
     async def fetch_page(
         _context, _page, _cookies, _token, _query, offset, _search_id, count
@@ -269,17 +265,7 @@ async def test_douyin_search_uses_ten_item_page_step_even_when_request_count_is_
             "extra": {"logid": f"log-{offset}"},
         }
 
-    with patch("backend.sources.douyin.async_playwright", return_value=PlaywrightCM()), \
-         patch.object(
-             provider,
-             "_pick_context_and_page",
-             new=AsyncMock(return_value=(context, page, False)),
-         ), \
-         patch.object(
-             provider,
-             "_session_state",
-             new=AsyncMock(return_value=(True, {}, None)),
-         ), \
+    with patch("backend.sources.douyin.open_douyin_cdp_session", fake_session), \
          patch.object(provider, "_fetch_search_page", side_effect=fetch_page):
         result = await provider.search("健身", limit=15)
 
@@ -319,50 +305,17 @@ async def test_douyin_waf_status_2483_is_access_restriction():
 
 
 @pytest.mark.asyncio
-async def test_douyin_created_probe_page_is_closed_on_access_failure():
+async def test_douyin_search_surfaces_access_failure_from_shared_session():
     provider = DouyinProvider()
 
-    class Page:
-        closed = False
+    @asynccontextmanager
+    async def blocked_session(*args, **kwargs):
+        raise PermissionError("risk control")
+        yield  # pragma: no cover
 
-        async def close(self):
-            self.closed = True
-
-    page = Page()
-    context = object()
-
-    class Chromium:
-        async def connect_over_cdp(self, *args, **kwargs):
-            return object()
-
-    class Playwright:
-        chromium = Chromium()
-
-    class PlaywrightCM:
-        async def __aenter__(self):
-            return Playwright()
-
-        async def __aexit__(self, *args):
-            return False
-
-    with patch("backend.sources.douyin.async_playwright", return_value=PlaywrightCM()), \
-         patch.object(
-             provider,
-             "_pick_context_and_page",
-             new=AsyncMock(return_value=(context, page, True)),
-         ), \
-         patch.object(
-             provider,
-             "_session_state",
-             new=AsyncMock(return_value=(True, {}, None)),
-         ), \
-         patch.object(
-             provider,
-             "_fetch_search_page",
-             new=AsyncMock(side_effect=PermissionError("risk control")),
-         ):
+    with patch("backend.sources.douyin.open_douyin_cdp_session", blocked_session):
         result = await provider.search("健身", limit=1)
 
     assert result.status == ProviderStatus.AUTH_REQUIRED
-    assert page.closed is True
+    assert result.error == "risk control"
 
