@@ -416,7 +416,7 @@ def _detect_cookie_browser() -> str | None:
     global _BROWSER_COOKIE_SOURCE
     if _BROWSER_COOKIE_SOURCE is not None:
         return _BROWSER_COOKIE_SOURCE or None
-    for name in ("edge", "chrome", "brave", "firefox"):
+    for name in ("chrome", "brave", "edge", "firefox"):
         if _browser_known_on_machine(name):
             _BROWSER_COOKIE_SOURCE = name
             logger.info("Auto-detected browser for download cookies: %s", name)
@@ -444,8 +444,24 @@ def _cookie_domain_counts(cookie_jar) -> dict:
     return counts
 
 
+def _remove_legacy_cookie_exports() -> None:
+    """Remove cookie jars written by older downloader revisions.
+
+    Those files contained cookies for every site in the browser and are no
+    longer part of the canonical design.
+    """
+    candidates = [settings.TMP_DIR / "yt_cookies.txt"]
+    candidates.extend(settings.TMP_DIR.glob("browser_cookies_*.txt"))
+    for path in candidates:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Could not remove legacy cookie export: %s", path)
+
+
 def _inspect_browser_session(browser: str = "auto", profile: str | None = None) -> dict:
     """Read browser cookies locally with yt-dlp; no network request is made."""
+    _remove_legacy_cookie_exports()
     selected = normalize_download_browser(browser)
     profile = normalize_download_profile(profile)
     concrete = _resolve_cookie_browser(selected)
@@ -533,6 +549,15 @@ def _is_bytedance_url(url: str) -> bool:
     return "douyin.com/" in value or "iesdouyin.com/" in value or "tiktok.com/" in value
 
 
+def _required_bytedance_cookie_count(url: str, session: dict) -> int:
+    value = (url or "").lower()
+    if "douyin.com/" in value or "iesdouyin.com/" in value:
+        return int(session.get("douyin_cookie_count") or 0)
+    if "tiktok.com/" in value:
+        return int(session.get("tiktok_cookie_count") or 0)
+    return 0
+
+
 async def probe_browser_session(browser: str = "auto", profile: str | None = None) -> dict:
     """Verify local cookie readability; this does not claim site login validity."""
     return await asyncio.to_thread(_inspect_browser_session, browser, profile)
@@ -550,7 +575,7 @@ def browser_session_health(browser: str = "auto", profile: str | None = None) ->
             "profile": profile,
         }
     return {
-        "status": "ready" if selected != "auto" else "auto",
+        "status": "configured" if selected != "auto" else "auto",
         "browser": selected,
         "resolved_browser": concrete,
         "profile": profile,
@@ -728,13 +753,20 @@ async def download_video(
         _inspect_browser_session, cookie_browser, cookie_profile
     )
     cookie_session_ok = bool(cookie_session.get("ok"))
-    if _is_bytedance_url(url) and not cookie_session_ok:
-        raise DownloadError(
-            "Douyin/TikTok needs a readable logged-in browser session. "
-            "Open Settings > Source Providers, select the browser/profile you "
-            "actually use, test it, then retry. "
-            f"({cookie_session.get('error') or 'browser session unavailable'})"
-        )
+    if _is_bytedance_url(url):
+        if not cookie_session_ok:
+            raise DownloadError(
+                "Douyin/TikTok needs a readable logged-in browser session. "
+                "Open Settings > Source Providers, select the browser/profile "
+                "you actually use, test it, then retry. "
+                f"({cookie_session.get('error') or 'browser session unavailable'})"
+            )
+        if _required_bytedance_cookie_count(url, cookie_session) <= 0:
+            raise DownloadError(
+                "The selected browser/profile is readable but has no matching "
+                "Douyin/TikTok cookies. Log in to that site in the same profile, "
+                "refresh it, then retry."
+            )
 
     # Wait out any active rate-limit cooldown before starting
     cooldown = _check_cooldown()
