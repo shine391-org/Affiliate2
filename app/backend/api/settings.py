@@ -8,7 +8,11 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import Optional
 
-from backend.core.localization import LocalizationProfile
+from backend.core.localization import (
+    DEFAULT_REWRITE_GUARDRAILS,
+    DEFAULT_TRANSLATION_GUARDRAILS,
+    LocalizationProfile,
+)
 from sqlalchemy import select
 
 from backend.database import AsyncSessionLocal
@@ -330,6 +334,15 @@ async def test_ai_connection(body: AIProbeRequest):
         raise HTTPException(status_code=400, detail=f"Connection failed: {str(exc)[:200]}")
 
 
+def _localization_profile_payload(store):
+    payload = store.model_dump()
+    payload["prompt_defaults"] = {
+        "translation_guardrails": DEFAULT_TRANSLATION_GUARDRAILS,
+        "rewrite_guardrails": DEFAULT_REWRITE_GUARDRAILS,
+    }
+    return payload
+
+
 @router.get("/settings/localization-profiles")
 async def get_localization_profiles():
     from backend.core.localization import load_profile_store
@@ -340,7 +353,7 @@ async def get_localization_profiles():
         )
         s = result.scalar_one_or_none()
     store = load_profile_store(s.localization_profiles_json if s else None)
-    return store.model_dump()
+    return _localization_profile_payload(store)
 
 
 @router.post("/settings/localization-profiles")
@@ -362,7 +375,7 @@ async def save_localization_profile(profile: LocalizationProfile):
             raise HTTPException(status_code=400, detail=str(exc))
         s.localization_profiles_json = store.model_dump_json()
         await db.commit()
-    return store.model_dump()
+    return _localization_profile_payload(store)
 
 
 @router.delete("/settings/localization-profiles/{profile_id}")
@@ -375,11 +388,11 @@ async def remove_localization_profile(profile_id: str):
         )
         s = result.scalar_one_or_none()
         if not s:
-            return load_profile_store(None).model_dump()
+            return _localization_profile_payload(load_profile_store(None))
         store = delete_profile(load_profile_store(s.localization_profiles_json), profile_id)
         s.localization_profiles_json = store.model_dump_json()
         await db.commit()
-    return store.model_dump()
+    return _localization_profile_payload(store)
 
 
 @router.post("/settings/localization-profiles/{profile_id}/default")
@@ -400,7 +413,7 @@ async def make_default_localization_profile(profile_id: str):
             raise HTTPException(status_code=404, detail="Localization profile not found")
         s.localization_profiles_json = store.model_dump_json()
         await db.commit()
-    return store.model_dump()
+    return _localization_profile_payload(store)
 
 
 @router.get("/settings/youtube-auth")
