@@ -200,7 +200,7 @@ async def test_init_db_alters_only_the_missing_columns(tmp_path, monkeypatch):
             "download_cookie_browser",
             "download_cookie_profile",
         } <= cols
-        # ...and only the genuinely-missing ones ALTERed — the four above, not
+        # ...and only the genuinely-missing ones ALTERed — the checked upgrade columns above, not
         # the full migration list.
         assert 1 <= alters[0] < _MIGRATION_CALL_COUNT
     finally:
