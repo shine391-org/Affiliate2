@@ -212,14 +212,27 @@ Use representative real Douyin/Bilibili samples and inspect:
 
 ## Phase D — Smart Cut
 
-Status: PLANNED
+Status: **IMPLEMENTATION ACTIVE — shared-engine convergence wired / local QA pending 🚧**
 
-- reuse Phase-C media/transcript/timeline
-- propose source ranges
-- allow bounded human edit/approval
-- retime/reorder source material
-- reuse Clip Studio where fit
-- no Creative Remake semantics hidden inside Smart Cut
+Current implementation:
+- reuses the existing downloaded source, cached transcript/Whisper path, AI clip
+  selector, SourceBench range editor and clip renderer;
+- `/studio/smart-cut` mounts that existing workspace instead of a second Smart
+  Cut implementation;
+- direct Auto-cut is intentionally hidden in Smart Cut: AI suggestions must
+  return to editable ranges before render;
+- approved ranges post through the existing manual `/extract-clips` path with
+  `output_source_type=smart_cut`;
+- rendered rows persist as `GeneratedVideo.source_type=smart_cut` with
+  `source_downloaded_video_id`, so existing Library lineage owns the result;
+- legacy Manual Edit / Clipper keeps `clip_extraction` identity and behavior.
+
+Remaining gate:
+- focused backend/frontend tests and local browser smoke;
+- real source: Ask AI → adjust range → create Smart Cut → verify Library lineage;
+- no duplicate ASR, proposal engine, range editor or renderer may be introduced.
+
+No Creative Remake semantics are hidden inside Smart Cut.
 
 ## Phase E — Creative Remake HQ
 
