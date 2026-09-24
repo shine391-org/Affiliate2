@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (c) 2025-2026 ViralMint Contributors
 import { useState, useEffect, useCallback } from "react"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import {
   Box, Stack, Typography, Button, CircularProgress, useTheme,
 } from "@mui/material"
@@ -32,6 +32,8 @@ export default function MotionGraphics() {
   useDocumentTitle("Motion Graphics")
   const theme = useTheme()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const sourceId = searchParams.get("source") || ""
   const showSnackbar = useAppStore((s) => s.showSnackbar)
   const setMotionInstalled = useAppStore((s) => s.setMotionInstalled)
   const mode = theme.palette.mode   // the studio is re-skinned to follow the app
@@ -111,6 +113,15 @@ export default function MotionGraphics() {
       actions={
         installed ? (
           <>
+            {sourceId && (
+              <Button
+                size="small"
+                variant="text"
+                onClick={() => navigate(`/studio/remake?source=${encodeURIComponent(sourceId)}`)}
+              >
+                Back to Remake
+              </Button>
+            )}
             <Button size="small" variant="outlined" startIcon={<VideoLibraryIcon />}
               onClick={() => navigate("/library")}>
               Library
