@@ -299,4 +299,16 @@ async def _add_column_if_missing(conn, table: str, column: str, col_type: str, *
         if existing is not None:
             existing.setdefault(table, set()).add(column)
     except Exception:
-        pass  # Column already exists — expected for idempotent migrations
+        # Never treat every ALTER failure as "column already exists". A locked,
+        # read-only or corrupt upgrade DB must fail loudly; otherwise the ORM
+        # model moves ahead while SQLite silently stays on the old schema.
+        cols_after = await _table_columns(conn, table)
+        if column in cols_after:
+            if existing is not None:
+                existing[table] = cols_after
+            return
+        logger.exception(
+            "Failed to add required column %s.%s (%s)",
+            table, column, col_type,
+        )
+        raise
