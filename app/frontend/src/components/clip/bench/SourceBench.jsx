@@ -347,7 +347,13 @@ export default function SourceBench({
       }
       const accepted = collectDeps.current.addMany(found.map((f) => ({
         start: f.start, end: f.end,
-        meta: { title: f.title, score: f.score, hook_score: f.hook_score, reason: f.reason },
+        meta: {
+          title: f.title,
+          score: f.score,
+          hook_score: f.hook_score,
+          hook_type: f.hook_type,
+          reason: f.reason,
+        },
       })))
       finish(
         accepted < found.length
