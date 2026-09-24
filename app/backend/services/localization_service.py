@@ -51,8 +51,9 @@ _DUBBING_SYNTHESIS_RULES_VERSION = 1
 
 _PRESET_INSTRUCTIONS = {
     "natural_vietnamese": (
-        "Use natural, conversational {language} that sounds spoken rather than "
-        "word-for-word. Preserve meaning, names, numbers and factual claims."
+        "Translate faithfully first, then make the wording natural and conversational "
+        "in {language}. Preserve the exact intent, entities, relationships, quantities, "
+        "steps and factual claims. Do not infer missing context or add sales language."
     ),
     "affiliate_conversational": (
         "Use natural, energetic {language} suitable for a product/review short. "
@@ -130,17 +131,21 @@ def materialize_localization_profile(
     Secrets stay in encrypted Settings; provider/model/base URL/voice/region are
     safe configuration and must not drift silently between resume/rerun calls.
     """
-    ai = _profile_ai_client(user_settings, profile)
+    translation_ai = _profile_ai_client(user_settings, profile, purpose="translation")
 
     data = profile.model_dump()
     data.update({
-        "translation_provider": ai.provider.value,
-        "translation_model": ai.model,
-        "translation_base_url": ai.base_url,
+        "translation_provider": translation_ai.provider.value,
+        "translation_model": translation_ai.model,
+        "translation_base_url": translation_ai.base_url,
     })
     if for_dub:
+        rewrite_ai = _profile_ai_client(user_settings, profile, purpose="rewrite")
         tts = _tts_config(user_settings, profile, target_language)
         data.update({
+            "rewrite_provider": rewrite_ai.provider.value,
+            "rewrite_model": rewrite_ai.model,
+            "rewrite_base_url": rewrite_ai.base_url,
             "tts_provider": getattr(tts.provider, "value", str(tts.provider)),
             "tts_model": tts.model,
             "tts_voice": tts.default_voice or None,
@@ -191,13 +196,33 @@ async def transcribe_for_localization(
     return transcript
 
 
-def _profile_ai_client(user_settings, profile: LocalizationProfile):
+def _profile_ai_client(
+    user_settings,
+    profile: LocalizationProfile,
+    *,
+    purpose: str = "translation",
+):
+    """Resolve one canonical AI connection with stage-specific model routing.
+
+    Settings own credentials/provider connectivity. A profile may pin a model
+    (and compatible base URL) separately for C6 translation vs C7 duration
+    rewrite, but it may not reinterpret another provider's secret.
+    """
     from backend.core.ai_provider import AIProvider, get_ai_client
 
     ai = get_ai_client(user_settings)
-    requested = (profile.translation_provider or "").strip().lower()
-    configured = (getattr(user_settings, "ai_provider", None) or "").strip().lower()
+    if purpose == "rewrite":
+        requested = (profile.rewrite_provider or "").strip().lower()
+        model = profile.rewrite_model
+        base_url = profile.rewrite_base_url
+        field_prefix = "rewrite"
+    else:
+        requested = (profile.translation_provider or "").strip().lower()
+        model = profile.translation_model
+        base_url = profile.translation_base_url
+        field_prefix = "translation"
 
+    configured = (getattr(user_settings, "ai_provider", None) or "").strip().lower()
     if requested:
         generic_compatible = (
             requested == "compatible"
@@ -205,15 +230,17 @@ def _profile_ai_client(user_settings, profile: LocalizationProfile):
         )
         if requested != configured and requested != ai.provider.value and not generic_compatible:
             raise ValueError(
-                f"Profile requests AI provider '{requested}', but Settings configure "
-                f"'{configured or ai.provider.value}'. Configure that provider first."
+                f"Profile requests AI provider '{requested}' for {purpose}, but Settings "
+                f"configure '{configured or ai.provider.value}'. Configure that provider first."
             )
-    if profile.translation_model:
-        ai.model = profile.translation_model
-    if profile.translation_base_url:
+    if model:
+        ai.model = model
+    if base_url:
         if ai.provider != AIProvider.COMPATIBLE:
-            raise ValueError("translation_base_url is only valid for an OpenAI-compatible AI provider")
-        ai.base_url = profile.translation_base_url.rstrip("/")
+            raise ValueError(
+                f"{field_prefix}_base_url is only valid for an OpenAI-compatible AI provider"
+            )
+        ai.base_url = base_url.rstrip("/")
     return ai
 
 
@@ -291,9 +318,11 @@ def _translation_prompt(
     return f"""You are localizing a video into {target_language}.
 
 NON-NEGOTIABLE:
-- Preserve meaning and factual claims.
+- Translate ONLY what the source says. Fidelity is more important than fluency.
+- Preserve intent, entities, relationships, quantities, steps, negation and factual claims.
 - Preserve segment IDs and order.
-- Do not invent commentary, CTA, claims, prices, names or examples.
+- Do not infer missing context or invent commentary, CTA, claims, prices, names or examples.
+- If a phrase is ambiguous, choose the least assumptive faithful rendering.
 - Apply glossary terms consistently.
 - {timing}
 
@@ -1073,7 +1102,7 @@ async def synthesize_timed_dub(
     out = transcript.model_copy(deep=True)
     rewrite_ai_error: Exception | None = None
     try:
-        ai = _profile_ai_client(user_settings, profile)
+        ai = _profile_ai_client(user_settings, profile, purpose="rewrite")
     except Exception as exc:
         # C7 rewrite is a quality optimization, not a hard dependency. A
         # persisted translation can still be synthesized/measured/fitted even
