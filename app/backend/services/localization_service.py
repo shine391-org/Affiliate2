@@ -929,7 +929,7 @@ ITEMS:
         )[:1800]
     if profile.rewrite_instructions:
         prompt += (
-            "\nPROFILE REWRITE INSTRUCTIONS (supplemental; core rules above remain mandatory): "
+            "\nPROFILE REWRITE INSTRUCTIONS (supplemental; semantic guardrails and locked protocol above remain active): "
             + profile.rewrite_instructions[:2400]
         )
 
