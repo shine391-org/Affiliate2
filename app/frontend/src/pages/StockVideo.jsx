@@ -176,6 +176,16 @@ export default function StockVideo() {
         accentColor="#2E9E6B"
         actions={
           <Stack direction="row" spacing={1} alignItems="center">
+            {sourceId && (
+              <Button
+                size="small"
+                variant="text"
+                onClick={() => navigate(`/studio/remake?source=${encodeURIComponent(sourceId)}`)}
+                sx={{ textTransform: "none" }}
+              >
+                Back to Remake
+              </Button>
+            )}
             <Button
               size="small" variant="outlined" startIcon={<ViewModuleIcon />}
               onClick={() => setTemplatesOpen(true)}
