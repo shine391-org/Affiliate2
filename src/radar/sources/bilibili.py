@@ -4,7 +4,7 @@ sources/bilibili.py — Bilibili adapter for Radar Ingestion (Phase 2.1)
 Strategy: REUSE WITH ADAPTER
   - Call Bilibili search API directly via httpx (no browser, no auth needed).
   - Phase 1 confirmed: Bilibili public search returns full metadata without login.
-  - MediaCrawler subprocess approach failed: requires Chrome (not installed on this machine)
+  - The old browser/subprocess donor path is retired; this source is direct HTTP only
     and blocks on QR code even headless.
 
 API endpoint: https://api.bilibili.com/x/web-interface/wbi/search/type
@@ -102,7 +102,7 @@ async def _scan_async(keyword: str, max_count: int) -> SourceRunResult:
     seen: set[str] = set()
 
     for raw in all_items[:max_count]:
-        # Remap Bilibili search API fields to MediaCrawler-compatible keys
+        # Remap Bilibili search API fields to the legacy Radar normalization shape
         normalized_raw = {
             "video_id": str(raw.get("aid", raw.get("id", ""))),
             "video_url": raw.get("arcurl") or raw.get("url") or f"https://www.bilibili.com/video/av{raw.get('aid', '')}",
