@@ -290,7 +290,7 @@ export default function LocalizationProfilesSection({ settings }) {
               label="Translation instructions"
               value={draft.translation_instructions || ""}
               onChange={(e) => patch("translation_instructions", e.target.value)}
-              helperText="Add domain/style preferences for this profile. Leave blank to use only the locked core prompt."
+              helperText="Add domain/style preferences for this profile. Leave blank to use the profile semantic guardrails + preset only."
             />
             <TextField
               size="small" multiline minRows={4}
@@ -336,7 +336,7 @@ export default function LocalizationProfilesSection({ settings }) {
               value={draft.rewrite_instructions || ""}
               onChange={(e) => patch("rewrite_instructions", e.target.value)}
               placeholder="Example: Prefer compact spoken Vietnamese; remove filler before facts; keep product features, quantities and causal meaning."
-              helperText="Applied only to C7 duration rewrite for this profile. It does not replace the locked core prompt."
+              helperText="Applied only to C7 duration rewrite for this profile, after the editable semantic guardrails."
             />
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
               <FormControl size="small" fullWidth>
