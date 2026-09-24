@@ -1,6 +1,6 @@
 # Affiliate2 UI/UX Convergence Plan
 
-Status: **UX1–UX5 IMPLEMENTED — later convergence phases remain planned**
+Status: **UX1–UX5 QA PASS — UX6–UX7 IMPLEMENTED / LOCAL QA PENDING — UX8+ PLANNED**
 
 Implementation checkpoint (September 24, 2026):
 
@@ -23,6 +23,17 @@ Implementation checkpoint (September 24, 2026):
   Expert workspace for fixes and targeted reruns;
 - Saved/shortlist is intentionally not represented until a real persisted state
   exists; no client-only fake shortlist was introduced.
+- Utilities now hides workflow-owned Localize/Batch/Review cards while retaining
+  their legacy redirects; one-off video/audio/text utilities remain available.
+- Settings is reorganized into explicit configuration owners (AI connection,
+  Localization Profiles, TTS/Voices, service keys, add-ons, health) instead of
+  one long mixed card wall.
+- Localization Profiles group C6 translation, C7 rewrite/voice/timing,
+  ASR/alignment, and output/QC defaults; model discovery reuses the configured
+  AI connection and still permits custom model IDs.
+- Studio Localize now mounts one Expert workspace in a contextual drawer instead
+  of repeating the full Expert panel across Translation, Voice/Timing, Render
+  and QC.
 
 This plan replaces incremental ViralMint-page patching with one migration path
 toward a workflow-first Affiliate2 interface.
@@ -807,7 +818,7 @@ Gate:
 
 - QC exception -> Review -> fix -> rerun affected stage -> resolved
 
-## UX6 — Utilities cleanup
+## UX6 — Utilities cleanup — IMPLEMENTED / LOCAL QA PENDING
 
 Reclassify existing Tools.
 
@@ -823,7 +834,7 @@ Gate:
 - no useful ViralMint function is lost
 - no duplicate workflow owner remains
 
-## UX7 — Settings cleanup
+## UX7 — Settings cleanup — IMPLEMENTED / LOCAL QA PENDING
 
 Reorganize provider/profile/account configuration.
 
