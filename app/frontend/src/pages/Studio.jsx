@@ -110,6 +110,12 @@ function ReservedMode({ mode, source, context, navigate }) {
               <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
                 {contract.steps.map((step, index) => <Chip key={step} size="small" variant="outlined" label={`${index + 1}. ${step.replaceAll("-", " ")}`} />)}
               </Stack>
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.5 }}>
+                Future Review categories
+              </Typography>
+              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 0.75 }}>
+                {contract.review_categories.map((category) => <Chip key={category} size="small" label={category} />)}
+              </Stack>
             </Paper>
           </>
         )}
