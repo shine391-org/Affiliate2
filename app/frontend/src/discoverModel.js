@@ -11,3 +11,10 @@ export function downloadedByScoutResult(videos = []) {
       .map((video) => [video.scout_result_id, video.id]),
   )
 }
+
+export function thumbnailRequestKey(candidate) {
+  const platform = candidate?.platform || ""
+  const id = candidate?.id || candidate?.video_id || ""
+  const url = candidate?.thumbnail_url || ""
+  return `${platform}::${id}::${url}`
+}
