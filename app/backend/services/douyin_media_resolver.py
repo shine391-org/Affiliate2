@@ -47,7 +47,7 @@ async def resolve_douyin_media(
     *,
     cdp_url: str | None = None,
     navigation_timeout_ms: int = 20_000,
-    media_wait_timeout_ms: int = 8_000,
+    media_wait_timeout_ms: int = 5_000,
 ) -> ResolvedDouyinMedia:
     """Resolve one Douyin video page using the already-running CDP browser.
 
@@ -93,6 +93,38 @@ async def resolve_douyin_media(
                 wait_until="domcontentloaded",
                 timeout=navigation_timeout_ms,
             )
+            async def _dom_media_urls():
+                return await page.evaluate(
+                    """() => Array.from(document.querySelectorAll('video')).flatMap(v => {
+                        const urls = [v.currentSrc, v.src];
+                        for (const s of v.querySelectorAll('source')) urls.push(s.src);
+                        return urls.filter(Boolean);
+                    })"""
+                )
+
+            def _resolved(candidate: str) -> ResolvedDouyinMedia:
+                return ResolvedDouyinMedia(
+                    url=str(candidate),
+                    headers={
+                        **({"User-Agent": session.user_agent} if session.user_agent else {}),
+                        "Referer": source_url,
+                    },
+                    source_url=source_url,
+                )
+
+            # Fast path: domcontentloaded often already exposed either a real
+            # video src or the first media response. Do not burn the full wait
+            # budget when we already have a usable signed URL.
+            for candidate in (await _dom_media_urls()) or []:
+                if _is_http_media_url(candidate):
+                    return _resolved(candidate)
+            if network_candidates:
+                candidate, _ = max(
+                    network_candidates,
+                    key=lambda item: _candidate_score(item[0], item[1]),
+                )
+                return _resolved(candidate)
+
             try:
                 await page.wait_for_function(
                     """() => Array.from(document.querySelectorAll('video')).some(
@@ -101,40 +133,17 @@ async def resolve_douyin_media(
                     timeout=media_wait_timeout_ms,
                 )
             except Exception:
-                # Network capture below is an equally valid resolution path.
                 pass
 
-            dom_urls = await page.evaluate(
-                """() => Array.from(document.querySelectorAll('video')).flatMap(v => {
-                    const urls = [v.currentSrc, v.src];
-                    for (const s of v.querySelectorAll('source')) urls.push(s.src);
-                    return urls.filter(Boolean);
-                })"""
-            )
-            for candidate in dom_urls or []:
+            for candidate in (await _dom_media_urls()) or []:
                 if _is_http_media_url(candidate):
-                    return ResolvedDouyinMedia(
-                        url=str(candidate),
-                        headers={
-                            **({"User-Agent": session.user_agent} if session.user_agent else {}),
-                            "Referer": source_url,
-                        },
-                        source_url=source_url,
-                    )
-
+                    return _resolved(candidate)
             if network_candidates:
                 candidate, _ = max(
                     network_candidates,
                     key=lambda item: _candidate_score(item[0], item[1]),
                 )
-                return ResolvedDouyinMedia(
-                    url=candidate,
-                    headers={
-                        **({"User-Agent": session.user_agent} if session.user_agent else {}),
-                        "Referer": source_url,
-                    },
-                    source_url=source_url,
-                )
+                return _resolved(candidate)
 
             raise RuntimeError("Authenticated Douyin page exposed no playable media URL")
         finally:
