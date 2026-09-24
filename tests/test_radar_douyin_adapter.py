@@ -6,8 +6,6 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from radar.sources import douyin as dy
