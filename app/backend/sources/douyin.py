@@ -17,7 +17,6 @@ from datetime import datetime
 from typing import Any
 
 from backend.services.douyin_browser_session import (
-    DEFAULT_CDP_URL,
     DOUYIN_HOST,
     open_douyin_cdp_session,
     pick_authenticated_context_and_page,
