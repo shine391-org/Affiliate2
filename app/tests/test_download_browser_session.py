@@ -147,10 +147,12 @@ def test_session_probe_cache_avoids_repeating_failed_dpapi_work(monkeypatch):
 
     first = svc._inspect_browser_session("edge", "Default")
     second = svc._inspect_browser_session("edge", "Default")
+    forced = svc._inspect_browser_session("edge", "Default", force=True)
 
     assert first["ok"] is False
     assert second["ok"] is False
-    assert calls["n"] == 1
+    assert forced["ok"] is False
+    assert calls["n"] == 2  # cached normal probe + one explicit forced refresh
     svc._BROWSER_SESSION_CACHE.clear()
 
 
