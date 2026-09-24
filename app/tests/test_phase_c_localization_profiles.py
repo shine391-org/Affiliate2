@@ -25,6 +25,7 @@ def test_default_profile_is_full_hq_donor_stack():
     assert profile.semantic_segmentation is True
     assert profile.translation_preset == "natural_vietnamese"
     assert profile.rewrite_model is None
+    assert profile.rewrite_instructions == ""
     assert profile.dub_min_cue_duration_ms == 2500
     assert profile.dub_max_chunk_size == 5
     assert profile.dub_gap_tolerance_ms == 1500
@@ -46,9 +47,11 @@ def test_profile_can_pin_translation_and_rewrite_models_independently():
         rewrite_model="rewrite-small",
         translation_base_url="http://127.0.0.1:1234/v1",
         rewrite_base_url="http://127.0.0.1:1234/v1",
+        rewrite_instructions="Keep the product facts; remove filler first.",
     )
     assert profile.translation_model == "translator-large"
     assert profile.rewrite_model == "rewrite-small"
+    assert profile.rewrite_instructions == "Keep the product facts; remove filler first."
 
 
 def test_profile_round_trips_as_one_json_payload():
@@ -113,6 +116,21 @@ def test_legacy_builtin_profile_migrates_to_faithful_translation_default():
     })
     store = load_profile_store(raw)
     assert store.profiles[0].translation_preset == "natural_vietnamese"
+
+
+def test_persisted_profile_migrates_old_c7_style_behavior_to_rewrite_instructions():
+    raw = json.dumps({
+        "default_profile_id": "custom",
+        "profiles": [{
+            "id": "custom",
+            "name": "Custom",
+            "translation_instructions": "Keep tech terms in English.",
+            "rewrite_model": "fast-rewriter",
+        }],
+    })
+    store = load_profile_store(raw)
+    assert store.profiles[0].translation_instructions == "Keep tech terms in English."
+    assert store.profiles[0].rewrite_instructions == "Keep tech terms in English."
 
 
 def test_new_explicit_affiliate_profile_is_not_silently_migrated():
