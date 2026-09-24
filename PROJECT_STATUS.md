@@ -98,6 +98,12 @@ The old `src/radar/intel/media.py`, `transcribe.py`, and `ai_analyze.py` are com
 
 The Radar CLI/report/cache contract remains intact during this transition. Local QA at `8e15807` passed focused Candidate Intelligence, legacy Intel, Analyzer, AI provider, Radar enrichment, cache reuse, real canonical ASR, real Gemma/LM Studio AI, failure isolation, and canonical ownership checks. DB convergence remains Phase G.
 
+### Post-C12 source ownership cleanup
+- Legacy Radar Douyin scanning now adapts the canonical app-native CDP provider.
+- Retired donor runtime/evidence files were removed from the working tree.
+- Download/discovery browser-session ownership is now separated from TikTok upload-only legacy state.
+- Stale downloader regressions were aligned with the current browser-order and quality-cap contracts.
+
 ### C13 — Final real-media acceptance
 **ACTIVE — translation quality hardening + real-media defect triage.**
 
