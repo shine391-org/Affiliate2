@@ -51,9 +51,9 @@ async def resolve_douyin_media(
 ) -> ResolvedDouyinMedia:
     """Resolve one Douyin video page using the already-running CDP browser.
 
-    The temporary page blocks images/fonts/stylesheets to keep CPU, memory and
-    bandwidth low.  Scripts/XHR/media stay enabled because Douyin needs them to
-    produce the signed stream URL.
+    The temporary page blocks images/fonts to keep CPU, memory and bandwidth
+    low while preserving layout. Scripts/XHR/media stay enabled because Douyin
+    needs them to produce the signed stream URL.
     """
     source_url = str(source_url or "").strip()
     if "douyin.com/" not in source_url.lower() and "iesdouyin.com/" not in source_url.lower():
@@ -79,7 +79,7 @@ async def resolve_douyin_media(
 
         async def _lightweight_route(route):
             request = route.request
-            if request.resource_type in {"image", "font", "stylesheet"}:
+            if request.resource_type in {"image", "font"}:
                 await route.abort()
             else:
                 await route.continue_()
