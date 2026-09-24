@@ -53,7 +53,7 @@ _TRANSLATION_KEYS = {
     "translation_preset", "translation_instructions", "glossary",
 }
 _DUBBING_KEYS = {
-    "rewrite_provider", "rewrite_model", "rewrite_base_url",
+    "rewrite_provider", "rewrite_model", "rewrite_base_url", "rewrite_instructions",
     "tts_provider", "tts_model", "tts_voice", "tts_base_url", "tts_region",
     "speaker_voices", "speaker_reference_audio", "tts_reference_audio",
     "tts_reference_text", "tts_reference_language", "voice_clone_reference_mode",
