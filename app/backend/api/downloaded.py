@@ -805,6 +805,32 @@ _MANUAL_MAX_RANGES = 10      # cap per submit; mirrored on the frontend as
                              # proposal is cut through manual mode.
 _MANUAL_MIN_CLIP_SEC = 1.0   # sub-second clips have no visual value
 
+_ALLOWED_CLIP_OUTPUT_SOURCE_TYPES = {"clip_extraction", "smart_cut"}
+
+
+def _resolve_clip_output_source_type(raw: str | None, mode: str) -> str:
+    """Choose the persisted derivative identity without creating a second renderer.
+
+    Smart Cut is deliberately review-first: its outputs may only be produced
+    from manual/approved ranges. Direct AI extraction remains a Clipper output.
+    """
+    key = (raw or "clip_extraction").strip().lower()
+    if key not in _ALLOWED_CLIP_OUTPUT_SOURCE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unknown output_source_type '{key}' "
+                "(expected 'clip_extraction' or 'smart_cut')"
+            ),
+        )
+    if key == "smart_cut" and mode != "manual":
+        raise HTTPException(
+            status_code=400,
+            detail="Smart Cut output requires approved manual ranges.",
+        )
+    return key
+
+
 
 def _validate_manual_time_ranges(raw_ranges, video_duration: float) -> list[dict]:
     """Parse + validate user-supplied time ranges for manual-mode extraction.
@@ -897,6 +923,7 @@ class ExtractClipsRequest(BaseModel):
     emoji_style: str = "moderate"
     genre: Optional[str] = None
     time_ranges: Optional[list[dict]] = None
+    output_source_type: str = "clip_extraction"
 
 
 @router.post("/downloaded/{video_id}/extract-clips")
@@ -924,6 +951,8 @@ async def extract_clips(video_id: str, body: ExtractClipsRequest | None = None):
             tutorial | gaming | reaction | lecture; aliases accepted)
 
       Both modes (post-processing):
+        output_source_type: "clip_extraction" | "smart_cut". Smart Cut is
+            manual/approval-only and reuses this same extraction pipeline.
         caption_style: str (default viral)
         emoji_style: str (none|minimal|moderate|heavy, default moderate)
         whisper_quality: str (default balanced)
@@ -942,6 +971,7 @@ async def extract_clips(video_id: str, body: ExtractClipsRequest | None = None):
             detail=f"Unknown mode '{mode}' (expected 'ai' or 'manual')",
         )
 
+    output_source_type = _resolve_clip_output_source_type(req.output_source_type, mode)
     caption_style = req.caption_style or "viral"
     whisper_quality = req.whisper_quality or "balanced"
     force_retranscribe = bool(req.force_retranscribe)
@@ -1015,7 +1045,7 @@ async def extract_clips(video_id: str, body: ExtractClipsRequest | None = None):
 
     job = await create_job("generate", "local", {
         "downloaded_video_id": video_id,
-        "type": "clip_extraction",
+        "type": output_source_type,
         "mode": mode,
         "max_clips": max_clips,
     })
@@ -1034,6 +1064,7 @@ async def extract_clips(video_id: str, body: ExtractClipsRequest | None = None):
         emoji_style=emoji_style,
         genre=genre,
         time_ranges=time_ranges,
+        output_source_type=output_source_type,
     )
     dispatch(run_extract_clips(
         job_id=job.id,
@@ -1042,14 +1073,18 @@ async def extract_clips(video_id: str, body: ExtractClipsRequest | None = None):
         user_id="local",
     ))
     video_title = video.title or "Untitled"
-    mode_label = "user-specified" if mode == "manual" else "viral"
+    mode_label = (
+        "approved Smart Cut" if output_source_type == "smart_cut"
+        else "user-specified" if mode == "manual"
+        else "viral"
+    )
     await ws_manager.send({
         "type": "job_started",
         "job_id": job.id,
         "job_type": "generate",
         "message": f"Extracting {mode_label} clips from: {video_title}",
         "input_data": {
-            "type": "clip_extraction",
+            "type": output_source_type,
             "downloaded_video_id": video_id,
             "mode": mode,
             "max_clips": max_clips,
