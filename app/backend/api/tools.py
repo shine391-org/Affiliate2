@@ -343,6 +343,7 @@ async def translate_tool(
     emoji_style: str = Form("moderate"),
     target_aspect: Optional[str] = Form(None),
     profile_id: Optional[str] = Form(None),
+    review_translation: bool = Form(False),
 ):
     """Translate captions (and optionally dub audio) to another language.
 
@@ -366,6 +367,7 @@ async def translate_tool(
         "caption_style": caption_style,
         "target_aspect": target_aspect,
         "profile_id": profile_id,
+        "review_translation": bool(review_translation),
     })
     in_path = await save_upload(file, job.id, VIDEO_EXTS, VIDEO_MAX_BYTES)
     dispatch(run_tool_translate(
@@ -373,6 +375,7 @@ async def translate_tool(
         voice_id, caption_style, emoji_style,
         target_aspect=target_aspect,
         profile_id=profile_id,
+        review_translation=bool(review_translation),
     ))
     return {"job_id": job.id}
 
