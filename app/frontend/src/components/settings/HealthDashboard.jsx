@@ -63,7 +63,7 @@ export default function HealthDashboard() {
     {
       label: "Download Browser Session",
       key: "download_session",
-      description: "Selected browser for login-gated downloads; Test session verifies cookie readability",
+      description: "yt-dlp browser-cookie source; Douyin can fall back to authenticated CDP if Windows blocks cookie decryption",
       extra: sessionBrowser ? `${sessionBrowser}${sessionProfile ? ` / ${sessionProfile}` : ""}` : null,
     },
   ]
