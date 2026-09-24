@@ -27,7 +27,10 @@ Current implementation branch:
 
 Current scope:
 
-Phase C — Media, AI & Automated HQ Localization.
+Phase C implementation is frozen for architecture work; localization quality
+tuning is profile/model/prompt driven unless real-media QA exposes a technical
+defect. Phase D — Smart Cut is now active on the same integration branch and
+must reuse the canonical Clip Studio/ASR/job/Library plumbing.
 
 Read before changing Phase-C code:
 
@@ -146,9 +149,22 @@ Phase C does not include:
 - automatic publishing
 - performance-learning rewrites
 - generative B-roll system
-- Smart Cut implementation
 - Creative Remake HQ implementation
 - big-bang DB convergence
+
+## Phase-D Smart Cut boundary
+
+Smart Cut must reuse the existing Clip Studio mechanics already in `app/`:
+
+- canonical downloaded source + transcript/Whisper fallback;
+- `suggest-clips` proposal job;
+- SourceBench editable ranges;
+- manual clip extraction/render;
+- GeneratedVideo + Library lineage.
+
+Do not add another ASR owner, AI picker, range editor, renderer, job system or
+asset table. Smart Cut is review-first: direct no-review Auto-cut remains a
+legacy Clipper behavior, not the Smart Cut product path.
 
 ## Branch/change protocol
 
