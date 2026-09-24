@@ -1,6 +1,6 @@
 # Affiliate2 UI/UX Convergence Plan
 
-Status: **UX1–UX7 QA PASS — UX8 NEXT**
+Status: **UX1–UX7 QA PASS — UX8–UX9 IMPLEMENTED / LOCAL QA PENDING — UX10 PLANNED**
 
 Implementation checkpoint (September 24, 2026):
 
@@ -861,28 +861,43 @@ model IDs; all 26 profile fields persist and reload via the canonical profile st
 profile does not mutate global Settings; no API-key input exists inside Localization Profiles
 (credentials stay in AI Connections).
 
-## UX8 — Phase-D readiness — NEXT
+## UX8 — Phase-D readiness — IMPLEMENTED / LOCAL QA PENDING
 
-Before implementing Smart Cut:
+Implemented readiness contracts:
 
-- Studio shell stable
-- Library lineage stable
-- Review generic enough for Smart Cut exceptions
-- source/transcript/timeline reusable
-- no new top-level route required for Phase D
+- Studio resolves one persisted DownloadedVideo source and loads its full detail;
+- `/api/downloaded/{id}` exposes canonical persisted transcript segments;
+- `studioReadinessModel.js` normalizes source transcript timing to milliseconds
+  and flags timeline drift beyond the source;
+- Library can hand a downloaded source directly to reserved Smart Cut without
+  re-importing it;
+- `smart_cut` is a reserved Library derivative producer identity;
+- Review has a Smart Cut workflow contract and source-registry extension point
+  without fabricating live Smart Cut items;
+- no new top-level Smart Cut app exists.
 
-Then start Phase D inside `Studio -> Smart Cut`.
+See `docs/UX8_UX9_READINESS.md`.
 
-## UX9 — Phase-E readiness
+After QA passes, Phase D starts inside `Studio -> Smart Cut`.
 
-Before Creative Remake:
+## UX9 — Phase-E readiness — IMPLEMENTED / LOCAL QA PENDING
 
-- shared Studio project shell supports external assets
-- storyboard review surface exists
-- Stock/Motion asset providers accessible contextually
-- Review supports creative/storyboard exceptions
+Implemented readiness contracts:
 
-Then Phase E plugs into `Studio -> Creative Remake`.
+- Creative Remake reuses the same Studio source/project context;
+- existing Stock / Smart Video and Motion Graphics surfaces are exposed as
+  contextual asset providers from the reserved Remake mode;
+- the reserved workflow explicitly requires storyboard + HUMAN APPROVAL before
+  composition/render;
+- Storyboard and Visual are real Review categories (zero items until a real
+  Phase-E source is registered);
+- Review has a Creative Remake contract/source slot instead of requiring a
+  second review app;
+- `creative_remake` is a reserved Library derivative producer identity.
+
+See `docs/UX8_UX9_READINESS.md`.
+
+After QA passes, Phase E can plug into `Studio -> Creative Remake`.
 
 ## UX10 — Phase-F native Publish convergence
 
