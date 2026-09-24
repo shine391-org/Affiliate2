@@ -1,6 +1,6 @@
 # PROJECT_STATUS.md
 
-## Overall status: PHASE C IMPLEMENTATION FROZEN — PHASE D SMART CUT ACTIVE
+## Overall status: PHASE D SMART CUT QA PENDING — PHASE E E0 DONOR AUDIT COMPLETE
 
 Phase A and Phase B are complete and merged to `master`.
 
@@ -161,3 +161,28 @@ model was added.
 
 Local test/build/browser evidence is still required before Phase D QA PASS.
 See `docs/CONSOLIDATION_PLAN.md` and `docs/ARCHITECTURE.md`.
+
+
+---
+
+## Phase E — Creative Remake HQ
+
+**E0 DONOR AUDIT COMPLETE — E1 SOURCE SHOT MAP NEXT.**
+
+Audit result:
+
+- ViralMint already owns most lower-level media capability: source/transcript,
+  Pexels scene assembly, B-roll cue planning, Motion asset staging/composition,
+  TTS/captions/audio, FFmpeg, jobs and Library lineage.
+- The missing core is source shot identity/understanding -> creative beats ->
+  beat-to-asset mapping -> persisted storyboard -> explicit approval.
+- PySceneDetect is selected as the initial physical shot-boundary donor.
+- OpenCreator is the strongest contract donor for stable beat/shot IDs,
+  storyboard validation, artifact lineage and stale-plan rejection.
+- MoneyPrinterTurbo is a material-provider/allocation donor, not a second app.
+- Direct TransNetV2 is deferred behind the same scene-map interface.
+- Remotion is reference-only and is not being added as a parallel renderer.
+
+Next implementation task: **E1 canonical source shot map**.
+
+See `docs/PHASE_E_DONOR_AUDIT.md`.
