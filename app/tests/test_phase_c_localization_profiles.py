@@ -100,6 +100,35 @@ def test_profile_rejects_unbounded_glossary():
         )
 
 
+def test_legacy_builtin_profile_migrates_to_faithful_translation_default():
+    raw = json.dumps({
+        "default_profile_id": "vi-affiliate-hq",
+        "profiles": [{
+            "id": "vi-affiliate-hq",
+            "name": "Vietnam Affiliate HQ",
+            "translation_preset": "affiliate_conversational",
+            "translation_instructions": "",
+            "glossary": {},
+        }],
+    })
+    store = load_profile_store(raw)
+    assert store.profiles[0].translation_preset == "natural_vietnamese"
+
+
+def test_new_explicit_affiliate_profile_is_not_silently_migrated():
+    profile = LocalizationProfile(
+        id="vi-affiliate-hq",
+        name="Vietnam Affiliate HQ",
+        translation_preset="affiliate_conversational",
+        rewrite_model="fast-rewriter",
+    )
+    store = load_profile_store(json.dumps({
+        "default_profile_id": profile.id,
+        "profiles": [profile.model_dump()],
+    }))
+    assert store.profiles[0].translation_preset == "affiliate_conversational"
+
+
 def test_corrupt_store_falls_back_instead_of_bricking_settings():
     assert load_profile_store("{not json").profiles
     assert load_profile_store(json.dumps({"profiles": []})).profiles
