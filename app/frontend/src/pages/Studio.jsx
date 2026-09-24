@@ -82,7 +82,10 @@ function ReservedMode({ mode, source, context, navigate }) {
                   <Typography variant="body2" sx={{ mt: 0.75 }}>
                     Phase E must persist source → scene map → creative beats → asset map → storyboard, then stop for explicit human approval before composition/render.
                   </Typography>
-                  <Button size="small" sx={{ mt: 1 }} onClick={() => navigate("/review?filter=storyboard")}>Open storyboard review queue</Button>
+                  <Button size="small" sx={{ mt: 1 }} disabled>Storyboard review · Phase E</Button>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.75 }}>
+                    The Review contract is reserved, but the queue stays disabled until a real Creative Remake engine registers live exceptions.
+                  </Typography>
                 </Paper>
                 <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
                   <Typography variant="subtitle2">Contextual asset providers</Typography>
