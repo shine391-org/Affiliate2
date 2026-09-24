@@ -44,11 +44,51 @@ def test_profile_invalidation_uses_earliest_quality_stage():
     assert api._profile_invalidation({"tts_base_url"}) == "dubbing"
     assert api._profile_invalidation({"voice_clone_reference_mode"}) == "dubbing"
     assert api._profile_invalidation({"translation_base_url"}) == "translation"
+    assert api._profile_invalidation({"rewrite_model"}) == "dubbing"
+    assert api._profile_invalidation({"rewrite_base_url"}) == "dubbing"
     assert api._profile_invalidation({"audio_mode"}) == "audio_mix"
     assert api._profile_invalidation({"render_profile"}) == "final_render"
     assert api._profile_invalidation({"translation_model", "tts_model"}) == "translation"
     assert api._profile_invalidation({"asr_model", "render_profile"}) == "asr"
 
+
+
+@pytest.mark.asyncio
+async def test_continue_after_translation_approves_same_run(monkeypatch):
+    events = []
+
+    class FakeRun:
+        job_id = "job-review"
+        request = {
+            "review_translation": True,
+            "translation_review_pending": True,
+            "translation_review_approved": False,
+        }
+
+        def is_complete(self, stage, artifacts=()):
+            return stage == "translation"
+
+        def update_request(self, value):
+            self.request = value
+            events.append(("update", dict(value)))
+
+    async def fake_inactive(job_id):
+        events.append(("inactive", job_id))
+
+    async def fake_dispatch(run):
+        events.append(("dispatch", run.job_id))
+
+    fake_run = FakeRun()
+    monkeypatch.setattr(api, "_assert_job_inactive", fake_inactive)
+    monkeypatch.setattr(api, "_load_run", lambda job_id: fake_run)
+    monkeypatch.setattr(api, "_dispatch_existing_run", fake_dispatch)
+
+    result = await api.continue_after_translation_review("job-review")
+
+    assert result["from_stage"] == "dubbing"
+    assert fake_run.request["translation_review_approved"] is True
+    assert fake_run.request["translation_review_pending"] is False
+    assert events[-1] == ("dispatch", "job-review")
 
 
 @pytest.mark.asyncio
