@@ -1,6 +1,6 @@
 # Affiliate2 UI/UX Convergence Plan
 
-Status: **UX1–UX5 QA PASS — UX6–UX7 IMPLEMENTED / LOCAL QA PENDING — UX8+ PLANNED**
+Status: **UX1–UX7 QA PASS — UX8 NEXT**
 
 Implementation checkpoint (September 24, 2026):
 
@@ -818,7 +818,7 @@ Gate:
 
 - QC exception -> Review -> fix -> rerun affected stage -> resolved
 
-## UX6 — Utilities cleanup — IMPLEMENTED / LOCAL QA PENDING
+## UX6 — Utilities cleanup — QA PASS
 
 Reclassify existing Tools.
 
@@ -834,7 +834,14 @@ Gate:
 - no useful ViralMint function is lost
 - no duplicate workflow owner remains
 
-## UX7 — Settings cleanup — IMPLEMENTED / LOCAL QA PENDING
+QA evidence (browser, current code at 403aa50): all 21 standalone utilities visible on `/utilities`;
+Translate + Dub / Localization Batch / Localization Review absent from cards and search; legacy routes
+`/tools/translate` → `/studio/localize`, `/tools/localization-batch` → `/studio/localize?batch=1`,
+`/tools/localization-review` → `/review`, `/tools/*` → `/utilities/*` all resolve preserving query;
+real utility jobs ran end-to-end (trim → FFmpeg output verified by ffprobe, audio-enhance → video+audio
+output verified, metadata → AI output verified).
+
+## UX7 — Settings cleanup — QA PASS
 
 Reorganize provider/profile/account configuration.
 
@@ -846,7 +853,15 @@ Gate:
 - profile defaults are reusable
 - Studio overrides do not mutate global config accidentally
 
-## UX8 — Phase-D readiness
+QA evidence (browser, current code at 403aa50): all six sections (`ai`, `localization`, `tts`,
+`services`, `addons`, `health`) deep-link and switch correctly on desktop and 375px mobile with no
+horizontal overflow; model discovery uses the canonical `/api/settings/ai/models` endpoint and
+populated real LM Studio model suggestions; custom model IDs accepted; C6 and C7 select different
+model IDs; all 26 profile fields persist and reload via the canonical profile store; editing a
+profile does not mutate global Settings; no API-key input exists inside Localization Profiles
+(credentials stay in AI Connections).
+
+## UX8 — Phase-D readiness — NEXT
 
 Before implementing Smart Cut:
 
