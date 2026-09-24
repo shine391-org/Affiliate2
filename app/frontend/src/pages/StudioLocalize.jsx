@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
-  Alert, Box, Button, Checkbox, Chip, Dialog, DialogContent, DialogTitle,
+  Alert, Box, Button, Checkbox, Chip, Dialog, DialogContent, DialogTitle, Drawer,
   FormControl, FormControlLabel, InputLabel, MenuItem, Paper, Radio, RadioGroup,
   Select, Stack, Step, StepButton, Stepper, Typography,
 } from "@mui/material"
 import BatchPredictionOutlinedIcon from "@mui/icons-material/BatchPredictionOutlined"
 import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined"
+import TuneOutlinedIcon from "@mui/icons-material/TuneOutlined"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import http from "../api/http"
 import useAppStore from "../store/appStore"
@@ -35,6 +36,7 @@ export default function StudioLocalize({ source, sourcesLoading }) {
   const [detailError, setDetailError] = useState("")
   const [starting, setStarting] = useState(false)
   const [batchOpen, setBatchOpen] = useState(params.get("batch") === "1")
+  const [expertOpen, setExpertOpen] = useState(false)
   const jobId = params.get("job") || ""
   const requestedStep = params.get("step") || ""
   const activeStep = LOCALIZE_STEPS.some((item) => item.value === requestedStep)
@@ -138,7 +140,10 @@ export default function StudioLocalize({ source, sourcesLoading }) {
           <RadioGroup value={mode} onChange={(e) => setMode(e.target.value)}><FormControlLabel value="full_dub" control={<Radio size="small" />} label="HQ full dub" /><FormControlLabel value="captions_only" control={<Radio size="small" />} label="Translated captions only" /></RadioGroup>
           {mode === "full_dub" && <FormControlLabel control={<Checkbox checked={reviewTranslation} onChange={(e) => setReviewTranslation(e.target.checked)} />} label="Pause after C6 for translation approval" />}
           {selectedProfile && <Alert severity="info" variant="outlined">C6 <strong>{selectedProfile.translation_model || "connection default"}</strong> · C7 <strong>{selectedProfile.rewrite_model || "connection default"}</strong>. These are independent models.</Alert>}
-          <Button variant="contained" onClick={start} disabled={!source || !profileId || starting}>{starting ? "Starting…" : "Start localization"}</Button>
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+            <Button variant="outlined" onClick={() => navigate("/settings?section=localization")}>Manage profiles</Button>
+            <Button variant="contained" onClick={start} disabled={!source || !profileId || starting}>{starting ? "Starting…" : "Start localization"}</Button>
+          </Stack>
         </Stack>
       </Paper>
     </Box>
@@ -156,17 +161,21 @@ export default function StudioLocalize({ source, sourcesLoading }) {
         <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, maxHeight: 560, overflow: "auto" }}><Stack spacing={1}>{segments.map((segment) => <Box key={segment.id} sx={{ pb: 1, borderBottom: 1, borderColor: "divider" }}><Typography variant="caption" color="text.secondary">{segment.id} · {formatMs(segment.source_start_ms)}–{formatMs(segment.source_end_ms)}</Typography><Typography variant="body2">{segment.source_text}</Typography><Typography variant="body2" sx={{ color: "primary.main", fontWeight: 600 }}>{segment.translated_text || "Not translated"}</Typography></Box>)}</Stack></Paper>
         <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}><Typography variant="subtitle2">C6 Translation</Typography><Typography variant="body2" sx={{ mt: 1 }}>Model: <strong>{effective.translation_model || "connection default"}</strong></Typography><Typography variant="body2">Provider: <strong>{effective.translation_provider || "Settings connection"}</strong></Typography><Typography variant="body2">Preset: <strong>{effective.translation_preset || "natural_vietnamese"}</strong></Typography><Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>{effective.translation_instructions || "No custom instructions"}</Typography><Typography variant="caption" color="text.secondary">Glossary: {Object.keys(effective.glossary || {}).length} entries</Typography></Paper>
       </Box>
-      {jobId && <LocalizationExpertPanel jobId={jobId} />}
+      {jobId && (
+        <Button variant="outlined" startIcon={<TuneOutlinedIcon />} onClick={() => setExpertOpen(true)} sx={{ alignSelf: "flex-start" }}>
+          Review / edit translation
+        </Button>
+      )}
     </Stack>
   )
 
   const voicePanel = (
-    <Stack spacing={2}><Alert severity="info" variant="outlined">C7 Duration Rewrite Model <strong>{effective.rewrite_model || "connection default"}</strong> is separate from the C6 translation model.</Alert><Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(3, 1fr)" }, gap: 1.5 }}><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Voice</Typography><Typography variant="body2">{effective.tts_provider || "provider default"} · {effective.tts_voice || "profile voice"}</Typography></Paper><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Timing ceilings</Typography><Typography variant="body2">Preferred {effective.dub_speed_accept || 1.15}× · hard {effective.dub_speed_max || 1.3}×</Typography></Paper><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Rewrite</Typography><Typography variant="body2">{effective.dub_rewrite_attempts ?? 2} attempts</Typography></Paper></Box>{chunks.length > 0 && <Stack spacing={1}>{chunks.map((chunk) => <Paper variant="outlined" key={chunk.id} sx={{ p: 1.25 }}><Typography variant="body2">Chunk {chunk.id} · {chunk.speaker_id || "speaker —"} · speed {Number(chunk.speed_factor || 1).toFixed(2)}×</Typography></Paper>)}</Stack>}{jobId && <LocalizationExpertPanel jobId={jobId} />}</Stack>
+    <Stack spacing={2}><Alert severity="info" variant="outlined">C7 Duration Rewrite Model <strong>{effective.rewrite_model || "connection default"}</strong> is separate from the C6 translation model.</Alert><Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(3, 1fr)" }, gap: 1.5 }}><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Voice</Typography><Typography variant="body2">{effective.tts_provider || "provider default"} · {effective.tts_voice || "profile voice"}</Typography></Paper><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Timing ceilings</Typography><Typography variant="body2">Preferred {effective.dub_speed_accept || 1.15}× · hard {effective.dub_speed_max || 1.3}×</Typography></Paper><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Rewrite</Typography><Typography variant="body2">{effective.dub_rewrite_attempts ?? 2} attempts</Typography></Paper></Box>{chunks.length > 0 && <Stack spacing={1}>{chunks.map((chunk) => <Paper variant="outlined" key={chunk.id} sx={{ p: 1.25 }}><Typography variant="body2">Chunk {chunk.id} · {chunk.speaker_id || "speaker —"} · speed {Number(chunk.speed_factor || 1).toFixed(2)}×</Typography></Paper>)}</Stack>}{jobId && <Button variant="outlined" startIcon={<TuneOutlinedIcon />} onClick={() => setExpertOpen(true)} sx={{ alignSelf: "flex-start" }}>Advanced timing / voice</Button>}</Stack>
   )
 
-  const renderPanel = <Stack spacing={2}><Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(2, 1fr)" }, gap: 1.5 }}><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Audio</Typography><Typography variant="body2">Mode: {effective.audio_mode || "profile default"}</Typography><Typography variant="body2">Background: {effective.preserve_background === false ? "replace" : "preserve"}</Typography><Typography variant="body2">Voice: {effective.tts_voice || "profile voice"}</Typography></Paper><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Picture & captions</Typography><Typography variant="body2">Style: {effective.caption_style || "viral"}</Typography><Typography variant="body2">Aspect: {effective.target_aspect || "source"}</Typography><Typography variant="body2">Render: {effective.render_profile || "hq"}</Typography></Paper></Box><Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap><StageChip name="Audio mix" record={stages.audio_mix} /><StageChip name="Final render" record={stages.final_render} /></Stack>{jobId && <LocalizationExpertPanel jobId={jobId} />}</Stack>
+  const renderPanel = <Stack spacing={2}><Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(2, 1fr)" }, gap: 1.5 }}><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Audio</Typography><Typography variant="body2">Mode: {effective.audio_mode || "profile default"}</Typography><Typography variant="body2">Background: {effective.preserve_background === false ? "replace" : "preserve"}</Typography><Typography variant="body2">Voice: {effective.tts_voice || "profile voice"}</Typography></Paper><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Picture & captions</Typography><Typography variant="body2">Style: {effective.caption_style || "viral"}</Typography><Typography variant="body2">Aspect: {effective.target_aspect || "source"}</Typography><Typography variant="body2">Render: {effective.render_profile || "hq"}</Typography></Paper></Box><Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap><StageChip name="Audio mix" record={stages.audio_mix} /><StageChip name="Final render" record={stages.final_render} /></Stack>{jobId && <Button variant="outlined" startIcon={<TuneOutlinedIcon />} onClick={() => setExpertOpen(true)} sx={{ alignSelf: "flex-start" }}>Expert render controls</Button>}</Stack>
 
-  const qcPanel = <Stack spacing={2}>{qc ? <Alert severity={qc.status === "READY" ? "success" : qc.status === "FAILED" ? "error" : "warning"}><strong>{qc.status}</strong> · {(qc.failures || []).length} failures · {(qc.warnings || []).length} warnings</Alert> : <Alert severity="info">QC has not completed.</Alert>}{qc && [...(qc.failures || []), ...(qc.warnings || [])].map((issue, index) => <Paper key={index} variant="outlined" sx={{ p: 1.5 }}><Typography variant="body2">{typeof issue === "string" ? issue : issue.message || JSON.stringify(issue)}</Typography></Paper>)}<Stack direction={{ xs: "column", sm: "row" }} spacing={1}>{qc?.status === "READY" && <Button variant="contained" onClick={() => navigate("/library")}>Open final output in Library</Button>}{qc?.status && qc.status !== "READY" && <Button variant="contained" color="warning" startIcon={<FactCheckOutlinedIcon />} onClick={() => navigate(`/review?job=${encodeURIComponent(jobId)}`)}>Open in Review</Button>}</Stack>{jobId && <LocalizationExpertPanel jobId={jobId} />}</Stack>
+  const qcPanel = <Stack spacing={2}>{qc ? <Alert severity={qc.status === "READY" ? "success" : qc.status === "FAILED" ? "error" : "warning"}><strong>{qc.status}</strong> · {(qc.failures || []).length} failures · {(qc.warnings || []).length} warnings</Alert> : <Alert severity="info">QC has not completed.</Alert>}{qc && [...(qc.failures || []), ...(qc.warnings || [])].map((issue, index) => <Paper key={index} variant="outlined" sx={{ p: 1.5 }}><Typography variant="body2">{typeof issue === "string" ? issue : issue.message || JSON.stringify(issue)}</Typography></Paper>)}<Stack direction={{ xs: "column", sm: "row" }} spacing={1}>{qc?.status === "READY" && <Button variant="contained" onClick={() => navigate("/library")}>Open final output in Library</Button>}{qc?.status && qc.status !== "READY" && <Button variant="contained" color="warning" startIcon={<FactCheckOutlinedIcon />} onClick={() => navigate(`/review?job=${encodeURIComponent(jobId)}`)}>Open in Review</Button>}</Stack>{jobId && <Button variant="outlined" startIcon={<TuneOutlinedIcon />} onClick={() => setExpertOpen(true)} sx={{ alignSelf: "flex-start" }}>Open expert review</Button>}</Stack>
 
   const panels = { source: sourcePanel, transcript: transcriptPanel, translation: translationPanel, "voice-timing": voicePanel, render: renderPanel, qc: qcPanel }
 
@@ -181,10 +190,24 @@ export default function StudioLocalize({ source, sourcesLoading }) {
           {LOCALIZE_STEPS.map((item) => <Step key={item.value}><StepButton onClick={() => setStep(item.value)}>{item.label}</StepButton></Step>)}
         </Stepper>
         {detailError && <Alert severity="warning">{detailError}</Alert>}
-        {jobId && <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap><Chip label={`Job ${jobId}`} size="small" /><StageChip name="Translation" record={stages.translation} /><StageChip name="Dubbing" record={stages.dubbing} /><StageChip name="QC" record={stages.qc} /></Stack>}
+        {jobId && <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap><Chip label={`Job ${jobId}`} size="small" /><StageChip name="Translation" record={stages.translation} /><StageChip name="Dubbing" record={stages.dubbing} /><StageChip name="QC" record={stages.qc} /><Box sx={{ flex: 1 }} /><Button size="small" variant="outlined" startIcon={<TuneOutlinedIcon />} onClick={() => setExpertOpen(true)}>Advanced / Expert</Button></Stack>}
         {panels[activeStep]}
       </Stack>
       <Dialog open={batchOpen} onClose={() => setParams((previous) => { const next = new URLSearchParams(previous); next.delete("batch"); return next }, { replace: true })} maxWidth="md" fullWidth><DialogTitle>Run Localize batch</DialogTitle><DialogContent><LocalizationBatch embedded /></DialogContent></Dialog>
+      <Drawer
+        anchor="right"
+        open={expertOpen}
+        onClose={() => setExpertOpen(false)}
+        PaperProps={{ sx: { width: { xs: "100%", sm: 620 }, maxWidth: "100%" } }}
+      >
+        <Box sx={{ p: 2, borderBottom: 1, borderColor: "divider" }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>Advanced / Expert</Typography>
+          <Typography variant="caption" color="text.secondary">Targeted translation, timing, voice and rerun controls for this persisted job.</Typography>
+        </Box>
+        <Box sx={{ p: 2, overflow: "auto" }}>
+          {jobId ? <LocalizationExpertPanel jobId={jobId} /> : <Alert severity="info">Start or open a localization job first.</Alert>}
+        </Box>
+      </Drawer>
     </Box>
   )
 }
