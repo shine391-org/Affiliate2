@@ -96,6 +96,7 @@ export default function SourceBench({
   existingClips,     // clips already cut from this source (for the ghost lane)
   onOpenDialog,      // escape hatch to Auto-cut (>10 clips, no review)
   allowAutoCut = true,
+  storageNamespace = "clipper",
   ranges: R,         // useBenchRanges(), owned by ClipStudio — the Cut button
                      // that spends this list lives in the page hero
   settings,          // shared per-clip settings (useClipSettings, owned by
@@ -152,7 +153,7 @@ export default function SourceBench({
   // the user peeks at a finished clip (centerMode flips) — without this, a
   // running Ask AI was silently orphaned and its proposals never adopted. On
   // remount the collector below re-attaches to the job row.
-  const suggestKey = storageKey("clipper", `suggest:${source?.id}`)
+  const suggestKey = storageKey(storageNamespace, `suggest:${source?.id}`)
   const [suggestJobId, setSuggestJobId] = useState(() => {
     try { return sessionStorage.getItem(suggestKey) || null } catch { return null }
   })
