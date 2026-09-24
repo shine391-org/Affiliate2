@@ -47,8 +47,8 @@ export function normalizeTranscriptSegments(segments = []) {
       const endMs = segment.end_ms ?? ms(segment.end)
       return {
         id: String(segment.id ?? index + 1),
-        start_ms: Number.isFinite(Number(startMs)) ? Number(startMs) : null,
-        end_ms: Number.isFinite(Number(endMs)) ? Number(endMs) : null,
+        start_ms: startMs != null && Number.isFinite(Number(startMs)) ? Number(startMs) : null,
+        end_ms: endMs != null && Number.isFinite(Number(endMs)) ? Number(endMs) : null,
         text: String(segment.text || "").trim(),
         words: Array.isArray(segment.words) ? segment.words : [],
       }

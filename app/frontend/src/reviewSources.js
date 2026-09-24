@@ -1,4 +1,4 @@
-import { adaptLocalizationException } from "./reviewModel"
+import { adaptLocalizationException } from "./reviewModel.js"
 
 export const REVIEW_SOURCES = [
   {
