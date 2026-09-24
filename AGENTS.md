@@ -30,8 +30,8 @@ Current scope:
 Phase C implementation is frozen for architecture work; localization quality
 tuning is profile/model/prompt driven unless real-media QA exposes a technical
 defect. Phase D Smart Cut is wired and awaits local QA. Phase E Creative Remake
-has completed its donor audit; E1 source shot mapping is the next architecture
-task on the same integration branch.
+is intentionally deferred after donor audit. Phase F Review / Publish /
+Performance native migration is the next architecture task.
 
 Read before changing Phase-C code:
 
@@ -169,17 +169,9 @@ legacy Clipper behavior, not the Smart Cut product path.
 
 ## Phase-E Creative Remake boundary
 
-Read `docs/PHASE_E_DONOR_AUDIT.md` before implementing Phase E.
-
-The canonical order is source shot map -> multimodal shot understanding ->
-creative beats -> asset map -> persisted storyboard -> explicit approval ->
-composition/render -> QC/Library.
-
-Reuse ViralMint media/TTS/caption/FFmpeg/job/Library plumbing. Adapt
-MoneyPrinterTurbo material-provider patterns and OpenCreator's strict
-storyboard/artifact contracts. Use PySceneDetect behind one app-owned scene-map
-interface. Do not add Remotion, OpenCreator runtime, MoneyPrinterTurbo runtime
-or direct TransNetV2 as parallel subsystems without measured evidence.
+Phase E is intentionally deferred. Keep `docs/PHASE_E_DONOR_AUDIT.md` as
+reference only. Do not implement source shot mapping, storyboard or full-remake
+orchestration unless product evidence reopens the phase.
 
 ## Branch/change protocol
 
