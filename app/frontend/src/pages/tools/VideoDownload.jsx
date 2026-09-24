@@ -200,8 +200,13 @@ export default function VideoDownload() {
       <PageHero
         icon={<DownloadForOfflineOutlinedIcon />}
         title="Video Download"
-        subtitle="Paste a link — download from YouTube, TikTok, Bilibili, X and 1,800+ more sites. Runs locally, no watermark."
+        subtitle="Paste a link — download from YouTube, TikTok, Douyin, Bilibili, X and other yt-dlp sources. Login-gated sites reuse your configured browser session."
         backTo="/utilities"
+        actions={
+          <Button size="small" variant="outlined" onClick={() => navigate("/settings?section=services")}>
+            Browser session
+          </Button>
+        }
       />
 
       <Box sx={{ maxWidth: 900, mx: "auto", px: { xs: 2, md: 3 }, py: 3 }}>
