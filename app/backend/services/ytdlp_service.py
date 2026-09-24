@@ -905,19 +905,22 @@ async def download_video(
 
                     # ── Bot detection: retry with fresh cookies ────
                     if _is_bot_detection_error(str(e)) and attempt == 0:
-                        browser = _detect_cookie_browser()
+                        browser = _resolve_cookie_browser(cookie_browser)
                         if browser:
-                            logger.warning(f"Bot detection triggered, retrying with {browser} cookies")
+                            logger.warning(
+                                "Bot detection triggered, retrying with configured %s session",
+                                browser,
+                            )
                             _cleanup_partial_files(output_dir, file_stem)
-                            _apply_cookies(video_opts)
+                            _apply_cookies(video_opts, cookie_browser, cookie_profile)
                             import time as _time
                             _time.sleep(3)
-                            continue  # Retry with cookies
+                            continue  # Retry with the same configured session
                         else:
                             _cleanup_partial_files(output_dir, file_stem)
                             raise DownloadError(
-                                "YouTube requires sign-in to verify you're not a bot. "
-                                "Install Chrome/Brave/Firefox and log into YouTube, then retry."
+                                "This site requires a logged-in browser session. "
+                                "Configure Settings > Source Providers > Download Browser Session, then retry."
                             )
 
                     # ── Transient errors: retry once after delay ────
