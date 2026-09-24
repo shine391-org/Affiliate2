@@ -80,6 +80,7 @@ GPT-SoVITS can use manual reference audio or automatically extract reference spe
 - UX8–UX9 are implemented / local-QA pending: Studio now exposes one normalized persisted source/transcript/timeline contract for the reserved Phase-D/E modes; Library has reserved `smart_cut` / `creative_remake` derivative identities and source handoffs; Review has a workflow-source registry plus Smart Cut / Creative Remake contracts with Storyboard/Visual categories; Stock and Motion are contextual Remake asset providers; no Smart Cut/Remake engine or new top-level app was introduced.
 - Legacy Translate, Batch, Review, and Clip Studio URLs preserve source/job query context while redirecting to the canonical Studio or Review owner.
 - Saved/shortlist remains deferred until the backend has a canonical persisted state; the UI does not emulate it locally.
+- Localization Profiles now expose separate C6 translation instructions and C7 duration-rewrite instructions in UI. Both are additive only: app-owned fidelity, stable-ID and structured-output guardrails remain locked in code and cannot be replaced from a profile.
 
 ### C4–C11 technical gate
 **TECHNICAL PASS** on the clean real-media job at commit `b5e3609`.
