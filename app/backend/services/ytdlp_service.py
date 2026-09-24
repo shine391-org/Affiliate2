@@ -618,7 +618,10 @@ async def _prepare_download_source(
 
         try:
             from backend.services.douyin_media_resolver import resolve_douyin_media
-            resolved = await resolve_douyin_media(url)
+            resolved = await asyncio.wait_for(
+                resolve_douyin_media(url),
+                timeout=45,
+            )
         except Exception as exc:
             probe_reason = (
                 cookie_session.get("detail")
@@ -857,6 +860,10 @@ async def download_video(
         url, cookie_session
     )
     use_browser_cookies = cookie_session_ok and resolved_via is None
+    effective_headers = {
+        **_yt_dlp_http_headers(),
+        **(resolved_headers or {}),
+    }
 
     # Wait out any active rate-limit cooldown before starting
     cooldown = _check_cooldown()
@@ -886,7 +893,7 @@ async def download_video(
             "max_sleep_interval": 8,
             "sleep_interval_requests": 1,
             # Browser-like headers
-            "http_headers": resolved_headers or _yt_dlp_http_headers(),
+            "http_headers": effective_headers,
             # Subtitle download
             "writesubtitles": True,
             "writeautomaticsub": True,
@@ -1144,7 +1151,7 @@ async def download_video(
                         "preferredcodec": "mp3",
                         "preferredquality": "192",
                     }],
-                    "http_headers": resolved_headers or _yt_dlp_http_headers(),
+                    "http_headers": effective_headers,
                 }
                 if use_browser_cookies:
                     _apply_cookies(
