@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import {
-  Alert, Box, FormControl, FormControlLabel, InputLabel, MenuItem,
+  Alert, Box, Checkbox, FormControl, FormControlLabel, InputLabel, MenuItem,
   Radio, RadioGroup, Select, Stack, TextField, Typography,
 } from "@mui/material"
 import TranslateOutlinedIcon from "@mui/icons-material/TranslateOutlined"
@@ -41,6 +41,7 @@ export default function ToolTranslate() {
   const [captionStyle, setCaptionStyle] = useState("viral")
   const [emojiStyle, setEmojiStyle] = useState("moderate")
   const [profileId, setProfileId] = useState("")
+  const [reviewTranslation, setReviewTranslation] = useState(true)
   const [profiles, setProfiles] = useState([])
   const [profileDefault, setProfileDefault] = useState("")
 
@@ -68,6 +69,7 @@ export default function ToolTranslate() {
     caption_style: captionStyle,
     emoji_style: emojiStyle,
     profile_id: profileId || profileDefault || undefined,
+    review_translation: mode === "full_dub" ? reviewTranslation : false,
     voice_id: mode === "full_dub" && voiceId.trim() ? voiceId.trim() : undefined,
   })
 
@@ -107,11 +109,33 @@ export default function ToolTranslate() {
               ASR {selectedProfile.asr_quality}
               {" · alignment " + (selectedProfile.alignment_mode || "off")}
               {" · diarization " + (selectedProfile.diarization_mode || "off")}
+              {" · translation " + (selectedProfile.translation_preset || "natural_vietnamese")}
+              {" · C6 model " + (selectedProfile.translation_model || "global")}
+              {" · C7 rewrite " + (selectedProfile.rewrite_model || "global")}
               {" · audio " + selectedProfile.audio_mode}
               {" · render " + selectedProfile.render_profile}
               {" · speed ceiling " + Number(selectedProfile.dub_speed_max || 1.3).toFixed(2) + "×"}
             </Typography>
           </Alert>
+        )}
+
+        {mode === "full_dub" && (
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={reviewTranslation}
+                onChange={(e) => setReviewTranslation(e.target.checked)}
+              />
+            }
+            label={
+              <Box>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>Review translation before dubbing</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Pause after C6 so you can compare source ↔ target, edit bad lines, then continue the same job from C7 without repeating ASR.
+                </Typography>
+              </Box>
+            }
+          />
         )}
 
         <Box>
