@@ -82,6 +82,14 @@ def test_profile_guardrails_are_editable_but_cannot_be_empty():
         )
 
 
+def test_settings_profile_payload_exposes_authoritative_guardrail_defaults():
+    from backend.api.settings import _localization_profile_payload
+
+    payload = _localization_profile_payload(default_profile_store())
+    assert payload["prompt_defaults"]["translation_guardrails"] == DEFAULT_TRANSLATION_GUARDRAILS
+    assert payload["prompt_defaults"]["rewrite_guardrails"] == DEFAULT_REWRITE_GUARDRAILS
+
+
 def test_profile_round_trips_as_one_json_payload():
     store = default_profile_store()
     restored = load_profile_store(store.model_dump_json())
