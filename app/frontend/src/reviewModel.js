@@ -3,8 +3,8 @@ export const REVIEW_FILTERS = [
   { value: "translation", label: "Translation", enabled: true },
   { value: "timing", label: "Timing", enabled: true },
   { value: "audio", label: "Audio", enabled: true },
-  { value: "storyboard", label: "Storyboard", enabled: true },
-  { value: "visual", label: "Visual", enabled: true },
+  { value: "storyboard", label: "Storyboard · Phase E", enabled: false, phase: "E" },
+  { value: "visual", label: "Visual · Phase D/E", enabled: false, phase: "D/E" },
   { value: "qc", label: "QC", enabled: true },
   { value: "publish", label: "Publish", enabled: false },
 ]
@@ -147,6 +147,11 @@ export function adaptLocalizationException(raw) {
 
 export function reviewSelectionId(item) {
   return item?.selection_id || item?.job_id || item?.id || ""
+}
+
+export function normalizeReviewFilter(value = "needs-review") {
+  const record = REVIEW_FILTERS.find((item) => item.value === value)
+  return record?.enabled ? record.value : "needs-review"
 }
 
 export function reviewItemMatches(item, filter) {
