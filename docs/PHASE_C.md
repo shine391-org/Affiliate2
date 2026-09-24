@@ -85,6 +85,7 @@ Profiles persist the quality contract:
 - diarization mode / speaker count
 - semantic segmentation policy
 - translation model/preset/instructions/glossary
+- independent C7 rewrite model/instructions; profile instructions append to locked app-owned fidelity/ID/output guardrails rather than replacing raw prompts
 - TTS provider/model/default voice
 - speaker voice map
 - manual or automatic speaker reference audio
@@ -161,6 +162,7 @@ Behavior:
 - ONE natural-rate TTS request per dubbing chunk
 - real generated duration is authoritative
 - bounded AI rewrite/regeneration for overlong speech
+- profile-scoped C7 rewrite instructions are appended behind locked meaning/number/entity/stable-ID/JSON guardrails
 - AI rewrite is best-effort: local/provider timeout or malformed rewrite records a review warning and continues through measured TTS / atempo / bounded retime instead of killing the whole dubbing stage
 - local OpenAI-compatible endpoints get a longer request timeout than cloud endpoints
 - post-TTS FFmpeg `atempo`
