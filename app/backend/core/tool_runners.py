@@ -871,6 +871,7 @@ async def run_tool_translate(
     target_aspect: str | None = None,
     profile_id: str | None = None,
     profile_override: dict | None = None,
+    review_translation: bool | None = None,
 ):
     """Canonical resumable Phase-C localization runner.
 
@@ -911,6 +912,7 @@ async def run_tool_translate(
         "emoji_style": emoji_style,
         "target_aspect": target_aspect,
         "profile_id": profile_id,
+        "review_translation": bool(review_translation),
     }
     logger.info(
         "TASK START tool:translate | job=%s target=%s mode=%s profile=%s",
@@ -970,6 +972,12 @@ async def run_tool_translate(
             )
             source_path = run.ensure_source_copy(original_input)
         else:
+            # Preserve the original review choice on resume/rerun unless the
+            # caller explicitly supplied one.
+            if review_translation is None:
+                request_snapshot["review_translation"] = bool(
+                    run.request.get("review_translation")
+                )
             source_path = run.source_path
             if not source_path.exists():
                 raise RuntimeError(
@@ -1126,6 +1134,65 @@ async def run_tool_translate(
             except Exception as exc:
                 run.fail("translation", exc)
                 raise
+
+        # Optional human quality gate: stop after C6 and expose source/target
+        # pairs before spending on TTS/render. The same manifest/job resumes at
+        # C7 after approval; no second pipeline or duplicate ASR is created.
+        if (
+            is_dub
+            and bool(run.request.get("review_translation"))
+            and not bool(run.request.get("translation_review_approved"))
+        ):
+            review_rows = [
+                {
+                    "id": seg.id,
+                    "speaker_id": seg.speaker_id,
+                    "source_start_ms": seg.source_start_ms,
+                    "source_end_ms": seg.source_end_ms,
+                    "source_text": seg.source_text,
+                    "translated_text": seg.translated_text,
+                    "translation_status": seg.translation_status,
+                }
+                for seg in localized.segments
+            ]
+            review_path = tool_out_path(job_id, ".json")
+            review_path.write_text(
+                _json.dumps(
+                    {
+                        "job_id": job_id,
+                        "target_language": target_language,
+                        "profile_id": profile.id,
+                        "translation_model": profile.translation_model,
+                        "translation_preset": profile.translation_preset,
+                        "segments": review_rows,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ) + "\n",
+                encoding="utf-8",
+            )
+            run.update_request({
+                **run.request,
+                "translation_review_pending": True,
+                "translation_review_approved": False,
+            })
+            await _tool_success(
+                job_id,
+                review_path,
+                cleanup,
+                user_id,
+                extra_output={
+                    "translation_review_pending": True,
+                    "translation_model": profile.translation_model,
+                    "translation_preset": profile.translation_preset,
+                    "semantic_cue_count": len(localized.segments),
+                },
+            )
+            logger.info(
+                "TASK PAUSED tool:translate | job=%s awaiting translation review",
+                job_id[:8],
+            )
+            return
 
         timing_issues: list[dict] = []
         video_slowdown = 1.0
