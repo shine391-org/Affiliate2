@@ -50,10 +50,10 @@ _ASR_KEYS = {
 _SEMANTIC_KEYS = {"semantic_segmentation"}
 _TRANSLATION_KEYS = {
     "translation_provider", "translation_model", "translation_base_url",
-    "translation_preset", "translation_instructions", "glossary",
+    "translation_preset", "translation_instructions", "translation_guardrails", "glossary",
 }
 _DUBBING_KEYS = {
-    "rewrite_provider", "rewrite_model", "rewrite_base_url", "rewrite_instructions",
+    "rewrite_provider", "rewrite_model", "rewrite_base_url", "rewrite_guardrails", "rewrite_instructions",
     "tts_provider", "tts_model", "tts_voice", "tts_base_url", "tts_region",
     "speaker_voices", "speaker_reference_audio", "tts_reference_audio",
     "tts_reference_text", "tts_reference_language", "voice_clone_reference_mode",
