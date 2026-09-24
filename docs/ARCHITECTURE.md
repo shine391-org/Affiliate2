@@ -151,6 +151,13 @@ One transcript should be reusable by:
 
 Do not perform duplicate ASR passes merely because features are implemented in different modules. Candidate Intelligence delegates its fallback ASR to the canonical Whisper service instead of owning a standalone faster-whisper model.
 
+DownloadedVideo is the shared source identity for Studio. Its detail API exposes
+the persisted transcript, transcript language/source and timed transcript
+segments. Studio normalizes those source segments to millisecond coordinates
+once; Phase D/E consume that contract rather than introducing another source or
+ASR model owner. If transcript data is missing, later workflows may invoke the
+canonical ASR service and persist the result on the same source.
+
 Source and output coordinates are explicit and distinct:
 
 ```
@@ -243,9 +250,30 @@ Important rules:
 
 The frontend exposes one canonical `/studio` workspace. Localize and Manual Edit
 reuse the same selected Library source; Smart Cut and Creative Remake remain
-explicit reserved modes until their later phases. `/review` is the canonical
-human-exception workspace and currently adapts localization QC items into a
-generic review envelope while reusing the persisted Expert job controls.
+explicit reserved modes until their later phases.
+
+Phase-D/E readiness uses the same source contract:
+
+```
+DownloadedVideo id
+  -> full source detail
+  -> canonical transcript segments / source timeline
+  -> Studio mode
+  -> durable derivative
+  -> existing Library lineage
+```
+
+Reserved derivative identities are `smart_cut` and `creative_remake`; future
+writers attach `source_downloaded_video_id` so no new media graph is required.
+
+`/review` is the canonical human-exception workspace. It loads workflow
+sources through one registry: Localize is live now, while Smart Cut and Creative
+Remake have explicit extension contracts. Storyboard / Visual review categories
+exist without fake review items. Phase E must stop at storyboard approval before
+expensive composition/render.
+
+Existing Stock / Smart Video and Motion Graphics surfaces are asset-provider
+capabilities for Creative Remake, not new workflow owners.
 
 ### Translate / Dub
 
