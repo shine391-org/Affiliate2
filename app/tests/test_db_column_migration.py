@@ -192,10 +192,40 @@ async def test_init_db_alters_only_the_missing_columns(tmp_path, monkeypatch):
         async with eng.connect() as conn:
             cols = await DB._table_columns(conn, "user_settings")
         # The missing columns were added...
-        assert {"ai_provider", "ai_model", "ai_api_key_encrypted",
-                "youtube_api_key_encrypted"} <= cols
+        assert {
+            "ai_provider",
+            "ai_model",
+            "ai_api_key_encrypted",
+            "youtube_api_key_encrypted",
+            "download_cookie_browser",
+            "download_cookie_profile",
+        } <= cols
         # ...and only the genuinely-missing ones ALTERed — the four above, not
         # the full migration list.
         assert 1 <= alters[0] < _MIGRATION_CALL_COUNT
     finally:
         await eng.dispose()
+
+
+
+@pytest.mark.asyncio
+async def test_real_migration_failure_is_not_silently_swallowed():
+    """A locked/read-only upgrade DB must fail startup instead of drifting."""
+    class Rows:
+        def fetchall(self):
+            return []
+
+    class BrokenConn:
+        async def execute(self, statement):
+            raise RuntimeError("database is locked")
+
+        async def exec_driver_sql(self, statement):
+            return Rows()
+
+    with pytest.raises(RuntimeError, match="database is locked"):
+        await _add_column_if_missing(
+            BrokenConn(),
+            "user_settings",
+            "download_cookie_browser",
+            "VARCHAR(20)",
+        )
