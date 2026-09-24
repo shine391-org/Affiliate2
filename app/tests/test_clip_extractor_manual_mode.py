@@ -39,6 +39,7 @@ from backend.services.clip_extractor import (
 from backend.api.downloaded import (
     _MANUAL_MAX_RANGES,
     _MANUAL_MIN_CLIP_SEC,
+    _resolve_clip_output_source_type,
     _validate_manual_time_ranges,
 )
 
@@ -304,6 +305,23 @@ class TestValidateManualTimeRangesRejects:
             60,
             "empty",
         )
+
+
+class TestSmartCutOutputIdentity:
+    def test_legacy_clipper_remains_default(self):
+        assert _resolve_clip_output_source_type(None, "ai") == "clip_extraction"
+        assert _resolve_clip_output_source_type("clip_extraction", "manual") == "clip_extraction"
+
+    def test_smart_cut_requires_approved_manual_ranges(self):
+        assert _resolve_clip_output_source_type("smart_cut", "manual") == "smart_cut"
+        with pytest.raises(HTTPException, match="approved manual ranges") as exc:
+            _resolve_clip_output_source_type("smart_cut", "ai")
+        assert exc.value.status_code == 400
+
+    def test_unknown_output_identity_is_rejected(self):
+        with pytest.raises(HTTPException, match="Unknown output_source_type") as exc:
+            _resolve_clip_output_source_type("another_renderer", "manual")
+        assert exc.value.status_code == 400
 
 
 class TestManualConstants:
