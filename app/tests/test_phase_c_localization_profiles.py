@@ -152,6 +152,8 @@ def test_legacy_builtin_profile_migrates_to_faithful_translation_default():
     })
     store = load_profile_store(raw)
     assert store.profiles[0].translation_preset == "natural_vietnamese"
+    assert store.profiles[0].translation_guardrails == DEFAULT_TRANSLATION_GUARDRAILS
+    assert store.profiles[0].rewrite_guardrails == DEFAULT_REWRITE_GUARDRAILS
 
 
 def test_persisted_profile_migrates_old_c7_style_behavior_to_rewrite_instructions():
