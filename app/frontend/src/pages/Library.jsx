@@ -46,11 +46,9 @@ import AssetDrawer from "../components/librarynext/AssetDrawer"
 import PendingTile from "../components/librarynext/PendingTile"
 import { MEDIA, ORIGINS, originColor, originTextColor, activityFromJob } from "../components/librarynext/assetModel"
 
-// NOTE: there is no "Use in…" hand-off here. Every tool page takes an UPLOAD —
-// no endpoint in this variant accepts a library reference — so a button that
-// sent you to a tool which then demanded the file again would be a promise the
-// app can't keep. Adding `library_ref` inputs to the tool endpoints is what
-// would earn that button.
+// Downloaded video sources hand off directly into the canonical Studio via
+// their persisted source ID. Generic tool pages still require their own
+// library_ref support before they should gain a "Use in…" action here.
 // What /api/downloaded/import accepts — video or audio, since an imported
 // podcast is as valid a source as an imported clip.
 const IMPORT_ACCEPT = "video/*,audio/*,.mp4,.mov,.avi,.mkv,.webm,.mp3,.wav,.m4a,.aac,.flac"
