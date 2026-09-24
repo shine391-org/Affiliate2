@@ -135,7 +135,8 @@ def _install_yt_dlp(monkeypatch, script, out_dir: Path):
 
         def extract_info(self, url, download=True):
             idx = len(calls)
-            calls.append({"format": self.opts.get("format"),
+            calls.append({"url": url,
+                          "format": self.opts.get("format"),
                           "opts": dict(self.opts)})
             outcome = script[idx] if idx < len(script) else None
             if isinstance(outcome, Exception):
@@ -272,6 +273,52 @@ class TestDownloadCascade:
         assert "cookiesfrombrowser" in calls[0]["opts"]
         assert "cookiesfrombrowser" not in calls[-1]["opts"], (
             "the browser cookie session must be dropped on the YouTube retry")
+
+    def test_douyin_dpapi_fallback_still_uses_canonical_ytdlp(
+            self, dl_env, monkeypatch):
+        from backend.services import douyin_media_resolver as resolver
+        from backend.services.douyin_media_resolver import ResolvedDouyinMedia
+
+        async def configured_browser():
+            return ("edge", "Default")
+
+        async def resolve(url):
+            return ResolvedDouyinMedia(
+                url="https://v3-web.douyinvod.com/video/main.mp4?sig=abc",
+                headers={"User-Agent": "Mozilla/5.0 Edge", "Referer": url},
+                source_url=url,
+            )
+
+        monkeypatch.setattr(YT, "get_download_browser_session", configured_browser)
+        monkeypatch.setattr(
+            YT,
+            "_inspect_browser_session",
+            lambda *args, **kwargs: {
+                "ok": False,
+                "browser": "edge",
+                "resolved_browser": "edge",
+                "profile": "Default",
+                "detail": "Failed to decrypt with DPAPI",
+                "cookie_count": 0,
+                "douyin_cookie_count": 0,
+                "tiktok_cookie_count": 0,
+            },
+        )
+        monkeypatch.setattr(resolver, "resolve_douyin_media", resolve)
+
+        calls = _install_yt_dlp(monkeypatch, [None], dl_env)
+        out = asyncio.run(YT.download_video(
+            "https://www.douyin.com/video/123",
+            output_dir=dl_env,
+            extract_audio=False,
+        ))
+
+        assert calls[0]["url"].startswith("https://v3-web.douyinvod.com/")
+        assert calls[0]["opts"]["http_headers"]["Referer"] == (
+            "https://www.douyin.com/video/123"
+        )
+        assert "cookiesfrombrowser" not in calls[0]["opts"]
+        assert out["download_source"] == "douyin_cdp"
 
     def test_a_hard_rate_limit_raises_and_sets_a_cooldown(
             self, dl_env, monkeypatch):
