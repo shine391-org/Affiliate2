@@ -1,7 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 
-import { candidateStatus, downloadedByScoutResult } from "./discoverModel.js"
+import { candidateStatus, downloadedByScoutResult, thumbnailRequestKey } from "./discoverModel.js"
 
 test("candidate status reflects canonical persisted state", () => {
   assert.equal(candidateStatus({ is_analyzed: true, is_downloaded: true }), "Analyzed")
@@ -19,4 +19,15 @@ test("downloaded media is indexed by its scout lineage", () => {
   assert.equal(index.get("candidate-1"), "local-1")
   assert.equal(index.has("candidate-2"), false)
   assert.equal(index.has(null), false)
+})
+
+test("thumbnail failure identity follows the thumbnail URL", () => {
+  const first = { id: "candidate-1", platform: "bilibili", thumbnail_url: "https://i0.hdslb.com/old.jpg" }
+  const refreshed = { ...first, thumbnail_url: "https://i0.hdslb.com/new.jpg" }
+
+  assert.notEqual(thumbnailRequestKey(first), thumbnailRequestKey(refreshed))
+  assert.equal(
+    thumbnailRequestKey(first),
+    "bilibili::candidate-1::https://i0.hdslb.com/old.jpg",
+  )
 })
