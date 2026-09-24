@@ -23,6 +23,8 @@ class ExtractOptions:
     target_platform, genre) are ignored in manual mode. The rest
     (caption_style, emoji_style, whisper_quality, force_retranscribe,
     remove_silence, force_vertical) are shared post-processing.
+    `output_source_type` does not select another renderer; it labels the
+    GeneratedVideo derivative produced by this same canonical clip pipeline.
     """
     mode: str = "ai"
     max_clips: int = 3
@@ -38,3 +40,7 @@ class ExtractOptions:
     emoji_style: str = "moderate"
     genre: Optional[str] = None
     time_ranges: Optional[list[dict]] = None
+    # Persisted GeneratedVideo producer identity. The extraction engine remains
+    # shared; Studio Smart Cut only changes ownership/lineage semantics after
+    # the user approves ranges.
+    output_source_type: str = "clip_extraction"
