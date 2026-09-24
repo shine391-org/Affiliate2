@@ -49,6 +49,8 @@ async def test_resolver_returns_dom_media_and_closes_temp_page():
     async def fake_session(*args, **kwargs):
         yield SimpleNamespace(
             context=Context(),
+            page=None,
+            created_page=False,
             user_agent="Mozilla/5.0 Edge",
         )
 
