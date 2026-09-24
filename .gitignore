@@ -41,6 +41,9 @@ Thumbs.db
 *.db-wal
 *.log
 douyin_cookies.txt
+tiktok_cookies.txt
+yt_cookies.txt
+browser_cookies_*.txt
 .env
 data/*profile*/
 
