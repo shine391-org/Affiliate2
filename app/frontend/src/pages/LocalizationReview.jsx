@@ -12,11 +12,11 @@ import LocalizationExpertPanel from "../components/tools/LocalizationExpertPanel
 import useDocumentTitle from "../hooks/useDocumentTitle"
 import {
   REVIEW_FILTERS,
-  adaptLocalizationException,
   reviewItemMatches,
   reviewSelectionForItems,
   reviewSelectionId,
 } from "../reviewModel"
+import { loadReviewItems } from "../reviewSources"
 
 export default function LocalizationReview() {
   useDocumentTitle("Review")
@@ -41,8 +41,7 @@ export default function LocalizationReview() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const { data } = await http.get("/api/localization/exceptions?limit=100")
-      const next = (data?.items || []).map(adaptLocalizationException)
+      const next = await loadReviewItems(http)
       setItems(next)
       reconcileSelection(next, selected, filter, setParams)
     } finally {
