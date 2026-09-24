@@ -210,7 +210,7 @@ function ServiceKeyRow({ service, settings, updateSettings }) {
         <DialogTitle>Remove {service.label} key?</DialogTitle>
         <DialogContent>
           <Typography variant="body2">
-            This deletes the encrypted key from your local database. ViralMint will fall back to
+            This deletes the encrypted key from your local database. Affiliate2 will fall back to
             the corresponding key in your <code>.env</code> file (if set). Features that depend on
             this service will stop working until you add a new key or restore the .env one.
           </Typography>
