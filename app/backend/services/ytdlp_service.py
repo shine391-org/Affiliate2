@@ -380,9 +380,11 @@ def _check_cooldown() -> float:
 _BROWSER_COOKIE_SOURCE = None
 # Cookie-store inspection can be surprisingly expensive on Windows when
 # Chromium App-Bound/DPAPI decryption fails. Cache the probe briefly so a
-# batch does not repeat the same failing decryption for every item.
+# batch does not repeat the same failing decryption for every item. The
+# explicit Test session action bypasses this cache, so a user can refresh it
+# immediately after changing login/profile state.
 _BROWSER_SESSION_CACHE: dict[tuple[str, str | None], tuple[float, dict]] = {}
-_BROWSER_SESSION_CACHE_TTL = 30.0
+_BROWSER_SESSION_CACHE_TTL = 300.0
 
 _SUPPORTED_BROWSER_BINARIES = {
     "chrome": ("chrome", "google-chrome"),
