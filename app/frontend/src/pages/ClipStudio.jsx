@@ -513,7 +513,10 @@ export default function ClipStudio({ workflow = "manual" }) {
   // primary action of this page. The bench renders the timeline and the rail
   // off this same object, so there is still exactly one list.
   const benchRanges = useBenchRanges(
-    benchSource?.id || null, benchSource?.duration_seconds || 0)
+    benchSource?.id || null,
+    benchSource?.duration_seconds || 0,
+    smartCut ? "smart-cut" : "clipper",
+  )
 
   // A source shorter than one clip can't be cut at all.
   const benchTooShort = !!benchSource
@@ -960,6 +963,7 @@ export default function ClipStudio({ workflow = "manual" }) {
               onSettings={clipSettings.update}
               onOpenDialog={() => { setExtractTarget(benchSource); setExtractDialogOpen(true) }}
               allowAutoCut={!smartCut}
+              storageNamespace={smartCut ? "smart-cut" : "clipper"}
             />
           ) : selectedClip ? (
             <Box sx={{ flex: 1, overflow: "auto", p: 3 }}>
