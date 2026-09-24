@@ -14,8 +14,8 @@ Each rung exists because of a specific real failure, and each is pinned here:
     immediately, not grind through every remaining format;
   * a 429 caused by SUBTITLES retries without them — Whisper transcribes
     anyway, so subtitles are never worth failing a download over;
-  * a 403 on a cookie'd request retries WITHOUT cookies, and the drop has to
-    persist across the later formats too;
+  * a YouTube 403 on a browser-cookie request retries WITHOUT cookies, and
+    the drop has to persist across the later formats too;
   * a rate limit sets a cooldown the next download waits out.
 
 `yt_dlp` is stubbed; nothing here touches the network.
@@ -112,59 +112,6 @@ class TestCookieBrowserDetection:
         assert YT._detect_cookie_browser() is None
 
 
-class TestCookieFile:
-    @pytest.fixture(autouse=True)
-    def tmp_cookies(self, tmp_path, monkeypatch):
-        from backend.config import settings as S
-        monkeypatch.setattr(type(S), "TMP_DIR", property(lambda self: tmp_path))
-        monkeypatch.setattr(YT, "_COOKIE_FILE", None)
-        monkeypatch.setattr(YT, "_COOKIE_FILE_AGE", 0.0)
-        return tmp_path
-
-    def test_a_fresh_file_on_disk_is_reused(self, tmp_cookies, monkeypatch):
-        """It survives a server restart — re-extracting would trigger another
-        Keychain prompt for nothing."""
-        ck = tmp_cookies / "yt_cookies.txt"
-        ck.write_text("# Netscape HTTP Cookie File\n")
-        monkeypatch.setattr(YT, "_detect_cookie_browser", lambda: (_ for _ in ()).throw(
-            AssertionError("must not re-extract when a fresh file exists")))
-        assert YT._get_cookie_file() == ck
-
-    def test_an_empty_file_is_not_reused(self, tmp_cookies, monkeypatch):
-        (tmp_cookies / "yt_cookies.txt").write_text("")
-        monkeypatch.setattr(YT, "_detect_cookie_browser", lambda: None)
-        assert YT._get_cookie_file() is None
-
-    def test_a_stale_file_beats_nothing_when_no_browser_is_present(
-            self, tmp_cookies, monkeypatch):
-        import os
-        import time
-        ck = tmp_cookies / "yt_cookies.txt"
-        ck.write_text("# cookies\n")
-        old = time.time() - (YT._COOKIE_MAX_AGE + 100)
-        os.utime(ck, (old, old))
-        monkeypatch.setattr(YT, "_detect_cookie_browser", lambda: None)
-        assert YT._get_cookie_file() == ck
-
-    def test_no_file_and_no_browser_is_none(self, tmp_cookies, monkeypatch):
-        monkeypatch.setattr(YT, "_detect_cookie_browser", lambda: None)
-        assert YT._get_cookie_file() is None
-
-    def test_a_failed_extraction_degrades_to_none(self, tmp_cookies, monkeypatch):
-        """A Keychain denial must not fail the download outright."""
-        monkeypatch.setattr(YT, "_detect_cookie_browser", lambda: "chrome")
-        mod = types.ModuleType("yt_dlp")
-
-        class YDL:
-            def __init__(self, opts):
-                raise RuntimeError("user denied Keychain access")
-        mod.YoutubeDL = YDL
-        monkeypatch.setitem(sys.modules, "yt_dlp", mod)
-        assert YT._get_cookie_file() is None
-
-
-# ── the download cascade ────────────────────────────────────────────────────
-
 class _DownloadError(Exception):
     pass
 
@@ -212,7 +159,24 @@ def _install_yt_dlp(monkeypatch, script, out_dir: Path):
 @pytest.fixture()
 def dl_env(tmp_path, monkeypatch):
     monkeypatch.setattr(YT, "_check_cooldown", lambda: 0)
-    monkeypatch.setattr(YT, "_get_cookie_file", lambda: None)
+
+    async def no_browser_selection():
+        return ("auto", None)
+
+    monkeypatch.setattr(YT, "get_download_browser_session", no_browser_selection)
+    monkeypatch.setattr(
+        YT,
+        "_inspect_browser_session",
+        lambda *args, **kwargs: {
+            "ok": False,
+            "browser": "auto",
+            "resolved_browser": None,
+            "profile": None,
+            "cookie_count": 0,
+            "douyin_cookie_count": 0,
+            "tiktok_cookie_count": 0,
+        },
+    )
     monkeypatch.setattr(YT, "_detect_cookie_browser", lambda: None)
     # The retry rungs sleep 3-5s between attempts; without this the failure
     # tests take ~20s of real waiting for nothing.
@@ -279,18 +243,35 @@ class TestDownloadCascade:
         assert calls[1]["opts"].get("writesubtitles") in (False, None)
 
     def test_a_403_on_a_cookied_request_retries_without_cookies(
-            self, dl_env, monkeypatch, tmp_path):
-        """Supplying any cookie makes yt-dlp skip every player client that
-        can't carry one — which are exactly the token-free ones."""
-        ck = tmp_path / "ck.txt"
-        ck.write_text("# cookies\n")
-        monkeypatch.setattr(YT, "_get_cookie_file", lambda: ck)
+            self, dl_env, monkeypatch):
+        """YouTube alone may drop browser cookies after a cookie-induced 403."""
+        async def configured_browser():
+            return ("edge", "Default")
+
+        monkeypatch.setattr(YT, "get_download_browser_session", configured_browser)
+        monkeypatch.setattr(
+            YT,
+            "_inspect_browser_session",
+            lambda *args, **kwargs: {
+                "ok": True,
+                "browser": "edge",
+                "resolved_browser": "edge",
+                "profile": "Default",
+                "cookie_count": 4,
+                "douyin_cookie_count": 0,
+                "tiktok_cookie_count": 0,
+            },
+        )
+        monkeypatch.setattr(YT, "_resolve_cookie_browser", lambda browser: "edge")
+
         calls = _install_yt_dlp(
             monkeypatch, [_DownloadError("HTTP Error 403: Forbidden"), None], dl_env)
         self._download(dl_env)
+
         assert len(calls) >= 2
-        assert "cookiefile" not in calls[-1]["opts"], (
-            "the cookie must be dropped on the retry")
+        assert "cookiesfrombrowser" in calls[0]["opts"]
+        assert "cookiesfrombrowser" not in calls[-1]["opts"], (
+            "the browser cookie session must be dropped on the YouTube retry")
 
     def test_a_hard_rate_limit_raises_and_sets_a_cooldown(
             self, dl_env, monkeypatch):
