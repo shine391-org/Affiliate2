@@ -912,14 +912,15 @@ async def _adapt_chunk_items(
     prompt = f"""Rewrite these {target_language} dubbing lines so the WHOLE group can be spoken naturally in about {target_ms / 1000.0:.2f} seconds.
 Duration feedback: current duration {duration_ms} ms; target duration {target_ms} ms.
 Attempt {(state or {}).get('attempt', 1)}. Combined word budget: at most {word_budget} whitespace-separated words (current: {current_words}).
-Remove redundant connective phrases and filler, not cooking steps, heat settings, ingredients, quantities, names or other factual content. Do not add polite filler or expand the previous wording.
-If essential facts cannot fit, preserve them rather than inventing or deleting facts.
+Remove filler, repetition and redundant connective phrases before removing any factual content. Do not add polite filler or expand the previous wording.
+If essential facts cannot fit, preserve them rather than inventing, deleting or reversing facts.
 
-Rules:
+NON-NEGOTIABLE CORE RULES:
 - Preserve every item ID and order.
-- Preserve essential meaning, names, numbers and factual claims.
-- Do not invent CTAs, claims, examples or prices.
-- Make wording concise and natural for speech.
+- Preserve intent, entities, relationships, quantities, units, negation, steps, settings, product features, comparisons, causal meaning and factual claims.
+- Never change a number, unit, model/brand/name, positive/negative meaning or who/what a claim refers to merely to fit duration.
+- Do not invent CTAs, claims, examples, prices or benefits.
+- Make wording concise and natural for speech only after the meaning-preservation rules above are satisfied.
 - Return ONLY JSON: [{{"id":"...","text":"..."}}]
 
 ITEMS:
