@@ -236,7 +236,7 @@ No Creative Remake semantics are hidden inside Smart Cut.
 
 ## Phase E — Creative Remake HQ
 
-Status: **E0 DONOR AUDIT COMPLETE — E1 SOURCE SHOT MAP NEXT 🚧**
+Status: **DEFERRED / NOT IN CURRENT PRODUCT ROADMAP**
 
 Audit:
 `docs/PHASE_E_DONOR_AUDIT.md`
@@ -251,20 +251,16 @@ Donor decisions:
 - DEFER direct TransNetV2 integration; enable only through the same scene-map interface if real media needs it;
 - REJECT Remotion as a parallel runtime/renderer for now.
 
-Implementation order:
-- E1 canonical source shot map;
-- E2 multimodal shot understanding;
-- E3 Vietnamese creative beat planner;
-- E4 beat-to-source/stock/user/motion asset mapping;
-- E5 persisted storyboard + explicit human approval;
-- E6 canonical composition/render;
-- E7 QC + `creative_remake` Library lineage.
+The donor audit is retained as reference only. No E1–E7 implementation is
+planned unless real affiliate output data later proves a full-remake workflow
+adds value beyond Localization HQ + Smart Cut.
 
-Creative Remake remains distinct from Smart Cut and must preserve source/output coordinate separation.
+Creative Remake remains architecturally distinct from Smart Cut if it is ever
+revisited.
 
 ## Phase F — Review / Publish / Performance native migration
 
-Status: PLANNED
+Status: **NEXT**
 
 - move remaining overlay pages/API into canonical app
 - reuse app upload/auth/metrics plumbing
