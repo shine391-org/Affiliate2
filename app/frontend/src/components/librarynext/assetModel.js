@@ -112,6 +112,11 @@ export const PRODUCERS = {
   // "Generated" is why a clip and the video it came from could never be seen
   // together.
   clip_extraction: { label: "Clipper", media: "video", origin: "edited" },
+  // Reserved canonical Studio derivatives. Phase D/E will register generated
+  // outputs under these producer keys and source_downloaded_video_id so the
+  // existing Library lineage graph can display them without a new asset model.
+  smart_cut: { label: "Smart Cut", media: "video", origin: "edited" },
+  creative_remake: { label: "Creative Remake", media: "video", origin: "edited" },
 
   // Made here from nothing you already owned.
   "tool:voiceover": { label: "Voice-over", media: "audio", origin: "created" },
