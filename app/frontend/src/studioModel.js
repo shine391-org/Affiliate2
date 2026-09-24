@@ -1,6 +1,6 @@
 export const STUDIO_MODES = [
   { value: "localize", label: "Localize", path: "/studio/localize", active: true, phase: "C" },
-  { value: "smart-cut", label: "Smart Cut", path: "/studio/smart-cut", active: false, phase: "D" },
+  { value: "smart-cut", label: "Smart Cut", path: "/studio/smart-cut", active: true, phase: "D" },
   { value: "remake", label: "Creative Remake", path: "/studio/remake", active: false, phase: "E" },
   { value: "manual", label: "Manual Edit", path: "/studio/manual", active: true, phase: "C" },
 ]
