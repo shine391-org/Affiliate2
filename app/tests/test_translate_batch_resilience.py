@@ -141,8 +141,11 @@ def test_c6_and_c7_can_resolve_different_models(monkeypatch):
     assert rewrite_ai.model == "rewrite-small"
 
 
-def test_c6_translation_prompt_is_fidelity_first():
-    profile = _profile(translation_preset="natural_vietnamese")
+def test_c6_translation_prompt_uses_editable_semantics_but_keeps_locked_protocol():
+    profile = _profile(
+        translation_preset="natural_vietnamese",
+        translation_guardrails="C6 SEMANTIC SENTINEL",
+    )
     prompt = ls._translation_prompt(
         target_language="Vietnamese",
         batch=_transcript().segments,
@@ -150,9 +153,11 @@ def test_c6_translation_prompt_is_fidelity_first():
         profile=profile,
         for_dub=True,
     )
-    assert "Translate ONLY what the source says" in prompt
-    assert "Fidelity is more important than fluency" in prompt
-    assert "do not infer missing context" in prompt.lower()
+    assert "C6 SEMANTIC SENTINEL" in prompt
+    assert "LOCKED PROTOCOL:" in prompt
+    assert "Preserve segment IDs and order." in prompt
+    assert "Return every input ID exactly once and no extra IDs." in prompt
+    assert "Return only the required JSON array" in prompt
 
 
 @pytest.mark.asyncio
@@ -318,6 +323,7 @@ async def test_c7_rewrite_prompt_keeps_locked_core_and_uses_its_own_profile_inst
     profile = _profile(
         translation_instructions="C6 ONLY SENTINEL",
         rewrite_instructions="C7 ONLY SENTINEL",
+        rewrite_guardrails="C7 SEMANTIC SENTINEL",
     )
 
     changed = await ls._adapt_chunk_items(
@@ -334,9 +340,10 @@ async def test_c7_rewrite_prompt_keeps_locked_core_and_uses_its_own_profile_inst
     assert changed is True
     assert "C7 ONLY SENTINEL" in ai.prompt
     assert "C6 ONLY SENTINEL" not in ai.prompt
+    assert "C7 SEMANTIC SENTINEL" in ai.prompt
+    assert "LOCKED PROTOCOL:" in ai.prompt
     assert "Preserve every item ID and order." in ai.prompt
-    assert "Preserve intent, entities, relationships, quantities, units, negation" in ai.prompt
-    assert "Never change a number, unit, model/brand/name" in ai.prompt
+    assert "Return every input ID exactly once and no extra IDs." in ai.prompt
     assert "core rules above remain mandatory" in ai.prompt
     assert segment.translated_text == "ngắn"
 
