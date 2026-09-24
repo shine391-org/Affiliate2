@@ -335,7 +335,8 @@ async def test_c7_rewrite_prompt_keeps_locked_core_and_uses_its_own_profile_inst
     assert "C7 ONLY SENTINEL" in ai.prompt
     assert "C6 ONLY SENTINEL" not in ai.prompt
     assert "Preserve every item ID and order." in ai.prompt
-    assert "Preserve essential meaning, names, numbers and factual claims." in ai.prompt
+    assert "Preserve intent, entities, relationships, quantities, units, negation" in ai.prompt
+    assert "Never change a number, unit, model/brand/name" in ai.prompt
     assert "core rules above remain mandatory" in ai.prompt
     assert segment.translated_text == "ngắn"
 
