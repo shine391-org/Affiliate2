@@ -236,16 +236,31 @@ No Creative Remake semantics are hidden inside Smart Cut.
 
 ## Phase E — Creative Remake HQ
 
-Status: PLANNED
+Status: **E0 DONOR AUDIT COMPLETE — E1 SOURCE SHOT MAP NEXT 🚧**
 
-- full transcript + shot/scene map
-- multimodal visual understanding
-- Vietnamese creative beats
-- explicit source/other-material mapping
-- storyboard review
-- automated composition/render
-- preserve source/output coordinate separation
-- evaluate MoneyPrinterTurbo-style assembly patterns as donor/reference rather than a second application
+Audit:
+`docs/PHASE_E_DONOR_AUDIT.md`
+
+Donor decisions:
+- KEEP ViralMint source/transcript/Library/job/FFmpeg/TTS/caption primitives;
+- ADAPT ViralMint Pexels/stock scene assembly and B-roll cue timing;
+- ADAPT ViralMint Motion Studio as a contextual overlay/insert provider, not the orchestration owner;
+- ADAPT MoneyPrinterTurbo's provider-neutral material acquisition/allocation patterns;
+- STRONG ADAPT OpenCreator's stable segment/shot IDs, strict storyboard schema, artifact lineage and stale-plan validation;
+- ADOPT PySceneDetect for deterministic physical shot boundaries;
+- DEFER direct TransNetV2 integration; enable only through the same scene-map interface if real media needs it;
+- REJECT Remotion as a parallel runtime/renderer for now.
+
+Implementation order:
+- E1 canonical source shot map;
+- E2 multimodal shot understanding;
+- E3 Vietnamese creative beat planner;
+- E4 beat-to-source/stock/user/motion asset mapping;
+- E5 persisted storyboard + explicit human approval;
+- E6 canonical composition/render;
+- E7 QC + `creative_remake` Library lineage.
+
+Creative Remake remains distinct from Smart Cut and must preserve source/output coordinate separation.
 
 ## Phase F — Review / Publish / Performance native migration
 
