@@ -16,6 +16,18 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 _PROFILE_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
 MAX_LOCALIZATION_PROFILES = 20
 
+DEFAULT_TRANSLATION_GUARDRAILS = """- Translate only what the source says; fidelity is more important than fluency.
+- Preserve intent, entities, relationships, quantities, units, steps, negation and factual claims.
+- Do not infer missing context or invent commentary, CTAs, claims, prices, names, examples or benefits.
+- If a phrase is ambiguous, choose the least-assumptive faithful rendering.
+- Apply glossary terms consistently."""
+
+DEFAULT_REWRITE_GUARDRAILS = """- Preserve intent, entities, relationships, quantities, units, negation, steps, settings, product features, comparisons, causal meaning and factual claims.
+- Never change a number, unit, model/brand/name, positive/negative meaning or who/what a claim refers to merely to fit duration.
+- Remove filler, repetition and redundant connective phrases before removing factual content.
+- Do not invent CTAs, claims, examples, prices or benefits.
+- If essential facts cannot fit, preserve them rather than inventing, deleting or reversing facts."""
+
 
 class LocalizationProfile(BaseModel):
     id: str
@@ -38,6 +50,10 @@ class LocalizationProfile(BaseModel):
         "natural_vietnamese", "affiliate_conversational", "literal", "custom"
     ] = "natural_vietnamese"
     translation_instructions: str = ""
+    # Semantic fidelity policy is editable per profile from Settings. Structural
+    # protocol (stable IDs/order + JSON schema) stays app-owned because runtime
+    # parsing depends on it.
+    translation_guardrails: str = DEFAULT_TRANSLATION_GUARDRAILS
     glossary: dict[str, str] = Field(default_factory=dict)
 
     # C6 translation and C7 duration rewrite are different jobs. Translation
@@ -47,7 +63,8 @@ class LocalizationProfile(BaseModel):
     rewrite_provider: str | None = None
     rewrite_model: str | None = None
     rewrite_base_url: str | None = None
-    # Appended to the locked C7 duration-rewrite prompt. Users can tune
+    rewrite_guardrails: str = DEFAULT_REWRITE_GUARDRAILS
+    # Appended after the semantic guardrails. Users can tune
     # compression/style per profile without replacing the core fidelity,
     # stable-ID or structured-output guardrails owned by the application.
     rewrite_instructions: str = ""
@@ -115,6 +132,21 @@ class LocalizationProfile(BaseModel):
                 else "Translation instructions"
             )
             raise ValueError(f"{label} are too long (max 8000 chars).")
+        return value
+
+    @field_validator("translation_guardrails", "rewrite_guardrails")
+    @classmethod
+    def validate_guardrails(cls, value: str, info) -> str:
+        value = value.strip()
+        label = (
+            "Rewrite guardrails"
+            if info.field_name == "rewrite_guardrails"
+            else "Translation guardrails"
+        )
+        if not value:
+            raise ValueError(f"{label} cannot be empty.")
+        if len(value) > 12000:
+            raise ValueError(f"{label} are too long (max 12000 chars).")
         return value
 
     @model_validator(mode="after")
