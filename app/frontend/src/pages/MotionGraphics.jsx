@@ -111,7 +111,7 @@ export default function MotionGraphics() {
       subtitle="Design animated compositions — kinetic type, stat cards, lower thirds — and render them locally"
       dense
       actions={
-        installed ? (
+        (installed || sourceId) ? (
           <>
             {sourceId && (
               <Button
@@ -122,14 +122,18 @@ export default function MotionGraphics() {
                 Back to Remake
               </Button>
             )}
-            <Button size="small" variant="outlined" startIcon={<VideoLibraryIcon />}
-              onClick={() => navigate("/library")}>
-              Library
-            </Button>
-            <Button size="small" variant={panelOpen ? "outlined" : "contained"}
-              startIcon={<AutoAwesomeIcon />} onClick={() => setPanelOpen((v) => !v)}>
-              AI Compose
-            </Button>
+            {installed && (
+              <>
+                <Button size="small" variant="outlined" startIcon={<VideoLibraryIcon />}
+                  onClick={() => navigate("/library")}>
+                  Library
+                </Button>
+                <Button size="small" variant={panelOpen ? "outlined" : "contained"}
+                  startIcon={<AutoAwesomeIcon />} onClick={() => setPanelOpen((v) => !v)}>
+                  AI Compose
+                </Button>
+              </>
+            )}
           </>
         ) : null
       }
