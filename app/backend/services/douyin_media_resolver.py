@@ -77,7 +77,8 @@ async def resolve_douyin_media(
             except Exception:
                 pass
 
-        async def _lightweight_route(route, request):
+        async def _lightweight_route(route):
+            request = route.request
             if request.resource_type in {"image", "font", "stylesheet"}:
                 await route.abort()
             else:
@@ -115,7 +116,7 @@ async def resolve_douyin_media(
                     return ResolvedDouyinMedia(
                         url=str(candidate),
                         headers={
-                            "User-Agent": session.user_agent,
+                            **({"User-Agent": session.user_agent} if session.user_agent else {}),
                             "Referer": source_url,
                         },
                         source_url=source_url,
@@ -129,7 +130,7 @@ async def resolve_douyin_media(
                 return ResolvedDouyinMedia(
                     url=candidate,
                     headers={
-                        "User-Agent": session.user_agent,
+                        **({"User-Agent": session.user_agent} if session.user_agent else {}),
                         "Referer": source_url,
                     },
                     source_url=source_url,
