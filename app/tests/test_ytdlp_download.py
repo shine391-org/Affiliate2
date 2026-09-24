@@ -382,17 +382,18 @@ class TestPerDownloadOptions:
         assert calls[0]["format"] == dlo.QUALITY_LADDERS["480p"][0]
         assert out["requested_quality"] == "480p"
 
-    def test_a_cap_the_source_cannot_meet_falls_through_to_uncapped(
+    def test_a_quality_cap_never_uses_uncapped_formats(
             self, dl_env, monkeypatch):
-        """The safety property, end to end: every capped rung failing must
-        still produce a video off the unconstrained tail, not an error."""
+        """An explicit quality is a hard ceiling across the whole fallback ladder."""
         calls = _install_yt_dlp(
-            monkeypatch, [_DownloadError("requested format not available")] * 2 + [None],
-            dl_env)
-        out = self._download(dl_env, options={"quality": "2160p"})
-        assert Path(out["video_path"]).exists()
-        assert "height<=" not in calls[-1]["format"], (
-            "the last rung tried must be unconstrained")
+            monkeypatch,
+            [_DownloadError("requested format not available")] * 10,
+            dl_env,
+        )
+        with pytest.raises(DownloadError):
+            self._download(dl_env, options={"quality": "2160p"})
+        assert calls
+        assert all("height<=2160" in call["format"] for call in calls)
 
     def test_option_overrides_reach_yt_dlp(self, dl_env, monkeypatch):
         calls = _install_yt_dlp(monkeypatch, [None], dl_env)
