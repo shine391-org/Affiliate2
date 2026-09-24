@@ -19,8 +19,10 @@ def test_user_settings_retire_douyin_cookie_columns_from_orm():
     columns = set(UserSettings.__table__.columns.keys())
     assert "douyin_cookie_encrypted" not in columns
     assert "douyin_cookie_set_at" not in columns
-    # TikTok keeps one upload-only legacy cookie fallback for now.
+    # TikTok keeps one upload-only legacy cookie fallback for now, but its old
+    # generic "set at" discovery-era marker is gone.
     assert "tiktok_cookie_encrypted" in columns
+    assert "tiktok_cookie_set_at" not in columns
 
 
 def test_manual_cookie_test_endpoint_is_gone():
