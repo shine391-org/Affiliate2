@@ -44,7 +44,7 @@ const round3 = (v) => Math.round(v * 1000) / 1000
  * @param {number} duration       Source duration in seconds; every edit
  *   is clamped into [0, duration].
  */
-export default function useBenchRanges(sourceId, duration) {
+export default function useBenchRanges(sourceId, duration, storageNamespace = "clipper") {
   const [ranges, setRanges] = useState([])
   const [activeId, setActiveId] = useState(null)
   // Guards the restore→persist round trip: without it the first render
@@ -52,7 +52,7 @@ export default function useBenchRanges(sourceId, duration) {
   // over the incoming source's saved ranges.
   const loadedFor = useRef(null)
 
-  const skey = sourceId ? storageKey("clipper", `bench:${sourceId}`) : null
+  const skey = sourceId ? storageKey(storageNamespace, `bench:${sourceId}`) : null
 
   // ── Restore on source change ───────────────────────────────
   useEffect(() => {
