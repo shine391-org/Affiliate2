@@ -10,6 +10,13 @@ test("Settings sections reflect configuration ownership", () => {
   )
 })
 
+test("Source Providers owns downloader/browser configuration", () => {
+  assert.equal(
+    SETTINGS_SECTIONS.find(({ value }) => value === "services")?.label,
+    "Source Providers",
+  )
+})
+
 test("Settings deep links fail safely to AI Connections", () => {
   assert.equal(normalizeSettingsSection("localization"), "localization")
   assert.equal(normalizeSettingsSection("unknown"), "ai")
