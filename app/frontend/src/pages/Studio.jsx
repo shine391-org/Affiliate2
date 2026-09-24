@@ -220,8 +220,8 @@ export default function Studio() {
 
       <Box sx={{ flex: 1, minHeight: 0, overflow: (mode === "manual" || mode === "smart-cut") ? "hidden" : "auto" }}>
         {mode === "localize" && <StudioLocalize source={source} sourcesLoading={loading} />}
-        {mode === "manual" && <ClipStudio workflow="manual" />}
-        {mode === "smart-cut" && <ClipStudio workflow="smart-cut" />}
+        {mode === "manual" && <ClipStudio key="manual" workflow="manual" />}
+        {mode === "smart-cut" && <ClipStudio key="smart-cut" workflow="smart-cut" />}
         {mode === "remake" && <ReservedMode mode={mode} source={source} context={sourceContext} navigate={navigate} />}
       </Box>
     </Box>
