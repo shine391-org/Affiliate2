@@ -1,162 +1,114 @@
-"""
-sources/douyin.py — Douyin adapter for Radar Ingestion (Phase 2.1)
+"""Legacy Radar CLI adapter for the canonical app-native Douyin provider.
 
-Strategy:
-  1. Invoke MediaCrawler as a subprocess (proven working in Phase 1).
-  2. Read the JSONL output file it produces.
-  3. Normalize each record.
-
-Requires:
-  - Edge browser open with Douyin CDP session on port 9222
-    (or MediaCrawler will open its own session and prompt for QR login)
-  - MediaCrawler configured with SAVE_DATA_OPTION=jsonl
+Radar no longer launches MediaCrawler or reads JSONL. The compatibility CLI
+reuses the same authenticated CDP provider as the Affiliate2 app and only maps
+its normalized Scout-row shape into Radar legacy dataclasses.
 """
 from __future__ import annotations
 
-import json
-import subprocess
-import sys
-from datetime import date, datetime, timezone
-from pathlib import Path
-from typing import Optional
+import asyncio
+from datetime import datetime, timezone
 
+from ..intel._canonical_bridge import ensure_canonical_app_imports
 from ..models import MetricSnapshot, NormalizedContent, SourceRunResult
-from ..normalize import normalize_douyin
 
-# Project root = 3 levels up from this file
-PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
-MC_DIR = PROJECT_ROOT / "tools" / "MediaCrawler"
-VENV_PY = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
+ensure_canonical_app_imports()
 
-
-def _get_today_jsonl() -> Path:
-    today = date.today().strftime("%Y-%m-%d")
-    return MC_DIR / "data" / "douyin" / "jsonl" / f"search_contents_{today}.jsonl"
+from backend.sources.base import ProviderStatus
+from backend.sources.douyin import DouyinProvider
 
 
-def _read_jsonl(path: Path) -> list[dict]:
-    if not path.exists():
-        return []
-    records = []
-    with path.open(encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                try:
-                    records.append(json.loads(line))
-                except json.JSONDecodeError:
-                    pass
-    return records
-
-
-def scan(keyword: str, max_count: int = 15, timeout: int = 300) -> SourceRunResult:
-    """
-    Run a Douyin keyword search via MediaCrawler and return normalized records.
-
-    Args:
-        keyword:   Search keyword (Chinese or any string)
-        max_count: Maximum videos to fetch per keyword
-        timeout:   Subprocess timeout in seconds
-
-    Returns:
-        SourceRunResult with status, counts, and normalized data
-    """
-    captured_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    jsonl_path = _get_today_jsonl()
-
-    # Record lines before run so we can identify new records added by this scan
-    lines_before = _count_jsonl_lines(jsonl_path)
-
-    cmd = [
-        str(VENV_PY),
-        "main.py",
-        "--platform", "dy",
-        "--lt", "qrcode",
-        "--type", "search",
-        "--keywords", keyword,
-        "--crawler_max_notes_count", str(max_count),
-    ]
-
+def _publish_timestamp(value) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp())
     try:
-        result = subprocess.run(
-            cmd,
-            cwd=str(MC_DIR),
-            timeout=timeout,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env={**_base_env(), "PYTHONUTF8": "1"},
-        )
-    except subprocess.TimeoutExpired:
-        return SourceRunResult(
-            platform="douyin",
-            keyword=keyword,
-            status="ERROR",
-            error=f"MediaCrawler subprocess timed out after {timeout}s",
-        )
-    except Exception as exc:
-        return SourceRunResult(
-            platform="douyin",
-            keyword=keyword,
-            status="ERROR",
-            error=str(exc),
-        )
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
-    # Detect auth failure in output
-    combined = (result.stdout or "") + (result.stderr or "")
-    if "login_by_qrcode" in combined and "Begin login" in combined:
-        # QR code was triggered — means no valid session was found
+
+def _optional_metric(value) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return None
+
+
+async def scan_async(keyword: str, max_count: int = 15) -> SourceRunResult:
+    """Run canonical Douyin discovery and adapt the result for legacy Radar."""
+    captured_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    provider_result = await DouyinProvider().search(keyword, limit=max_count)
+
+    if provider_result.status != ProviderStatus.SUCCESS:
         return SourceRunResult(
             platform="douyin",
             keyword=keyword,
-            status="AUTH_REQUIRED",
-            error="Douyin QR login triggered — no active CDP session. Open Edge with Douyin profile first.",
-        )
-
-    # Read ALL records from today's file then filter to this keyword
-    all_records = _read_jsonl(jsonl_path)
-    keyword_records = [r for r in all_records if r.get("source_keyword") == keyword]
-
-    if not keyword_records:
-        return SourceRunResult(
-            platform="douyin",
-            keyword=keyword,
-            status="EMPTY",
-            records_raw=0,
+            status=provider_result.status.value,
+            records_raw=len(provider_result.items),
             records_normalized=0,
+            error=provider_result.error,
         )
 
     contents: list[NormalizedContent] = []
     snapshots: list[MetricSnapshot] = []
     seen: set[str] = set()
 
-    for raw in keyword_records:
-        c, s = normalize_douyin(raw, captured_at)
-        if not c.content_id or c.content_id in seen:
+    for row in provider_result.items:
+        content_id = str(row.get("video_id") or "").strip()
+        if not content_id or content_id in seen:
             continue
-        seen.add(c.content_id)
-        contents.append(c)
-        snapshots.append(s)
+        seen.add(content_id)
+
+        radar_metrics = row.get("radar_metrics") or {}
+        contents.append(
+            NormalizedContent(
+                platform="douyin",
+                content_id=content_id,
+                canonical_url=row.get("video_url"),
+                creator_id=row.get("creator_id"),
+                creator_name=row.get("author"),
+                title=row.get("title"),
+                description=row.get("description"),
+                publish_time=_publish_timestamp(row.get("upload_date")),
+                source_keyword=keyword,
+            )
+        )
+        snapshots.append(
+            MetricSnapshot(
+                platform="douyin",
+                content_id=content_id,
+                captured_at=captured_at,
+                views=_optional_metric(radar_metrics.get("views")),
+                likes=_optional_metric(radar_metrics.get("likes")),
+                comments=_optional_metric(radar_metrics.get("comments")),
+                shares=_optional_metric(radar_metrics.get("shares")),
+                favorites=_optional_metric(radar_metrics.get("favorites")),
+            )
+        )
 
     return SourceRunResult(
         platform="douyin",
         keyword=keyword,
-        status="SUCCESS",
-        records_raw=len(keyword_records),
+        status="SUCCESS" if contents else "EMPTY",
+        records_raw=len(provider_result.items),
         records_normalized=len(contents),
         contents=contents,
         snapshots=snapshots,
     )
 
 
-def _count_jsonl_lines(path: Path) -> int:
-    if not path.exists():
-        return 0
-    with path.open(encoding="utf-8") as f:
-        return sum(1 for line in f if line.strip())
+def scan(keyword: str, max_count: int = 15, timeout: int = 300) -> SourceRunResult:
+    """Sync compatibility API used by radar.py/scanplan.
 
-
-def _base_env() -> dict:
-    import os
-    return dict(os.environ)
+    timeout is retained for callers but no subprocess exists anymore. The
+    canonical provider owns its bounded CDP/network timeouts.
+    """
+    del timeout
+    return asyncio.run(scan_async(keyword, max_count=max_count))
