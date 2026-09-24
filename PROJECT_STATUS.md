@@ -1,6 +1,6 @@
 # PROJECT_STATUS.md
 
-## Overall status: PHASE C C4–C12 TECHNICAL PASS — C13 REAL-MEDIA ACCEPTANCE ACTIVE
+## Overall status: PHASE C IMPLEMENTATION FROZEN — PHASE D SMART CUT ACTIVE
 
 Phase A and Phase B are complete and merged to `master`.
 
@@ -132,3 +132,32 @@ See:
 - `docs/PHASE_C_C0_DONOR_AUDIT.md`
 - `docs/PHASE_C_DONOR_CAPABILITY_MATRIX.md`
 - `docs/QA_PHASE_C.md`
+
+
+---
+
+## Phase D — Smart Cut
+
+**IMPLEMENTATION ACTIVE — shared-engine convergence wired / local QA pending.**
+
+Phase D does not introduce a second Smart Cut engine. The existing ViralMint
+Clip Studio path already owns the required mechanics and is now the canonical
+implementation behind `Studio → Smart Cut`:
+
+- existing cached transcript / canonical Whisper fallback;
+- existing `/downloaded/{id}/suggest-clips` AI proposal job;
+- existing SourceBench range preview/edit/delete controls;
+- existing manual `/downloaded/{id}/extract-clips` render path;
+- direct Auto-cut hidden in Smart Cut so AI proposals remain review-first;
+- approved Smart Cut renders persist as `source_type=smart_cut` while legacy
+  Clipper/Manual Edit remains `source_type=clip_extraction`;
+- `source_downloaded_video_id` keeps outputs inside the existing Library
+  lineage graph;
+- Activity classifies Smart Cut renders under Smart Cut ownership and can open
+  the first resulting Library derivative.
+
+No duplicate ASR, AI picker, range editor, renderer, job system or Library asset
+model was added.
+
+Local test/build/browser evidence is still required before Phase D QA PASS.
+See `docs/CONSOLIDATION_PLAN.md` and `docs/ARCHITECTURE.md`.
