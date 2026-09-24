@@ -47,6 +47,7 @@ def test_profile_invalidation_uses_earliest_quality_stage():
     assert api._profile_invalidation({"translation_base_url"}) == "translation"
     assert api._profile_invalidation({"rewrite_model"}) == "dubbing"
     assert api._profile_invalidation({"rewrite_base_url"}) == "dubbing"
+    assert api._profile_invalidation({"rewrite_instructions"}) == "dubbing"
     assert api._profile_invalidation({"audio_mode"}) == "audio_mix"
     assert api._profile_invalidation({"render_profile"}) == "final_render"
     assert api._profile_invalidation({"translation_model", "tts_model"}) == "translation"
