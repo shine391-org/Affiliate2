@@ -20,6 +20,7 @@ export const LEGACY_ROUTE_TARGETS = {
   "/tools/translate": "/studio/localize",
   "/tools/localization-batch": "/studio/localize?batch=1",
   "/tools/localization-review": "/review",
+  "/review-queue": "/review",
   "/utilities/localization-review": "/review",
   "/videos": "/library",
 }
