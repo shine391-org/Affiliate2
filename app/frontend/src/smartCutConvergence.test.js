@@ -1,6 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
+import { activityFromJob } from "./components/librarynext/assetModel.js"
 
 const studio = readFileSync(new URL("./pages/Studio.jsx", import.meta.url), "utf8")
 const clipStudio = readFileSync(new URL("./pages/ClipStudio.jsx", import.meta.url), "utf8")
@@ -27,4 +28,26 @@ test("Smart Cut is review-first and does not expose direct Auto-cut", () => {
 test("Smart Cut uses the Studio header as its source owner", () => {
   assert.ok(clipStudio.includes('display: smartCut ? "none" : "flex"'))
   assert.ok(clipStudio.includes('Select a source in the Studio header'))
+})
+
+test("Smart Cut render jobs appear under Smart Cut ownership and open their first Library output", () => {
+  const item = activityFromJob({
+    id: "job-smart-1",
+    job_type: "generate",
+    status: "success",
+    input_json: JSON.stringify({
+      type: "smart_cut",
+      mode: "manual",
+      max_clips: 2,
+    }),
+    output_json: JSON.stringify({
+      clip_ids: ["cut-1", "cut-2"],
+      source_type: "smart_cut",
+    }),
+  })
+  assert.equal(item.where, "Smart Cut")
+  assert.equal(item.producer, "Smart Cut")
+  assert.equal(item.origin, "edited")
+  assert.equal(item.libraryBound, true)
+  assert.equal(item.result_key, "gv:cut-1")
 })
