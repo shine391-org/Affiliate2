@@ -77,7 +77,7 @@ export default function DownloadSessionSection({ settings, updateSettings }) {
           </Typography>
           <Typography variant="caption" color="text.secondary">
             Used by the canonical yt-dlp downloader for sites that require login, including Douyin/TikTok.
-            Affiliate2 stores only the browser/profile choice; cookies stay in your browser.
+            Affiliate2 stores only the browser/profile choice; it reads cookies locally through yt-dlp and does not export an all-sites cookie file.
           </Typography>
         </Box>
 
@@ -95,13 +95,13 @@ export default function DownloadSessionSection({ settings, updateSettings }) {
             value={profile}
             onChange={(event) => { setProfile(event.target.value); setProbe(null) }}
             placeholder="Default"
-            helperText="Leave blank for the browser's default profile. Use e.g. Profile 1 only if your login lives there."
+            helperText="Leave blank to let yt-dlp use the browser's most recently accessed profile. Enter e.g. Default or Profile 1 when you need an exact login profile."
           />
         </Stack>
 
         <Alert severity="info" variant="outlined">
-          Log in to Douyin/TikTok in the selected browser profile first. If Chromium locks its cookie database,
-          close that browser once, press Test session, then reopen it.
+          Log in to Douyin/TikTok in the selected browser profile first, then refresh that site shortly before downloading.
+          Test session checks whether yt-dlp can read the local cookie store; the real URL download is the final login check.
         </Alert>
 
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1} flexWrap="wrap" useFlexGap>
@@ -123,7 +123,7 @@ export default function DownloadSessionSection({ settings, updateSettings }) {
           <Alert severity={byteDanceCookies > 0 ? "success" : "warning"}>
             <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="center">
               <span>
-                Cookie extraction works from <strong>{probe.resolved_browser}</strong>
+                Cookie store is readable from <strong>{probe.resolved_browser}</strong>
                 {probe.profile ? ` / ${probe.profile}` : ""}.
               </span>
               <Chip size="small" label={`${probe.cookie_count || 0} total`} />
@@ -132,7 +132,12 @@ export default function DownloadSessionSection({ settings, updateSettings }) {
             </Stack>
             {byteDanceCookies === 0 && (
               <Typography variant="caption" sx={{ display: "block", mt: 0.75 }}>
-                Browser access works, but no Douyin/TikTok login cookies were found in this profile. Log in there and test again.
+                Browser access works, but no Douyin/TikTok-domain cookies were found in this profile. Log in there, refresh the site, then test again.
+              </Typography>
+            )}
+            {byteDanceCookies > 0 && (
+              <Typography variant="caption" sx={{ display: "block", mt: 0.75 }}>
+                Domain cookies found does not guarantee that the login is still valid; test the actual Douyin/TikTok URL in Video Download next.
               </Typography>
             )}
           </Alert>
