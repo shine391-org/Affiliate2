@@ -14,7 +14,6 @@ from sqlalchemy import select
 from backend.database import AsyncSessionLocal
 from backend.models.user_settings import UserSettings
 from backend.core.crypto import encrypt, decrypt_safe
-from backend.core.http_utils import get_user_agent
 from backend.config import settings as app_settings
 from backend.services.download_browser_session import (
     SUPPORTED_DOWNLOAD_BROWSERS,
@@ -39,9 +38,7 @@ class SettingsResponse(BaseModel):
     youtube_api_key_set: bool = False
     huggingface_token_set: bool = False
 
-    # OAuth / cookie status
-    douyin_cookie_set: bool = False
-    tiktok_cookie_set: bool = False
+    # OAuth / browser-session status
     download_cookie_browser: str = "auto"
     download_cookie_profile: Optional[str] = None
     youtube_channel_title: Optional[str] = None
@@ -125,8 +122,6 @@ async def get_settings():
         ai_api_key_set=bool(s.ai_api_key_encrypted),
         youtube_api_key_set=bool(s.youtube_api_key_encrypted),
         huggingface_token_set=bool(s.huggingface_token_encrypted),
-        douyin_cookie_set=bool(s.douyin_cookie_encrypted),
-        tiktok_cookie_set=bool(s.tiktok_cookie_encrypted),
         download_cookie_browser=normalize_download_browser(s.download_cookie_browser),
         download_cookie_profile=normalize_download_profile(s.download_cookie_profile),
         youtube_channel_title=s.youtube_channel_title,
@@ -512,222 +507,3 @@ async def test_download_session(body: DownloadSessionProbeRequest):
 
     from backend.services.ytdlp_service import probe_browser_session
     return await probe_browser_session(browser, profile)
-
-
-@router.post("/settings/test-cookie")
-async def test_cookie(body: dict):
-    """Test a platform session cookie."""
-    platform = body.get("platform", "")
-    cookie = body.get("cookie", "")
-    if not cookie:
-        return {"ok": False, "error": "No cookie provided"}
-
-    if platform == "tiktok":
-        try:
-            import httpx
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(
-                    "https://www.tiktok.com/api/user/detail/",
-                    cookies={"sessionid": cookie},
-                    headers={"User-Agent": get_user_agent()},
-                )
-                if resp.status_code == 200 and resp.json().get("userInfo"):
-                    return {"ok": True}
-                return {"ok": False, "error": "Cookie appears invalid"}
-        except Exception as e:
-            return {"ok": False, "error": str(e)}
-
-    elif platform == "douyin":
-        try:
-            import httpx
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(
-                    "https://www.douyin.com/aweme/v1/web/user/profile/self/",
-                    cookies={"sessionid": cookie},
-                    headers={"User-Agent": get_user_agent()},
-                )
-                if resp.status_code == 200:
-                    return {"ok": True}
-                return {"ok": False, "error": "Cookie appears invalid"}
-        except Exception as e:
-            return {"ok": False, "error": str(e)}
-
-    return {"ok": False, "error": f"Unknown platform: {platform}"}
-
-
-@router.get("/settings/health")
-async def get_health():
-    """Return system health status."""
-    import shutil
-    import subprocess
-
-    health = {}
-
-    # Canonical downloader browser-session health. Old per-platform cookie
-    # fields remain for backward compatibility but no longer define downloader
-    # readiness.
-    async with AsyncSessionLocal() as db:
-        res = await db.execute(
-            select(UserSettings).where(UserSettings.user_id == "local")
-        )
-        s = res.scalar_one_or_none()
-
-    from backend.services.ytdlp_service import browser_session_health
-    health["download_session"] = browser_session_health(
-        normalize_download_browser(getattr(s, "download_cookie_browser", None)),
-        normalize_download_profile(getattr(s, "download_cookie_profile", None)),
-    )
-
-    # ImageMagick
-    if shutil.which("magick") or shutil.which("convert"):
-        health["imagemagick"] = {"status": "ok"}
-    else:
-        health["imagemagick"] = {"status": "not_found"}
-
-    # yt-dlp
-    try:
-        r = subprocess.run(["yt-dlp", "--version"], capture_output=True, text=True, timeout=5)
-        health["ytdlp"] = {"status": "ok", "version": r.stdout.strip()}
-    except Exception:
-        health["ytdlp"] = {"status": "not_found"}
-
-    # AI provider configured (BYOK)
-    has_ai_key = bool(
-        app_settings.ANTHROPIC_API_KEY
-        or app_settings.OPENAI_API_KEY
-        or (s and s.ai_api_key_encrypted)
-    )
-    health["ai_provider"] = {"status": "configured" if has_ai_key else "not_configured"}
-
-    # YouTube API key (BYOK — per-user encrypted or .env fallback)
-    has_youtube_key = bool(
-        app_settings.YOUTUBE_API_KEY
-        or (s and s.youtube_api_key_encrypted)
-    )
-    health["youtube_api_key"] = {"status": "configured" if has_youtube_key else "not_configured"}
-
-    # YouTube quota
-    from backend.services.youtube_quota import _usage_today, DAILY_LIMIT
-    health["youtube_quota"] = {"used": _usage_today.get("count", 0), "limit": DAILY_LIMIT}
-
-    return health
-
-
-@router.post("/settings/open-folder")
-async def open_folder(body: dict):
-    """Open a storage folder in the OS file manager."""
-    import platform, subprocess
-    from pathlib import Path
-
-    folder_map = {
-        "videos": app_settings.VIDEOS_DIR,
-        "audio": app_settings.AUDIO_DIR,
-        "generated": app_settings.GENERATED_DIR,
-        "thumbnails": app_settings.THUMBNAILS_DIR,
-        "storage": app_settings.STORAGE_ROOT,
-    }
-
-    folder_key = body.get("folder", "storage")
-    target = folder_map.get(folder_key, app_settings.STORAGE_ROOT)
-    target = Path(target).resolve()
-    target.mkdir(parents=True, exist_ok=True)
-
-    system = platform.system()
-    try:
-        if system == "Darwin":
-            subprocess.Popen(["open", str(target)])
-        elif system == "Windows":
-            subprocess.Popen(["explorer", str(target)])
-        else:
-            subprocess.Popen(["xdg-open", str(target)])
-        return {"ok": True, "path": str(target)}
-    except Exception as e:
-        return {"ok": False, "error": str(e), "path": str(target)}
-
-
-# ── Motion Graphics (HyperFrames) — on-demand Node plugin ─────────────────────
-# Nothing motion-related ships in the base install. The portable Node runtime
-# and the HyperFrames npm package are downloaded on opt-in and live entirely in
-# the user's data dir, so the feature can be added and removed without touching
-# the app. Rendering is local (headless Chrome + FFmpeg) and costs nothing.
-
-@router.get("/settings/motion-graphics/status")
-async def motion_graphics_status():
-    """Plugin install state for the Settings card to poll (every 2s)."""
-    from backend.services.hyperframes_service import HyperFramesService
-    return HyperFramesService.get_install_state()
-
-
-@router.post("/settings/motion-graphics/install")
-async def motion_graphics_install():
-    """Trigger the plugin install (portable Node + npm install) in the
-    background. Idempotent; returns immediately. The UI polls status for
-    progress."""
-    from backend.services.hyperframes_service import HyperFramesService
-    return await HyperFramesService.install_plugin()
-
-
-@router.post("/settings/motion-graphics/uninstall")
-async def motion_graphics_uninstall():
-    """Remove the entire motion/ plugin dir."""
-    from backend.services.hyperframes_service import HyperFramesService
-    return await HyperFramesService.uninstall_plugin()
-
-
-@router.post("/settings/motion-graphics/test")
-async def motion_graphics_test():
-    """End-to-end smoke render of the bundled kinetic-hook template.
-
-    Confirms the whole chain (portable Node → HyperFrames CLI → headless Chrome
-    → FFmpeg) still produces a real MP4. The status is always 200 — the `ok`
-    flag carries the verdict, so the UI renders a result rather than an error.
-    """
-    import time as _time
-    from backend.services.hyperframes_service import HyperFramesService
-    from backend.services.motion_render_service import MotionRenderService
-
-    if not HyperFramesService.is_installed():
-        return {
-            "ok": False, "latency_ms": 0, "output_size_kb": None,
-            "error": "not_installed",
-            "detail": "Motion Graphics isn't installed yet. Click Install above first.",
-        }
-
-    start = _time.monotonic()
-    try:
-        out = await MotionRenderService.render(
-            template_id="kinetic_hook",
-            variables={
-                "kicker": "MOTION GRAPHICS",
-                "title": "It Works",
-                "subtitle": "rendered locally",
-                "accent": "#ffd60a",
-                "bg": "#0b0b14",
-            },
-            aspect="9:16",
-            # A verification render, not a deliverable: draft quality and no
-            # supersample keep it fast.
-            quality="draft",
-            supersample=False,
-        )
-        latency_ms = round((_time.monotonic() - start) * 1000)
-        size_kb = round(out.stat().st_size / 1024)
-        # Smoke test only — don't keep the output around.
-        try:
-            out.unlink(missing_ok=True)
-        except OSError:
-            pass
-        return {
-            "ok": True, "latency_ms": latency_ms,
-            "output_size_kb": size_kb, "error": None, "detail": None,
-        }
-    except Exception as e:
-        latency_ms = round((_time.monotonic() - start) * 1000)
-        logger.info(
-            "Motion Graphics smoke test failed in %dms: %s: %s",
-            latency_ms, type(e).__name__, str(e)[:200],
-        )
-        return {
-            "ok": False, "latency_ms": latency_ms, "output_size_kb": None,
-            "error": type(e).__name__, "detail": str(e)[:200],
-        }
