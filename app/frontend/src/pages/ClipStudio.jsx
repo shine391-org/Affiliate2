@@ -336,17 +336,24 @@ function ClipCardImpl({ clip, isSelected, onSelect }) {
 // is why the card takes `onSelect(clip)` instead.
 const ClipCard = memo(ClipCardImpl)
 
-export default function ClipStudio() {
+export default function ClipStudio({ workflow = "manual" }) {
   useDocumentTitle("Studio")
   const [searchParams] = useSearchParams()
   const requestedSourceId = searchParams.get("source")
+  const smartCut = workflow === "smart-cut"
+  const outputSourceType = smartCut ? "smart_cut" : "clip_extraction"
+  const workspaceTitle = smartCut ? "Smart Cut" : "Clip Studio"
   const showSnackbar = useAppStore((s) => s.showSnackbar)
   const activeJobs = useAppStore((s) => s.activeJobs)
 
-  // Track clip extraction jobs (restored from API on page load via useWebSocket)
-  const isClipJob = (j) =>
-    (j.message && j.message.toLowerCase().includes("clip"))
-    || (j.inputData && j.inputData.type === "clip_extraction")
+  // Track only jobs owned by this workspace. Smart Cut and legacy Clipper
+  // share one renderer, but their persisted producer identities must not make
+  // one workspace look busy because the other is rendering.
+  const isClipJob = (j) => {
+    const type = j.inputData?.type
+    if (type) return type === outputSourceType
+    return !smartCut && Boolean(j.message?.toLowerCase().includes("clip"))
+  }
   const clipJobs = Object.values(activeJobs).filter(isClipJob)
   const clipJobFilter = (j) => j.status === "running" && isClipJob(j)
   // Both Cut buttons disable while a cut is in flight. A suggestion search is
@@ -417,7 +424,7 @@ export default function ClipStudio() {
         // Filter server-side: an unfiltered page of 100 could be entirely
         // recent non-clip rows, rendering "No clips yet" over a library full
         // of clips.
-        http.get("/api/videos", { params: { limit: 100, source_type: "clip_extraction" } }),
+        http.get("/api/videos", { params: { limit: 100, source_type: outputSourceType } }),
       ])
       // Show all downloaded videos (sorted longest first — best for clipping)
       const downloadedVideos = (srcRes.data?.videos || srcRes.data || [])
@@ -428,8 +435,9 @@ export default function ClipStudio() {
         setCenterMode("bench")
       }
 
-      // Only show clip_extraction videos
-      const clipVideos = (clipRes.data.videos || []).filter(v => v.source_type === "clip_extraction")
+      // Each Studio workflow sees only derivatives it owns. Both still come
+      // from the same extraction/render path.
+      const clipVideos = (clipRes.data.videos || []).filter(v => v.source_type === outputSourceType)
       setClips(clipVideos)
       setClipTotal(typeof clipRes.data.total === "number" ? clipRes.data.total : null)
 
@@ -440,7 +448,7 @@ export default function ClipStudio() {
     } finally {
       setLoading(false)
     }
-  }, [requestedSourceId])
+  }, [requestedSourceId, outputSourceType])
 
   useEffect(() => { fetchData() }, [fetchData])
 
@@ -566,11 +574,14 @@ export default function ClipStudio() {
         if (opts.genre) payload.genre = opts.genre
       }
 
+      if (smartCut) payload.output_source_type = "smart_cut"
       await http.post(`/api/downloaded/${videoId}/extract-clips`, payload)
       showSnackbar(
-        isManual
-          ? `Cutting ${opts.time_ranges?.length || "your"} clip${opts.time_ranges?.length !== 1 ? "s" : ""} at the times you picked`
-          : "Extracting viral clips — AI will find the best moments",
+        smartCut
+          ? `Rendering ${opts.time_ranges?.length || "your"} approved Smart Cut${opts.time_ranges?.length !== 1 ? "s" : ""}`
+          : isManual
+            ? `Cutting ${opts.time_ranges?.length || "your"} clip${opts.time_ranges?.length !== 1 ? "s" : ""} at the times you picked`
+            : "Extracting viral clips — AI will find the best moments",
         "success",
       )
     } catch (e) {
@@ -708,10 +719,10 @@ export default function ClipStudio() {
           <ContentCutIcon sx={{ color: "primary.main", fontSize: 26 }} />
           <Box>
             <Typography variant="h5" sx={{ fontWeight: 700, letterSpacing: -0.3 }}>
-              Clip Studio
+              {workspaceTitle}
             </Typography>
             <Typography variant="caption" sx={{ color: "text.secondary" }}>
-              {clipTotal ?? clips.length} clip{(clipTotal ?? clips.length) !== 1 ? "s" : ""} from {sources.length} video{sources.length !== 1 ? "s" : ""}{clipTotal > clips.length ? ` · showing latest ${clips.length}` : ""}
+              {clipTotal ?? clips.length} {smartCut ? "approved cut" : "clip"}{(clipTotal ?? clips.length) !== 1 ? "s" : ""} from {sources.length} video{sources.length !== 1 ? "s" : ""}{clipTotal > clips.length ? ` · showing latest ${clips.length}` : ""}
             </Typography>
           </Box>
         </Stack>
@@ -719,7 +730,7 @@ export default function ClipStudio() {
         <Stack direction="row" spacing={1}>
           {/* Search */}
           <TextField
-            placeholder="Search clips..."
+            placeholder={smartCut ? "Search Smart Cuts..." : "Search clips..."}
             size="small"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
@@ -789,15 +800,17 @@ export default function ClipStudio() {
                   sx={{ textTransform: "none", whiteSpace: "nowrap", fontWeight: 700 }}
                 >
                   {clipJobRunning
-                    ? "Cutting…"
+                    ? "Rendering…"
                     : cutCount
-                      ? `Cut ${cutCount} clip${cutCount !== 1 ? "s" : ""}`
-                      : "Cut clips"}
+                      ? smartCut
+                        ? `Create ${cutCount} Smart Cut${cutCount !== 1 ? "s" : ""}`
+                        : `Cut ${cutCount} clip${cutCount !== 1 ? "s" : ""}`
+                      : smartCut ? "Create Smart Cuts" : "Cut clips"}
                 </Button>
               </span>
             </Tooltip>
           )}
-          {selectedSourceId && selectedSourceId !== "all" && (
+          {!smartCut && selectedSourceId && selectedSourceId !== "all" && (
             <Tooltip describeChild title="AI picks the moments and cuts them straight away — no review step, any number of clips. To see the picks first and adjust them, use Ask AI on the bench.">
               <span>
                 <Button
@@ -820,7 +833,7 @@ export default function ClipStudio() {
       </Box>
 
       {/* ── Active Jobs Progress ──────────────────────────────── */}
-      <ActiveJobsBanner filter={clipJobFilter} fallbackLabel="Extracting clips…" />
+      <ActiveJobsBanner filter={clipJobFilter} fallbackLabel={smartCut ? "Rendering approved Smart Cuts…" : "Extracting clips…"} />
 
       {/* ── Main Layout ─────────────────────────────────────── */}
       <Box sx={{ flex: 1, display: "flex", overflow: "hidden" }}>
@@ -829,7 +842,7 @@ export default function ClipStudio() {
         <Box sx={{
           width: 200, flexShrink: 0, overflow: "auto",
           borderRight: 1, borderColor: "divider",
-          p: 1.5, display: "flex", flexDirection: "column", gap: 0.5,
+          p: 1.5, display: smartCut ? "none" : "flex", flexDirection: "column", gap: 0.5,
         }}>
           <Typography variant="overline" sx={{ color: "text.secondary", px: 0.5, fontSize: "0.65rem" }}>
             Source Videos
@@ -938,6 +951,7 @@ export default function ClipStudio() {
               settings={clipSettings.settings}
               onSettings={clipSettings.update}
               onOpenDialog={() => { setExtractTarget(benchSource); setExtractDialogOpen(true) }}
+              allowAutoCut={!smartCut}
             />
           ) : selectedClip ? (
             <Box sx={{ flex: 1, overflow: "auto", p: 3 }}>
@@ -1153,14 +1167,16 @@ export default function ClipStudio() {
             }}>
               <ContentCutIcon sx={{ fontSize: 64, color: "text.disabled", opacity: 0.3 }} />
               <Typography variant="h6" sx={{ color: "text.disabled" }}>
-                {clips.length === 0 ? "No clips yet" : "Select a clip to preview"}
+                {clips.length === 0 ? (smartCut ? "No Smart Cuts yet" : "No clips yet") : "Select a clip to preview"}
               </Typography>
               <Typography variant="body2" sx={{ color: "text.disabled", textAlign: "center", maxWidth: 360 }}>
                 {clips.length === 0
-                  ? "Select a source video and click 'Extract Clips' to get started. AI will find the most viral moments."
+                  ? smartCut
+                    ? "Select a source in the Studio header, ask AI for proposals, adjust the ranges, then create only the cuts you approve."
+                    : "Select a source video and click 'Extract Clips' to get started. AI will find the most viral moments."
                   : "Click on a clip in the filmstrip below to preview and manage it."}
               </Typography>
-              {clips.length === 0 && sources.length > 0 && (
+              {!smartCut && clips.length === 0 && sources.length > 0 && (
                 <Button variant="contained" startIcon={<ContentCutIcon />}
                   onClick={() => { setExtractTarget(sources[0]); setExtractDialogOpen(true) }}>
                   Extract from {sources[0].title?.slice(0, 30) || "first video"}
@@ -1177,7 +1193,7 @@ export default function ClipStudio() {
           }}>
             <Stack direction="row" spacing={0.5} alignItems="center" sx={{ px: 2, pt: 1.5, pb: 0.5 }}>
               <Typography variant="overline" sx={{ color: "text.secondary", fontSize: "0.65rem", flexShrink: 0 }}>
-                Clips ({filteredClips.length})
+                {smartCut ? "Smart Cuts" : "Clips"} ({filteredClips.length})
               </Typography>
               <Box sx={{ flex: 1 }} />
               {/* The "Extract Clips" button that used to sit here is now
@@ -1197,7 +1213,9 @@ export default function ClipStudio() {
               {filteredClips.length === 0 ? (
                 <Box sx={{ py: 3, px: 4, textAlign: "center", width: "100%" }}>
                   <Typography variant="caption" sx={{ color: "text.disabled" }}>
-                    {selectedSourceId ? "No clips from this video yet" : "No clips to display"}
+                    {selectedSourceId
+                      ? smartCut ? "No approved Smart Cuts from this video yet" : "No clips from this video yet"
+                      : smartCut ? "Select a source in the Studio header" : "No clips to display"}
                   </Typography>
                 </Box>
               ) : (
@@ -1215,9 +1233,9 @@ export default function ClipStudio() {
         </Box>
       </Box>
 
-      {/* Extract Dialog */}
+      {/* Extract Dialog — legacy Clipper only. Smart Cut is review-first. */}
       <ExtractDialog
-        open={extractDialogOpen}
+        open={!smartCut && extractDialogOpen}
         onClose={() => setExtractDialogOpen(false)}
         video={extractTarget}
         onExtract={handleExtract}
