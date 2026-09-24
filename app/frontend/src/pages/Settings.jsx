@@ -1,6 +1,6 @@
 import {
   Box, Typography, Stack, Card, CardContent,
-  Button, alpha, useTheme,
+  Button, Tab, Tabs, alpha, useTheme,
 } from "@mui/material"
 import MonitorHeartIcon from "@mui/icons-material/MonitorHeartOutlined"
 import KeyIcon from "@mui/icons-material/VpnKeyOutlined"
@@ -15,6 +15,8 @@ import LocalizationProfilesSection from "../components/settings/LocalizationProf
 import ServiceKeysSection from "../components/settings/ServiceKeysSection"
 import useSettings from "../hooks/useSettings"
 import useDocumentTitle from "../hooks/useDocumentTitle"
+import { useSearchParams } from "react-router-dom"
+import { SETTINGS_SECTIONS, normalizeSettingsSection } from "../settingsModel"
 
 function Section({ icon, title, description, children, accentColor }) {
   const theme = useTheme()
@@ -65,6 +67,16 @@ function Section({ icon, title, description, children, accentColor }) {
 export default function Settings() {
   useDocumentTitle("Settings")
   const { settings, loading, error, fetchSettings, updateSettings } = useSettings()
+  const [params, setParams] = useSearchParams()
+  const section = normalizeSettingsSection(params.get("section"))
+
+  const setSection = (_, value) => {
+    setParams((previous) => {
+      const next = new URLSearchParams(previous)
+      next.set("section", value)
+      return next
+    }, { replace: true })
+  }
 
   if (loading) return (
     <Box sx={{ p: 4, display: "flex", justifyContent: "center" }}>
@@ -95,74 +107,94 @@ export default function Settings() {
               Settings
             </Typography>
             <Typography variant="caption" sx={{ color: "text.secondary" }}>
-              Manage your AI provider and system health
+              Connections, reusable profiles, voices, service keys and system health
             </Typography>
           </Box>
         </Stack>
       </Box>
 
-      {/* ── Scrollable content ── */}
+      <Box sx={{ px: { xs: 1, md: 3 }, borderBottom: 1, borderColor: "divider", bgcolor: "background.paper", flexShrink: 0 }}>
+        <Tabs
+          value={section}
+          onChange={setSection}
+          variant="scrollable"
+          scrollButtons="auto"
+          aria-label="Settings sections"
+        >
+          {SETTINGS_SECTIONS.map((item) => <Tab key={item.value} value={item.value} label={item.label} />)}
+        </Tabs>
+      </Box>
+
+      {/* One configuration owner at a time — no endless card wall. */}
       <Box sx={{ flex: 1, overflow: "auto", p: { xs: 2, md: 3 } }}>
-      <Stack spacing={3} sx={{ maxWidth: 900, mx: "auto" }}>
-        {/* AI Provider (BYOK) */}
-        <Section
-          icon={<SmartToyIcon sx={{ fontSize: 20 }} />}
-          title="AI Provider"
-          description="Cloud or local AI — editable model IDs, OpenAI-compatible endpoints, encrypted BYOK"
-          accentColor="#0d9f6e"
-        >
-          <AIProviderSection settings={settings} updateSettings={updateSettings} />
-        </Section>
+        <Box sx={{ maxWidth: 920, mx: "auto" }}>
+          {section === "ai" && (
+            <Section
+              icon={<SmartToyIcon sx={{ fontSize: 20 }} />}
+              title="AI Connections"
+              description="Provider, endpoint, credentials and global/default model"
+              accentColor="#0d9f6e"
+            >
+              <AIProviderSection settings={settings} updateSettings={updateSettings} />
+            </Section>
+          )}
 
-        <Section
-          icon={<RecordVoiceOverOutlinedIcon sx={{ fontSize: 20 }} />}
-          title="Localization Profiles"
-          description="Translation fidelity, separate C6/C7 model routing, glossary, ASR and dubbing policy"
-          accentColor="#0f766e"
-        >
-          <LocalizationProfilesSection settings={settings} />
-        </Section>
+          {section === "localization" && (
+            <Section
+              icon={<RecordVoiceOverOutlinedIcon sx={{ fontSize: 20 }} />}
+              title="Localization Profiles"
+              description="Reusable C6/C7 models, language style, ASR, timing, audio, render and QC defaults"
+              accentColor="#0f766e"
+            >
+              <LocalizationProfilesSection settings={settings} />
+            </Section>
+          )}
 
-        <Section
-          icon={<RecordVoiceOverOutlinedIcon sx={{ fontSize: 20 }} />}
-          title="Localization Voice / TTS"
-          description="HQ TTS provider, model, endpoint and BYOK credentials for donor-derived dubbing"
-          accentColor="#9333ea"
-        >
-          <TTSProviderSection settings={settings} updateSettings={updateSettings} />
-        </Section>
+          {section === "tts" && (
+            <Section
+              icon={<RecordVoiceOverOutlinedIcon sx={{ fontSize: 20 }} />}
+              title="TTS / Voices"
+              description="Global TTS connection and credentials. Profiles reference these defaults without duplicating secrets."
+              accentColor="#9333ea"
+            >
+              <TTSProviderSection settings={settings} updateSettings={updateSettings} />
+            </Section>
+          )}
 
-        {/* Service API Keys (BYOK) */}
-        <Section
-          icon={<KeyIcon sx={{ fontSize: 20 }} />}
-          title="Service API Keys"
-          description="Per-service API keys (YouTube, etc.) — encrypted locally, override .env at runtime"
-          accentColor="#2563eb"
-        >
-          <ServiceKeysSection settings={settings} updateSettings={updateSettings} />
-        </Section>
+          {section === "services" && (
+            <Section
+              icon={<KeyIcon sx={{ fontSize: 20 }} />}
+              title="Source Providers / Service Keys"
+              description="Per-service credentials used by discovery and supported integrations"
+              accentColor="#2563eb"
+            >
+              <ServiceKeysSection settings={settings} updateSettings={updateSettings} />
+            </Section>
+          )}
 
-        {/* Optional add-ons */}
-        <Section
-          icon={<MovieFilterIcon sx={{ fontSize: 20 }} />}
-          title="Add-ons"
-          description="Optional engines that install on demand into your data folder"
-          accentColor="#7c3aed"
-        >
-          <MotionGraphicsSection />
-        </Section>
+          {section === "addons" && (
+            <Section
+              icon={<MovieFilterIcon sx={{ fontSize: 20 }} />}
+              title="Add-ons"
+              description="Optional engines installed on demand into the data folder"
+              accentColor="#7c3aed"
+            >
+              <MotionGraphicsSection />
+            </Section>
+          )}
 
-        {/* System Health */}
-        <Section
-          icon={<MonitorHeartIcon sx={{ fontSize: 20 }} />}
-          title="System Health"
-          description="Service status, dependency checks, and storage usage"
-          accentColor="#dc2626"
-        >
-          <HealthDashboard />
-        </Section>
-      </Stack>
-      </Box>{/* end scrollable content */}
+          {section === "health" && (
+            <Section
+              icon={<MonitorHeartIcon sx={{ fontSize: 20 }} />}
+              title="System Health"
+              description="Dependency status, provider availability and storage/runtime checks"
+              accentColor="#dc2626"
+            >
+              <HealthDashboard />
+            </Section>
+          )}
+        </Box>
+      </Box>
     </Box>
   )
 }
