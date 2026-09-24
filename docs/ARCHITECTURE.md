@@ -309,15 +309,33 @@ Not a synonym for Smart Cut.
 ```
 source
  → canonical transcript
- → scene/shot map
+ → deterministic physical shot map
+ → representative frames + multimodal shot understanding
  → creative VN script beats
- → beat ↔ source/other-material mapping
- → storyboard
+ → beat ↔ source/Library/stock/motion asset candidates
+ → persisted storyboard
  → HUMAN APPROVAL
- → automated composition
+ → canonical composition/render
  → timed voice/captions/audio
- → final review
+ → QC / final review
 ```
+
+Phase-E donor boundary:
+
+- PySceneDetect owns initial physical shot-boundary detection behind one
+  Affiliate2 scene-map interface; direct TransNetV2 is deferred unless real
+  media demonstrates a need, and then remains behind the same interface.
+- OpenCreator is a contract reference for stable beat/shot IDs, strict
+  storyboard validation, artifact lineage and stale-plan rejection.
+- MoneyPrinterTurbo is a reference for provider-neutral stock/local/generated
+  material acquisition and allocation; it is not a runtime dependency.
+- ViralMint Stock/Pexels/B-roll/Motion capabilities remain contextual asset and
+  composition primitives rather than becoming a second Creative Remake app.
+- Remotion is reference-only; the existing FFmpeg + Motion stack remains the
+  renderer ownership boundary.
+
+Physical shot boundaries are deterministic media facts. AI may describe, rank
+or map those shots, but it must not invent the source cut coordinates.
 
 Source-video timestamps and output-timeline timestamps must never share one ambiguous field.
 
