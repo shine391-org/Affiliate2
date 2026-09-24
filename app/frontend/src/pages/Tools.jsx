@@ -6,6 +6,7 @@ import useDocumentTitle from "../hooks/useDocumentTitle"
 import PageHero from "../components/PageHero"
 import { alpha } from "@mui/material/styles"
 import { GlassCard } from "../utils/glassFx"
+import { WORKFLOW_OWNED_UTILITY_IDS } from "../utilitiesModel"
 import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined"
 import SubtitlesOutlinedIcon from "@mui/icons-material/SubtitlesOutlined"
 import AspectRatioOutlinedIcon from "@mui/icons-material/AspectRatioOutlined"
@@ -348,8 +349,9 @@ function CategorySection({ category, tools, onPick }) {
 export default function Tools() {
   useDocumentTitle("Utilities")
   const navigate = useNavigate()
+  const visibleTools = TOOLS.filter((tool) => !WORKFLOW_OWNED_UTILITY_IDS.has(tool.id))
   const pick = (id) => {
-    const tool = TOOLS.find((t) => t.id === id)
+    const tool = visibleTools.find((t) => t.id === id)
     navigate(tool?.route || `/utilities/${id}`)
   }
 
@@ -358,7 +360,7 @@ export default function Tools() {
   const [query, setQuery] = useState("")
   const q = query.trim().toLowerCase()
   const matches = q
-    ? TOOLS.filter((t) => [t.title, t.description, t.id].some((s) => (s || "").toLowerCase().includes(q)))
+    ? visibleTools.filter((t) => [t.title, t.description, t.id].some((s) => (s || "").toLowerCase().includes(q)))
     : null
 
   return (
@@ -379,7 +381,7 @@ export default function Tools() {
             size="small"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search tools — e.g. caption, reframe, speed, translate…"
+            placeholder="Search utilities — e.g. caption, reframe, speed, download…"
             sx={{ mb: 2.5 }}
             slotProps={{
               input: {
@@ -414,7 +416,7 @@ export default function Tools() {
             <>
               {/* Categories */}
               {CATEGORIES.map((cat, i) => {
-                const tools = TOOLS.filter((t) => t.category === cat.id)
+                const tools = visibleTools.filter((t) => t.category === cat.id)
                 if (!tools.length) return null
                 return (
                   <Box key={cat.id}>
