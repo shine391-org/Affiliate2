@@ -9,20 +9,109 @@ import useDocumentTitle from "../hooks/useDocumentTitle"
 import ClipStudio from "./ClipStudio"
 import StudioLocalize from "./StudioLocalize"
 import { STUDIO_MODES, buildStudioModeHref, studioModeForPath } from "../studioModel"
+import {
+  STUDIO_ASSET_PROVIDERS,
+  STUDIO_READINESS,
+  buildStudioSourceContext,
+  studioAssetProviderHref,
+} from "../studioReadinessModel"
 
-function ReservedMode({ mode, source }) {
+function ReservedMode({ mode, source, context, navigate }) {
+  const contract = STUDIO_READINESS[mode]
   const smart = mode === "smart-cut"
+  const transcript = context?.transcript
+  const timeline = context?.timeline
+
   return (
-    <Stack alignItems="center" justifyContent="center" spacing={2} sx={{ minHeight: 360, p: 3, textAlign: "center" }}>
-      <MovieCreationOutlinedIcon sx={{ fontSize: 52, color: "text.disabled" }} />
-      <Typography variant="h5" sx={{ fontWeight: 700 }}>{smart ? "Smart Cut" : "Creative Remake"}</Typography>
-      <Alert severity="info" variant="outlined" sx={{ maxWidth: 620 }}>
-        {smart
-          ? "Planned for Phase D. It will reuse this source, transcript and canonical timeline. No Smart Cut processing is implemented in this phase."
-          : "Planned for Phase E. It will reuse this project and require storyboard approval before expensive rendering. No remake generation is implemented in this phase."}
-      </Alert>
-      {source && <Chip label={`Reserved source: ${source.title || source.id}`} variant="outlined" />}
-    </Stack>
+    <Box sx={{ maxWidth: 1040, mx: "auto", p: { xs: 2, md: 3 } }}>
+      <Stack spacing={2.25}>
+        <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems={{ md: "center" }}>
+          <MovieCreationOutlinedIcon sx={{ fontSize: 48, color: "text.disabled" }} />
+          <Box sx={{ flex: 1 }}>
+            <Typography variant="h5" sx={{ fontWeight: 800 }}>{contract.title}</Typography>
+            <Typography variant="body2" color="text.secondary">{contract.promise}</Typography>
+          </Box>
+          <Chip label={`Phase ${contract.phase} readiness`} variant="outlined" />
+        </Stack>
+
+        <Alert severity="info" variant="outlined">
+          This is a readiness surface only. No {smart ? "Smart Cut" : "Creative Remake"} processing exists yet; Phase {contract.phase} must plug into this same Studio/source contract instead of creating another app.
+        </Alert>
+
+        {!source ? (
+          <Alert severity="warning">Select a source from Library first. Phase {contract.phase} must reuse that persisted source ID rather than upload/import it again.</Alert>
+        ) : (
+          <>
+            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>Shared source contract</Typography>
+              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                <Chip size="small" label={`source ${context?.source_id || source.id}`} />
+                <Chip size="small" variant="outlined" label={context?.library_key || `dl:${source.id}`} />
+                {context?.duration_ms != null && <Chip size="small" variant="outlined" label={`${(context.duration_ms / 1000).toFixed(2)}s timeline`} />}
+                {source.platform && <Chip size="small" variant="outlined" label={source.platform} />}
+              </Stack>
+            </Paper>
+
+            {smart ? (
+              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 1.5 }}>
+                <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                  <Typography variant="subtitle2">Canonical transcript</Typography>
+                  <Typography variant="body2" sx={{ mt: 0.75 }}>
+                    {transcript?.available
+                      ? `${transcript.segments.length} timed segments · ${transcript.language || "language unknown"} · ${transcript.source || "source unknown"}`
+                      : "No persisted transcript is available for this source yet."}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Phase D may create missing transcript data through the canonical ASR service, but must not add another ASR owner.
+                  </Typography>
+                </Paper>
+                <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                  <Typography variant="subtitle2">Timeline safety</Typography>
+                  <Typography variant="body2" sx={{ mt: 0.75 }}>
+                    {timeline?.transcript_end_ms != null
+                      ? `Transcript ends at ${(timeline.transcript_end_ms / 1000).toFixed(2)}s · ${timeline.within_source ? "inside source timeline" : "timeline mismatch"}`
+                      : "No timed transcript to validate yet."}
+                  </Typography>
+                  {timeline && !timeline.within_source && <Alert severity="error" sx={{ mt: 1 }}>Transcript extends beyond the canonical source. Phase D must treat this as a provenance/timeline blocker.</Alert>}
+                </Paper>
+              </Box>
+            ) : (
+              <>
+                <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                  <Typography variant="subtitle2">Storyboard approval contract</Typography>
+                  <Typography variant="body2" sx={{ mt: 0.75 }}>
+                    Phase E must persist source → scene map → creative beats → asset map → storyboard, then stop for explicit human approval before composition/render.
+                  </Typography>
+                  <Button size="small" sx={{ mt: 1 }} onClick={() => navigate("/review?filter=storyboard")}>Open storyboard review queue</Button>
+                </Paper>
+                <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                  <Typography variant="subtitle2">Contextual asset providers</Typography>
+                  <Typography variant="caption" color="text.secondary">Existing providers stay secondary capabilities; Creative Remake may call them from this project context.</Typography>
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ mt: 1.25 }}>
+                    {STUDIO_ASSET_PROVIDERS.map((provider) => (
+                      <Button
+                        key={provider.id}
+                        variant="outlined"
+                        onClick={() => navigate(studioAssetProviderHref(provider, source.id))}
+                      >
+                        {provider.label}
+                      </Button>
+                    ))}
+                  </Stack>
+                </Paper>
+              </>
+            )}
+
+            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+              <Typography variant="subtitle2">Reserved workflow</Typography>
+              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+                {contract.steps.map((step, index) => <Chip key={step} size="small" variant="outlined" label={`${index + 1}. ${step.replaceAll("-", " ")}`} />)}
+              </Stack>
+            </Paper>
+          </>
+        )}
+      </Stack>
+    </Box>
   )
 }
 
@@ -34,6 +123,7 @@ export default function Studio() {
   const openActivity = useAppStore((s) => s.openActivity)
   const [sources, setSources] = useState([])
   const [loading, setLoading] = useState(true)
+  const [sourceDetail, setSourceDetail] = useState(null)
   const mode = studioModeForPath(location.pathname)
   const sourceId = params.get("source") || ""
 
@@ -48,7 +138,19 @@ export default function Studio() {
   }, [])
 
   useEffect(() => { loadSources() }, [loadSources])
-  const source = useMemo(() => sources.find((item) => item.id === sourceId) || null, [sources, sourceId])
+  const sourceSummary = useMemo(() => sources.find((item) => item.id === sourceId) || null, [sources, sourceId])
+
+  useEffect(() => {
+    if (!sourceId) { setSourceDetail(null); return }
+    let alive = true
+    http.get(`/api/downloaded/${sourceId}`)
+      .then(({ data }) => { if (alive) setSourceDetail(data) })
+      .catch(() => { if (alive) setSourceDetail(null) })
+    return () => { alive = false }
+  }, [sourceId])
+
+  const source = sourceDetail?.id === sourceId ? sourceDetail : sourceSummary
+  const sourceContext = useMemo(() => buildStudioSourceContext(source), [source])
 
   const chooseSource = (id) => {
     setParams((previous) => {
@@ -110,7 +212,7 @@ export default function Studio() {
       <Box sx={{ flex: 1, minHeight: 0, overflow: mode === "manual" ? "hidden" : "auto" }}>
         {mode === "localize" && <StudioLocalize source={source} sourcesLoading={loading} />}
         {mode === "manual" && <ClipStudio />}
-        {(mode === "smart-cut" || mode === "remake") && <ReservedMode mode={mode} source={source} />}
+        {(mode === "smart-cut" || mode === "remake") && <ReservedMode mode={mode} source={source} context={sourceContext} navigate={navigate} />}
       </Box>
     </Box>
   )
