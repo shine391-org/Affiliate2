@@ -191,6 +191,45 @@ class TestSettings:
         got = client.get("/api/settings").json()
         assert got["caption_style"] == "bold" and got["music_genre"] == "cinematic"
 
+    def test_download_browser_session_round_trips(self, client):
+        r = client.post("/api/settings", json={
+            "download_cookie_browser": "edge",
+            "download_cookie_profile": "Profile 1",
+        })
+        assert r.status_code == 200, r.text
+        got = client.get("/api/settings").json()
+        assert got["download_cookie_browser"] == "edge"
+        assert got["download_cookie_profile"] == "Profile 1"
+
+    def test_unknown_download_browser_is_rejected(self, client):
+        r = client.post("/api/settings", json={"download_cookie_browser": "opera"})
+        assert r.status_code == 400
+        assert "Unsupported browser" in r.json()["detail"]
+
+    def test_download_session_probe_delegates_to_canonical_downloader(self, client, monkeypatch):
+        async def fake_probe(browser, profile):
+            return {
+                "ok": True,
+                "browser": browser,
+                "resolved_browser": browser,
+                "profile": profile,
+                "cookie_count": 12,
+                "douyin_cookie_count": 3,
+                "tiktok_cookie_count": 0,
+            }
+        monkeypatch.setattr(
+            "backend.services.ytdlp_service.probe_browser_session",
+            fake_probe,
+        )
+        r = client.post("/api/settings/download-session/test", json={
+            "browser": "edge",
+            "profile": "Default",
+        })
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["resolved_browser"] == "edge"
+        assert body["douyin_cookie_count"] == 3
+
     def test_an_unset_music_bed_reads_as_the_audible_default(self, client):
         """-20dB measured as a 0.1dB change to the finished mix, which users
         reported as "no background music". Set the column to NULL explicitly:
@@ -218,7 +257,10 @@ class TestSettings:
     def test_health_reports_the_local_toolchain(self, client):
         r = client.get("/api/settings/health")
         assert r.status_code == 200
-        assert isinstance(r.json(), dict)
+        body = r.json()
+        assert isinstance(body, dict)
+        assert "download_session" in body
+        assert "douyin_cookie" not in body and "tiktok_cookie" not in body
 
     def test_a_partial_update_leaves_other_fields_alone(self, client):
         client.post("/api/settings", json={"music_genre": "lofi"})
