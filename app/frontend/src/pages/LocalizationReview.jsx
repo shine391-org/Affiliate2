@@ -72,6 +72,7 @@ export default function LocalizationReview() {
       const next = new URLSearchParams(previous)
       next.set("filter", value)
       next.delete("job")
+      next.delete("item")
       return next
     })
   }
@@ -94,7 +95,7 @@ export default function LocalizationReview() {
       </Box>
       <Box sx={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: { xs: "1fr", md: "360px minmax(0, 1fr)" } }}>
         <Box sx={{ overflow: "auto", p: 2, borderRight: { md: 1 }, borderColor: "divider" }}>
-          {loading ? <Stack alignItems="center" sx={{ py: 5 }}><CircularProgress size={28} /></Stack> : visible.length === 0 ? <Alert severity="success">No real items match this review filter.</Alert> : <Stack spacing={1}>{visible.map((item) => <Paper key={item.id} variant="outlined" onClick={() => choose(item)} sx={{ p: 1.5, borderRadius: 2, cursor: "pointer", borderColor: selected === reviewSelectionId(item) ? "primary.main" : "divider", bgcolor: selected === reviewSelectionId(item) ? "action.selected" : "background.paper" }}><Stack direction="row" spacing={0.75} alignItems="center"><Typography variant="body2" sx={{ fontWeight: 800, flex: 1 }} noWrap>{item.source}</Typography><Chip size="small" color={item.severity} label={item.status} /></Stack><Typography variant="caption" color="text.secondary">{item.workflow} · {item.job_id}</Typography><Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>{item.categories.map((category) => <Chip key={category} size="small" variant="outlined" label={category} />)}</Stack>{item.reasons.map((reason, index) => <Typography key={index} variant="caption" color="error.main" sx={{ display: "block", mt: 0.5 }}>{reason.stage}: {reason.error || "failed"}</Typography>)}</Paper>)}</Stack>}
+          {loading ? <Stack alignItems="center" sx={{ py: 5 }}><CircularProgress size={28} /></Stack> : visible.length === 0 ? <Alert severity="success">No real items match this review filter.</Alert> : <Stack spacing={1}>{visible.map((item) => <Paper key={item.id} variant="outlined" onClick={() => choose(item)} sx={{ p: 1.5, borderRadius: 2, cursor: "pointer", borderColor: selected === reviewSelectionId(item) ? "primary.main" : "divider", bgcolor: selected === reviewSelectionId(item) ? "action.selected" : "background.paper" }}><Stack direction="row" spacing={0.75} alignItems="center"><Typography variant="body2" sx={{ fontWeight: 800, flex: 1 }} noWrap>{item.source}</Typography><Chip size="small" color={item.severity} label={item.status} /></Stack><Typography variant="caption" color="text.secondary">{item.workflow} · {item.project || reviewSelectionId(item)}</Typography><Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>{item.categories.map((category) => <Chip key={category} size="small" variant="outlined" label={category} />)}</Stack>{item.reasons.map((reason, index) => <Typography key={index} variant="caption" color="error.main" sx={{ display: "block", mt: 0.5 }}>{reason.stage}: {reason.error || "failed"}</Typography>)}</Paper>)}</Stack>}
         </Box>
         <Box sx={{ overflow: "auto", p: { xs: 1.5, md: 2.5 } }}>
           {selectedItem?.detail_kind === "localization-expert" && selectedItem.job_id ? (
