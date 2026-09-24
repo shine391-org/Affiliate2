@@ -519,13 +519,10 @@ def _build_manual_clip_windows(
     just defensively clamp `end` to source duration in case the row's
     cached duration drifted from the actual file).
 
-    Skips virality / hook fields — manual mode has no AI judgment to
-    inject. Each window gets a generic title; task_runner's
-    `_clip_title` overrides this with the AI-batch's `youtube_title`
-    when batched metadata generation succeeds, otherwise falls back to
-    "{source} — clip N" via its existing fallback chain. The
-    `clip_virality_score` / `clip_hook_score` / `clip_hook_type`
-    columns persist as NULL for manual clips.
+    Plain manual ranges carry no AI judgment, so score fields remain absent.
+    Smart Cut uses the same manual renderer after human approval, but the API
+    may attach sanitized proposal metadata to those approved ranges. When that
+    metadata is present, preserve it; no second scoring/render path is needed.
     """
     windows = []
     for i, r in enumerate(time_ranges):
@@ -533,17 +530,17 @@ def _build_manual_clip_windows(
         end = float(r["end"])
         if duration and end > duration:
             end = duration
-        windows.append({
+        window = {
             "start": round(start, 1),
             "end": round(end, 1),
-            "title": f"{title} — clip {i + 1}",
+            "title": r.get("title") or f"{title} — clip {i + 1}",
             "hook": "",
-            "reason": "",  # explicitly empty so task_runner's _clip_title
-                          # falls through to the "clip N" branch when batched
-                          # AI metadata fails.
-            # virality_score / hook_score deliberately omitted — they default
-            # to None downstream, which the persistence layer stores as NULL.
-        })
+            "reason": r.get("reason") or "",
+        }
+        for key in ("virality_score", "hook_score", "hook_type"):
+            if r.get(key) is not None:
+                window[key] = r[key]
+        windows.append(window)
     return windows
 
 
