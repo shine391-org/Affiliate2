@@ -94,9 +94,11 @@ The old `src/radar/intel/media.py`, `transcribe.py`, and `ai_analyze.py` are com
 The Radar CLI/report/cache contract remains intact during this transition. Local QA at `8e15807` passed focused Candidate Intelligence, legacy Intel, Analyzer, AI provider, Radar enrichment, cache reuse, real canonical ASR, real Gemma/LM Studio AI, failure isolation, and canonical ownership checks. DB convergence remains Phase G.
 
 ### C13 — Final real-media acceptance
-**ACTIVE.**
+**ACTIVE — translation quality hardening before broader sample campaign.**
 
 Final acceptance = same regression sample + representative real supported videos supplied by the user, including fast speech, music-heavy, multi-speaker, longer-form, and normal product/review material. C13 is an acceptance campaign, not a new media engine: fix only evidence-backed defects and do not relax quality thresholds to obtain a pass.
+
+Historical regression is technically healthy (timing/media/resume), but user perceptual review rejected the Vietnamese translation quality. C13 therefore pauses broader samples until C6 translation quality is revalidated. Hardening now includes fidelity-first default prompting, independent C6 translation vs C7 rewrite model routing, editable Localization Profiles in Settings, and an optional pre-dubbing translation review gate.
 
 See:
 - `docs/PHASE_C.md`
