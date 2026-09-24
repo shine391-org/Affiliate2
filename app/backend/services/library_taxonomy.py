@@ -112,6 +112,10 @@ PRODUCERS: dict[str, Producer] = {
     # Made FROM something you already had. A clip is the clearest case: it is
     # not a new video, it is a piece of one you downloaded.
     "clip_extraction": _p("clip_extraction", "Clipper", MEDIA_VIDEO, ORIGIN_EDITED),
+    # Reserved canonical producer identities for the next Studio phases. They
+    # classify outputs only; no Smart Cut / Remake engine is implemented here.
+    "smart_cut": _p("smart_cut", "Smart Cut", MEDIA_VIDEO, ORIGIN_EDITED),
+    "creative_remake": _p("creative_remake", "Creative Remake", MEDIA_VIDEO, ORIGIN_EDITED),
     "tool:captions": _p("tool:captions", "Captions", MEDIA_VIDEO, ORIGIN_EDITED),
     "tool:reframe": _p("tool:reframe", "Reframe", MEDIA_VIDEO, ORIGIN_EDITED),
     "tool:trim": _p("tool:trim", "Trim", MEDIA_VIDEO, ORIGIN_EDITED),
