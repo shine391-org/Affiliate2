@@ -11,6 +11,7 @@ import HealthDashboard from "../components/settings/HealthDashboard"
 import MotionGraphicsSection from "../components/settings/MotionGraphicsSection"
 import AIProviderSection from "../components/settings/AIProviderSection"
 import TTSProviderSection from "../components/settings/TTSProviderSection"
+import LocalizationProfilesSection from "../components/settings/LocalizationProfilesSection"
 import ServiceKeysSection from "../components/settings/ServiceKeysSection"
 import useSettings from "../hooks/useSettings"
 
@@ -109,6 +110,15 @@ export default function Settings() {
           accentColor="#0d9f6e"
         >
           <AIProviderSection settings={settings} updateSettings={updateSettings} />
+        </Section>
+
+        <Section
+          icon={<RecordVoiceOverOutlinedIcon sx={{ fontSize: 20 }} />}
+          title="Localization Profiles"
+          description="Translation fidelity, separate C6/C7 model routing, glossary, ASR and dubbing policy"
+          accentColor="#0f766e"
+        >
+          <LocalizationProfilesSection settings={settings} />
         </Section>
 
         <Section
