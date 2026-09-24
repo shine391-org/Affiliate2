@@ -320,7 +320,9 @@ Local QA evidence at `8e15807`: focused canonical Candidate Intelligence, legacy
 
 ## C13 — Final Real-Media Acceptance
 
-One final QA campaign after C4–C11 implementation.
+One final QA campaign after C4–C12 technical completion.
+
+Current acceptance state: the historical sample passes technical timing/media gates, but user perceptual review rejected Vietnamese translation quality. Broader C13 samples stay paused until translation quality is revalidated with the new fidelity/model/profile controls.
 
 First regression:
 `E:\Affiliate ver 1\storage\videos\qa\sample.mp4`
