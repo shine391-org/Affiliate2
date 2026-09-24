@@ -8,7 +8,7 @@ const clipStudio = readFileSync(new URL("./pages/ClipStudio.jsx", import.meta.ur
 const sourceBench = readFileSync(new URL("./components/clip/bench/SourceBench.jsx", import.meta.url), "utf8")
 
 test("Studio Smart Cut mounts the existing Clip Studio engine instead of a second implementation", () => {
-  assert.ok(studio.includes('<ClipStudio workflow="smart-cut" />'))
+  assert.ok(studio.includes('<ClipStudio key="smart-cut" workflow="smart-cut" />'))
   assert.ok(!studio.includes('(mode === "smart-cut" || mode === "remake")'))
 })
 
@@ -27,6 +27,7 @@ test("Smart Cut is review-first and does not expose direct Auto-cut", () => {
 
 test("Smart Cut uses the Studio header as its source owner", () => {
   assert.ok(clipStudio.includes('display: smartCut ? "none" : "flex"'))
+  assert.ok(clipStudio.includes('Studio header is the one Smart Cut source owner'))
   assert.ok(clipStudio.includes('Select a source in the Studio header'))
 })
 
