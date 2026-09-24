@@ -19,10 +19,8 @@ const Messaging = lazy(() => import("./pages/Messaging"))
 const Studio = lazy(() => import("./pages/Studio"))
 const MotionGraphics = lazy(() => import("./pages/MotionGraphics"))
 const Tools = lazy(() => import("./pages/Tools"))
-const LocalizationBatch = lazy(() => import("./pages/LocalizationBatch"))
 const LocalizationReview = lazy(() => import("./pages/LocalizationReview"))
 const Publish = lazy(() => import("./pages/Publish"))
-const ReviewQueue = lazy(() => import("./plugins/review/ReviewQueue"))
 const Performance = lazy(() => import("./plugins/performance/Performance"))
 
 // Utilities — single-purpose pages remain thin wrappers around ToolRunner.
@@ -41,7 +39,6 @@ const ToolTransform = lazy(() => import("./pages/tools/Transform"))
 const ToolMusicVisualizer = lazy(() => import("./pages/tools/MusicVisualizer"))
 const ToolVoiceover = lazy(() => import("./pages/tools/Voiceover"))
 const ToolHookAnalysis = lazy(() => import("./pages/tools/HookAnalysis"))
-const ToolTranslate = lazy(() => import("./pages/tools/Translate"))
 const ToolMetadata = lazy(() => import("./pages/tools/Metadata"))
 const ToolAutoChapters = lazy(() => import("./pages/tools/AutoChapters"))
 const ToolCompress = lazy(() => import("./pages/tools/Compress"))
@@ -138,7 +135,7 @@ export default function App() {
               <Route path="cron" element={<Navigate to="/assistant" replace />} />
               <Route path="motion" element={<MotionGraphics />} />
               <Route path="messaging" element={<Messaging />} />
-              <Route path="review-queue" element={<ReviewQueue />} />
+              <Route path="review-queue" element={<LegacyRedirect to="/review" />} />
 
               <Route path="utilities/localization-batch" element={<LegacyRedirect to="/studio/localize" suffix="?batch=1" />} />
               <Route path="utilities/localization-review" element={<LegacyRedirect to="/review" />} />
