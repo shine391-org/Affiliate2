@@ -10,7 +10,13 @@ import http from "../api/http"
 import PageHero from "../components/PageHero"
 import LocalizationExpertPanel from "../components/tools/LocalizationExpertPanel"
 import useDocumentTitle from "../hooks/useDocumentTitle"
-import { REVIEW_FILTERS, adaptLocalizationException, reviewItemMatches, reviewSelectionForItems } from "../reviewModel"
+import {
+  REVIEW_FILTERS,
+  adaptLocalizationException,
+  reviewItemMatches,
+  reviewSelectionForItems,
+  reviewSelectionId,
+} from "../reviewModel"
 
 export default function LocalizationReview() {
   useDocumentTitle("Review")
@@ -18,14 +24,16 @@ export default function LocalizationReview() {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const filter = params.get("filter") || "needs-review"
-  const selected = params.get("job") || ""
+  // ?job= remains a legacy deep link for Localize; ?item= is the generic
+  // Review selection contract Phase D/E can reuse.
+  const selected = params.get("item") || params.get("job") || ""
 
   const reconcileSelection = useCallback((next, current, currentFilter, setParamsFn) => {
     const resolved = reviewSelectionForItems(next, currentFilter, current)
     setParamsFn((previous) => {
       const value = new URLSearchParams(previous)
-      if (resolved) value.set("job", resolved)
-      else value.delete("job")
+      if (resolved) value.set("item", resolved)
+      else value.delete("item")
       return value
     }, { replace: true })
   }, [])
@@ -49,9 +57,14 @@ export default function LocalizationReview() {
   }, [load])
 
   const visible = useMemo(() => items.filter((item) => reviewItemMatches(item, filter)), [items, filter])
-  const choose = (jobId) => setParams((previous) => {
+  const selectedItem = useMemo(
+    () => items.find((item) => reviewSelectionId(item) === selected) || null,
+    [items, selected],
+  )
+  const choose = (item) => setParams((previous) => {
     const value = new URLSearchParams(previous)
-    value.set("job", jobId)
+    value.set("item", reviewSelectionId(item))
+    value.delete("job")
     return value
   })
   const changeFilter = (_, value) => {
@@ -82,10 +95,28 @@ export default function LocalizationReview() {
       </Box>
       <Box sx={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: { xs: "1fr", md: "360px minmax(0, 1fr)" } }}>
         <Box sx={{ overflow: "auto", p: 2, borderRight: { md: 1 }, borderColor: "divider" }}>
-          {loading ? <Stack alignItems="center" sx={{ py: 5 }}><CircularProgress size={28} /></Stack> : visible.length === 0 ? <Alert severity="success">No real items match this review filter.</Alert> : <Stack spacing={1}>{visible.map((item) => <Paper key={item.id} variant="outlined" onClick={() => choose(item.job_id)} sx={{ p: 1.5, borderRadius: 2, cursor: "pointer", borderColor: selected === item.job_id ? "primary.main" : "divider", bgcolor: selected === item.job_id ? "action.selected" : "background.paper" }}><Stack direction="row" spacing={0.75} alignItems="center"><Typography variant="body2" sx={{ fontWeight: 800, flex: 1 }} noWrap>{item.source}</Typography><Chip size="small" color={item.severity} label={item.status} /></Stack><Typography variant="caption" color="text.secondary">{item.workflow} · {item.job_id}</Typography><Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>{item.categories.map((category) => <Chip key={category} size="small" variant="outlined" label={category} />)}</Stack>{item.reasons.map((reason, index) => <Typography key={index} variant="caption" color="error.main" sx={{ display: "block", mt: 0.5 }}>{reason.stage}: {reason.error || "failed"}</Typography>)}</Paper>)}</Stack>}
+          {loading ? <Stack alignItems="center" sx={{ py: 5 }}><CircularProgress size={28} /></Stack> : visible.length === 0 ? <Alert severity="success">No real items match this review filter.</Alert> : <Stack spacing={1}>{visible.map((item) => <Paper key={item.id} variant="outlined" onClick={() => choose(item)} sx={{ p: 1.5, borderRadius: 2, cursor: "pointer", borderColor: selected === reviewSelectionId(item) ? "primary.main" : "divider", bgcolor: selected === reviewSelectionId(item) ? "action.selected" : "background.paper" }}><Stack direction="row" spacing={0.75} alignItems="center"><Typography variant="body2" sx={{ fontWeight: 800, flex: 1 }} noWrap>{item.source}</Typography><Chip size="small" color={item.severity} label={item.status} /></Stack><Typography variant="caption" color="text.secondary">{item.workflow} · {item.job_id}</Typography><Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>{item.categories.map((category) => <Chip key={category} size="small" variant="outlined" label={category} />)}</Stack>{item.reasons.map((reason, index) => <Typography key={index} variant="caption" color="error.main" sx={{ display: "block", mt: 0.5 }}>{reason.stage}: {reason.error || "failed"}</Typography>)}</Paper>)}</Stack>}
         </Box>
         <Box sx={{ overflow: "auto", p: { xs: 1.5, md: 2.5 } }}>
-          {selected ? <LocalizationExpertPanel jobId={selected} /> : <Stack spacing={1} alignItems="center" justifyContent="center" sx={{ minHeight: 240 }}><FactCheckOutlinedIcon color="disabled" sx={{ fontSize: 44 }} /><Typography variant="body2" color="text.secondary">Select an exception to inspect translation, timing, voice, chunks, reruns and QC.</Typography></Stack>}
+          {selectedItem?.detail_kind === "localization-expert" && selectedItem.job_id ? (
+            <LocalizationExpertPanel jobId={selectedItem.job_id} />
+          ) : selectedItem ? (
+            <Stack spacing={1.5}>
+              <Typography variant="h6" sx={{ fontWeight: 800 }}>{selectedItem.workflow}</Typography>
+              <Alert severity={selectedItem.severity || "warning"}>
+                {selectedItem.source} · {selectedItem.status}
+              </Alert>
+              <Typography variant="body2" color="text.secondary">
+                This workflow uses the generic Review envelope. Its Phase-specific detail editor will plug into this surface without creating another Review app.
+              </Typography>
+              {selectedItem.action_target && <Button variant="outlined" href={selectedItem.action_target}>Open workflow</Button>}
+            </Stack>
+          ) : (
+            <Stack spacing={1} alignItems="center" justifyContent="center" sx={{ minHeight: 240 }}>
+              <FactCheckOutlinedIcon color="disabled" sx={{ fontSize: 44 }} />
+              <Typography variant="body2" color="text.secondary">Select an exception to inspect and resolve it in its canonical workflow.</Typography>
+            </Stack>
+          )}
         </Box>
       </Box>
     </Box>
