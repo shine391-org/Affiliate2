@@ -116,6 +116,45 @@ def test_profile_resolution_uses_saved_default():
     assert got.asr_quality == "best"
 
 
+def test_c6_and_c7_can_resolve_different_models(monkeypatch):
+    from backend.core.ai_provider import AIProvider
+
+    settings = SimpleNamespace(ai_provider="lmstudio")
+
+    def fake_client(_settings):
+        return SimpleNamespace(
+            provider=AIProvider.COMPATIBLE,
+            model="global-small",
+            base_url="http://127.0.0.1:1234/v1",
+        )
+
+    monkeypatch.setattr("backend.core.ai_provider.get_ai_client", fake_client)
+    profile = _profile(
+        translation_model="translator-large",
+        rewrite_model="rewrite-small",
+    )
+
+    translation_ai = ls._profile_ai_client(settings, profile, "translation")
+    rewrite_ai = ls._profile_ai_client(settings, profile, "rewrite")
+
+    assert translation_ai.model == "translator-large"
+    assert rewrite_ai.model == "rewrite-small"
+
+
+def test_c6_translation_prompt_is_fidelity_first():
+    profile = _profile(translation_preset="natural_vietnamese")
+    prompt = ls._translation_prompt(
+        target_language="Vietnamese",
+        batch=_transcript().segments,
+        transcript_context="第一句 品牌很好",
+        profile=profile,
+        for_dub=True,
+    )
+    assert "Translate ONLY what the source says" in prompt
+    assert "Fidelity is more important than fluency" in prompt
+    assert "do not infer missing context" in prompt.lower()
+
+
 @pytest.mark.asyncio
 async def test_c5_transcribe_passes_exact_profile_model(monkeypatch, tmp_path):
     calls = {}
