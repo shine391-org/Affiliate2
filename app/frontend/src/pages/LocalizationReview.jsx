@@ -12,6 +12,7 @@ import LocalizationExpertPanel from "../components/tools/LocalizationExpertPanel
 import useDocumentTitle from "../hooks/useDocumentTitle"
 import {
   REVIEW_FILTERS,
+  normalizeReviewFilter,
   reviewItemMatches,
   reviewSelectionForItems,
   reviewSelectionId,
@@ -23,37 +24,47 @@ export default function LocalizationReview() {
   const [params, setParams] = useSearchParams()
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
-  const filter = params.get("filter") || "needs-review"
+  const [loadError, setLoadError] = useState("")
+  const requestedFilter = params.get("filter") || "needs-review"
+  const filter = normalizeReviewFilter(requestedFilter)
   // ?job= remains a legacy deep link for Localize; ?item= is the generic
   // Review selection contract Phase D/E can reuse.
   const selected = params.get("item") || params.get("job") || ""
-
-  const reconcileSelection = useCallback((next, current, currentFilter, setParamsFn) => {
-    const resolved = reviewSelectionForItems(next, currentFilter, current)
-    setParamsFn((previous) => {
-      const value = new URLSearchParams(previous)
-      if (resolved) value.set("item", resolved)
-      else value.delete("item")
-      return value
-    }, { replace: true })
-  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
       const next = await loadReviewItems(http)
       setItems(next)
-      reconcileSelection(next, selected, filter, setParams)
+      setLoadError("")
+    } catch (error) {
+      setLoadError(error?.response?.data?.detail || "Could not refresh the review queue.")
     } finally {
       setLoading(false)
     }
-  }, [filter, selected, setParams, reconcileSelection])
+  }, [])
 
   useEffect(() => {
     load()
     const timer = setInterval(load, 5000)
     return () => clearInterval(timer)
   }, [load])
+
+  useEffect(() => {
+    const resolved = reviewSelectionForItems(items, filter, selected)
+    const legacyJob = params.get("job")
+    const needsFilterRepair = requestedFilter !== filter
+    const needsSelectionRepair = resolved !== selected || Boolean(legacyJob)
+    if (!needsFilterRepair && !needsSelectionRepair) return
+    setParams((previous) => {
+      const value = new URLSearchParams(previous)
+      value.set("filter", filter)
+      if (resolved) value.set("item", resolved)
+      else value.delete("item")
+      value.delete("job")
+      return value
+    }, { replace: true })
+  }, [items, filter, requestedFilter, selected, params, setParams])
 
   const visible = useMemo(() => items.filter((item) => reviewItemMatches(item, filter)), [items, filter])
   const selectedItem = useMemo(
@@ -93,8 +104,13 @@ export default function LocalizationReview() {
           })}
         </ToggleButtonGroup>
       </Box>
-      <Box sx={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: { xs: "1fr", md: "360px minmax(0, 1fr)" } }}>
-        <Box sx={{ overflow: "auto", p: 2, borderRight: { md: 1 }, borderColor: "divider" }}>
+      {loadError && <Alert severity="warning" sx={{ mx: { xs: 1.5, md: 2.5 }, mt: 1 }}>{loadError}</Alert>}
+      <Box sx={{
+        flex: 1, minHeight: 0, display: "grid",
+        gridTemplateColumns: { xs: "1fr", md: "360px minmax(0, 1fr)" },
+        gridTemplateRows: { xs: "minmax(180px, 42%) minmax(0, 1fr)", md: "minmax(0, 1fr)" },
+      }}>
+        <Box sx={{ overflow: "auto", p: 2, borderRight: { md: 1 }, borderBottom: { xs: 1, md: 0 }, borderColor: "divider" }}>
           {loading ? <Stack alignItems="center" sx={{ py: 5 }}><CircularProgress size={28} /></Stack> : visible.length === 0 ? <Alert severity="success">No real items match this review filter.</Alert> : <Stack spacing={1}>{visible.map((item) => <Paper key={item.id} variant="outlined" onClick={() => choose(item)} sx={{ p: 1.5, borderRadius: 2, cursor: "pointer", borderColor: selected === reviewSelectionId(item) ? "primary.main" : "divider", bgcolor: selected === reviewSelectionId(item) ? "action.selected" : "background.paper" }}><Stack direction="row" spacing={0.75} alignItems="center"><Typography variant="body2" sx={{ fontWeight: 800, flex: 1 }} noWrap>{item.source}</Typography><Chip size="small" color={item.severity} label={item.status} /></Stack><Typography variant="caption" color="text.secondary">{item.workflow} · {item.project || reviewSelectionId(item)}</Typography><Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>{item.categories.map((category) => <Chip key={category} size="small" variant="outlined" label={category} />)}</Stack>{item.reasons.map((reason, index) => <Typography key={index} variant="caption" color="error.main" sx={{ display: "block", mt: 0.5 }}>{reason.stage}: {reason.error || "failed"}</Typography>)}</Paper>)}</Stack>}
         </Box>
         <Box sx={{ overflow: "auto", p: { xs: 1.5, md: 2.5 } }}>
