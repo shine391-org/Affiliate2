@@ -384,7 +384,8 @@ _BROWSER_COOKIE_SOURCE = None
 # explicit Test session action bypasses this cache, so a user can refresh it
 # immediately after changing login/profile state.
 _BROWSER_SESSION_CACHE: dict[tuple[str, str | None], tuple[float, dict]] = {}
-_BROWSER_SESSION_CACHE_TTL = 300.0
+_BROWSER_SESSION_CACHE_OK_TTL = 30.0
+_BROWSER_SESSION_CACHE_FAIL_TTL = 300.0
 
 _SUPPORTED_BROWSER_BINARIES = {
     "chrome": ("chrome", "google-chrome"),
@@ -487,8 +488,11 @@ def _inspect_browser_session(
 
     if not force:
         cached = _BROWSER_SESSION_CACHE.get(cache_key)
-        if cached and now - cached[0] < _BROWSER_SESSION_CACHE_TTL:
-            return dict(cached[1])
+        if cached:
+            cached_result = cached[1]
+            ttl = (_BROWSER_SESSION_CACHE_OK_TTL if cached_result.get("ok") else _BROWSER_SESSION_CACHE_FAIL_TTL)
+            if now - cached[0] < ttl:
+                return dict(cached_result)
 
     concrete = _resolve_cookie_browser(selected)
     if not concrete:
