@@ -21,12 +21,10 @@ class UserSettings(Base, TimestampMixin):
     youtube_api_key_encrypted = Column(Text, nullable=True)         # YouTube Data API v3 key
     huggingface_token_encrypted = Column(Text, nullable=True)        # WhisperX/pyannote gated diarization models
 
-    # ── Scout credentials (user-specific cookies) ──────
-    douyin_cookie_encrypted = Column(Text, nullable=True)
-    douyin_cookie_set_at = Column(DateTime, nullable=True)
-
+    # ── Legacy TikTok upload cookie fallback ───────────
+    # UploadAgent may still use an existing encrypted TikTok sessionid when no
+    # OAuth token is present. Discovery/download no longer consumes this field.
     tiktok_cookie_encrypted = Column(Text, nullable=True)
-    tiktok_cookie_set_at = Column(DateTime, nullable=True)
 
     # ── Canonical downloader browser session ───────────
     # Non-secret selectors only. Actual cookies stay in the user's browser and
