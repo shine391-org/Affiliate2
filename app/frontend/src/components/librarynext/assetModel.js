@@ -313,9 +313,13 @@ export function jobDetail(job, input) {
     return ""
   }
   if (t === "generate") {
-    if (p.type === "clip_extraction") {
+    if (p.type === "clip_extraction" || p.type === "smart_cut") {
       const bits = []
-      if (p.max_clips) bits.push(`up to ${p.max_clips} clips`)
+      if (p.max_clips) bits.push(
+        p.type === "smart_cut"
+          ? `${p.max_clips} approved cut${p.max_clips === 1 ? "" : "s"}`
+          : `up to ${p.max_clips} clips`
+      )
       if (p.mode && p.mode !== "auto") bits.push(String(p.mode))
       return bits.join(" · ")
     }
@@ -369,6 +373,7 @@ export function activityFromJob(job) {
   try {
     const out = job.output_json ? JSON.parse(job.output_json) : null
     if (out?.generated_video_id) resultKey = `gv:${out.generated_video_id}`
+    else if (Array.isArray(out?.clip_ids) && out.clip_ids[0]) resultKey = `gv:${out.clip_ids[0]}`
     else if (out?.file && !p.unmapped) resultKey = `job:${job.id}`
   } catch { /* malformed output_json — no result link, nothing else breaks */ }
   let label = JOB_ONLY_LABELS[norm] || p?.label || job.job_type
@@ -376,12 +381,12 @@ export function activityFromJob(job) {
   // (the generated_videos row each one registers is the library item).
   let bound = norm in RENDER_JOB_TYPES || (!p.unmapped && !(norm in JOB_ONLY_LABELS))
   if (norm in RENDER_JOB_TYPES) p = { ...p, ...RENDER_JOB_TYPES[norm] }
-  // Clip extraction rides job_type "generate" with the real producer in its
-  // input — without this, a running Clipper run showed as "Smart Video" and
-  // the user couldn't find their own job in Activity.
-  if (norm === "generate" && input?.type === "clip_extraction") {
-    p = classify("clip_extraction") || p
-    label = p?.label || "Clipper"
+  // Clipper and Smart Cut both ride job_type "generate" because they share
+  // the same renderer. The input producer identity tells Activity/Library
+  // which Studio workflow owns the output.
+  if (norm === "generate" && ["clip_extraction", "smart_cut"].includes(input?.type)) {
+    p = classify(input.type) || p
+    label = p?.label || (input.type === "smart_cut" ? "Smart Cut" : "Clipper")
     bound = true
   }
   // Headline precedence matches the old Jobs tab: the stored title, else what
