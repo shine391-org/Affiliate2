@@ -115,6 +115,7 @@ export default function LocalizationProfilesSection({ settings }) {
         rewrite_model: draft.rewrite_model?.trim() || null,
         rewrite_base_url: draft.rewrite_base_url?.trim() || null,
         translation_instructions: draft.translation_instructions || "",
+        rewrite_instructions: draft.rewrite_instructions || "",
         glossary: textToGlossary(glossaryText),
       }
       const { data } = await http.post("/api/settings/localization-profiles", payload)
@@ -158,6 +159,7 @@ export default function LocalizationProfilesSection({ settings }) {
       rewrite_provider: null,
       rewrite_model: null,
       rewrite_base_url: null,
+      rewrite_instructions: "",
     }
     setSelectedId(id)
     setDraft(next)
@@ -272,12 +274,15 @@ export default function LocalizationProfilesSection({ settings }) {
               placeholder={settings?.ai_base_url || "inherit Settings endpoint"}
               helperText="Connection credentials remain in AI Connections."
             />
+            <Alert severity="info" variant="outlined">
+              Core translation guardrails are locked by the app. Instructions below are appended per profile and cannot replace the fidelity, ID/order, no-invention or structured-output rules.
+            </Alert>
             <TextField
               size="small" multiline minRows={4}
               label="Translation instructions"
               value={draft.translation_instructions || ""}
               onChange={(e) => patch("translation_instructions", e.target.value)}
-              helperText="Extra domain/style rules. Fidelity rules remain non-negotiable."
+              helperText="Add domain/style preferences for this profile. Leave blank to use only the locked core prompt."
             />
             <TextField
               size="small" multiline minRows={4}
@@ -313,6 +318,17 @@ export default function LocalizationProfilesSection({ settings }) {
               value={draft.rewrite_base_url || ""}
               onChange={(e) => patch("rewrite_base_url", e.target.value)}
               placeholder={settings?.ai_base_url || "inherit Settings endpoint"}
+            />
+            <Alert severity="info" variant="outlined">
+              Core rewrite guardrails are locked by the app. The field below only adds profile-specific compression/style guidance; it cannot remove meaning-preservation, numbers/entities, stable IDs or JSON-output rules.
+            </Alert>
+            <TextField
+              size="small" multiline minRows={4}
+              label="C7 rewrite instructions"
+              value={draft.rewrite_instructions || ""}
+              onChange={(e) => patch("rewrite_instructions", e.target.value)}
+              placeholder="Example: Prefer compact spoken Vietnamese; remove filler before facts; keep product features, quantities and causal meaning."
+              helperText="Applied only to C7 duration rewrite for this profile. It does not replace the locked core prompt."
             />
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
               <FormControl size="small" fullWidth>
