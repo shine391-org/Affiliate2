@@ -609,7 +609,17 @@ export default function ClipStudio({ workflow = "manual" }) {
     await handleExtract(benchSource.id, {
       ...clipSettings.toPayload({ hasTranscript: !!benchSource.has_transcript_segments }),
       mode: "manual",
-      time_ranges: benchRanges.ranges.map(({ start, end }) => ({ start, end })),
+      time_ranges: benchRanges.ranges.map(({ start, end, meta }) => ({
+        start,
+        end,
+        ...(smartCut && meta ? {
+          title: meta.title || null,
+          virality_score: meta.score ?? null,
+          hook_score: meta.hook_score ?? null,
+          hook_type: meta.hook_type || null,
+          reason: meta.reason || null,
+        } : {}),
+      })),
     })
   }
 
