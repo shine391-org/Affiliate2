@@ -13,6 +13,7 @@ import http from "../../api/http"
 
 const STATUS_ICON = {
   running: CheckCircleIcon, ok: CheckCircleIcon, valid: CheckCircleIcon,
+  ready: CheckCircleIcon, auto: CheckCircleIcon,
   expiring_soon: WarningIcon, expired: ErrorIcon,
   not_configured: HelpOutlineIcon, not_running: ErrorIcon, not_found: ErrorIcon,
   unknown_age: WarningIcon,
@@ -20,6 +21,7 @@ const STATUS_ICON = {
 
 const STATUS_COLOR = {
   running: "success", ok: "success", valid: "success",
+  ready: "success", auto: "success",
   expiring_soon: "warning", expired: "error",
   not_configured: "default", not_running: "error", not_found: "error",
   unknown_age: "warning",
@@ -53,11 +55,17 @@ export default function HealthDashboard() {
   )
   if (!health) return <Typography sx={{ color: "error.main", fontSize: "0.85rem" }}>Failed to load health status</Typography>
 
+  const sessionBrowser = health.download_session?.resolved_browser || health.download_session?.browser
+  const sessionProfile = health.download_session?.profile
   const items = [
     { label: "ImageMagick", key: "imagemagick", description: "Required for caption rendering" },
     { label: "yt-dlp", key: "ytdlp", description: "Video downloader", extra: health.ytdlp?.version ? `v${health.ytdlp.version}` : null },
-    { label: "Douyin Cookie", key: "douyin_cookie", description: "Douyin scouting access", extra: health.douyin_cookie?.age_days != null ? `${health.douyin_cookie.age_days}d old` : null },
-    { label: "TikTok Cookie", key: "tiktok_cookie", description: "TikTok scouting access", extra: health.tiktok_cookie?.age_days != null ? `${health.tiktok_cookie.age_days}d old` : null },
+    {
+      label: "Download Browser Session",
+      key: "download_session",
+      description: "Browser cookies used by yt-dlp for login-gated sources",
+      extra: sessionBrowser ? `${sessionBrowser}${sessionProfile ? ` / ${sessionProfile}` : ""}` : null,
+    },
   ]
 
   return (
