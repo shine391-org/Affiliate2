@@ -36,9 +36,17 @@ class LocalizationProfile(BaseModel):
     translation_base_url: str | None = None
     translation_preset: Literal[
         "natural_vietnamese", "affiliate_conversational", "literal", "custom"
-    ] = "affiliate_conversational"
+    ] = "natural_vietnamese"
     translation_instructions: str = ""
     glossary: dict[str, str] = Field(default_factory=dict)
+
+    # C6 translation and C7 duration rewrite are different jobs. Translation
+    # may pin a larger/high-quality model while rewrite can inherit a smaller
+    # low-latency model from Settings (or pin its own model) without coupling
+    # the two stages.
+    rewrite_provider: str | None = None
+    rewrite_model: str | None = None
+    rewrite_base_url: str | None = None
 
     tts_provider: str | None = None
     tts_model: str | None = None
