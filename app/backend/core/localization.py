@@ -47,6 +47,10 @@ class LocalizationProfile(BaseModel):
     rewrite_provider: str | None = None
     rewrite_model: str | None = None
     rewrite_base_url: str | None = None
+    # Appended to the locked C7 duration-rewrite prompt. Users can tune
+    # compression/style per profile without replacing the core fidelity,
+    # stable-ID or structured-output guardrails owned by the application.
+    rewrite_instructions: str = ""
 
     tts_provider: str | None = None
     tts_model: str | None = None
@@ -100,12 +104,17 @@ class LocalizationProfile(BaseModel):
             raise ValueError("Profile name must be 1-80 characters.")
         return value
 
-    @field_validator("translation_instructions")
+    @field_validator("translation_instructions", "rewrite_instructions")
     @classmethod
-    def cap_instructions(cls, value: str) -> str:
+    def cap_instructions(cls, value: str, info) -> str:
         value = value.strip()
         if len(value) > 8000:
-            raise ValueError("Translation instructions are too long (max 8000 chars).")
+            label = (
+                "Rewrite instructions"
+                if info.field_name == "rewrite_instructions"
+                else "Translation instructions"
+            )
+            raise ValueError(f"{label} are too long (max 8000 chars).")
         return value
 
     @model_validator(mode="after")
@@ -169,6 +178,10 @@ def load_profile_store(raw: str | None) -> LocalizationProfileStore:
             for item in profiles:
                 if not isinstance(item, dict):
                     continue
+                if "rewrite_instructions" not in item:
+                    item["rewrite_instructions"] = str(
+                        item.get("translation_instructions") or ""
+                    )
                 is_legacy_builtin = (
                     item.get("id") == "vi-affiliate-hq"
                     and item.get("name") == "Vietnam Affiliate HQ"
