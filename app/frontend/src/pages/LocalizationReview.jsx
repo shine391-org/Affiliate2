@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Alert, Box, Button, Chip, CircularProgress, Paper, Stack, ToggleButton,
   ToggleButtonGroup, Typography,
@@ -25,6 +25,7 @@ export default function LocalizationReview() {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState("")
+  const loadedOnce = useRef(false)
   const requestedFilter = params.get("filter") || "needs-review"
   const filter = normalizeReviewFilter(requestedFilter)
   // ?job= remains a legacy deep link for Localize; ?item= is the generic
@@ -32,7 +33,7 @@ export default function LocalizationReview() {
   const selected = params.get("item") || params.get("job") || ""
 
   const load = useCallback(async () => {
-    setLoading(true)
+    if (!loadedOnce.current) setLoading(true)
     try {
       const next = await loadReviewItems(http)
       setItems(next)
@@ -40,6 +41,7 @@ export default function LocalizationReview() {
     } catch (error) {
       setLoadError(error?.response?.data?.detail || "Could not refresh the review queue.")
     } finally {
+      loadedOnce.current = true
       setLoading(false)
     }
   }, [])
@@ -51,6 +53,7 @@ export default function LocalizationReview() {
   }, [load])
 
   useEffect(() => {
+    if (loading || loadError) return
     const resolved = reviewSelectionForItems(items, filter, selected)
     const legacyJob = params.get("job")
     const needsFilterRepair = requestedFilter !== filter
@@ -64,7 +67,7 @@ export default function LocalizationReview() {
       value.delete("job")
       return value
     }, { replace: true })
-  }, [items, filter, requestedFilter, selected, params, setParams])
+  }, [items, filter, requestedFilter, selected, params, setParams, loading, loadError])
 
   const visible = useMemo(() => items.filter((item) => reviewItemMatches(item, filter)), [items, filter])
   const selectedItem = useMemo(
