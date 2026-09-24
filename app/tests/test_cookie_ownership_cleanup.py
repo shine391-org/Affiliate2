@@ -1,6 +1,8 @@
 """Regression guards for retired cookie/discovery ownership."""
 from __future__ import annotations
 
+import pytest
+
 from backend.api import settings as settings_api
 from backend.models.user_settings import UserSettings
 
@@ -25,3 +27,22 @@ def test_manual_cookie_test_endpoint_is_gone():
     paths = {getattr(route, "path", "") for route in settings_api.router.routes}
     assert "/settings/test-cookie" not in paths
     assert "/settings/download-session/test" in paths
+
+
+@pytest.mark.asyncio
+async def test_tiktok_scout_does_not_read_legacy_upload_cookie(monkeypatch):
+    from backend.agents import scout as scout_module
+    from backend.agents.scout import ScoutAgent
+
+    class UploadCookieTrap:
+        @property
+        def tiktok_cookie_encrypted(self):
+            raise AssertionError("TikTok discovery must not read upload cookie state")
+
+    monkeypatch.setattr(scout_module.settings, "TIKHUB_API_KEY", "")
+    rows = await ScoutAgent()._scout_platform(
+        "tiktok",
+        "test",
+        UploadCookieTrap(),
+    )
+    assert rows == []
