@@ -1031,6 +1031,7 @@ async def run_extract_clips(
     """
     max_clips = opts.max_clips
     mode = opts.mode
+    output_source_type = opts.output_source_type or "clip_extraction"
     logger.info(
         "TASK START extract_clips | job=%s video=%s mode=%s max=%d",
         job_id[:8], downloaded_video_id[:8], mode, max_clips,
@@ -1163,7 +1164,7 @@ async def run_extract_clips(
                     or await _fallback_aspect(clip),
                     duration_seconds=clip.get("duration_seconds"),
                     gen_tier="clip_extraction",
-                    source_type="clip_extraction",
+                    source_type=output_source_type,
                     youtube_title=clip.get("youtube_title"),
                     youtube_description=clip.get("youtube_description"),
                     youtube_tags_json=json.dumps(clip.get("youtube_tags", [])),
@@ -1196,15 +1197,30 @@ async def run_extract_clips(
         await update_job_status(
             job_id, "success",
             progress_pct=100,
-            current_step=f"Extracted {len(clips)} clips",
-            output_data={"clip_ids": clip_ids, "count": len(clips)},
+            current_step=(
+                f"Created {len(clips)} Smart Cut{'' if len(clips) == 1 else 's'}"
+                if output_source_type == "smart_cut"
+                else f"Extracted {len(clips)} clips"
+            ),
+            output_data={
+                "clip_ids": clip_ids,
+                "count": len(clips),
+                "source_type": output_source_type,
+            },
         )
         await ws_manager.send({
             "type": "job_complete",
             "job_id": job_id,
-            "result": {"clip_ids": clip_ids, "count": len(clips)},
+            "result": {
+                "clip_ids": clip_ids,
+                "count": len(clips),
+                "source_type": output_source_type,
+            },
         }, user_id)
-        logger.info("TASK DONE  extract_clips | job=%s clips=%d", job_id[:8], len(clips))
+        logger.info(
+            "TASK DONE  extract_clips | job=%s clips=%d source_type=%s",
+            job_id[:8], len(clips), output_source_type,
+        )
 
     except Exception as e:
         # User-initiated cancel is a quiet stop, not a failure: the row is
