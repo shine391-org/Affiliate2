@@ -95,6 +95,7 @@ export default function SourceBench({
   source,            // DownloadedVideo row
   existingClips,     // clips already cut from this source (for the ghost lane)
   onOpenDialog,      // escape hatch to Auto-cut (>10 clips, no review)
+  allowAutoCut = true,
   ranges: R,         // useBenchRanges(), owned by ClipStudio — the Cut button
                      // that spends this list lives in the page hero
   settings,          // shared per-clip settings (useClipSettings, owned by
@@ -511,11 +512,16 @@ export default function SourceBench({
           </Stack>
           <Typography variant="caption" sx={{ color: "text.disabled" }}>
             Up to {MAX_RANGES} proposals — every one is cut through the same path
-            as a hand-drawn range.{" "}
-            <Box component="span" onClick={() => { setAiAnchor(null); onOpenDialog() }}
-              sx={{ color: "primary.main", cursor: "pointer", textDecoration: "underline" }}>
-              Need more? Auto-cut instead →
-            </Box>
+            as a hand-drawn range.
+            {allowAutoCut && onOpenDialog && (
+              <>
+                {" "}
+                <Box component="span" onClick={() => { setAiAnchor(null); onOpenDialog() }}
+                  sx={{ color: "primary.main", cursor: "pointer", textDecoration: "underline" }}>
+                  Need more? Auto-cut instead →
+                </Box>
+              </>
+            )}
           </Typography>
           <Button
             variant="contained" color="secondary" fullWidth
