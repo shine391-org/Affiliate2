@@ -344,7 +344,7 @@ async def test_c7_rewrite_prompt_keeps_locked_core_and_uses_its_own_profile_inst
     assert "LOCKED PROTOCOL:" in ai.prompt
     assert "Preserve every item ID and order." in ai.prompt
     assert "Return every input ID exactly once and no extra IDs." in ai.prompt
-    assert "core rules above remain mandatory" in ai.prompt
+    assert "semantic guardrails and locked protocol above remain active" in ai.prompt
     assert segment.translated_text == "ngắn"
 
 
