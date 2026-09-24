@@ -333,9 +333,38 @@ async def remove_silence_tool(
     return {"job_id": job.id}
 
 
+async def _downloaded_video_path(video_id: str) -> Path:
+    from sqlalchemy import select
+    from backend.database import AsyncSessionLocal
+    from backend.models.downloaded_video import DownloadedVideo
+
+    async with AsyncSessionLocal() as db:
+        row = (await db.execute(
+            select(DownloadedVideo).where(DownloadedVideo.id == video_id)
+        )).scalar_one_or_none()
+    if not row:
+        raise HTTPException(404, "Downloaded source not found")
+    path = Path(row.video_path or "")
+    if not row.video_path or not path.is_file():
+        raise HTTPException(409, "Downloaded source media is missing")
+    return path
+
+
+async def _resolve_translate_source(
+    *, file: UploadFile | None, downloaded_video_id: str | None, job_id: str,
+) -> Path:
+    stripped_id = (downloaded_video_id or "").strip()
+    if stripped_id:
+        return await _downloaded_video_path(stripped_id)
+    if not file:
+        raise HTTPException(400, "Provide exactly one translation source: file or downloaded_video_id")
+    return await save_upload(file, job_id, VIDEO_EXTS, VIDEO_MAX_BYTES)
+
+
 @router.post("/translate")
 async def translate_tool(
-    file: UploadFile = File(...),
+    file: Optional[UploadFile] = File(None),
+    downloaded_video_id: Optional[str] = Form(None),
     target_language: str = Form(...),
     mode: Literal["captions_only", "full_dub"] = Form("captions_only"),
     voice_id: str = Form(""),
@@ -357,10 +386,10 @@ async def translate_tool(
     if not (target_language or "").strip():
         raise HTTPException(400, "target_language is required")
 
-    from backend.agents.job_helper import create_job
+    from backend.agents.job_helper import create_job as _create_job
     from backend.core.task_runner import dispatch
     from backend.core.tool_runners import run_tool_translate
-    job = await create_job("tool:translate", "local", {
+    job = await _create_job("tool:translate", "local", {
         "target_language": target_language,
         "mode": mode,
         "voice_id": voice_id if mode == "full_dub" else None,
@@ -368,8 +397,11 @@ async def translate_tool(
         "target_aspect": target_aspect,
         "profile_id": profile_id,
         "review_translation": bool(review_translation),
+        "downloaded_video_id": downloaded_video_id,
     })
-    in_path = await save_upload(file, job.id, VIDEO_EXTS, VIDEO_MAX_BYTES)
+    in_path = await _resolve_translate_source(
+        file=file, downloaded_video_id=downloaded_video_id, job_id=job.id,
+    )
     dispatch(run_tool_translate(
         job.id, in_path, target_language.strip(), mode,
         voice_id, caption_style, emoji_style,

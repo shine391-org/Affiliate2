@@ -1,91 +1,91 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import {
-  Alert, Box, Button, Chip, CircularProgress, Divider, Stack, Typography,
+  Alert, Box, Button, Chip, CircularProgress, Paper, Stack, ToggleButton,
+  ToggleButtonGroup, Typography,
 } from "@mui/material"
 import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined"
 import RefreshOutlinedIcon from "@mui/icons-material/RefreshOutlined"
+import { useSearchParams } from "react-router-dom"
 import http from "../api/http"
 import PageHero from "../components/PageHero"
 import LocalizationExpertPanel from "../components/tools/LocalizationExpertPanel"
 import useDocumentTitle from "../hooks/useDocumentTitle"
+import { REVIEW_FILTERS, adaptLocalizationException, reviewItemMatches, reviewSelectionForItems } from "../reviewModel"
 
 export default function LocalizationReview() {
-  useDocumentTitle("Localization Review")
+  useDocumentTitle("Review")
+  const [params, setParams] = useSearchParams()
   const [items, setItems] = useState([])
-  const [selected, setSelected] = useState(null)
   const [loading, setLoading] = useState(true)
+  const filter = params.get("filter") || "needs-review"
+  const selected = params.get("job") || ""
+
+  const reconcileSelection = useCallback((next, current, currentFilter, setParamsFn) => {
+    const resolved = reviewSelectionForItems(next, currentFilter, current)
+    setParamsFn((previous) => {
+      const value = new URLSearchParams(previous)
+      if (resolved) value.set("job", resolved)
+      else value.delete("job")
+      return value
+    }, { replace: true })
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
       const { data } = await http.get("/api/localization/exceptions?limit=100")
-      const next = data?.items || []
+      const next = (data?.items || []).map(adaptLocalizationException)
       setItems(next)
-      if (!selected && next.length) setSelected(next[0].job_id)
-      if (selected && !next.some((x) => x.job_id === selected)) setSelected(next[0]?.job_id || null)
+      reconcileSelection(next, selected, filter, setParams)
     } finally {
       setLoading(false)
     }
-  }, [selected])
+  }, [filter, selected, setParams, reconcileSelection])
 
-  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    load()
+    const timer = setInterval(load, 5000)
+    return () => clearInterval(timer)
+  }, [load])
+
+  const visible = useMemo(() => items.filter((item) => reviewItemMatches(item, filter)), [items, filter])
+  const choose = (jobId) => setParams((previous) => {
+    const value = new URLSearchParams(previous)
+    value.set("job", jobId)
+    return value
+  })
+  const changeFilter = (_, value) => {
+    if (!value) return
+    setParams((previous) => {
+      const next = new URLSearchParams(previous)
+      next.set("filter", value)
+      next.delete("job")
+      return next
+    })
+  }
 
   return (
-    <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
+    <Box sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <PageHero
-        backTo="/utilities"
         icon={<FactCheckOutlinedIcon sx={{ fontSize: 22 }} />}
-        title="Localization Review"
-        subtitle="QC exceptions and targeted expert reruns — same persisted pipeline artifacts"
-        actions={
-          <Button variant="outlined" startIcon={<RefreshOutlinedIcon />} onClick={load}>
-            Refresh
-          </Button>
-        }
+        title="Review"
+        subtitle="One exception workspace. Current live items come from the canonical localization QC queue."
+        actions={<Button variant="outlined" startIcon={<RefreshOutlinedIcon />} onClick={load}>Refresh</Button>}
       />
-      <Box sx={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: { xs: "1fr", md: "340px 1fr" } }}>
+      <Box sx={{ px: { xs: 1.5, md: 2.5 }, py: 1.25, borderBottom: 1, borderColor: "divider", overflowX: "auto", flexShrink: 0 }}>
+        <ToggleButtonGroup exclusive value={filter} onChange={changeFilter} size="small" sx={{ "& .MuiToggleButton-root": { textTransform: "none", whiteSpace: "nowrap" } }}>
+          {REVIEW_FILTERS.map((item) => {
+            const count = item.enabled ? items.filter((reviewItem) => reviewItemMatches(reviewItem, item.value)).length : null
+            return <ToggleButton key={item.value} value={item.value} disabled={!item.enabled}>{item.label}{count !== null && <Chip size="small" label={count} sx={{ ml: 0.75, height: 18, fontSize: "0.62rem" }} />}</ToggleButton>
+          })}
+        </ToggleButtonGroup>
+      </Box>
+      <Box sx={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: { xs: "1fr", md: "360px minmax(0, 1fr)" } }}>
         <Box sx={{ overflow: "auto", p: 2, borderRight: { md: 1 }, borderColor: "divider" }}>
-          {loading ? (
-            <Stack alignItems="center" sx={{ py: 5 }}><CircularProgress size={28} /></Stack>
-          ) : items.length === 0 ? (
-            <Alert severity="success">No localization jobs currently need review.</Alert>
-          ) : (
-            <Stack spacing={1}>
-              {items.map((item) => (
-                <Button
-                  key={item.job_id}
-                  variant={selected === item.job_id ? "contained" : "outlined"}
-                  color={item.qc_status === "FAILED" ? "error" : "warning"}
-                  onClick={() => setSelected(item.job_id)}
-                  sx={{ justifyContent: "flex-start", textAlign: "left", py: 1.25 }}
-                >
-                  <Box sx={{ minWidth: 0 }}>
-                    <Stack direction="row" spacing={0.75} alignItems="center">
-                      <Typography variant="body2" sx={{ fontWeight: 700 }} noWrap>
-                        {item.request?.target_language || "Localization"}
-                      </Typography>
-                      {item.qc_status && <Chip size="small" label={item.qc_status} />}
-                    </Stack>
-                    <Typography variant="caption" sx={{ opacity: 0.85 }} noWrap>
-                      {item.job_id}
-                    </Typography>
-                  </Box>
-                </Button>
-              ))}
-            </Stack>
-          )}
+          {loading ? <Stack alignItems="center" sx={{ py: 5 }}><CircularProgress size={28} /></Stack> : visible.length === 0 ? <Alert severity="success">No real items match this review filter.</Alert> : <Stack spacing={1}>{visible.map((item) => <Paper key={item.id} variant="outlined" onClick={() => choose(item.job_id)} sx={{ p: 1.5, borderRadius: 2, cursor: "pointer", borderColor: selected === item.job_id ? "primary.main" : "divider", bgcolor: selected === item.job_id ? "action.selected" : "background.paper" }}><Stack direction="row" spacing={0.75} alignItems="center"><Typography variant="body2" sx={{ fontWeight: 800, flex: 1 }} noWrap>{item.source}</Typography><Chip size="small" color={item.severity} label={item.status} /></Stack><Typography variant="caption" color="text.secondary">{item.workflow} · {item.job_id}</Typography><Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>{item.categories.map((category) => <Chip key={category} size="small" variant="outlined" label={category} />)}</Stack>{item.reasons.map((reason, index) => <Typography key={index} variant="caption" color="error.main" sx={{ display: "block", mt: 0.5 }}>{reason.stage}: {reason.error || "failed"}</Typography>)}</Paper>)}</Stack>}
         </Box>
-        <Box sx={{ overflow: "auto", p: 2.5 }}>
-          {selected ? (
-            <LocalizationExpertPanel jobId={selected} />
-          ) : (
-            <Stack spacing={1} alignItems="center" justifyContent="center" sx={{ minHeight: 240 }}>
-              <FactCheckOutlinedIcon color="disabled" sx={{ fontSize: 44 }} />
-              <Typography variant="body2" color="text.secondary">
-                Select a QC exception to inspect and rerun.
-              </Typography>
-            </Stack>
-          )}
+        <Box sx={{ overflow: "auto", p: { xs: 1.5, md: 2.5 } }}>
+          {selected ? <LocalizationExpertPanel jobId={selected} /> : <Stack spacing={1} alignItems="center" justifyContent="center" sx={{ minHeight: 240 }}><FactCheckOutlinedIcon color="disabled" sx={{ fontSize: 44 }} /><Typography variant="body2" color="text.secondary">Select an exception to inspect translation, timing, voice, chunks, reruns and QC.</Typography></Stack>}
         </Box>
       </Box>
     </Box>

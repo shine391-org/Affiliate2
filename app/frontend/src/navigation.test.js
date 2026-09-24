@@ -6,6 +6,7 @@ import {
   BOTTOM_NAV_ITEMS,
   LEGACY_ROUTE_TARGETS,
   discoverSectionForPath,
+  legacyRedirectHref,
 } from "./navigation.js"
 
 test("primary navigation is workflow-first and ordered", () => {
@@ -34,9 +35,12 @@ test("legacy route ownership remains explicit", () => {
   assert.deepEqual(LEGACY_ROUTE_TARGETS, {
     "/scout": "/discover/spy",
     "/channels": "/discover/channels",
-    "/clips": "/studio",
+    "/clips": "/studio/manual",
     "/tools": "/utilities",
+    "/tools/translate": "/studio/localize",
+    "/tools/localization-batch": "/studio/localize?batch=1",
     "/tools/localization-review": "/review",
+    "/utilities/localization-review": "/review",
     "/videos": "/library",
   })
 })
@@ -47,4 +51,11 @@ test("discover routes resolve to the correct internal section", () => {
   assert.equal(discoverSectionForPath("/discover/channels"), "channels")
   assert.equal(discoverSectionForPath("/discover/candidates"), "candidates")
   assert.equal(discoverSectionForPath("/discover/unknown"), "spy")
+})
+
+test("legacy redirects preserve query/hash while adding canonical parameters", () => {
+  assert.equal(
+    legacyRedirectHref("/studio/localize?batch=1", "?source=abc&step=source", "#files"),
+    "/studio/localize?source=abc&step=source&batch=1#files",
+  )
 })

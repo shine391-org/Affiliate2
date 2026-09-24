@@ -204,11 +204,18 @@ async def localization_exceptions(limit: int = 50):
             if rec.get("status") == "failed"
         ]
         if qc_status in {"FAILED", "NEEDS_REVIEW"} or failed:
+            qc_report = None
+            try:
+                qc_report = _optional_json(LocalizationRun.load(str(data.get("job_id"))), "qc", "report")
+            except (ValueError, RuntimeError):
+                pass
             items.append({
                 "job_id": data.get("job_id"),
                 "updated_at": data.get("updated_at"),
                 "qc_status": qc_status,
                 "failed_stages": failed,
+                "qc_failures": (qc_report or {}).get("failures") or [],
+                "qc_warnings": (qc_report or {}).get("warnings") or [],
                 "request": data.get("request") or {},
             })
     items.sort(key=lambda x: x.get("updated_at") or "", reverse=True)

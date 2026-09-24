@@ -15,9 +15,12 @@ export const BOTTOM_NAV_ITEMS = [
 export const LEGACY_ROUTE_TARGETS = {
   "/scout": "/discover/spy",
   "/channels": "/discover/channels",
-  "/clips": "/studio",
+  "/clips": "/studio/manual",
   "/tools": "/utilities",
+  "/tools/translate": "/studio/localize",
+  "/tools/localization-batch": "/studio/localize?batch=1",
   "/tools/localization-review": "/review",
+  "/utilities/localization-review": "/review",
   "/videos": "/library",
 }
 
@@ -30,4 +33,12 @@ export const DISCOVER_SECTIONS = [
 export function discoverSectionForPath(pathname) {
   const section = pathname.split("/").filter(Boolean)[1]
   return DISCOVER_SECTIONS.some((item) => item.value === section) ? section : "spy"
+}
+
+export function legacyRedirectHref(target, search = "", hash = "") {
+  const [pathname, fixedSearch = ""] = target.split("?", 2)
+  const params = new URLSearchParams(search)
+  for (const [key, value] of new URLSearchParams(fixedSearch)) params.set(key, value)
+  const query = params.toString()
+  return `${pathname}${query ? `?${query}` : ""}${hash || ""}`
 }

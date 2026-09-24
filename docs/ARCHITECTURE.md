@@ -241,6 +241,12 @@ Important rules:
 
 ## Production modes
 
+The frontend exposes one canonical `/studio` workspace. Localize and Manual Edit
+reuse the same selected Library source; Smart Cut and Creative Remake remain
+explicit reserved modes until their later phases. `/review` is the canonical
+human-exception workspace and currently adapts localization QC items into a
+generic review envelope while reusing the persisted Expert job controls.
+
 ### Translate / Dub
 
 Preserve source meaning/content while producing a Vietnamese-localized version through the canonical localization pipeline.

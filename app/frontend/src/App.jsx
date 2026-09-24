@@ -4,6 +4,7 @@ import { Snackbar, Alert, Button, CircularProgress, Box } from "@mui/material"
 import ErrorBoundary from "./components/ErrorBoundary"
 import Layout from "./components/Layout"
 import useAppStore from "./store/appStore"
+import { legacyRedirectHref } from "./navigation"
 
 // Route-level code splitting — Assistant remains available, but Discover owns home.
 import Chat from "./pages/Chat"
@@ -15,7 +16,7 @@ const Scout = lazy(() => import("./pages/Scout"))
 const StockVideo = lazy(() => import("./pages/StockVideo"))
 const Channels = lazy(() => import("./pages/Channels"))
 const Messaging = lazy(() => import("./pages/Messaging"))
-const ClipStudio = lazy(() => import("./pages/ClipStudio"))
+const Studio = lazy(() => import("./pages/Studio"))
 const MotionGraphics = lazy(() => import("./pages/MotionGraphics"))
 const Tools = lazy(() => import("./pages/Tools"))
 const LocalizationBatch = lazy(() => import("./pages/LocalizationBatch"))
@@ -55,7 +56,7 @@ const LazyFallback = () => (
 
 function LegacyRedirect({ to, suffix = "" }) {
   const location = useLocation()
-  return <Navigate to={`${to}${suffix}${location.search}${location.hash}`} replace />
+  return <Navigate to={legacyRedirectHref(`${to}${suffix}`, location.search, location.hash)} replace />
 }
 
 function LegacyToolsRedirect() {
@@ -117,7 +118,11 @@ export default function App() {
               </Route>
 
               <Route path="library" element={<Library />} />
-              <Route path="studio" element={<ClipStudio />} />
+              <Route path="studio" element={<Studio />} />
+              <Route path="studio/localize" element={<Studio />} />
+              <Route path="studio/manual" element={<Studio />} />
+              <Route path="studio/smart-cut" element={<Studio />} />
+              <Route path="studio/remake" element={<Studio />} />
               <Route path="review" element={<LocalizationReview />} />
               <Route path="publish" element={<Publish />} />
               <Route path="performance" element={<Performance />} />
@@ -135,8 +140,8 @@ export default function App() {
               <Route path="messaging" element={<Messaging />} />
               <Route path="review-queue" element={<ReviewQueue />} />
 
-              <Route path="utilities/localization-batch" element={<LocalizationBatch />} />
-              <Route path="utilities/localization-review" element={<Navigate to="/review" replace />} />
+              <Route path="utilities/localization-batch" element={<LegacyRedirect to="/studio/localize" suffix="?batch=1" />} />
+              <Route path="utilities/localization-review" element={<LegacyRedirect to="/review" />} />
               <Route path="utilities/captions" element={<ToolCaptions />} />
               <Route path="utilities/reframe" element={<ToolReframe />} />
               <Route path="utilities/audio-enhance" element={<ToolAudioEnhance />} />
@@ -155,15 +160,17 @@ export default function App() {
               <Route path="utilities/music-visualizer" element={<ToolMusicVisualizer />} />
               <Route path="utilities/voiceover" element={<ToolVoiceover />} />
               <Route path="utilities/hook-analysis" element={<ToolHookAnalysis />} />
-              <Route path="utilities/translate" element={<ToolTranslate />} />
+              <Route path="utilities/translate" element={<LegacyRedirect to="/studio/localize" />} />
               <Route path="utilities/metadata" element={<ToolMetadata />} />
               <Route path="utilities/auto-chapters" element={<ToolAutoChapters />} />
 
               {/* Bookmark compatibility. Redirects preserve query/hash. */}
               <Route path="scout" element={<LegacyRedirect to="/discover/spy" />} />
               <Route path="channels" element={<LegacyRedirect to="/discover/channels" />} />
-              <Route path="clips" element={<LegacyRedirect to="/studio" />} />
+              <Route path="clips" element={<LegacyRedirect to="/studio/manual" />} />
               <Route path="videos" element={<LegacyRedirect to="/library" />} />
+              <Route path="tools/translate" element={<LegacyRedirect to="/studio/localize" />} />
+              <Route path="tools/localization-batch" element={<LegacyRedirect to="/studio/localize" suffix="?batch=1" />} />
               <Route path="tools/localization-review" element={<LegacyRedirect to="/review" />} />
               <Route path="tools/*" element={<LegacyToolsRedirect />} />
 

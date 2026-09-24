@@ -1,6 +1,6 @@
 # Affiliate2 UI/UX Convergence Plan
 
-Status: **UX1 + UX2 SHELL IMPLEMENTED — later convergence phases remain planned**
+Status: **UX1–UX5 IMPLEMENTED — later convergence phases remain planned**
 
 Implementation checkpoint (September 24, 2026):
 
@@ -13,6 +13,14 @@ Implementation checkpoint (September 24, 2026):
   downloaded assets remain visible through the canonical Library index;
 - Candidates exposes persisted discovery/download/analyze state and opens linked
   local assets in the existing Studio by canonical downloaded-video ID;
+- Studio is now the canonical source workspace with Localize and Manual Edit
+  active, truthful reserved states for Smart Cut and Creative Remake, and source
+  context preserved across mode switches and legacy redirects;
+- Localize now presents the canonical six-step Phase-C workflow and opens Batch
+  as a contextual action without introducing a second localization engine;
+- Review now adapts localization QC exceptions into a generic review-item
+  envelope with real Translation/Timing/Audio/QC filters and reuses the existing
+  Expert workspace for fixes and targeted reruns;
 - Saved/shortlist is intentionally not represented until a real persisted state
   exists; no client-only fake shortlist was introduced.
 

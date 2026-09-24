@@ -10,7 +10,7 @@ import PageHero from "../components/PageHero"
 import useAppStore from "../store/appStore"
 import useDocumentTitle from "../hooks/useDocumentTitle"
 
-export default function LocalizationBatch() {
+export default function LocalizationBatch({ embedded = false }) {
   useDocumentTitle("Localization Batch")
   const startJob = useAppStore((s) => s.startJob)
   const showSnackbar = useAppStore((s) => s.showSnackbar)
@@ -62,13 +62,15 @@ export default function LocalizationBatch() {
 
   return (
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      <PageHero
-        backTo="/utilities"
-        icon={<TranslateOutlinedIcon sx={{ fontSize: 22 }} />}
-        title="Localization Batch"
-        subtitle="Run the same proven HQ localization pipeline across up to 20 videos"
-      />
-      <Box sx={{ flex: 1, overflow: "auto", p: 3 }}>
+      {!embedded && (
+        <PageHero
+          backTo="/studio/localize"
+          icon={<TranslateOutlinedIcon sx={{ fontSize: 22 }} />}
+          title="Localization Batch"
+          subtitle="Run the same proven HQ localization pipeline across up to 20 videos"
+        />
+      )}
+      <Box sx={{ flex: 1, overflow: "auto", p: embedded ? 1 : 3 }}>
         <Stack spacing={2.5} sx={{ maxWidth: 900, mx: "auto" }}>
           <Alert severity="info" variant="outlined">
             Every item gets its own persisted stage manifest, resume state, QC report

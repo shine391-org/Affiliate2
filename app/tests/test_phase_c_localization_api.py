@@ -2,6 +2,7 @@
 import pytest
 
 from backend.api import localization as api
+from backend.api import tools
 
 
 @pytest.mark.asyncio
@@ -51,6 +52,75 @@ def test_profile_invalidation_uses_earliest_quality_stage():
     assert api._profile_invalidation({"translation_model", "tts_model"}) == "translation"
     assert api._profile_invalidation({"asr_model", "render_profile"}) == "asr"
 
+
+@pytest.mark.asyncio
+async def test_translate_source_reuses_downloaded_media_without_upload(monkeypatch, tmp_path):
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"real-source")
+
+    async def fake_downloaded_path(video_id):
+        assert video_id == "downloaded-1"
+        return source
+
+    async def fail_upload(*args, **kwargs):
+        raise AssertionError("selected downloaded source must not be re-uploaded")
+
+    monkeypatch.setattr(tools, "_downloaded_video_path", fake_downloaded_path)
+    monkeypatch.setattr(tools, "save_upload", fail_upload)
+
+    resolved = await tools._resolve_translate_source(
+        file=None,
+        downloaded_video_id="downloaded-1",
+        job_id="job-1",
+    )
+
+    assert resolved == source
+
+
+@pytest.mark.asyncio
+async def test_translate_source_requires_exactly_one_input():
+    with pytest.raises(Exception, match="exactly one"):
+        await tools._resolve_translate_source(file=None, downloaded_video_id=None, job_id="job-1")
+
+
+@pytest.mark.asyncio
+async def test_translate_source_treats_whitespace_download_id_as_absent(monkeypatch, tmp_path):
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"real-source")
+
+    async def fake_downloaded_path(video_id):
+        raise AssertionError("whitespace id must not resolve a download")
+    monkeypatch.setattr(tools, "_downloaded_video_path", fake_downloaded_path)
+
+    class FakeUpload:
+        filename = "drop.mp4"
+        async def read(self):
+            return b"upload-bytes"
+        def close(self):
+            pass
+
+    async def captured_upload(file, job_id, allowed_exts, max_bytes, suffix=""):
+        assert file.filename == "drop.mp4"
+        return source
+    monkeypatch.setattr(tools, "save_upload", captured_upload)
+
+    resolved = await tools._resolve_translate_source(
+        file=FakeUpload(), downloaded_video_id="   ", job_id="job-1",
+    )
+    assert resolved == source
+
+
+@pytest.mark.asyncio
+async def test_translate_rejects_missing_download_before_creating_job(monkeypatch):
+    async def missing_source(video_id):
+        raise tools.HTTPException(404, "Downloaded source not found")
+
+    monkeypatch.setattr(tools, "_downloaded_video_path", missing_source)
+
+    with pytest.raises(tools.HTTPException, match="Downloaded source not found"):
+        await tools._resolve_translate_source(
+            file=None, downloaded_video_id="missing", job_id="job-1",
+        )
 
 
 @pytest.mark.asyncio
