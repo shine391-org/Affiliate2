@@ -373,19 +373,15 @@ class ScoutAgent:
             return await search_youtube(niche, youtube_key, PLATFORM_LIMITS["youtube"])
 
         elif platform == "tiktok":
-            # Try TikHub API first (env key)
+            # TikHub is the only implemented TikTok discovery path. The old
+            # cookie "fallback" called a placeholder service that always
+            # returned [], so keeping it only created false configuration state.
             if settings.TIKHUB_API_KEY:
                 from backend.services.tikhub_client import search_tiktok
-                return await search_tiktok(niche, settings.TIKHUB_API_KEY, PLATFORM_LIMITS["tiktok"])
-            # Fall back to user's session cookie
-            from backend.core.crypto import decrypt_safe
-            cookie = ""
-            if user_settings and user_settings.tiktok_cookie_encrypted:
-                cookie = decrypt_safe(user_settings.tiktok_cookie_encrypted)
-            if cookie:
-                from backend.services.tiktok_downloader_svc import scout_tiktok_trending
-                return await scout_tiktok_trending(cookie, niche, PLATFORM_LIMITS["tiktok"])
-            logger.warning("TikTok: no API key or cookie configured")
+                return await search_tiktok(
+                    niche, settings.TIKHUB_API_KEY, PLATFORM_LIMITS["tiktok"]
+                )
+            logger.warning("TikTok: no TikHub API key configured")
             return []
 
         elif has_source_provider(platform):
