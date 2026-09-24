@@ -64,9 +64,9 @@ class LocalizationProfile(BaseModel):
     rewrite_model: str | None = None
     rewrite_base_url: str | None = None
     rewrite_guardrails: str = DEFAULT_REWRITE_GUARDRAILS
-    # Appended after the semantic guardrails. Users can tune
-    # compression/style per profile without replacing the core fidelity,
-    # stable-ID or structured-output guardrails owned by the application.
+    # Appended after the editable semantic guardrails. Users can tune
+    # compression/style per profile while the stable-ID / structured-output
+    # protocol remains application-owned.
     rewrite_instructions: str = ""
 
     tts_provider: str | None = None
