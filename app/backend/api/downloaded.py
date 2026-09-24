@@ -832,7 +832,12 @@ def _resolve_clip_output_source_type(raw: str | None, mode: str) -> str:
 
 
 
-def _validate_manual_time_ranges(raw_ranges, video_duration: float) -> list[dict]:
+def _validate_manual_time_ranges(
+    raw_ranges,
+    video_duration: float,
+    *,
+    preserve_metadata: bool = False,
+) -> list[dict]:
     """Parse + validate user-supplied time ranges for manual-mode extraction.
 
     `raw_ranges` is the unsafe payload from the API client: a list of
@@ -894,7 +899,28 @@ def _validate_manual_time_ranges(raw_ranges, video_duration: float) -> list[dict
                     f"({video_duration:g}s)"
                 ),
             )
-        parsed.append({"start": start, "end": end})
+        item = {"start": start, "end": end}
+        if preserve_metadata:
+            title = str(r.get("title") or "").strip()
+            reason = str(r.get("reason") or "").strip()
+            hook_type = str(r.get("hook_type") or "").strip()
+            if title:
+                item["title"] = title[:200]
+            if reason:
+                item["reason"] = reason[:1200]
+            if hook_type:
+                item["hook_type"] = hook_type[:30]
+            for source_key, target_key in (
+                ("virality_score", "virality_score"),
+                ("hook_score", "hook_score"),
+            ):
+                try:
+                    value = float(r.get(source_key))
+                except (TypeError, ValueError):
+                    continue
+                if math.isfinite(value):
+                    item[target_key] = max(1.0, min(10.0, value))
+        parsed.append(item)
 
     # Sort chronologically for stable clip numbering downstream.
     parsed.sort(key=lambda r: r["start"])
@@ -1027,6 +1053,7 @@ async def extract_clips(video_id: str, body: ExtractClipsRequest | None = None):
         time_ranges = _validate_manual_time_ranges(
             req.time_ranges,
             video_duration=duration,
+            preserve_metadata=output_source_type == "smart_cut",
         )
         max_clips = len(time_ranges)
     else:
