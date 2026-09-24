@@ -248,11 +248,11 @@ Important rules:
 
 ## Production modes
 
-The frontend exposes one canonical `/studio` workspace. Localize and Manual Edit
-reuse the same selected Library source; Smart Cut and Creative Remake remain
-explicit reserved modes until their later phases.
+The frontend exposes one canonical `/studio` workspace. Localize, Manual Edit
+and Smart Cut reuse the same selected Library source. Creative Remake remains
+an explicit reserved mode until Phase E.
 
-Phase-D/E readiness uses the same source contract:
+Phase-D/E workflows use the same source contract:
 
 ```
 DownloadedVideo id
@@ -263,8 +263,23 @@ DownloadedVideo id
   -> existing Library lineage
 ```
 
-Reserved derivative identities are `smart_cut` and `creative_remake`; future
-writers attach `source_downloaded_video_id` so no new media graph is required.
+Smart Cut is live without a second media engine:
+
+```
+DownloadedVideo
+  -> canonical cached transcript / Whisper when missing
+  -> existing /suggest-clips AI range proposal
+  -> existing SourceBench human adjust/approve
+  -> existing /extract-clips manual renderer
+  -> GeneratedVideo(source_type="smart_cut",
+                    source_downloaded_video_id=<source>)
+  -> Library lineage
+```
+
+The backend only allows the `smart_cut` derivative identity on manual/approved
+ranges; direct AI extraction remains a Clipper output. `creative_remake`
+remains reserved for Phase E and will attach the same source lineage rather than
+introducing another media graph.
 
 `/review` is the canonical human-exception workspace. It loads workflow
 sources through one registry: Localize is live now, while Smart Cut and Creative
@@ -281,7 +296,11 @@ Preserve source meaning/content while producing a Vietnamese-localized version t
 
 ### Smart Cut
 
-Shorten/repackage source material by selecting/retiming/reordering source ranges. Reuse Phase-C media/transcript/timeline and Clip Studio where fit.
+Shorten/repackage source material by selecting source ranges. The current Phase-D
+implementation reuses the existing Clip Studio proposal bench and renderer:
+AI proposes non-overlapping source windows, the user adjusts/approves them, and
+only those approved ranges render as `smart_cut` derivatives. There is no
+second ASR owner, range editor, job system or FFmpeg clip renderer.
 
 ### Creative Remake HQ
 
