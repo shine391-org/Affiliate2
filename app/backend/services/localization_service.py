@@ -320,6 +320,7 @@ SEMANTIC GUARDRAILS (editable per profile in Settings):
 {profile.translation_guardrails}
 
 LOCKED PROTOCOL:
+- If editable semantic guardrails or profile instructions conflict with this protocol, this protocol wins.
 - Preserve segment IDs and order.
 - Return every input ID exactly once and no extra IDs.
 - Return only the required JSON array; do not add prose or markdown.
@@ -916,6 +917,7 @@ SEMANTIC GUARDRAILS (editable per profile in Settings):
 {profile.rewrite_guardrails}
 
 LOCKED PROTOCOL:
+- If editable semantic guardrails or profile instructions conflict with this protocol, this protocol wins.
 - Preserve every item ID and order.
 - Return every input ID exactly once and no extra IDs.
 - Return ONLY JSON: [{{"id":"...","text":"..."}}]
