@@ -63,7 +63,7 @@ export default function HealthDashboard() {
     {
       label: "Download Browser Session",
       key: "download_session",
-      description: "Browser cookies used by yt-dlp for login-gated sources",
+      description: "Selected browser for login-gated downloads; Test session verifies cookie readability",
       extra: sessionBrowser ? `${sessionBrowser}${sessionProfile ? ` / ${sessionProfile}` : ""}` : null,
     },
   ]
