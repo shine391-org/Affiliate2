@@ -141,6 +141,26 @@ class TestBuildManualClipWindows:
         assert "hook_score" not in windows[0]
         assert "hook_type" not in windows[0]
 
+    def test_smart_cut_metadata_is_preserved_when_present(self):
+        windows = _build_manual_clip_windows(
+            [{
+                "start": 10,
+                "end": 30,
+                "title": "AI pick",
+                "reason": "Strong hook and complete payoff",
+                "virality_score": 8.7,
+                "hook_score": 9.1,
+                "hook_type": "curiosity_gap",
+            }],
+            duration=60,
+            title="Source",
+        )
+        assert windows[0]["title"] == "AI pick"
+        assert windows[0]["reason"] == "Strong hook and complete payoff"
+        assert windows[0]["virality_score"] == 8.7
+        assert windows[0]["hook_score"] == 9.1
+        assert windows[0]["hook_type"] == "curiosity_gap"
+
     def test_clamps_end_to_duration_defensively(self):
         """API validates against video_duration but a drifted DB row
         (yt-dlp reported 60s, actual file is 58s) could let an end-time
@@ -219,6 +239,40 @@ class TestValidateManualTimeRangesHappyPath:
             video_duration=58.0,
         )
         assert parsed[0]["end"] == 58.3
+
+
+class TestValidateSmartCutMetadata:
+    def test_plain_manual_validation_strips_untrusted_metadata(self):
+        parsed = _validate_manual_time_ranges(
+            [{"start": 0, "end": 10, "virality_score": 10, "reason": "x"}],
+            video_duration=60,
+        )
+        assert parsed == [{"start": 0.0, "end": 10.0}]
+
+    def test_smart_cut_validation_preserves_and_clamps_allowlisted_metadata(self):
+        parsed = _validate_manual_time_ranges(
+            [{
+                "start": 0,
+                "end": 10,
+                "title": "  AI pick  ",
+                "reason": "why",
+                "virality_score": 99,
+                "hook_score": -3,
+                "hook_type": "question",
+                "ignored": "do not persist",
+            }],
+            video_duration=60,
+            preserve_metadata=True,
+        )
+        assert parsed == [{
+            "start": 0.0,
+            "end": 10.0,
+            "title": "AI pick",
+            "reason": "why",
+            "hook_type": "question",
+            "virality_score": 10.0,
+            "hook_score": 1.0,
+        }]
 
 
 class TestValidateManualTimeRangesRejects:
