@@ -23,6 +23,8 @@ def test_default_profile_is_full_hq_donor_stack():
     assert profile.alignment_mode == "whisperx"
     assert profile.diarization_mode == "auto"
     assert profile.semantic_segmentation is True
+    assert profile.translation_preset == "natural_vietnamese"
+    assert profile.rewrite_model is None
     assert profile.dub_min_cue_duration_ms == 2500
     assert profile.dub_max_chunk_size == 5
     assert profile.dub_gap_tolerance_ms == 1500
@@ -34,6 +36,19 @@ def test_default_profile_is_full_hq_donor_stack():
     assert profile.voice_clone_reference_mode == "per_speaker_auto"
     assert profile.render_profile == "hq"
     assert profile.qc_profile == "strict"
+
+
+def test_profile_can_pin_translation_and_rewrite_models_independently():
+    profile = LocalizationProfile(
+        id="model-split",
+        name="Model split",
+        translation_model="translator-large",
+        rewrite_model="rewrite-small",
+        translation_base_url="http://127.0.0.1:1234/v1",
+        rewrite_base_url="http://127.0.0.1:1234/v1",
+    )
+    assert profile.translation_model == "translator-large"
+    assert profile.rewrite_model == "rewrite-small"
 
 
 def test_profile_round_trips_as_one_json_payload():
