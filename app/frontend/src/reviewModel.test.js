@@ -1,7 +1,15 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 
-import { REVIEW_FILTERS, adaptLocalizationException, formatReviewIssue, reviewItemMatches, reviewSelectionForItems } from "./reviewModel.js"
+import {
+  REVIEW_FILTERS,
+  REVIEW_WORKFLOW_CONTRACTS,
+  adaptLocalizationException,
+  adaptWorkflowException,
+  formatReviewIssue,
+  reviewItemMatches,
+  reviewSelectionForItems,
+} from "./reviewModel.js"
 
 test("localization exceptions adapt to the generic review envelope", () => {
   const item = adaptLocalizationException({
@@ -26,9 +34,33 @@ test("review filters reserve future categories without fake counts", () => {
     REVIEW_FILTERS.map(({ value, enabled }) => [value, enabled]),
     [
       ["needs-review", true], ["translation", true], ["timing", true],
-      ["audio", true], ["qc", true], ["visual", false], ["publish", false],
+      ["audio", true], ["storyboard", true], ["visual", true],
+      ["qc", true], ["publish", false],
     ],
   )
+})
+
+test("Phase D and E review contracts are registered without fabricating live items", () => {
+  assert.deepEqual(REVIEW_WORKFLOW_CONTRACTS["Smart Cut"].categories, ["Timing", "Visual", "QC"])
+  assert.equal(REVIEW_WORKFLOW_CONTRACTS["Creative Remake"].human_approval, "storyboard")
+
+  const storyboard = adaptWorkflowException({
+    id: "remake-1",
+    source_title: "Product demo",
+    status: "NEEDS_REVIEW",
+    categories: ["Storyboard", "Visual"],
+    reasons: [{ stage: "storyboard", error: "Human approval required" }],
+  }, {
+    workflow: "Creative Remake",
+    prefix: "remake",
+    detailKind: "creative-remake",
+  })
+
+  assert.equal(storyboard.workflow, "Creative Remake")
+  assert.equal(storyboard.detail_kind, "creative-remake")
+  assert.equal(reviewItemMatches(storyboard, "storyboard"), true)
+  assert.equal(reviewItemMatches(storyboard, "visual"), true)
+  assert.equal(reviewSelectionForItems([storyboard], "storyboard", ""), "remake-1")
 })
 
 test("review category matching uses real reason categories", () => {
