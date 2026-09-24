@@ -62,9 +62,17 @@ def seeded(media):
             await conn.run_sync(Base.metadata.create_all)
         ids = {}
         async with AsyncSessionLocal() as db:
-            ok = DownloadedVideo(user_id="local", title="A long podcast",
-                                 platform="youtube", video_path=str(media),
-                                 duration_seconds=600)
+            ok = DownloadedVideo(
+                user_id="local",
+                title="A long podcast",
+                platform="youtube",
+                video_path=str(media),
+                duration_seconds=600,
+                transcript="hello world",
+                transcript_language="en",
+                transcript_source="whisper",
+                transcript_segments_json='[{"start":0.0,"end":1.2,"text":"hello world","words":[{"start":0.0,"end":0.5,"word":"hello"}]}]',
+            )
             gone = DownloadedVideo(user_id="local", title="Deleted from disk",
                                    platform="youtube",
                                    video_path="/no/such/file.mp4",
@@ -118,6 +126,20 @@ class TestListing:
         r = client.get(f"/api/downloaded/{seeded['ok']}")
         assert r.status_code == 200
         assert r.json()["title"] == "A long podcast"
+
+    def test_a_single_row_exposes_canonical_transcript_segments(self, client, seeded):
+        r = client.get(f"/api/downloaded/{seeded['ok']}")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["transcript"] == "hello world"
+        assert body["transcript_language"] == "en"
+        assert body["transcript_source"] == "whisper"
+        assert body["transcript_segments"] == [{
+            "start": 0.0,
+            "end": 1.2,
+            "text": "hello world",
+            "words": [{"start": 0.0, "end": 0.5, "word": "hello"}],
+        }]
 
     def test_an_unknown_id_is_a_404(self, client):
         assert client.get("/api/downloaded/nope").status_code == 404
