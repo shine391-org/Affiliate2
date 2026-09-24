@@ -158,6 +158,7 @@ def test_c6_translation_prompt_uses_editable_semantics_but_keeps_locked_protocol
     assert "Preserve segment IDs and order." in prompt
     assert "Return every input ID exactly once and no extra IDs." in prompt
     assert "Return only the required JSON array" in prompt
+    assert "this protocol wins" in prompt
 
 
 @pytest.mark.asyncio
@@ -344,6 +345,7 @@ async def test_c7_rewrite_prompt_keeps_locked_core_and_uses_its_own_profile_inst
     assert "LOCKED PROTOCOL:" in ai.prompt
     assert "Preserve every item ID and order." in ai.prompt
     assert "Return every input ID exactly once and no extra IDs." in ai.prompt
+    assert "this protocol wins" in ai.prompt
     assert "semantic guardrails and locked protocol above remain active" in ai.prompt
     assert segment.translated_text == "ngắn"
 
