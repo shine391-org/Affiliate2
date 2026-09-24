@@ -433,6 +433,14 @@ export default function ClipStudio({ workflow = "manual" }) {
       if (requestedSourceId && downloadedVideos.some((video) => video.id === requestedSourceId)) {
         setSelectedSourceId(requestedSourceId)
         setCenterMode("bench")
+        if (smartCut) setSelectedClip(null)
+      } else if (smartCut) {
+        // Studio header is the one Smart Cut source owner. Clearing or
+        // changing ?source= must never leave the hidden legacy sidebar's
+        // previous selection active behind the header.
+        setSelectedSourceId(null)
+        setSelectedClip(null)
+        setCenterMode("bench")
       }
 
       // Each Studio workflow sees only derivatives it owns. Both still come
@@ -448,7 +456,7 @@ export default function ClipStudio({ workflow = "manual" }) {
     } finally {
       setLoading(false)
     }
-  }, [requestedSourceId, outputSourceType])
+  }, [requestedSourceId, outputSourceType, smartCut])
 
   useEffect(() => { fetchData() }, [fetchData])
 
@@ -460,7 +468,7 @@ export default function ClipStudio({ workflow = "manual" }) {
   const refreshJobs = useMemo(
     () => Object.values(activeJobs).filter(
       j => isClipJob(j) || j.inputData?.type === "clip_suggestion"),
-    [activeJobs])  // eslint-disable-line react-hooks/exhaustive-deps
+    [activeJobs, outputSourceType])
   useEffect(() => {
     for (const job of refreshJobs) {
       if ((job.status === "success" || job.status === "failed") && !justCompletedRef.current.has(job.jobId)) {
