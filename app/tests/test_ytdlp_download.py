@@ -100,10 +100,13 @@ class TestCookieBrowserDetection:
         monkeypatch.setattr(YT, "_BROWSER_COOKIE_SOURCE", "")
         assert YT._detect_cookie_browser() is None
 
-    def test_the_first_installed_browser_wins_on_macos(self, monkeypatch):
-        monkeypatch.setattr(YT.platform, "system", lambda: "Darwin")
-        monkeypatch.setattr(YT.Path, "exists",
-                            lambda self: "Brave" in str(self))
+    def test_the_first_available_browser_wins_in_declared_order(self, monkeypatch):
+        available = {"brave"}
+        monkeypatch.setattr(
+            YT,
+            "_browser_known_on_machine",
+            lambda name: name in available,
+        )
         assert YT._detect_cookie_browser() == "brave"
 
     def test_no_browser_at_all_is_none(self, monkeypatch):
