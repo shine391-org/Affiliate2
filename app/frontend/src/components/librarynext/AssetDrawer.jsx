@@ -249,6 +249,28 @@ export default function AssetDrawer({
             <Divider />
           </Box>
 
+          {item.source === "downloaded" && item.media === "video" && (
+            <Box sx={{ px: 2, pt: 1.25, flexShrink: 0 }}>
+              <Typography sx={{ fontSize: "0.68rem", fontWeight: 800, letterSpacing: "0.07em", textTransform: "uppercase", color: "text.disabled", mb: 0.75 }}>
+                Open in Studio
+              </Typography>
+              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                <Button size="small" variant="contained" onClick={() => { onClose?.(); navigate(`/studio/localize?source=${encodeURIComponent(item.id)}`) }}>
+                  Localize
+                </Button>
+                <Button size="small" variant="outlined" onClick={() => { onClose?.(); navigate(`/studio/manual?source=${encodeURIComponent(item.id)}`) }}>
+                  Manual Edit
+                </Button>
+                <Button size="small" variant="outlined" onClick={() => { onClose?.(); navigate(`/studio/smart-cut?source=${encodeURIComponent(item.id)}`) }}>
+                  Smart Cut · Phase D
+                </Button>
+                <Button size="small" variant="outlined" onClick={() => { onClose?.(); navigate(`/studio/remake?source=${encodeURIComponent(item.id)}`) }}>
+                  Creative Remake · Phase E
+                </Button>
+              </Stack>
+            </Box>
+          )}
+
           {/* Body */}
           <Box sx={{ flex: 1, overflow: "auto", px: 2, py: 2 }}>
             {tab === 0 && (
