@@ -214,6 +214,38 @@ async def test_lineage_links_a_clip_to_the_download_it_came_from():
         await db.close()
 
 
+async def test_smart_cut_derivative_keeps_source_lineage_and_label():
+    from backend.models.downloaded_video import DownloadedVideo
+    from backend.models.generated_video import GeneratedVideo
+    from backend.services import library_index
+
+    db = await _session()
+    src = _real_file(f"{PREFIX}smart-src.mp4")
+    cut = _real_file(f"{PREFIX}smart-cut.mp4")
+    try:
+        db.add(DownloadedVideo(id=f"{PREFIX}smart-dl", title="Source", platform="youtube",
+                               video_path=str(src)))
+        db.add(GeneratedVideo(id=f"{PREFIX}smart-gv", title="Approved cut",
+                              video_path=str(cut), source_type="smart_cut",
+                              source_downloaded_video_id=f"{PREFIX}smart-dl"))
+        await db.commit()
+
+        items = await library_index.gather(db)
+        item = _by_key(items, f"gv:{PREFIX}smart-gv")
+        assert item is not None
+        assert item["producer"] == "Smart Cut"
+        assert item["origin"] == "edited"
+        assert item["parent_key"] == f"dl:{PREFIX}smart-dl"
+
+        result = await library_index.lineage(db, f"gv:{PREFIX}smart-gv")
+        assert [a["key"] for a in result["ancestors"]] == [f"dl:{PREFIX}smart-dl"]
+    finally:
+        await _cleanup(db)
+        src.unlink(missing_ok=True)
+        cut.unlink(missing_ok=True)
+        await db.close()
+
+
 async def test_resolve_job_video_answers_only_for_indexed_videos():
     """It is the one place that answers "is this job id a video I own, and
     where". A doc output is not a video, and a row the index skips is not
