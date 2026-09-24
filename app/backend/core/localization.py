@@ -153,11 +153,36 @@ def default_profile_store() -> LocalizationProfileStore:
 
 
 def load_profile_store(raw: str | None) -> LocalizationProfileStore:
-    """Parse persisted JSON; corrupt/old data falls back to one safe profile."""
+    """Parse persisted JSON; corrupt/old data falls back to one safe profile.
+
+    Schema-less built-in profiles created before translation-quality hardening
+    used affiliate_conversational as the default for every video. Upgrade only
+    that untouched legacy built-in shape; explicit/newer affiliate profiles are
+    preserved exactly.
+    """
     if not raw:
         return default_profile_store()
     try:
-        store = LocalizationProfileStore.model_validate(json.loads(raw))
+        payload = json.loads(raw)
+        profiles = payload.get("profiles") if isinstance(payload, dict) else None
+        if isinstance(profiles, list):
+            for item in profiles:
+                if not isinstance(item, dict):
+                    continue
+                is_legacy_builtin = (
+                    item.get("id") == "vi-affiliate-hq"
+                    and item.get("name") == "Vietnam Affiliate HQ"
+                    and "rewrite_model" not in item
+                    and "rewrite_provider" not in item
+                    and "rewrite_base_url" not in item
+                    and item.get("translation_preset", "affiliate_conversational")
+                        == "affiliate_conversational"
+                    and not item.get("translation_instructions")
+                    and not item.get("glossary")
+                )
+                if is_legacy_builtin:
+                    item["translation_preset"] = "natural_vietnamese"
+        store = LocalizationProfileStore.model_validate(payload)
     except Exception:
         return default_profile_store()
     if not store.profiles:
