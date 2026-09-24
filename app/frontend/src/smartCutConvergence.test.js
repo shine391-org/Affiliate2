@@ -21,8 +21,10 @@ test("Smart Cut persists its own derivative identity through the shared extracti
 test("Smart Cut is review-first and does not expose direct Auto-cut", () => {
   assert.ok(clipStudio.includes('!smartCut && selectedSourceId'))
   assert.ok(clipStudio.includes('allowAutoCut={!smartCut}'))
+  assert.ok(clipStudio.includes('storageNamespace={smartCut ? "smart-cut" : "clipper"}'))
   assert.ok(sourceBench.includes('allowAutoCut = true'))
   assert.ok(sourceBench.includes('allowAutoCut && onOpenDialog'))
+  assert.ok(sourceBench.includes('storageKey(storageNamespace'))
 })
 
 test("Smart Cut uses the Studio header as its source owner", () => {
