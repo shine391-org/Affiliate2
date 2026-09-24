@@ -12,6 +12,7 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircleOutline"
 import YouTubeIcon from "@mui/icons-material/YouTube"
 import HubOutlinedIcon from "@mui/icons-material/HubOutlined"
 import useAppStore from "../../store/appStore"
+import DownloadSessionSection from "./DownloadSessionSection"
 
 /**
  * Generic per-service BYOK key card. Drop more entries into SERVICES below to
@@ -32,7 +33,7 @@ const SERVICES = [
   {
     id: "huggingface",
     label: "Hugging Face",
-    description: "Unlocks gated pyannote/WhisperX speaker diarization models for HQ multi-speaker localization",
+    description: "Optional Phase-C dependency for gated pyannote/WhisperX speaker diarization; not required for downloading",
     icon: <HubOutlinedIcon sx={{ color: "#f59e0b", fontSize: 28 }} />,
     settingsKey: "huggingface_token",
     setFlag: "huggingface_token_set",
@@ -228,9 +229,11 @@ function ServiceKeyRow({ service, settings, updateSettings }) {
 export default function ServiceKeysSection({ settings, updateSettings }) {
   return (
     <Stack spacing={0}>
+      <DownloadSessionSection settings={settings} updateSettings={updateSettings} />
+      <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Service keys / optional dependencies</Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        Per-service API keys, encrypted (AES-256) before storage. They take priority over the
-        keys in your <code>.env</code> file at runtime.
+        API keys below are separate from browser login. They are encrypted before storage.
+        Hugging Face is only needed for gated multi-speaker diarization; it does not affect video download.
       </Typography>
       {SERVICES.map((service) => (
         <ServiceKeyRow
