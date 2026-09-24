@@ -55,7 +55,10 @@ export default function DownloadSessionSection({ settings, updateSettings }) {
       if (data.ok) {
         showSnackbar(`Browser session readable via ${data.resolved_browser || browser}`, "success")
       } else {
-        showSnackbar(data.error || "Browser session test failed", "error")
+        showSnackbar(
+          data.error || "Browser cookie store is not readable",
+          "warning",
+        )
       }
     } catch (err) {
       const message = err?.response?.data?.detail || "Browser session test failed"
@@ -76,8 +79,9 @@ export default function DownloadSessionSection({ settings, updateSettings }) {
             Download Browser Session
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            Used by the canonical yt-dlp downloader for sites that require login, including Douyin/TikTok.
-            Affiliate2 stores only the browser/profile choice; it reads cookies locally through yt-dlp and does not export an all-sites cookie file.
+            Used by the canonical yt-dlp downloader for login-gated sites. TikTok depends on this cookie path.
+            Douyin prefers it when readable, but can fall back to the already-authenticated CDP browser if Windows blocks cookie decryption.
+            Affiliate2 stores only the browser/profile choice and never exports an all-sites cookie file.
           </Typography>
         </Box>
 
@@ -100,8 +104,8 @@ export default function DownloadSessionSection({ settings, updateSettings }) {
         </Stack>
 
         <Alert severity="info" variant="outlined">
-          Log in to Douyin/TikTok in the selected browser profile first, then refresh that site shortly before downloading.
-          Test session checks whether yt-dlp can read the local cookie store; the real URL download is the final login check.
+          Test session checks only whether yt-dlp can read the local browser cookie store.
+          A failed test can still allow Douyin downloads through the authenticated CDP browser; TikTok still requires a readable browser-cookie session.
         </Alert>
 
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1} flexWrap="wrap" useFlexGap>
@@ -132,18 +136,23 @@ export default function DownloadSessionSection({ settings, updateSettings }) {
             </Stack>
             {byteDanceCookies === 0 && (
               <Typography variant="caption" sx={{ display: "block", mt: 0.75 }}>
-                Browser access works, but no Douyin/TikTok-domain cookies were found in this profile. Log in there, refresh the site, then test again.
+                Browser access works, but no Douyin/TikTok-domain cookies were found in this profile. TikTok needs matching cookies; Douyin may use the authenticated CDP fallback instead.
               </Typography>
             )}
             {byteDanceCookies > 0 && (
               <Typography variant="caption" sx={{ display: "block", mt: 0.75 }}>
-                Domain cookies found does not guarantee that the login is still valid; test the actual Douyin/TikTok URL in Video Download next.
+                Domain cookies do not guarantee that the login is still valid; the real URL download remains the final check.
               </Typography>
             )}
           </Alert>
         )}
 
-        {probe && !probe.ok && <Alert severity="error">{probe.error || "Browser session test failed"}</Alert>}
+        {probe && !probe.ok && (
+          <Alert severity="warning">
+            {probe.error || "Browser cookie store is not readable."}
+            {" "}Douyin can still use the authenticated CDP browser fallback; TikTok cannot.
+          </Alert>
+        )}
       </Stack>
     </Box>
   )
