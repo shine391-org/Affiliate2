@@ -151,11 +151,29 @@ export default function LocalizationExpertPanel({ jobId }) {
     setBusy(true)
     try {
       await http.post("/api/localization/jobs/" + jobId + "/override", { segments: [change] })
-      await http.post("/api/localization/jobs/" + jobId + "/rerun", { from_stage: "dubbing" })
-      showSnackbar("Override saved; rerunning dubbing downstream", "info")
-      await pollUntilTerminal()
+      if (detail?.translation_review_pending) {
+        showSnackbar("Translation saved. Review the remaining lines, then continue to dubbing.", "success")
+        await load()
+      } else {
+        await http.post("/api/localization/jobs/" + jobId + "/rerun", { from_stage: "dubbing" })
+        showSnackbar("Override saved; rerunning dubbing downstream", "info")
+        await pollUntilTerminal()
+      }
     } catch (err) {
       showSnackbar(err.response?.data?.detail || "Override failed", "error")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const continueAfterTranslation = async () => {
+    setBusy(true)
+    try {
+      await http.post("/api/localization/jobs/" + jobId + "/continue-after-translation")
+      showSnackbar("Translation approved; continuing HQ dubbing from C7", "info")
+      await pollUntilTerminal()
+    } catch (err) {
+      showSnackbar(err.response?.data?.detail || "Could not continue dubbing", "error")
     } finally {
       setBusy(false)
     }
@@ -179,6 +197,8 @@ export default function LocalizationExpertPanel({ jobId }) {
   const transcript = detail?.transcript?.segments || []
   const chunks = detail?.chunks || []
   const qc = detail?.qc
+  const reviewPending = !!detail?.translation_review_pending
+  const finalReady = stages?.final_render?.status === "complete"
   const stageEntries = useMemo(() => Object.entries(stages), [stages])
 
   if (loading) return <Stack alignItems="center" sx={{ py: 4 }}><CircularProgress size={28} /></Stack>
@@ -186,7 +206,22 @@ export default function LocalizationExpertPanel({ jobId }) {
 
   return (
     <Stack spacing={2}>
-      <Box component="video" src={"/api/tools/download/" + jobId} controls playsInline sx={{ width: "100%", borderRadius: 1.5, bgcolor: "#000" }} />
+      {finalReady && (
+        <Box component="video" src={"/api/tools/download/" + jobId} controls playsInline sx={{ width: "100%", borderRadius: 1.5, bgcolor: "#000" }} />
+      )}
+
+      {reviewPending && (
+        <Alert
+          severity="warning"
+          action={
+            <Button color="inherit" size="small" onClick={continueAfterTranslation} disabled={busy}>
+              Continue dubbing
+            </Button>
+          }
+        >
+          Translation review is required before TTS. Compare every source line with the Vietnamese target below; edit anything inaccurate, then continue the same job from C7.
+        </Alert>
+      )}
 
       <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
         <Typography variant="subtitle2" sx={{ flex: 1 }}>Localization Expert</Typography>
@@ -229,7 +264,9 @@ export default function LocalizationExpertPanel({ jobId }) {
       <Divider />
 
       <Typography variant="subtitle2">Dubbing chunks</Typography>
-      {chunks.length === 0 ? (
+      {reviewPending ? (
+        <Typography variant="caption" color="text.secondary">Dubbing has not started yet — approve the C6 translation first.</Typography>
+      ) : chunks.length === 0 ? (
         <Typography variant="caption" color="text.secondary">No dubbing chunks for this run.</Typography>
       ) : chunks.map((chunk) => (
         <Stack key={chunk.id} direction="row" spacing={1} alignItems="center">
