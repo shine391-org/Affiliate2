@@ -378,6 +378,12 @@ def _check_cooldown() -> float:
 # export an all-sites Netscape cookie jar to disk.
 
 _BROWSER_COOKIE_SOURCE = None
+# Cookie-store inspection can be surprisingly expensive on Windows when
+# Chromium App-Bound/DPAPI decryption fails. Cache the probe briefly so a
+# batch does not repeat the same failing decryption for every item.
+_BROWSER_SESSION_CACHE: dict[tuple[str, str | None], tuple[float, dict]] = {}
+_BROWSER_SESSION_CACHE_TTL = 30.0
+
 _SUPPORTED_BROWSER_BINARIES = {
     "chrome": ("chrome", "google-chrome"),
     "brave": ("brave", "brave-browser"),
@@ -412,7 +418,7 @@ def _browser_known_on_machine(name: str) -> bool:
 
 
 def _detect_cookie_browser() -> str | None:
-    """Auto-detect once, preferring Edge on Windows for this desktop workflow."""
+    """Auto-detect once in the documented Chrome → Brave → Edge → Firefox order."""
     global _BROWSER_COOKIE_SOURCE
     if _BROWSER_COOKIE_SOURCE is not None:
         return _BROWSER_COOKIE_SOURCE or None
@@ -459,14 +465,32 @@ def _remove_legacy_cookie_exports() -> None:
             logger.warning("Could not remove legacy cookie export: %s", path)
 
 
-def _inspect_browser_session(browser: str = "auto", profile: str | None = None) -> dict:
-    """Read browser cookies locally with yt-dlp; no network request is made."""
+def _inspect_browser_session(
+    browser: str = "auto",
+    profile: str | None = None,
+    *,
+    force: bool = False,
+) -> dict:
+    """Read browser cookies locally with yt-dlp; no network request is made.
+
+    Results are cached briefly because a failed Chromium decryption can take
+    noticeable time. The explicit Settings Test session action uses force=True
+    so the user always gets a fresh probe.
+    """
     _remove_legacy_cookie_exports()
     selected = normalize_download_browser(browser)
     profile = normalize_download_profile(profile)
+    cache_key = (selected, profile)
+    now = time.time()
+
+    if not force:
+        cached = _BROWSER_SESSION_CACHE.get(cache_key)
+        if cached and now - cached[0] < _BROWSER_SESSION_CACHE_TTL:
+            return dict(cached[1])
+
     concrete = _resolve_cookie_browser(selected)
     if not concrete:
-        return {
+        result = {
             "ok": False,
             "browser": selected,
             "resolved_browser": None,
@@ -476,6 +500,9 @@ def _inspect_browser_session(browser: str = "auto", profile: str | None = None) 
             "douyin_cookie_count": 0,
             "tiktok_cookie_count": 0,
         }
+        _BROWSER_SESSION_CACHE[cache_key] = (now, dict(result))
+        return result
+
     try:
         import yt_dlp
         from yt_dlp.cookies import load_cookies
@@ -486,7 +513,7 @@ def _inspect_browser_session(browser: str = "auto", profile: str | None = None) 
                 ydl,
             )
         counts = _cookie_domain_counts(jar)
-        return {
+        result = {
             "ok": True,
             "browser": selected,
             "resolved_browser": concrete,
@@ -497,7 +524,7 @@ def _inspect_browser_session(browser: str = "auto", profile: str | None = None) 
         }
     except Exception as exc:
         logger.warning("Could not read %s browser cookies: %s", concrete, exc)
-        return {
+        result = {
             "ok": False,
             "browser": selected,
             "resolved_browser": concrete,
@@ -512,6 +539,9 @@ def _inspect_browser_session(browser: str = "auto", profile: str | None = None) 
             "douyin_cookie_count": 0,
             "tiktok_cookie_count": 0,
         }
+
+    _BROWSER_SESSION_CACHE[cache_key] = (time.time(), dict(result))
+    return result
 
 
 def _apply_cookies(
@@ -544,9 +574,17 @@ def _is_youtube_url(url: str) -> bool:
     return "youtube.com/" in value or "youtu.be/" in value
 
 
-def _is_bytedance_url(url: str) -> bool:
+def _is_douyin_url(url: str) -> bool:
     value = (url or "").lower()
-    return "douyin.com/" in value or "iesdouyin.com/" in value or "tiktok.com/" in value
+    return "douyin.com/" in value or "iesdouyin.com/" in value
+
+
+def _is_tiktok_url(url: str) -> bool:
+    return "tiktok.com/" in (url or "").lower()
+
+
+def _is_bytedance_url(url: str) -> bool:
+    return _is_douyin_url(url) or _is_tiktok_url(url)
 
 
 def _required_bytedance_cookie_count(url: str, session: dict) -> int:
@@ -558,9 +596,71 @@ def _required_bytedance_cookie_count(url: str, session: dict) -> int:
     return 0
 
 
+async def _prepare_download_source(
+    url: str,
+    cookie_session: dict,
+) -> tuple[str, dict[str, str] | None, str | None]:
+    """Choose the URL that the canonical yt-dlp pipeline will download.
+
+    TikTok still requires a readable yt-dlp browser session. Douyin gets one
+    narrow escape hatch for the Windows DPAPI/App-Bound case proven by runtime
+    QA: resolve a signed media URL through the already-authenticated CDP
+    browser, then hand that URL straight back to yt-dlp.
+
+    Returns (effective_url, headers, resolution_strategy).
+    """
+    if _is_douyin_url(url):
+        if (
+            cookie_session.get("ok")
+            and _required_bytedance_cookie_count(url, cookie_session) > 0
+        ):
+            return url, None, None
+
+        try:
+            from backend.services.douyin_media_resolver import resolve_douyin_media
+            resolved = await resolve_douyin_media(url)
+        except Exception as exc:
+            probe_reason = (
+                cookie_session.get("detail")
+                or cookie_session.get("error")
+                or "matching Douyin browser cookies unavailable"
+            )
+            raise DownloadError(
+                "Douyin download could not use the browser cookie store and the "
+                "authenticated CDP fallback could not resolve the media URL. "
+                f"Cookie probe: {probe_reason}. "
+                f"CDP resolver: {type(exc).__name__}: {exc}"
+            ) from exc
+
+        logger.info(
+            "Douyin browser-cookie path unavailable; using authenticated CDP "
+            "media resolution while keeping yt-dlp as the downloader"
+        )
+        return resolved.url, dict(resolved.headers), "douyin_cdp"
+
+    if _is_tiktok_url(url):
+        if not cookie_session.get("ok"):
+            raise DownloadError(
+                "TikTok needs a readable logged-in browser session. "
+                "Open Settings > Source Providers, select the browser/profile "
+                "you actually use, test it, then retry. "
+                f"({cookie_session.get('error') or 'browser session unavailable'})"
+            )
+        if _required_bytedance_cookie_count(url, cookie_session) <= 0:
+            raise DownloadError(
+                "The selected browser/profile is readable but has no matching "
+                "TikTok cookies. Log in to TikTok in the same profile, refresh "
+                "it, then retry."
+            )
+
+    return url, None, None
+
+
 async def probe_browser_session(browser: str = "auto", profile: str | None = None) -> dict:
     """Verify local cookie readability; this does not claim site login validity."""
-    return await asyncio.to_thread(_inspect_browser_session, browser, profile)
+    return await asyncio.to_thread(
+        _inspect_browser_session, browser, profile, force=True
+    )
 
 
 def browser_session_health(browser: str = "auto", profile: str | None = None) -> dict:
@@ -753,20 +853,10 @@ async def download_video(
         _inspect_browser_session, cookie_browser, cookie_profile
     )
     cookie_session_ok = bool(cookie_session.get("ok"))
-    if _is_bytedance_url(url):
-        if not cookie_session_ok:
-            raise DownloadError(
-                "Douyin/TikTok needs a readable logged-in browser session. "
-                "Open Settings > Source Providers, select the browser/profile "
-                "you actually use, test it, then retry. "
-                f"({cookie_session.get('error') or 'browser session unavailable'})"
-            )
-        if _required_bytedance_cookie_count(url, cookie_session) <= 0:
-            raise DownloadError(
-                "The selected browser/profile is readable but has no matching "
-                "Douyin/TikTok cookies. Log in to that site in the same profile, "
-                "refresh it, then retry."
-            )
+    effective_url, resolved_headers, resolved_via = await _prepare_download_source(
+        url, cookie_session
+    )
+    use_browser_cookies = cookie_session_ok and resolved_via is None
 
     # Wait out any active rate-limit cooldown before starting
     cooldown = _check_cooldown()
@@ -796,7 +886,7 @@ async def download_video(
             "max_sleep_interval": 8,
             "sleep_interval_requests": 1,
             # Browser-like headers
-            "http_headers": _yt_dlp_http_headers(),
+            "http_headers": resolved_headers or _yt_dlp_http_headers(),
             # Subtitle download
             "writesubtitles": True,
             "writeautomaticsub": True,
@@ -805,9 +895,10 @@ async def download_video(
         }
 
         # Use cached browser cookies (avoids repeated Keychain prompts on macOS)
-        _apply_cookies(
-            base_opts, cookie_browser, cookie_profile, session_ok=cookie_session_ok
-        )
+        if use_browser_cookies:
+            _apply_cookies(
+                base_opts, cookie_browser, cookie_profile, session_ok=True
+            )
 
         # Per-download options LAST so an explicit request wins over the
         # standard layer (e.g. narrowing subtitleslangs from the 10-language
@@ -825,7 +916,7 @@ async def download_video(
         def _attempt_download(opts):
             """Single download attempt — raises on failure."""
             with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(url, download=True)
+                info = ydl.extract_info(effective_url, download=True)
                 return Path(ydl.prepare_filename(info)), info
 
         def _classify_and_raise(error):
@@ -1053,15 +1144,16 @@ async def download_video(
                         "preferredcodec": "mp3",
                         "preferredquality": "192",
                     }],
-                    "http_headers": _yt_dlp_http_headers(),
+                    "http_headers": resolved_headers or _yt_dlp_http_headers(),
                 }
-                _apply_cookies(
-                    audio_opts, cookie_browser, cookie_profile,
-                    session_ok=cookie_session_ok,
-                )
+                if use_browser_cookies:
+                    _apply_cookies(
+                        audio_opts, cookie_browser, cookie_profile,
+                        session_ok=True,
+                    )
                 try:
                     with yt_dlp.YoutubeDL(audio_opts) as ydl:
-                        ydl.extract_info(url, download=True)
+                        ydl.extract_info(effective_url, download=True)
                         audio_path = audio_dir / f"{file_stem_resolved}_audio.mp3"
                 except Exception as e:
                     logger.warning(f"Audio extraction failed (continuing without): {e}")
@@ -1106,6 +1198,8 @@ async def download_video(
             # itself could be kept — surfaced so the caller can report the
             # degradation instead of implying the extras were applied.
             "option_postprocessors_dropped": opt_pps_dropped,
+            # Safe QA/telemetry signal; contains no cookie or session values.
+            "download_source": resolved_via or "yt_dlp",
         }
 
     try:
