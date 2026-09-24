@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from "react"
 import {
-  Alert, Button, Checkbox, Divider, FormControl, FormControlLabel,
-  InputLabel, MenuItem, Select, Stack, TextField, Typography,
+  Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Checkbox,
+  Chip, Divider, FormControl, FormControlLabel, InputLabel, MenuItem, Select,
+  Stack, TextField, Typography,
 } from "@mui/material"
 import DeleteOutlineOutlinedIcon from "@mui/icons-material/DeleteOutlineOutlined"
 import SaveOutlinedIcon from "@mui/icons-material/SaveOutlined"
 import AddOutlinedIcon from "@mui/icons-material/AddOutlined"
+import ExpandMoreOutlinedIcon from "@mui/icons-material/ExpandMoreOutlined"
+import RefreshOutlinedIcon from "@mui/icons-material/RefreshOutlined"
 import http from "../../api/http"
 import useAppStore from "../../store/appStore"
 
@@ -44,6 +47,8 @@ export default function LocalizationProfilesSection({ settings }) {
   const [draft, setDraft] = useState(null)
   const [glossaryText, setGlossaryText] = useState("")
   const [busy, setBusy] = useState(false)
+  const [discovering, setDiscovering] = useState(false)
+  const [discoveredModels, setDiscoveredModels] = useState([])
 
   const load = async (preferId = "") => {
     const { data } = await http.get("/api/settings/localization-profiles")
@@ -73,6 +78,29 @@ export default function LocalizationProfilesSection({ settings }) {
   }, [draft, globalModel])
 
   const patch = (key, value) => setDraft((prev) => ({ ...prev, [key]: value }))
+
+  const discoverModels = async () => {
+    const provider = settings?.ai_provider || ""
+    if (!provider || provider === "anthropic") {
+      showSnackbar("Model discovery is not available for this AI connection", "warning")
+      return
+    }
+    setDiscovering(true)
+    try {
+      const { data } = await http.post("/api/settings/ai/models", {
+        provider,
+        model: settings?.ai_model || null,
+        base_url: settings?.ai_base_url || null,
+      })
+      const models = data?.models || []
+      setDiscoveredModels(models)
+      showSnackbar(models.length ? `Found ${models.length} models on the configured connection` : "No models returned", models.length ? "success" : "warning")
+    } catch (err) {
+      showSnackbar(err.response?.data?.detail || "Model discovery failed", "error")
+    } finally {
+      setDiscovering(false)
+    }
+  }
 
   const save = async () => {
     if (!draft) return
@@ -158,8 +186,8 @@ export default function LocalizationProfilesSection({ settings }) {
   return (
     <Stack spacing={2}>
       <Alert severity="info" variant="outlined">
-        C6 translation and C7 duration rewrite can use different model IDs on the same configured AI connection.
-        Use a stronger model for translation and a smaller/faster model for rewrite if desired.
+        Connections and credentials live in Settings. This profile stores reusable production defaults only:
+        C6 translation, C7 timing rewrite, ASR, voice/timing, audio/render and QC policy.
       </Alert>
 
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
@@ -184,91 +212,234 @@ export default function LocalizationProfilesSection({ settings }) {
         <TextField size="small" fullWidth label="Name" value={draft.name || ""} onChange={(e) => patch("name", e.target.value)} />
       </Stack>
 
-      <Divider />
-      <Typography variant="subtitle2">Translation quality (C6)</Typography>
+      <Box sx={{ p: 1.5, border: 1, borderColor: "divider", borderRadius: 2 }}>
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }}>
+          <Box sx={{ flex: 1 }}>
+            <Typography variant="subtitle2">Configured AI connection</Typography>
+            <Typography variant="caption" color="text.secondary">
+              {globalProvider} · global/default model {globalModel}
+            </Typography>
+          </Box>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<RefreshOutlinedIcon />}
+            onClick={discoverModels}
+            disabled={discovering}
+          >
+            {discovering ? "Discovering…" : "Discover models"}
+          </Button>
+        </Stack>
+        {discoveredModels.length > 0 && (
+          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+            {discoveredModels.slice(0, 8).map((model) => <Chip key={model} label={model} size="small" variant="outlined" />)}
+            {discoveredModels.length > 8 && <Chip label={`+${discoveredModels.length - 8} more`} size="small" />}
+          </Stack>
+        )}
+      </Box>
 
-      <FormControl size="small" fullWidth>
-        <InputLabel>Translation style</InputLabel>
-        <Select value={draft.translation_preset || "natural_vietnamese"} label="Translation style" onChange={(e) => patch("translation_preset", e.target.value)}>
-          {PRESETS.map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
-        </Select>
-      </FormControl>
+      <datalist id="localization-model-suggestions">
+        {[...new Set([settings?.ai_model, ...discoveredModels].filter(Boolean))].map((model) => <option key={model} value={model} />)}
+      </datalist>
 
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
-        <TextField
-          size="small" fullWidth label="C6 translation model"
-          value={draft.translation_model || ""}
-          onChange={(e) => patch("translation_model", e.target.value)}
-          placeholder={globalModel}
-          helperText={`Blank = inherit Settings AI model. Provider: ${draft.translation_provider || globalProvider}`}
-        />
-        <TextField
-          size="small" fullWidth label="C7 rewrite model"
-          value={draft.rewrite_model || ""}
-          onChange={(e) => patch("rewrite_model", e.target.value)}
-          placeholder={globalModel}
-          helperText="Shortening/timing model. Blank = inherit global model."
-        />
-      </Stack>
+      <Accordion defaultExpanded disableGutters>
+        <AccordionSummary expandIcon={<ExpandMoreOutlinedIcon />}>
+          <Box>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Translation (C6)</Typography>
+            <Typography variant="caption" color="text.secondary">Faithful translation model, style, instructions and glossary</Typography>
+          </Box>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Stack spacing={2}>
+            <FormControl size="small" fullWidth>
+              <InputLabel>Translation style</InputLabel>
+              <Select value={draft.translation_preset || "natural_vietnamese"} label="Translation style" onChange={(e) => patch("translation_preset", e.target.value)}>
+                {PRESETS.map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
+              </Select>
+            </FormControl>
+            <TextField
+              size="small" fullWidth label="C6 translation model"
+              value={draft.translation_model || ""}
+              onChange={(e) => patch("translation_model", e.target.value)}
+              placeholder={globalModel}
+              inputProps={{ list: "localization-model-suggestions" }}
+              helperText="Blank = inherit the global/default model. Type any compatible model ID or use Discover models."
+            />
+            <TextField
+              size="small" fullWidth label="Compatible Base URL override (optional)"
+              value={draft.translation_base_url || ""}
+              onChange={(e) => patch("translation_base_url", e.target.value)}
+              placeholder={settings?.ai_base_url || "inherit Settings endpoint"}
+              helperText="Connection credentials remain in AI Connections."
+            />
+            <TextField
+              size="small" multiline minRows={4}
+              label="Translation instructions"
+              value={draft.translation_instructions || ""}
+              onChange={(e) => patch("translation_instructions", e.target.value)}
+              helperText="Extra domain/style rules. Fidelity rules remain non-negotiable."
+            />
+            <TextField
+              size="small" multiline minRows={4}
+              label="Glossary"
+              value={glossaryText}
+              onChange={(e) => setGlossaryText(e.target.value)}
+              placeholder={"产品 => sản phẩm\n免税 => miễn thuế"}
+              helperText="One term per line: source => target"
+            />
+          </Stack>
+        </AccordionDetails>
+      </Accordion>
 
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
-        <TextField
-          size="small" fullWidth label="C6 compatible Base URL (optional)"
-          value={draft.translation_base_url || ""}
-          onChange={(e) => patch("translation_base_url", e.target.value)}
-          placeholder={settings?.ai_base_url || "inherit Settings endpoint"}
-        />
-        <TextField
-          size="small" fullWidth label="C7 rewrite Base URL (optional)"
-          value={draft.rewrite_base_url || ""}
-          onChange={(e) => patch("rewrite_base_url", e.target.value)}
-          placeholder={settings?.ai_base_url || "inherit Settings endpoint"}
-        />
-      </Stack>
+      <Accordion disableGutters>
+        <AccordionSummary expandIcon={<ExpandMoreOutlinedIcon />}>
+          <Box>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Voice & Timing (C7)</Typography>
+            <Typography variant="caption" color="text.secondary">Independent rewrite model, voice defaults and timing policy</Typography>
+          </Box>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Stack spacing={2}>
+            <TextField
+              size="small" fullWidth label="C7 duration rewrite model"
+              value={draft.rewrite_model || ""}
+              onChange={(e) => patch("rewrite_model", e.target.value)}
+              placeholder={globalModel}
+              inputProps={{ list: "localization-model-suggestions" }}
+              helperText="May use a smaller/faster model than C6. Blank = inherit global/default model."
+            />
+            <TextField
+              size="small" fullWidth label="Compatible Base URL override (optional)"
+              value={draft.rewrite_base_url || ""}
+              onChange={(e) => patch("rewrite_base_url", e.target.value)}
+              placeholder={settings?.ai_base_url || "inherit Settings endpoint"}
+            />
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+              <FormControl size="small" fullWidth>
+                <InputLabel>TTS provider</InputLabel>
+                <Select value={draft.tts_provider || ""} label="TTS provider" onChange={(e) => patch("tts_provider", e.target.value || null)}>
+                  <MenuItem value=""><em>Inherit TTS connection</em></MenuItem>
+                  {["edge_tts", "openai_tts", "openai_compatible_tts", "azure_tts", "elevenlabs", "gpt_sovits"].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
+                </Select>
+              </FormControl>
+              <TextField size="small" fullWidth label="Voice ID" value={draft.tts_voice || ""} onChange={(e) => patch("tts_voice", e.target.value || null)} placeholder={settings?.preferred_tts_voice || "inherit language/provider default"} />
+            </Stack>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+              <TextField size="small" type="number" fullWidth label="Preferred speed ceiling" value={draft.dub_speed_accept ?? 1.15} onChange={(e) => patch("dub_speed_accept", Number(e.target.value))} inputProps={{ step: 0.01, min: 1, max: 2 }} />
+              <TextField size="small" type="number" fullWidth label="Hard speed ceiling" value={draft.dub_speed_max ?? 1.3} onChange={(e) => patch("dub_speed_max", Number(e.target.value))} inputProps={{ step: 0.01, min: 1, max: 2 }} />
+              <TextField size="small" type="number" fullWidth label="Rewrite attempts" value={draft.dub_rewrite_attempts ?? 2} onChange={(e) => patch("dub_rewrite_attempts", Number(e.target.value))} inputProps={{ step: 1, min: 0, max: 5 }} />
+            </Stack>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+              <FormControl size="small" fullWidth>
+                <InputLabel>Video retime</InputLabel>
+                <Select value={draft.video_retime_mode || "fallback"} label="Video retime" onChange={(e) => patch("video_retime_mode", e.target.value)}>
+                  <MenuItem value="off">Off</MenuItem>
+                  <MenuItem value="fallback">Fallback only</MenuItem>
+                </Select>
+              </FormControl>
+              <TextField size="small" type="number" fullWidth label="Max video slowdown" value={draft.video_retime_max_slowdown ?? 1.12} onChange={(e) => patch("video_retime_max_slowdown", Number(e.target.value))} inputProps={{ step: 0.01, min: 1, max: 1.35 }} />
+            </Stack>
+          </Stack>
+        </AccordionDetails>
+      </Accordion>
+
+      <Accordion disableGutters>
+        <AccordionSummary expandIcon={<ExpandMoreOutlinedIcon />}>
+          <Box>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>ASR / Alignment</Typography>
+            <Typography variant="caption" color="text.secondary">Reusable transcript quality and speaker-analysis defaults</Typography>
+          </Box>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Stack spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+              <FormControl size="small" fullWidth>
+                <InputLabel>ASR quality</InputLabel>
+                <Select value={draft.asr_quality || "best"} label="ASR quality" onChange={(e) => patch("asr_quality", e.target.value)}>
+                  {["fast", "balanced", "accurate", "best"].map((v) => <MenuItem key={v} value={v}>{v}</MenuItem>)}
+                </Select>
+              </FormControl>
+              <TextField size="small" fullWidth label="ASR model override" value={draft.asr_model || ""} onChange={(e) => patch("asr_model", e.target.value || null)} />
+            </Stack>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+              <FormControl size="small" fullWidth>
+                <InputLabel>Alignment</InputLabel>
+                <Select value={draft.alignment_mode || "whisperx"} label="Alignment" onChange={(e) => patch("alignment_mode", e.target.value)}>
+                  <MenuItem value="off">Off</MenuItem>
+                  <MenuItem value="whisperx">WhisperX</MenuItem>
+                </Select>
+              </FormControl>
+              <FormControl size="small" fullWidth>
+                <InputLabel>Diarization</InputLabel>
+                <Select value={draft.diarization_mode || "auto"} label="Diarization" onChange={(e) => patch("diarization_mode", e.target.value)}>
+                  <MenuItem value="off">Off</MenuItem>
+                  <MenuItem value="auto">Auto</MenuItem>
+                  <MenuItem value="whisperx">WhisperX / pyannote</MenuItem>
+                </Select>
+              </FormControl>
+              <TextField size="small" type="number" fullWidth label="Expected speakers" value={draft.diarization_speakers ?? ""} onChange={(e) => patch("diarization_speakers", e.target.value === "" ? null : Number(e.target.value))} inputProps={{ min: 1, max: 16 }} />
+            </Stack>
+            <FormControlLabel
+              control={<Checkbox checked={!!draft.semantic_segmentation} onChange={(e) => patch("semantic_segmentation", e.target.checked)} />}
+              label="AI semantic segmentation"
+            />
+          </Stack>
+        </AccordionDetails>
+      </Accordion>
+
+      <Accordion disableGutters>
+        <AccordionSummary expandIcon={<ExpandMoreOutlinedIcon />}>
+          <Box>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Audio / Render / QC</Typography>
+            <Typography variant="caption" color="text.secondary">Output defaults, not provider credentials</Typography>
+          </Box>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Stack spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+              <FormControl size="small" fullWidth>
+                <InputLabel>Audio mode</InputLabel>
+                <Select value={draft.audio_mode || "hq_clean"} label="Audio mode" onChange={(e) => patch("audio_mode", e.target.value)}>
+                  <MenuItem value="hq_clean">HQ clean background</MenuItem>
+                  <MenuItem value="fast_duck">Fast duck</MenuItem>
+                </Select>
+              </FormControl>
+              <FormControl size="small" fullWidth>
+                <InputLabel>Render profile</InputLabel>
+                <Select value={draft.render_profile || "hq"} label="Render profile" onChange={(e) => patch("render_profile", e.target.value)}>
+                  <MenuItem value="draft">Draft</MenuItem>
+                  <MenuItem value="balanced">Balanced</MenuItem>
+                  <MenuItem value="hq">HQ</MenuItem>
+                </Select>
+              </FormControl>
+              <FormControl size="small" fullWidth>
+                <InputLabel>QC profile</InputLabel>
+                <Select value={draft.qc_profile || "strict"} label="QC profile" onChange={(e) => patch("qc_profile", e.target.value)}>
+                  <MenuItem value="standard">Standard</MenuItem>
+                  <MenuItem value="strict">Strict</MenuItem>
+                </Select>
+              </FormControl>
+            </Stack>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+              <TextField size="small" fullWidth label="Caption style" value={draft.caption_style || "viral"} onChange={(e) => patch("caption_style", e.target.value)} />
+              <FormControl size="small" fullWidth>
+                <InputLabel>Target aspect</InputLabel>
+                <Select value={draft.target_aspect || "9:16"} label="Target aspect" onChange={(e) => patch("target_aspect", e.target.value)}>
+                  {["source", "9:16", "16:9", "1:1"].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
+                </Select>
+              </FormControl>
+            </Stack>
+            <FormControlLabel
+              control={<Checkbox checked={draft.preserve_background !== false} onChange={(e) => patch("preserve_background", e.target.checked)} />}
+              label="Preserve separated background / music"
+            />
+          </Stack>
+        </AccordionDetails>
+      </Accordion>
 
       <Typography variant="caption" color="text.secondary">{modelSummary}</Typography>
 
-      <TextField
-        size="small" multiline minRows={4}
-        label="Translation instructions"
-        value={draft.translation_instructions || ""}
-        onChange={(e) => patch("translation_instructions", e.target.value)}
-        helperText="Extra style/domain rules. Fidelity rules remain non-negotiable."
-      />
-
-      <TextField
-        size="small" multiline minRows={4}
-        label="Glossary"
-        value={glossaryText}
-        onChange={(e) => setGlossaryText(e.target.value)}
-        placeholder={"产品 => sản phẩm\n免税 => miễn thuế"}
-        helperText="One term per line: source => target"
-      />
-
       <Divider />
-      <Typography variant="subtitle2">ASR / dubbing policy</Typography>
-
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
-        <FormControl size="small" fullWidth>
-          <InputLabel>ASR quality</InputLabel>
-          <Select value={draft.asr_quality || "best"} label="ASR quality" onChange={(e) => patch("asr_quality", e.target.value)}>
-            {["fast", "balanced", "accurate", "best"].map((v) => <MenuItem key={v} value={v}>{v}</MenuItem>)}
-          </Select>
-        </FormControl>
-        <TextField size="small" fullWidth label="ASR model override" value={draft.asr_model || ""} onChange={(e) => patch("asr_model", e.target.value || null)} />
-      </Stack>
-
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
-        <TextField size="small" type="number" fullWidth label="Preferred speed ceiling" value={draft.dub_speed_accept ?? 1.15} onChange={(e) => patch("dub_speed_accept", Number(e.target.value))} inputProps={{ step: 0.01, min: 1, max: 2 }} />
-        <TextField size="small" type="number" fullWidth label="Hard speed ceiling" value={draft.dub_speed_max ?? 1.3} onChange={(e) => patch("dub_speed_max", Number(e.target.value))} inputProps={{ step: 0.01, min: 1, max: 2 }} />
-        <TextField size="small" type="number" fullWidth label="Rewrite attempts" value={draft.dub_rewrite_attempts ?? 2} onChange={(e) => patch("dub_rewrite_attempts", Number(e.target.value))} inputProps={{ step: 1, min: 0, max: 5 }} />
-      </Stack>
-
-      <FormControlLabel
-        control={<Checkbox checked={!!draft.semantic_segmentation} onChange={(e) => patch("semantic_segmentation", e.target.checked)} />}
-        label="AI semantic segmentation"
-      />
-
       <Stack direction="row" spacing={1} justifyContent="flex-end" flexWrap="wrap" useFlexGap>
         {!isDefault && <Button variant="text" onClick={makeDefault} disabled={busy}>Make default</Button>}
         {store.profiles.length > 1 && <Button color="error" variant="outlined" startIcon={<DeleteOutlineOutlinedIcon />} onClick={remove} disabled={busy}>Delete</Button>}
