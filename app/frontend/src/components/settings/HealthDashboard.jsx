@@ -13,7 +13,7 @@ import http from "../../api/http"
 
 const STATUS_ICON = {
   running: CheckCircleIcon, ok: CheckCircleIcon, valid: CheckCircleIcon,
-  ready: CheckCircleIcon, auto: CheckCircleIcon,
+  configured: CheckCircleIcon, ready: CheckCircleIcon, auto: CheckCircleIcon,
   expiring_soon: WarningIcon, expired: ErrorIcon,
   not_configured: HelpOutlineIcon, not_running: ErrorIcon, not_found: ErrorIcon,
   unknown_age: WarningIcon,
@@ -21,7 +21,7 @@ const STATUS_ICON = {
 
 const STATUS_COLOR = {
   running: "success", ok: "success", valid: "success",
-  ready: "success", auto: "success",
+  configured: "success", ready: "success", auto: "success",
   expiring_soon: "warning", expired: "error",
   not_configured: "default", not_running: "error", not_found: "error",
   unknown_age: "warning",
