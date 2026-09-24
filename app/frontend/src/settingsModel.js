@@ -2,7 +2,7 @@ export const SETTINGS_SECTIONS = [
   { value: "ai", label: "AI Connections" },
   { value: "localization", label: "Localization Profiles" },
   { value: "tts", label: "TTS / Voices" },
-  { value: "services", label: "Service Keys" },
+  { value: "services", label: "Source Providers" },
   { value: "addons", label: "Add-ons" },
   { value: "health", label: "System Health" },
 ]
