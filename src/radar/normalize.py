@@ -83,7 +83,7 @@ def normalize_douyin(raw: dict, captured_at: str) -> tuple[NormalizedContent, Me
 
 def normalize_bilibili(raw: dict, captured_at: str) -> tuple[NormalizedContent, MetricSnapshot]:
     """
-    Map MediaCrawler Bilibili JSONL record → normalized schema.
+    Map a legacy Bilibili source record → normalized schema.
 
     Key field mappings:
         video_id        → content_id
