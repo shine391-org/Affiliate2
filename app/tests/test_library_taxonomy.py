@@ -126,6 +126,16 @@ def test_the_frontend_taxonomy_mirror_does_not_drift():
     assert not disagree, f"label/media/origin disagree between the two maps: {disagree}"
 
 
+def test_phase_d_e_reserved_derivatives_have_canonical_library_identity():
+    from backend.services.library_taxonomy import classify
+
+    smart = classify("smart_cut")
+    remake = classify("creative_remake")
+
+    assert smart is not None and smart.media == "video" and smart.origin == "edited"
+    assert remake is not None and remake.media == "video" and remake.origin == "edited"
+
+
 def test_agent_style_hyphen_spellings_fold_onto_the_underscore_twin():
     """Endpoints are hyphenated and job types are not; both spellings have
     reached this map at different times, so they must classify identically."""
