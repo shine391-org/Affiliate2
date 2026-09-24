@@ -28,6 +28,12 @@ class UserSettings(Base, TimestampMixin):
     tiktok_cookie_encrypted = Column(Text, nullable=True)
     tiktok_cookie_set_at = Column(DateTime, nullable=True)
 
+    # ── Canonical downloader browser session ───────────
+    # Non-secret selectors only. Actual cookies stay in the user's browser and
+    # are read by yt-dlp on demand.
+    download_cookie_browser = Column(String(20), nullable=True)     # auto|edge|chrome|brave|firefox
+    download_cookie_profile = Column(String(200), nullable=True)    # e.g. Default / Profile 1
+
     # ── YouTube upload OAuth ───────────────────────────
     youtube_credentials_json_encrypted = Column(Text, nullable=True)
     youtube_channel_title = Column(String(200), nullable=True)
