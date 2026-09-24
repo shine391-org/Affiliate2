@@ -73,3 +73,30 @@ def test_cookie_drop_scope_is_youtube_only():
     assert not svc._is_youtube_url("https://www.douyin.com/video/x")
     assert svc._is_bytedance_url("https://www.douyin.com/video/x")
     assert svc._is_bytedance_url("https://www.tiktok.com/@u/video/x")
+
+
+def test_bytedance_cookie_count_matches_the_requested_site():
+    from backend.services import ytdlp_service as svc
+
+    session = {"douyin_cookie_count": 4, "tiktok_cookie_count": 2}
+    assert svc._required_bytedance_cookie_count(
+        "https://www.douyin.com/video/123", session
+    ) == 4
+    assert svc._required_bytedance_cookie_count(
+        "https://www.tiktok.com/@u/video/123", session
+    ) == 2
+
+
+def test_legacy_plaintext_cookie_exports_are_removed(monkeypatch, tmp_path):
+    from backend.services import ytdlp_service as svc
+
+    monkeypatch.setattr(svc.settings, "TMP_DIR", tmp_path)
+    legacy = tmp_path / "yt_cookies.txt"
+    legacy.write_text("secret", encoding="utf-8")
+    newer = tmp_path / "browser_cookies_edge_default.txt"
+    newer.write_text("secret", encoding="utf-8")
+
+    svc._remove_legacy_cookie_exports()
+
+    assert not legacy.exists()
+    assert not newer.exists()
