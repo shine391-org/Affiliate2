@@ -126,7 +126,9 @@ async def get_settings():
         download_cookie_profile=normalize_download_profile(s.download_cookie_profile),
         youtube_channel_title=s.youtube_channel_title,
         youtube_connected=bool(s.youtube_credentials_json_encrypted),
-        tiktok_upload_connected=bool(s.tiktok_upload_token_encrypted),
+        tiktok_upload_connected=bool(
+            s.tiktok_upload_token_encrypted or s.tiktok_cookie_encrypted
+        ),
         preferred_voice_id=s.preferred_voice_id or "21m00Tcm4TlvDq8ikWAM",
         tts_provider=s.tts_provider or "edge_tts",
         preferred_tts_voice=s.preferred_tts_voice,
