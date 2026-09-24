@@ -9,12 +9,12 @@ import {
   studioModeForPath,
 } from "./studioModel.js"
 
-test("Studio exposes two active and two truthful reserved modes", () => {
+test("Studio exposes Smart Cut as active while Creative Remake stays reserved", () => {
   assert.deepEqual(
     STUDIO_MODES.map(({ value, active, phase }) => [value, active, phase]),
     [
       ["localize", true, "C"],
-      ["smart-cut", false, "D"],
+      ["smart-cut", true, "D"],
       ["remake", false, "E"],
       ["manual", true, "C"],
     ],
