@@ -928,8 +928,11 @@ ITEMS:
         prompt += "\nGlossary: " + "; ".join(
             f"{k} => {v}" for k, v in profile.glossary.items()
         )[:1800]
-    if profile.translation_instructions:
-        prompt += f"\nStyle: {profile.translation_instructions[:1200]}"
+    if profile.rewrite_instructions:
+        prompt += (
+            "\nPROFILE REWRITE INSTRUCTIONS (supplemental; core rules above remain mandatory): "
+            + profile.rewrite_instructions[:2400]
+        )
 
     def record_unavailable(exc: Exception) -> bool:
         logger.warning(
