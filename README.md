@@ -78,7 +78,7 @@ Stable local UI: `http://localhost:16888`
 - MediaCrawler is used as source-provider donor/reference code, not as a second long-term application.
 - Bilibili must use real Bilibili discovery, never silent YouTube fallback.
 - Radar's repeated metric snapshots and domain ranking/learning stay Affiliate2-owned.
-- Smart Cut uses ViralMint Clip Studio semantics.
+- Smart Cut is active through the existing ViralMint Clip Studio path: AI proposals → editable/approved ranges → shared manual renderer → `smart_cut` Library derivatives.
 - Creative Remake HQ will be rebuilt around source-shot mapping + storyboard approval.
 - Human approval remains mandatory before publishing.
 - Docker is not required for local operation.
