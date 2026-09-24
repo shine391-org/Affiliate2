@@ -1,9 +1,9 @@
 """
 sources/bili_creator.py — Bilibili creator (space) feed adapter (Phase 2.3)
 
-Reuses the wbi signing algorithm from MediaCrawler
-(tools/MediaCrawler/media_platform/bilibili/help.py) — reimplemented inline
-with stdlib only (md5 + urllib), no MediaCrawler import.
+Uses the Bilibili WBI signing algorithm that was originally validated against
+an external donor implementation. It is reimplemented inline with stdlib only
+(md5 + urllib) and has no donor runtime dependency.
 
 Endpoint: https://api.bilibili.com/x/space/wbi/arc/search
 Wbi keys come from https://api.bilibili.com/x/web-interface/nav (public, no login).
@@ -46,7 +46,7 @@ _HEADERS = {
 }
 
 # ---------------------------------------------------------------------------
-# wbi signing — ported from MediaCrawler bilibili/help.py (stdlib only)
+# WBI signing — app-owned stdlib implementation (no donor runtime dependency)
 # ---------------------------------------------------------------------------
 
 _MIXIN_KEY_ENC_TAB = [
