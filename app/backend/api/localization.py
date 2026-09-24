@@ -53,6 +53,7 @@ _TRANSLATION_KEYS = {
     "translation_preset", "translation_instructions", "glossary",
 }
 _DUBBING_KEYS = {
+    "rewrite_provider", "rewrite_model", "rewrite_base_url",
     "tts_provider", "tts_model", "tts_voice", "tts_base_url", "tts_region",
     "speaker_voices", "speaker_reference_audio", "tts_reference_audio",
     "tts_reference_text", "tts_reference_language", "voice_clone_reference_mode",
@@ -129,12 +130,17 @@ def _job_detail(run: LocalizationRun) -> dict:
     plan = _optional_json(run, "dubbing", "plan")
     chunks = _optional_json(run, "dubbing", "chunks")
     qc = _optional_json(run, "qc", "report")
+    request = run.request
     return {
         "manifest": run.snapshot(),
         "transcript": dubbing_tx or translation,
         "plan": plan or [],
         "chunks": chunks or [],
         "qc": qc,
+        "translation_review_pending": bool(
+            request.get("translation_review_pending")
+            and not request.get("translation_review_approved")
+        ),
     }
 
 
@@ -167,6 +173,7 @@ async def _dispatch_existing_run(run: LocalizationRun):
         target_aspect=req.get("target_aspect"),
         profile_id=req.get("profile_id"),
         profile_override=run.effective_profile,
+        review_translation=bool(req.get("review_translation")),
     ))
 
 
@@ -311,6 +318,31 @@ async def localization_expert_override(job_id: str, body: ExpertOverrideRequest)
         "invalidated_from": stage,
         "effective_profile": run.effective_profile,
     }
+
+
+@router.post("/jobs/{job_id}/continue-after-translation")
+async def continue_after_translation_review(job_id: str):
+    """Approve the persisted C6 translation and continue the SAME run at C7."""
+    await _assert_job_inactive(job_id)
+    run = _load_run(job_id)
+    if not run.is_complete("translation", ("transcript",)):
+        raise HTTPException(
+            status_code=409,
+            detail="Translation is not complete; there is nothing to approve yet.",
+        )
+    req = run.request
+    if not req.get("review_translation"):
+        raise HTTPException(
+            status_code=409,
+            detail="This localization job was not configured for translation review.",
+        )
+    run.update_request({
+        **req,
+        "translation_review_approved": True,
+        "translation_review_pending": False,
+    })
+    await _dispatch_existing_run(run)
+    return {"ok": True, "job_id": job_id, "from_stage": "dubbing"}
 
 
 @router.post("/jobs/{job_id}/chunks/{chunk_id}/regenerate")
