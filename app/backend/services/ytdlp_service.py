@@ -1006,7 +1006,7 @@ async def download_video(
                         continue
 
                     # ── Bot detection: retry with fresh cookies ────
-                    if _is_bot_detection_error(str(e)) and attempt == 0:
+                    if resolved_via is None and _is_bot_detection_error(str(e)) and attempt == 0:
                         browser = _resolve_cookie_browser(cookie_browser)
                         if browser:
                             logger.warning(
