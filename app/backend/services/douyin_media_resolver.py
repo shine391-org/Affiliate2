@@ -60,7 +60,12 @@ async def resolve_douyin_media(
         raise ValueError("Douyin media resolver only accepts Douyin URLs")
 
     async with open_douyin_cdp_session(cdp_url) as session:
-        page = await session.context.new_page()
+        # If the shared session had to create a probe page, reuse that page
+        # instead of opening a second tab. Existing user tabs are never
+        # navigated; in that common case we create one short-lived resolver tab.
+        reuse_probe_page = bool(session.created_page)
+        page = session.page if reuse_probe_page else await session.context.new_page()
+        close_page_here = not reuse_probe_page
         network_candidates: list[tuple[str, int]] = []
 
         def _capture(response):
@@ -147,7 +152,8 @@ async def resolve_douyin_media(
 
             raise RuntimeError("Authenticated Douyin page exposed no playable media URL")
         finally:
-            try:
-                await page.close()
-            except Exception:
-                pass
+            if close_page_here:
+                try:
+                    await page.close()
+                except Exception:
+                    pass
