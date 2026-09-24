@@ -131,7 +131,7 @@ def materialize_localization_profile(
     Secrets stay in encrypted Settings; provider/model/base URL/voice/region are
     safe configuration and must not drift silently between resume/rerun calls.
     """
-    translation_ai = _profile_ai_client(user_settings, profile, purpose="translation")
+    translation_ai = _profile_ai_client(user_settings, profile, "translation")
 
     data = profile.model_dump()
     data.update({
@@ -140,7 +140,7 @@ def materialize_localization_profile(
         "translation_base_url": translation_ai.base_url,
     })
     if for_dub:
-        rewrite_ai = _profile_ai_client(user_settings, profile, purpose="rewrite")
+        rewrite_ai = _profile_ai_client(user_settings, profile, "rewrite")
         tts = _tts_config(user_settings, profile, target_language)
         data.update({
             "rewrite_provider": rewrite_ai.provider.value,
@@ -199,7 +199,6 @@ async def transcribe_for_localization(
 def _profile_ai_client(
     user_settings,
     profile: LocalizationProfile,
-    *,
     purpose: str = "translation",
 ):
     """Resolve one canonical AI connection with stage-specific model routing.
@@ -1102,7 +1101,7 @@ async def synthesize_timed_dub(
     out = transcript.model_copy(deep=True)
     rewrite_ai_error: Exception | None = None
     try:
-        ai = _profile_ai_client(user_settings, profile, purpose="rewrite")
+        ai = _profile_ai_client(user_settings, profile, "rewrite")
     except Exception as exc:
         # C7 rewrite is a quality optimization, not a hard dependency. A
         # persisted translation can still be synthesized/measured/fitted even
