@@ -72,7 +72,7 @@ const TOOLS = [
     description: "Strip the sound from a video and keep the picture untouched.",
     icon: <VolumeOffOutlinedIcon />,
     category: "audio",
-    route: "/tools/transform?op=mute",
+    route: "/utilities/transform?op=mute",
   },
   {
     id: "compress",
@@ -346,11 +346,11 @@ function CategorySection({ category, tools, onPick }) {
 // ── Page ───────────────────────────────────────────────────────────────────
 
 export default function Tools() {
-  useDocumentTitle("Tools")
+  useDocumentTitle("Utilities")
   const navigate = useNavigate()
   const pick = (id) => {
     const tool = TOOLS.find((t) => t.id === id)
-    navigate(tool?.route || `/tools/${id}`)
+    navigate(tool?.route || `/utilities/${id}`)
   }
 
   // Hub search — a flat ranked result grid when a query is present, else the
@@ -365,7 +365,7 @@ export default function Tools() {
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <PageHero
         icon={<BuildOutlinedIcon sx={{ fontSize: 22 }} />}
-        title="Tools"
+        title="Utilities"
         subtitle="Single-purpose utilities to refine finished videos"
       />
 

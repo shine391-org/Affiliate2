@@ -14,6 +14,7 @@ import TTSProviderSection from "../components/settings/TTSProviderSection"
 import LocalizationProfilesSection from "../components/settings/LocalizationProfilesSection"
 import ServiceKeysSection from "../components/settings/ServiceKeysSection"
 import useSettings from "../hooks/useSettings"
+import useDocumentTitle from "../hooks/useDocumentTitle"
 
 function Section({ icon, title, description, children, accentColor }) {
   const theme = useTheme()
@@ -62,6 +63,7 @@ function Section({ icon, title, description, children, accentColor }) {
 
 
 export default function Settings() {
+  useDocumentTitle("Settings")
   const { settings, loading, error, fetchSettings, updateSettings } = useSettings()
 
   if (loading) return (

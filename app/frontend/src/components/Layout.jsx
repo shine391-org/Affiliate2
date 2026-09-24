@@ -10,41 +10,35 @@ import {
   Typography, Divider, IconButton, useMediaQuery, useTheme, Tooltip, Badge,
 } from "@mui/material"
 import useAppStore from "../store/appStore"
-import { pluginNavItems } from "../plugins"
+import { BOTTOM_NAV_ITEMS, PRIMARY_NAV_ITEMS } from "../navigation"
 import MenuIcon from "@mui/icons-material/MenuOutlined"
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft"
 import ChevronRightIcon from "@mui/icons-material/ChevronRight"
-import ChatIcon from "@mui/icons-material/ChatBubbleOutline"
 import VideoLibraryIcon from "@mui/icons-material/OndemandVideoOutlined"
-import PhotoLibraryIcon from "@mui/icons-material/PhotoLibraryOutlined"
-import SensorsIcon from "@mui/icons-material/SensorsOutlined"
-import PhoneIphoneIcon from "@mui/icons-material/PhoneIphoneOutlined"
 import ContentCutIcon from "@mui/icons-material/ContentCutOutlined"
-import MovieFilterIcon from "@mui/icons-material/MovieFilterOutlined"
 import BuildIcon from "@mui/icons-material/BuildOutlined"
 import SettingsIcon from "@mui/icons-material/SettingsOutlined"
 import TravelExploreIcon from "@mui/icons-material/TravelExploreOutlined"
+import FactCheckIcon from "@mui/icons-material/FactCheckOutlined"
+import CloudUploadIcon from "@mui/icons-material/CloudUploadOutlined"
+import InsightsIcon from "@mui/icons-material/InsightsOutlined"
 
 const DRAWER_WIDTH = 240
 const COLLAPSED_WIDTH = 64
 
-const navItems = [
-  { to: "/",          icon: <ChatIcon />,             label: "Chat" },
-  { to: "/scout",     icon: <TravelExploreIcon />,    label: "Scout" },
-  { to: "/channels",  icon: <SensorsIcon />,          label: "My Channels" },
-  { to: "/clips",     icon: <ContentCutIcon />,       label: "Clip Studio" },
-  { to: "/videos",    icon: <VideoLibraryIcon />,     label: "Library" },
-  { to: "/stock",     icon: <PhotoLibraryIcon />,     label: "Stock Video" },
-  { to: "/motion",    icon: <MovieFilterIcon />,      label: "Motion Graphics" },
-  { to: "/tools",     icon: <BuildIcon />,            label: "Tools" },
-  { to: "/messaging", icon: <PhoneIphoneIcon />,      label: "Messaging" },
-  ...pluginNavItems.filter(i => (i.position || "top") === "top"),
-]
+const NAV_ICONS = {
+  discover: <TravelExploreIcon />,
+  library: <VideoLibraryIcon />,
+  studio: <ContentCutIcon />,
+  review: <FactCheckIcon />,
+  publish: <CloudUploadIcon />,
+  performance: <InsightsIcon />,
+  utilities: <BuildIcon />,
+  settings: <SettingsIcon />,
+}
 
-const bottomItems = [
-  ...pluginNavItems.filter(i => i.position === "bottom"),
-  { to: "/settings",  icon: <SettingsIcon />,     label: "Settings" },
-]
+const navItems = PRIMARY_NAV_ITEMS.map((item) => ({ ...item, icon: NAV_ICONS[item.icon] }))
+const bottomItems = BOTTOM_NAV_ITEMS.map((item) => ({ ...item, icon: NAV_ICONS[item.icon] }))
 
 export default function Layout() {
   useWebSocket()  // Global WS connection — active on all pages
@@ -91,15 +85,15 @@ export default function Layout() {
 
   const drawerWidth = collapsed && !isNarrow ? COLLAPSED_WIDTH : DRAWER_WIDTH
 
-  const isActive = (to) => {
-    if (to === "/") return location.pathname === "/"
-    return location.pathname.startsWith(to)
+  const isActive = (to, activeRoot) => {
+    const root = activeRoot || to
+    return location.pathname === root || location.pathname.startsWith(`${root}/`)
   }
 
-  const renderNavItem = ({ to, icon, label }) => {
-    const active = isActive(to)
+  const renderNavItem = ({ to, icon, label, activeRoot }) => {
+    const active = isActive(to, activeRoot)
     const isCollapsed = collapsed && !isNarrow
-    const renderedIcon = (to === "/videos" && runningJobCount > 0)
+    const renderedIcon = (to === "/library" && runningJobCount > 0)
       ? <Badge color="warning" variant="dot">{icon}</Badge>
       : icon
     const button = (
@@ -107,7 +101,7 @@ export default function Layout() {
         key={to}
         component={NavLink}
         to={to}
-        end={to === "/"}
+        onClick={() => { if (isNarrow) setMobileOpen(false) }}
         selected={active}
         sx={{
           borderRadius: 2.5,
@@ -168,7 +162,7 @@ export default function Layout() {
           <Box
             component="img"
             src="/icon-192.png"
-            alt="ViralMint"
+            alt="Affiliate2"
             sx={{ width: 32, height: 32, borderRadius: 1, flexShrink: 0 }}
           />
           {(!collapsed || isNarrow) && (
@@ -184,7 +178,7 @@ export default function Layout() {
                 whiteSpace: "nowrap",
               }}
             >
-              ViralMint
+              Affiliate2
             </Typography>
           )}
         </Box>
@@ -322,7 +316,7 @@ export default function Layout() {
                 WebkitTextFillColor: "transparent",
               }}
             >
-              ViralMint
+              Affiliate2
             </Typography>
           </Box>
         )}
@@ -340,7 +334,7 @@ export default function Layout() {
         total={jobTotal}
         onOpenResult={(key) => {
           closeActivity()
-          navigate(`/videos?open=${encodeURIComponent(key)}`)
+          navigate(`/library?open=${encodeURIComponent(key)}`)
         }}
         onCancel={async (jobId) => {
           try {

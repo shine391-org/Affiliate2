@@ -192,7 +192,7 @@ export default function ScoutResultsCard({ results, platform, jobId }) {
         )}
         <Box sx={{ flex: 1 }} />
         <Button size="small" variant="text" startIcon={<LaunchIcon />}
-          onClick={() => navigate("/videos")} sx={{ color: "text.secondary" }}>
+          onClick={() => navigate("/library")} sx={{ color: "text.secondary" }}>
           Library
         </Button>
       </Stack>

@@ -112,7 +112,7 @@ export default function MotionGraphics() {
         installed ? (
           <>
             <Button size="small" variant="outlined" startIcon={<VideoLibraryIcon />}
-              onClick={() => navigate("/videos")}>
+              onClick={() => navigate("/library")}>
               Library
             </Button>
             <Button size="small" variant={panelOpen ? "outlined" : "contained"}

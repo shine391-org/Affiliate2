@@ -149,7 +149,7 @@ export default function StockVideo() {
       }
       await http.post("/api/generate/stock", body)
       showSnackbar("Stock video generation started!", "success")
-      navigate("/videos?tab=generated")
+      navigate("/library?tab=generated")
     } catch (err) {
       showSnackbar(err.response?.data?.detail || err.message, "error")
     } finally {

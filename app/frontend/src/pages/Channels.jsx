@@ -22,6 +22,7 @@ import ThumbUpIcon from "@mui/icons-material/ThumbUpOutlined"
 import ChatBubbleIcon from "@mui/icons-material/ChatBubbleOutlineOutlined"
 import http from "../api/http"
 import useAppStore from "../store/appStore"
+import useDocumentTitle from "../hooks/useDocumentTitle"
 
 function formatCount(n) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -373,7 +374,7 @@ function ChannelDetail({ channel, onBack }) {
       await http.post("/api/downloaded/batch-download", {
         urls: [{ url: video.url, title: video.title || "" }],
       })
-      showSnackbar(`Downloading: ${video.title || "video"}`, "info", { label: "View in Library", href: "/videos" })
+      showSnackbar(`Downloading: ${video.title || "video"}`, "info", { label: "View in Library", href: "/library" })
     } catch (e) {
       showSnackbar(`Download failed: ${e.response?.data?.detail || e.message}`, "error")
     }
@@ -662,6 +663,7 @@ function PlatformTab({ platform }) {
 /* ── Main Page ─────────────────────────────────────────────────── */
 
 export default function Channels() {
+  useDocumentTitle("Discover / Channels")
   const [tab, setTab] = useState(0)
   return (
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -678,10 +680,10 @@ export default function Channels() {
           <LiveTvIcon sx={{ color: "warning.main", fontSize: 26 }} />
           <Box>
             <Typography variant="h5" sx={{ fontWeight: 700, letterSpacing: -0.3 }}>
-              My Channels
+              Discover / Channels
             </Typography>
             <Typography variant="caption" sx={{ color: "text.secondary" }}>
-              Connect YouTube and TikTok channels to view content and analyze videos
+              Monitor source channels, compare outliers, and acquire videos into Library
             </Typography>
           </Box>
         </Stack>

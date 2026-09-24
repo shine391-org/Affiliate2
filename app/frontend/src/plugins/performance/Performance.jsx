@@ -7,6 +7,7 @@ import RefreshOutlinedIcon from "@mui/icons-material/RefreshOutlined"
 import SyncOutlinedIcon from "@mui/icons-material/SyncOutlined"
 import OpenInNewOutlinedIcon from "@mui/icons-material/OpenInNewOutlined"
 import http from "../../api/http"
+import useDocumentTitle from "../../hooks/useDocumentTitle"
 
 function fmt(value) {
   if (value === null || value === undefined) return "-"
@@ -97,13 +98,11 @@ function MetricEditor({ publication, onSaved }) {
 }
 
 export default function Performance() {
+  useDocumentTitle("Performance")
   const [summary, setSummary] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
 
-  useEffect(() => {
-    document.title = "Performance · ViralMint"
-  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)

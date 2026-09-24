@@ -28,7 +28,7 @@ import useAppStore from "../store/appStore"
 const DEFAULT_ROWS = 50
 
 export default function Scout() {
-  useDocumentTitle("Scout")
+  useDocumentTitle("Discover / Spy")
   const navigate = useNavigate()
   const showSnackbar = useAppStore((s) => s.showSnackbar)
   const jobs = useAppStore((s) => s.jobs)   // polled once, app-wide, in Layout
@@ -59,7 +59,7 @@ export default function Scout() {
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <PageHero
         icon={<TravelExploreIcon sx={{ fontSize: 22 }} />}
-        title="Scout"
+        title="Discover / Spy"
         subtitle="Trending videos worth borrowing from — leads, not files"
         accentColor="#0097a7"
         actions={
@@ -73,7 +73,7 @@ export default function Scout() {
             </Tooltip>
             <Button size="small" variant="contained"
               startIcon={<ChatBubbleOutlineRoundedIcon sx={{ fontSize: 17 }} />}
-              onClick={() => navigate("/")}>
+              onClick={() => navigate("/assistant")}>
               Scout a niche
             </Button>
           </Stack>

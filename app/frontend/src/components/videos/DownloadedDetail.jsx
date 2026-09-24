@@ -178,7 +178,7 @@ export default function DownloadedDetail({ video, onUseAsInspiration, onClose, o
               </Button>
               <Button variant="outlined" size="small"
                 startIcon={<ContentCutIcon />}
-                component={NavLink} to="/clips">
+                component={NavLink} to="/studio">
                 Clip Studio
               </Button>
             </>

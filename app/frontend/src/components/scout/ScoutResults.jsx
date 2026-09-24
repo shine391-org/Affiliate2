@@ -14,7 +14,14 @@ import CardGrid from "./CardGrid"
 import DataTable from "./DataTable"
 import VideoEmbed from "./VideoEmbed"
 
-export default function ScoutResults({ results, onSelect, onRefresh }) {
+export default function ScoutResults({
+  results,
+  onSelect,
+  onRefresh,
+  downloadedIndex,
+  onOpenStudio,
+  showCandidateStatus = false,
+}) {
   const [view, setView] = useState("cards")
   const [selectedResult, setSelectedResult] = useState(null)
   const [selectedIds, setSelectedIds] = useState(new Set())
@@ -127,8 +134,8 @@ export default function ScoutResults({ results, onSelect, onRefresh }) {
         )}
       </Stack>
 
-      {view === "cards" && <CardGrid results={results} onSelect={handleSelect} onDownload={handleDownloadOne} onDelete={handleDeleteOne} selectedIds={selectedIds} onToggle={toggleSelection} />}
-      {view === "table" && <DataTable results={results} onSelect={handleSelect} onDownload={handleDownloadOne} onDelete={handleDeleteOne} selectedIds={selectedIds} onToggle={toggleSelection} />}
+      {view === "cards" && <CardGrid results={results} onSelect={handleSelect} onDownload={handleDownloadOne} onDelete={handleDeleteOne} selectedIds={selectedIds} onToggle={toggleSelection} downloadedIndex={downloadedIndex} onOpenStudio={onOpenStudio} showCandidateStatus={showCandidateStatus} />}
+      {view === "table" && <DataTable results={results} onSelect={handleSelect} onDownload={handleDownloadOne} onDelete={handleDeleteOne} selectedIds={selectedIds} onToggle={toggleSelection} downloadedIndex={downloadedIndex} onOpenStudio={onOpenStudio} showCandidateStatus={showCandidateStatus} />}
 
       {/* Delete confirmation dialog */}
       <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} maxWidth="xs" fullWidth>

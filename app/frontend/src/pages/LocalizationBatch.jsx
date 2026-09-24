@@ -63,7 +63,7 @@ export default function LocalizationBatch() {
   return (
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <PageHero
-        backTo="/tools"
+        backTo="/utilities"
         icon={<TranslateOutlinedIcon sx={{ fontSize: 22 }} />}
         title="Localization Batch"
         subtitle="Run the same proven HQ localization pipeline across up to 20 videos"

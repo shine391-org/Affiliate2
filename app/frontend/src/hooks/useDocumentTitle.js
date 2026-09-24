@@ -1,6 +1,6 @@
 import { useEffect } from "react"
 
-// Set document.title to "<page> · ViralMint" for the lifetime of the
+// Set document.title to "<page> · Affiliate2" for the lifetime of the
 // component. Restores the previous title on unmount so SPA route changes
 // don't accumulate stale suffixes. Multi-tab users care: tab-bar text is
 // the primary way they distinguish Library vs Chat vs Settings.
@@ -11,7 +11,7 @@ export default function useDocumentTitle(name) {
   useEffect(() => {
     if (!name) return
     const prev = document.title
-    document.title = `${name} · ViralMint`
+    document.title = `${name} · Affiliate2`
     return () => {
       document.title = prev
     }

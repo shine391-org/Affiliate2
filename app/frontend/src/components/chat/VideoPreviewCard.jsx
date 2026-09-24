@@ -29,7 +29,7 @@ export default function VideoPreviewCard({ video }) {
         display: "flex", alignItems: "center", justifyContent: "center",
         cursor: "pointer", overflow: "hidden",
       }}
-        onClick={() => window.location.href = "/videos"}
+        onClick={() => window.location.href = "/library"}
       >
         {video.thumbnail_path ? (
           <Box component="img" src={`/api/videos/${video.id}/thumbnail`} alt={video.title}
@@ -65,7 +65,7 @@ export default function VideoPreviewCard({ video }) {
             TikTok
           </Button>
           <Button size="small" variant="outlined"
-            onClick={() => window.location.href = "/videos"}>
+            onClick={() => window.location.href = "/library"}>
             View
           </Button>
         </Stack>

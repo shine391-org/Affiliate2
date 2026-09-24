@@ -33,7 +33,7 @@ export default function LocalizationReview() {
   return (
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <PageHero
-        backTo="/tools"
+        backTo="/utilities"
         icon={<FactCheckOutlinedIcon sx={{ fontSize: 22 }} />}
         title="Localization Review"
         subtitle="QC exceptions and targeted expert reruns — same persisted pipeline artifacts"

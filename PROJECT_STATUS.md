@@ -75,6 +75,8 @@ GPT-SoVITS can use manual reference audio or automatically extract reference spe
 - Localization Batch uses the same runner for up to 20 jobs; no cheaper second engine.
 - Localization Review exposes QC exceptions and the same persisted artifacts.
 - Expert panel can edit translation/timing/voice, regenerate one dubbing chunk, or rerun downstream stages.
+- UX1 + UX2 shell is implemented: workflow sidebar, Discover parent with Spy / Channels / Candidates, backward-compatible legacy routes, and contextual candidate-to-Library/Studio lineage.
+- Saved/shortlist remains deferred until the backend has a canonical persisted state; the UI does not emulate it locally.
 
 ### C4–C11 technical gate
 **TECHNICAL PASS** on the clean real-media job at commit `b5e3609`.

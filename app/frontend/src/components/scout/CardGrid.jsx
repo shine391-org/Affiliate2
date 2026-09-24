@@ -11,6 +11,8 @@ import ThumbUpIcon from "@mui/icons-material/ThumbUpOutlined"
 import NewspaperIcon from "@mui/icons-material/Newspaper"
 import BookmarkAddIcon from "@mui/icons-material/BookmarkAdd"
 import BookmarkAddedIcon from "@mui/icons-material/BookmarkAdded"
+import ContentCutIcon from "@mui/icons-material/ContentCutOutlined"
+import { candidateStatus } from "../../discoverModel"
 
 function ViralityChip({ score }) {
   const color = score >= 70 ? "success" : score >= 40 ? "warning" : "error"
@@ -72,7 +74,10 @@ function getWatchUrl(r) {
 
 const PAGE_SIZE = 50
 
-export default function CardGrid({ results, onSelect, onDownload, onDelete, selectedIds, onToggle }) {
+export default function CardGrid({
+  results, onSelect, onDownload, onDelete, selectedIds, onToggle,
+  downloadedIndex, onOpenStudio, showCandidateStatus = false,
+}) {
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
   const [loadingId, setLoadingId] = useState(null)
   // Thumbnails whose host refused the image. Scout results carry the
@@ -240,6 +245,11 @@ export default function CardGrid({ results, onSelect, onDownload, onDelete, sele
                   {!isNews && <OutlierChip score={r.outlier_score} />}
                   {!isNews && <RadarChip score={r.radar_score} confidence={r.radar_confidence} />}
                   {!isNews && <CreatorOutlierChip ratio={r.radar_creator_outlier} />}
+                  {showCandidateStatus && (
+                    <Chip label={candidateStatus(r)} size="small" variant="outlined"
+                      color={r.is_analyzed ? "success" : r.is_downloaded ? "info" : "default"}
+                      sx={{ fontSize: "0.65rem", height: 22 }} />
+                  )}
                   {isNews && newsDesc?.word_count > 0 && (
                     <Chip label={`${newsDesc.word_count} words`} size="small" variant="outlined" sx={{ fontSize: "0.6rem", height: 20 }} />
                   )}
@@ -284,6 +294,12 @@ export default function CardGrid({ results, onSelect, onDownload, onDelete, sele
                     color={isNews ? "warning" : "primary"}
                   >
                     {loadingId === r.id ? "Saving..." : isNews ? "Save to Library" : "Download & Analyze"}
+                  </Button>
+                )}
+                {downloadedIndex?.has(r.id) && onOpenStudio && (
+                  <Button size="small" variant="outlined" startIcon={<ContentCutIcon />}
+                    onClick={(e) => { e.stopPropagation(); onOpenStudio(r) }}>
+                    Studio
                   </Button>
                 )}
                 <Box sx={{ flex: 1 }} />

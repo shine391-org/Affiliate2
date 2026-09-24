@@ -247,7 +247,7 @@ export default function ToolMergeClips() {
           : "linear-gradient(135deg, rgba(201,100,66,0.06) 0%, rgba(255,255,255,1) 100%)",
       }}>
         <Stack direction="row" spacing={1.5} alignItems="center" sx={{ minWidth: 0 }}>
-          <IconButton size="small" onClick={() => navigate("/tools")}>
+          <IconButton size="small" onClick={() => navigate("/utilities")}>
             <ArrowBackIcon />
           </IconButton>
           <Box sx={{ color: "primary.main", display: "flex", alignItems: "center" }}>

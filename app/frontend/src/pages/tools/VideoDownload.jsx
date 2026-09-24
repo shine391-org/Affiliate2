@@ -201,7 +201,7 @@ export default function VideoDownload() {
         icon={<DownloadForOfflineOutlinedIcon />}
         title="Video Download"
         subtitle="Paste a link — download from YouTube, TikTok, Bilibili, X and 1,800+ more sites. Runs locally, no watermark."
-        backTo="/tools"
+        backTo="/utilities"
       />
 
       <Box sx={{ maxWidth: 900, mx: "auto", px: { xs: 2, md: 3 }, py: 3 }}>
@@ -368,7 +368,7 @@ export default function VideoDownload() {
                 severity="success"
                 icon={<CheckCircleOutlinedIcon />}
                 action={
-                  <Button size="small" onClick={() => navigate("/videos")}>
+                  <Button size="small" onClick={() => navigate("/library")}>
                     Open Library
                   </Button>
                 }
@@ -424,7 +424,7 @@ export default function VideoDownload() {
 
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ mt: 2 }}>
           <Button size="small" variant="outlined" startIcon={<VideoLibraryOutlinedIcon />}
-                  onClick={() => navigate("/videos")}>
+                  onClick={() => navigate("/library")}>
             Library
           </Button>
         </Stack>

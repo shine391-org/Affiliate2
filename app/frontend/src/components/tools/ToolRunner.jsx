@@ -387,7 +387,7 @@ export default function ToolRunner({
           running/success/failed states (those have their own affordances in
           the body — progress bar, download CTA, retry). */}
       <PageHero
-        backTo="/tools"
+        backTo="/utilities"
         icon={icon && (
           // ToolRunner callers pass full-sized icons (`fontSize="large"`).
           // PageHero renders inside a 40x40 chip-sized container, so

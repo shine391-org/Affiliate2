@@ -156,7 +156,7 @@ export default function ReviewQueue() {
   const [actionBusy, setActionBusy] = useState(false)
 
   useEffect(() => {
-    document.title = "Review Queue · ViralMint"
+    document.title = "Review Queue · Affiliate2"
   }, [])
 
   const loadQueue = useCallback(async (nextFilter = filter) => {

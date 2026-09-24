@@ -1,15 +1,16 @@
 import { lazy, Suspense } from "react"
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom"
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom"
 import { Snackbar, Alert, Button, CircularProgress, Box } from "@mui/material"
 import ErrorBoundary from "./components/ErrorBoundary"
 import Layout from "./components/Layout"
 import useAppStore from "./store/appStore"
-import { pluginRoutes } from "./plugins"
 
-// Route-level code splitting — only Chat is eagerly loaded (home page)
+// Route-level code splitting — Assistant remains available, but Discover owns home.
 import Chat from "./pages/Chat"
 const Settings = lazy(() => import("./pages/Settings"))
 const Library = lazy(() => import("./pages/Library"))
+const Discover = lazy(() => import("./pages/Discover"))
+const Candidates = lazy(() => import("./pages/Candidates"))
 const Scout = lazy(() => import("./pages/Scout"))
 const StockVideo = lazy(() => import("./pages/StockVideo"))
 const Channels = lazy(() => import("./pages/Channels"))
@@ -19,9 +20,11 @@ const MotionGraphics = lazy(() => import("./pages/MotionGraphics"))
 const Tools = lazy(() => import("./pages/Tools"))
 const LocalizationBatch = lazy(() => import("./pages/LocalizationBatch"))
 const LocalizationReview = lazy(() => import("./pages/LocalizationReview"))
+const Publish = lazy(() => import("./pages/Publish"))
+const ReviewQueue = lazy(() => import("./plugins/review/ReviewQueue"))
+const Performance = lazy(() => import("./plugins/performance/Performance"))
 
-// Tools — single-purpose utility pages. Each is a thin wrapper around the
-// shared ToolRunner; lazy-loaded so the bundle for the hub stays small.
+// Utilities — single-purpose pages remain thin wrappers around ToolRunner.
 const ToolCaptions = lazy(() => import("./pages/tools/Captions"))
 const ToolReframe = lazy(() => import("./pages/tools/Reframe"))
 const ToolAudioEnhance = lazy(() => import("./pages/tools/AudioEnhance"))
@@ -49,6 +52,17 @@ const LazyFallback = () => (
     <CircularProgress size={36} />
   </Box>
 )
+
+function LegacyRedirect({ to, suffix = "" }) {
+  const location = useLocation()
+  return <Navigate to={`${to}${suffix}${location.search}${location.hash}`} replace />
+}
+
+function LegacyToolsRedirect() {
+  const location = useLocation()
+  const suffix = location.pathname.slice("/tools".length)
+  return <LegacyRedirect to="/utilities" suffix={suffix} />
+}
 
 function GlobalSnackbar() {
   const snackbar = useAppStore((s) => s.snackbar)
@@ -91,53 +105,69 @@ export default function App() {
         <Suspense fallback={<LazyFallback />}>
           <Routes>
             <Route path="/" element={<Layout />}>
-              <Route index element={<Chat />} />
-              <Route path="dashboard" element={<Navigate to="/videos" />} />
-              {/* `/videos` is the Library. The path is legacy and stays: it is
-                  bookmarked, and every ?tab= link the old page published still
-                  arrives here and is translated into the new filters. */}
-              <Route path="videos" element={<Library />} />
-              {/* Scout leads are not files you own, so they are not the
-                  Library. `/videos?tab=scout` redirects here. */}
-              <Route path="scout" element={<Scout />} />
-              <Route path="stock" element={<StockVideo />} />
-              <Route path="ai-video" element={<Navigate to="/stock" />} />
-              <Route path="avatar" element={<Navigate to="/stock" />} />
-              <Route path="create" element={<Navigate to="/stock" />} />
-              <Route path="cron" element={<Navigate to="/" />} />
-              <Route path="clips" element={<ClipStudio />} />
-              <Route path="motion" element={<MotionGraphics />} />
-              <Route path="tools" element={<Tools />} />
-              <Route path="tools/localization-batch" element={<LocalizationBatch />} />
-              <Route path="tools/localization-review" element={<LocalizationReview />} />
-              <Route path="tools/captions" element={<ToolCaptions />} />
-              <Route path="tools/reframe" element={<ToolReframe />} />
-              <Route path="tools/audio-enhance" element={<ToolAudioEnhance />} />
-              <Route path="tools/watermark" element={<ToolWatermark />} />
-              <Route path="tools/remove-silence" element={<ToolRemoveSilence />} />
-              <Route path="tools/merge-clips" element={<ToolMergeClips />} />
-              <Route path="tools/gif" element={<ToolGif />} />
-              <Route path="tools/speed" element={<ToolSpeed />} />
-              <Route path="tools/trim" element={<ToolTrim />} />
-              <Route path="tools/subtitles" element={<ToolSubtitles />} />
-              <Route path="tools/auto-zoom" element={<ToolAutoZoom />} />
-              <Route path="tools/transform" element={<ToolTransform />} />
-              <Route path="tools/compress" element={<ToolCompress />} />
-              <Route path="tools/crop" element={<ToolCrop />} />
-              <Route path="tools/video-download" element={<ToolVideoDownload />} />
-              <Route path="tools/music-visualizer" element={<ToolMusicVisualizer />} />
-              <Route path="tools/voiceover" element={<ToolVoiceover />} />
-              <Route path="tools/hook-analysis" element={<ToolHookAnalysis />} />
-              <Route path="tools/translate" element={<ToolTranslate />} />
-              <Route path="tools/metadata" element={<ToolMetadata />} />
-              <Route path="tools/auto-chapters" element={<ToolAutoChapters />} />
-              <Route path="channels" element={<Channels />} />
-              <Route path="messaging" element={<Messaging />} />
+              <Route index element={<Navigate to="/discover/spy" replace />} />
+              <Route path="assistant" element={<Chat />} />
+              <Route path="dashboard" element={<Navigate to="/library" replace />} />
+
+              <Route path="discover" element={<Discover />}>
+                <Route index element={<Navigate to="spy" replace />} />
+                <Route path="spy" element={<Scout />} />
+                <Route path="channels" element={<Channels />} />
+                <Route path="candidates" element={<Candidates />} />
+              </Route>
+
+              <Route path="library" element={<Library />} />
+              <Route path="studio" element={<ClipStudio />} />
+              <Route path="review" element={<LocalizationReview />} />
+              <Route path="publish" element={<Publish />} />
+              <Route path="performance" element={<Performance />} />
+              <Route path="utilities" element={<Tools />} />
               <Route path="settings" element={<Settings />} />
-              {pluginRoutes.map(({ path, element }) => (
-                <Route key={path} path={path} element={element} />
-              ))}
-              <Route path="*" element={<Navigate to="/" />} />
+
+              {/* Secondary/transitional surfaces remain reachable without
+                  competing for primary workflow ownership. */}
+              <Route path="stock" element={<StockVideo />} />
+              <Route path="ai-video" element={<Navigate to="/stock" replace />} />
+              <Route path="avatar" element={<Navigate to="/stock" replace />} />
+              <Route path="create" element={<Navigate to="/stock" replace />} />
+              <Route path="cron" element={<Navigate to="/assistant" replace />} />
+              <Route path="motion" element={<MotionGraphics />} />
+              <Route path="messaging" element={<Messaging />} />
+              <Route path="review-queue" element={<ReviewQueue />} />
+
+              <Route path="utilities/localization-batch" element={<LocalizationBatch />} />
+              <Route path="utilities/localization-review" element={<Navigate to="/review" replace />} />
+              <Route path="utilities/captions" element={<ToolCaptions />} />
+              <Route path="utilities/reframe" element={<ToolReframe />} />
+              <Route path="utilities/audio-enhance" element={<ToolAudioEnhance />} />
+              <Route path="utilities/watermark" element={<ToolWatermark />} />
+              <Route path="utilities/remove-silence" element={<ToolRemoveSilence />} />
+              <Route path="utilities/merge-clips" element={<ToolMergeClips />} />
+              <Route path="utilities/gif" element={<ToolGif />} />
+              <Route path="utilities/speed" element={<ToolSpeed />} />
+              <Route path="utilities/trim" element={<ToolTrim />} />
+              <Route path="utilities/subtitles" element={<ToolSubtitles />} />
+              <Route path="utilities/auto-zoom" element={<ToolAutoZoom />} />
+              <Route path="utilities/transform" element={<ToolTransform />} />
+              <Route path="utilities/compress" element={<ToolCompress />} />
+              <Route path="utilities/crop" element={<ToolCrop />} />
+              <Route path="utilities/video-download" element={<ToolVideoDownload />} />
+              <Route path="utilities/music-visualizer" element={<ToolMusicVisualizer />} />
+              <Route path="utilities/voiceover" element={<ToolVoiceover />} />
+              <Route path="utilities/hook-analysis" element={<ToolHookAnalysis />} />
+              <Route path="utilities/translate" element={<ToolTranslate />} />
+              <Route path="utilities/metadata" element={<ToolMetadata />} />
+              <Route path="utilities/auto-chapters" element={<ToolAutoChapters />} />
+
+              {/* Bookmark compatibility. Redirects preserve query/hash. */}
+              <Route path="scout" element={<LegacyRedirect to="/discover/spy" />} />
+              <Route path="channels" element={<LegacyRedirect to="/discover/channels" />} />
+              <Route path="clips" element={<LegacyRedirect to="/studio" />} />
+              <Route path="videos" element={<LegacyRedirect to="/library" />} />
+              <Route path="tools/localization-review" element={<LegacyRedirect to="/review" />} />
+              <Route path="tools/*" element={<LegacyToolsRedirect />} />
+
+              <Route path="*" element={<Navigate to="/discover/spy" replace />} />
             </Route>
           </Routes>
         </Suspense>

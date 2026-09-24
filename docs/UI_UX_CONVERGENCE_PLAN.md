@@ -1,6 +1,20 @@
 # Affiliate2 UI/UX Convergence Plan
 
-Status: **PLANNED — architecture freeze before further frontend feature work**
+Status: **UX1 + UX2 SHELL IMPLEMENTED — later convergence phases remain planned**
+
+Implementation checkpoint (September 24, 2026):
+
+- workflow-first sidebar now owns Discover, Library, Studio, Review, Publish,
+  Performance, Utilities, and Settings;
+- Discover is the parent workspace for Spy, Channels, and persisted Candidates;
+- legacy `/scout`, `/channels`, `/videos`, `/clips`, and `/tools/*` URLs redirect
+  without dropping query strings or hashes;
+- candidate acquisition still uses the canonical Scout/download APIs and
+  downloaded assets remain visible through the canonical Library index;
+- Candidates exposes persisted discovery/download/analyze state and opens linked
+  local assets in the existing Studio by canonical downloaded-video ID;
+- Saved/shortlist is intentionally not represented until a real persisted state
+  exists; no client-only fake shortlist was introduced.
 
 This plan replaces incremental ViralMint-page patching with one migration path
 toward a workflow-first Affiliate2 interface.

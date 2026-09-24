@@ -6,6 +6,8 @@ import {
 import LaunchIcon from "@mui/icons-material/Launch"
 import DownloadIcon from "@mui/icons-material/Download"
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline"
+import ContentCutIcon from "@mui/icons-material/ContentCutOutlined"
+import { candidateStatus } from "../../discoverModel"
 
 function formatViews(n) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -13,7 +15,10 @@ function formatViews(n) {
   return String(n)
 }
 
-export default function DataTable({ results, onSelect, onDownload, onDelete, selectedIds, onToggle }) {
+export default function DataTable({
+  results, onSelect, onDownload, onDelete, selectedIds, onToggle,
+  downloadedIndex, onOpenStudio, showCandidateStatus = false,
+}) {
   const [sortKey, setSortKey] = useState("virality_score")
   const [sortDir, setSortDir] = useState("desc")
   const [loadingId, setLoadingId] = useState(null)
@@ -50,6 +55,7 @@ export default function DataTable({ results, onSelect, onDownload, onDelete, sel
     { key: "comments", label: "Comments", width: "8%" },
     { key: "virality_score", label: "Viral", width: "7%" },
     { key: "radar_score", label: "Radar", width: "7%" },
+    ...(showCandidateStatus ? [{ key: "_status", label: "Status", width: "8%", sortable: false }] : []),
     { key: "upload_date", label: "Uploaded", width: "10%" },
     { key: "_actions", label: "Actions", width: "18%", sortable: false },
   ]
@@ -124,6 +130,12 @@ export default function DataTable({ results, onSelect, onDownload, onDelete, sel
                   </Tooltip>
                 )}
               </TableCell>
+              {showCandidateStatus && (
+                <TableCell>
+                  <Chip label={candidateStatus(r)} size="small" variant="outlined"
+                    color={r.is_analyzed ? "success" : r.is_downloaded ? "info" : "default"} />
+                </TableCell>
+              )}
               <TableCell sx={{ fontSize: "0.8rem", color: "text.secondary", whiteSpace: "nowrap" }}>
                 {r.upload_date
                   ? new Date(r.upload_date).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })
@@ -141,6 +153,14 @@ export default function DataTable({ results, onSelect, onDownload, onDelete, sel
                   >
                     {loadingId === r.id ? "..." : "Download"}
                   </Button>
+                )}
+                {downloadedIndex?.has(r.id) && onOpenStudio && (
+                  <Tooltip title="Open local asset in Studio" arrow>
+                    <IconButton size="small" onClick={(e) => { e.stopPropagation(); onOpenStudio(r) }}
+                      sx={{ color: "text.secondary", "&:hover": { color: "primary.main" } }}>
+                      <ContentCutIcon sx={{ fontSize: "1.1rem" }} />
+                    </IconButton>
+                  </Tooltip>
                 )}
                 {r.video_url && (
                   <Tooltip title="Open original" arrow>

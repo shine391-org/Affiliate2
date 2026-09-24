@@ -238,7 +238,7 @@ export default function Library() {
   const legacyTab = params.get("tab")
   useEffect(() => {
     if (!legacyTab) return
-    if (legacyTab === "scout") { navigate("/scout", { replace: true }); return }
+    if (legacyTab === "scout") { navigate("/discover/spy", { replace: true }); return }
     setParams((prev) => {
       const next = new URLSearchParams(prev)
       next.delete("tab")

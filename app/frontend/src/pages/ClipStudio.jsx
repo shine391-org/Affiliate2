@@ -30,8 +30,10 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircle"
 import VideocamIcon from "@mui/icons-material/Videocam"
 import FolderOpenIcon from "@mui/icons-material/FolderOpen"
 import AddIcon from "@mui/icons-material/Add"
+import { useSearchParams } from "react-router-dom"
 import http from "../api/http"
 import useAppStore from "../store/appStore"
+import useDocumentTitle from "../hooks/useDocumentTitle"
 import ActiveJobsBanner from "../components/create/ActiveJobsBanner"
 import ExtractDialog from "../components/clip/ExtractDialog"
 import SourceBench from "../components/clip/bench/SourceBench"
@@ -335,6 +337,9 @@ function ClipCardImpl({ clip, isSelected, onSelect }) {
 const ClipCard = memo(ClipCardImpl)
 
 export default function ClipStudio() {
+  useDocumentTitle("Studio")
+  const [searchParams] = useSearchParams()
+  const requestedSourceId = searchParams.get("source")
   const showSnackbar = useAppStore((s) => s.showSnackbar)
   const activeJobs = useAppStore((s) => s.activeJobs)
 
@@ -418,6 +423,10 @@ export default function ClipStudio() {
       const downloadedVideos = (srcRes.data?.videos || srcRes.data || [])
         .sort((a, b) => (b.duration_seconds || 0) - (a.duration_seconds || 0))
       setSources(downloadedVideos)
+      if (requestedSourceId && downloadedVideos.some((video) => video.id === requestedSourceId)) {
+        setSelectedSourceId(requestedSourceId)
+        setCenterMode("bench")
+      }
 
       // Only show clip_extraction videos
       const clipVideos = (clipRes.data.videos || []).filter(v => v.source_type === "clip_extraction")
@@ -431,7 +440,7 @@ export default function ClipStudio() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [requestedSourceId])
 
   useEffect(() => { fetchData() }, [fetchData])
 

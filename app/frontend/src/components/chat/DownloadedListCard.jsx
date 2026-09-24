@@ -46,7 +46,7 @@ export default function DownloadedListCard({ videos }) {
           <Chip label={`${videos.length}`} size="small" color="primary" variant="outlined"
             sx={{ fontSize: "0.65rem", height: 20 }} />
         </Stack>
-        <Button size="small" variant="text" onClick={() => navigate("/videos")}
+        <Button size="small" variant="text" onClick={() => navigate("/library")}
           endIcon={<OpenInNewIcon sx={{ fontSize: 14 }} />}>
           View all
         </Button>
