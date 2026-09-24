@@ -1,8 +1,9 @@
 """
 normalize.py — Per-platform normalization functions (Phase 2.1)
 
-Each normalizer takes a raw dict (one JSONL line from MediaCrawler output)
-and returns (NormalizedContent, MetricSnapshot).
+Each normalizer takes a legacy/raw source record and returns
+(NormalizedContent, MetricSnapshot). Canonical app-native providers may already
+emit normalized Scout rows and bypass these legacy mapping helpers.
 
 NULL policy: missing / unavailable metrics → None, NOT 0.
 """
@@ -35,12 +36,12 @@ def _now_iso() -> str:
 
 def normalize_douyin(raw: dict, captured_at: str) -> tuple[NormalizedContent, MetricSnapshot]:
     """
-    Map MediaCrawler Douyin JSONL record → normalized schema.
+    Map a legacy Douyin source record → normalized schema.
 
     Key field mappings:
         aweme_id        → content_id
         aweme_url       → canonical_url
-        creator_hash    → creator_id   (anonymized hash from MediaCrawler)
+        creator_hash    → creator_id   (legacy source identifier)
         nickname        → creator_name
         create_time     → publish_time (Unix ts)
         title / desc    → title / description
