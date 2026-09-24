@@ -11,19 +11,23 @@ AUTH_REQUIRED so the user can refresh the real browser session.
 from __future__ import annotations
 
 import asyncio
-import os
 import random
 import urllib.parse
 from datetime import datetime
 from typing import Any
 
-from playwright.async_api import async_playwright
+from backend.services.douyin_browser_session import (
+    DEFAULT_CDP_URL,
+    DOUYIN_HOST,
+    open_douyin_cdp_session,
+    pick_authenticated_context_and_page,
+    read_douyin_session_state,
+    resolve_douyin_cdp_url,
+)
 
 from .base import ProviderStatus, SourceProviderResult
 
-DOUYIN_HOST = "https://www.douyin.com"
 DOUYIN_SEARCH_PATH = "/aweme/v1/web/general/search/single/"
-DEFAULT_CDP_URL = "http://127.0.0.1:9222"
 
 _ACCESS_HTTP = {401, 403, 412, 429}
 _ACCESS_API_STATUS = {-1, 8, 2483, 10000}
@@ -69,103 +73,20 @@ class DouyinProvider:
     name = "douyin-cdp-web-search"
 
     def __init__(self, cdp_url: str | None = None):
-        self.cdp_url = (
-            cdp_url
-            or os.getenv("AFFILIATE2_DOUYIN_CDP_URL")
-            or os.getenv("DOUYIN_CDP_URL")
-            or DEFAULT_CDP_URL
-        )
+        self.cdp_url = resolve_douyin_cdp_url(cdp_url)
 
     @staticmethod
     async def _pick_context_and_page(browser):
-        contexts = browser.contexts
-        if not contexts:
-            raise PermissionError(
-                "CDP browser has no reusable context. Start Edge/Chrome with "
-                "--remote-debugging-port=9222 and log in to Douyin."
-            )
-
-        # A CDP browser can expose several reusable contexts. Do not stop at
-        # the first Douyin tab: it may be logged out while a later context is
-        # authenticated. Check every existing Douyin page first and prefer a
-        # context whose session is actually valid.
-        first_douyin_page = None
-        contexts_without_douyin_page = []
-        for context in contexts:
-            douyin_pages = [
-                page for page in context.pages
-                if "douyin.com" in (page.url or "")
-            ]
-            if not douyin_pages:
-                contexts_without_douyin_page.append(context)
-                continue
-            if first_douyin_page is None:
-                first_douyin_page = (context, douyin_pages[0])
-            for page in douyin_pages:
-                try:
-                    logged_in, _, _ = await DouyinProvider._session_state(context, page)
-                except Exception:
-                    logged_in = False
-                if logged_in:
-                    return context, page, False
-
-        # A context can still carry valid Douyin cookies/local storage without
-        # currently having a Douyin tab open. Probe those reusable contexts
-        # before concluding AUTH_REQUIRED. This opens pages only inside the
-        # already-running browser; it never launches a new browser/login flow.
-        for context in contexts_without_douyin_page:
-            page = None
-            selected = False
-            try:
-                page = await context.new_page()
-                await page.goto(DOUYIN_HOST, wait_until="domcontentloaded", timeout=60_000)
-                logged_in, _, _ = await DouyinProvider._session_state(context, page)
-                if logged_in:
-                    selected = True
-                    return context, page, True
-            except Exception:
-                # A closed/inaccessible reusable context must not abort scanning
-                # the remaining CDP contexts.
-                pass
-            finally:
-                if page is not None and not selected:
-                    try:
-                        await page.close()
-                    except Exception:
-                        pass
-
-        # Preserve the existing caller contract for a visible logged-out
-        # Douyin page. search() will perform the final session check and return
-        # AUTH_REQUIRED, but only after all reusable contexts were examined.
-        if first_douyin_page is not None:
-            context, page = first_douyin_page
-            return context, page, False
-
-        raise PermissionError(
-            "No authenticated Douyin session found in any reusable CDP context."
+        # Compatibility seam for focused provider tests; ownership lives in
+        # backend.services.douyin_browser_session.
+        return await pick_authenticated_context_and_page(
+            browser,
+            state_reader=DouyinProvider._session_state,
         )
 
     @staticmethod
     async def _session_state(context, page) -> tuple[bool, dict[str, str], str | None]:
-        try:
-            local_storage = await page.evaluate("() => ({...window.localStorage})")
-        except Exception:
-            local_storage = {}
-
-        cookies = await context.cookies(
-            [DOUYIN_HOST, "https://douyin.com", "https://creator.douyin.com"]
-        )
-        cookie_dict = {
-            str(cookie.get("name")): str(cookie.get("value") or "")
-            for cookie in cookies
-            if cookie.get("name")
-        }
-
-        logged_in = (
-            str(local_storage.get("HasUserLogin", "")) == "1"
-            or cookie_dict.get("LOGIN_STATUS") == "1"
-        )
-        return logged_in, cookie_dict, local_storage.get("xmst")
+        return await read_douyin_session_state(context, page)
 
     @staticmethod
     def _common_params(ms_token: str | None) -> dict[str, str]:
@@ -347,39 +268,12 @@ class DouyinProvider:
                 provider=self.name,
             )
 
-        created_page = None
         try:
-            async with async_playwright() as playwright:
-                try:
-                    browser = await playwright.chromium.connect_over_cdp(
-                        self.cdp_url,
-                        timeout=15_000,
-                    )
-                except Exception as exc:
-                    return SourceProviderResult(
-                        platform=self.platform,
-                        query=query,
-                        status=ProviderStatus.AUTH_REQUIRED,
-                        error=(
-                            f"Cannot connect to Douyin CDP at {self.cdp_url}: {exc}. "
-                            "Start/login the configured Edge/Chrome profile first."
-                        ),
-                        provider=self.name,
-                    )
-
-                context, page, page_was_created = await self._pick_context_and_page(browser)
-                created_page = page if page_was_created else None
-                logged_in, cookie_dict, ms_token = await self._session_state(context, page)
-                if not logged_in:
-                    if created_page:
-                        await created_page.close()
-                    return SourceProviderResult(
-                        platform=self.platform,
-                        query=query,
-                        status=ProviderStatus.AUTH_REQUIRED,
-                        error="Douyin browser session is not logged in.",
-                        provider=self.name,
-                    )
+            async with open_douyin_cdp_session(self.cdp_url) as session:
+                context = session.context
+                page = session.page
+                cookie_dict = session.cookie_dict
+                ms_token = session.ms_token
 
                 raw_awemes: list[dict] = []
                 seen: set[str] = set()
@@ -427,15 +321,7 @@ class DouyinProvider:
                         break
                     await asyncio.sleep(0.4)
 
-                if created_page:
-                    await created_page.close()
-
         except PermissionError as exc:
-            try:
-                if created_page:
-                    await created_page.close()
-            except Exception:
-                pass
             return SourceProviderResult(
                 platform=self.platform,
                 query=query,
@@ -444,11 +330,6 @@ class DouyinProvider:
                 provider=self.name,
             )
         except Exception as exc:  # noqa: BLE001
-            try:
-                if created_page:
-                    await created_page.close()
-            except Exception:
-                pass
             return SourceProviderResult(
                 platform=self.platform,
                 query=query,
