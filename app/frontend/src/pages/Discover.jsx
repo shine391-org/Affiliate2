@@ -15,7 +15,7 @@ export default function Discover() {
           onChange={(_, value) => navigate(DISCOVER_SECTIONS.find((item) => item.value === value)?.to || "/discover/spy")}
           variant="scrollable"
           scrollButtons="auto"
-          aria-label="Discover sections"
+          aria-label="Các mục Khám phá"
         >
           {DISCOVER_SECTIONS.map((item) => (
             <Tab key={item.value} value={item.value} label={item.label} sx={{ textTransform: "none", fontWeight: 700 }} />
