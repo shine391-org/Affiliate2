@@ -39,6 +39,6 @@ export function autoCutEstimate({ durationSeconds, requested }) {
   return {
     clips,
     // "up to" because the backend may return fewer; never because we're unsure.
-    label: `up to ${clips} clip${clips === 1 ? "" : "s"}`,
+    label: `tối đa ${clips} clip`,
   }
 }

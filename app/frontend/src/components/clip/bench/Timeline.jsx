@@ -314,7 +314,7 @@ export default function Timeline({
             }}>
               <CircularProgress size={14} thickness={5} sx={{ color: LANE_TEXT }} />
               <Typography variant="caption" sx={{ color: LANE_TEXT }}>
-                Reading frames from this video…
+                Đang đọc khung hình từ video…
               </Typography>
             </Stack>
           )}
@@ -326,10 +326,10 @@ export default function Timeline({
               color: LANE_TEXT, pointerEvents: "none",
             }}>
               {readable === "dead"
-                ? "This video has no readable frames — it may be an incomplete or cancelled download"
+                ? "Video không có khung hình đọc được — có thể bản tải xuống chưa hoàn tất hoặc đã bị hủy"
                 : readable === "truncated"
-                  ? "Only the beginning of this video is readable — it looks like an unfinished download, so most of the timeline won't play or cut"
-                  : "Preview frames unavailable — the timeline still works"}
+                  ? "Chỉ đọc được phần đầu video — có vẻ bản tải xuống chưa hoàn tất nên phần lớn timeline sẽ không phát hoặc cắt được"
+                  : "Không có khung hình xem trước — timeline vẫn hoạt động"}
             </Typography>
           )}
 
