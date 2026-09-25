@@ -54,7 +54,7 @@ function parseUrls(raw) {
 const isHttpUrl = (u) => /^https?:\/\/\S+$/i.test(u)
 
 export default function VideoDownload() {
-  useDocumentTitle("Video Download")
+  useDocumentTitle("Tải video")
   const navigate = useNavigate()
   const showSnackbar = useAppStore((s) => s.showSnackbar)
   const startJob = useAppStore((s) => s.startJob)

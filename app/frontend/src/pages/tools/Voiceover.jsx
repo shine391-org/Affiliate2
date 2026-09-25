@@ -60,7 +60,7 @@ const MAX_CHARS = 10_000
 const VIDEO_MAX_MB = 1000  // mirrors ToolRunner default + backend VIDEO_MAX_BYTES
 
 export default function ToolVoiceover() {
-  useDocumentTitle("Voice-over")
+  useDocumentTitle("Lồng tiếng")
   const [text, setText] = useState("")
   const [provider, setProvider] = useState("edge_tts")
   const [voiceId, setVoiceId] = useState(FALLBACK_EDGE_VOICES[0].voice_id)

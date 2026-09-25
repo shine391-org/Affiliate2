@@ -19,7 +19,7 @@ const FORMATS = [
 ]
 
 export default function ToolSubtitles() {
-  useDocumentTitle("Export Subtitles")
+  useDocumentTitle("Xuất phụ đề")
   const [format, setFormat] = useState("srt")
 
   return (

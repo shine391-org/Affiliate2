@@ -20,7 +20,7 @@ const QUICK_SPEEDS = [
 ]
 
 export default function ToolSpeed() {
-  useDocumentTitle("Speed up / Slow down")
+  useDocumentTitle("Tăng / giảm tốc")
   const [speed, setSpeed] = useState(1.5)
   const [keepPitch, setKeepPitch] = useState(true)
 
