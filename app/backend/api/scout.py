@@ -2,6 +2,7 @@
 # Copyright (c) 2025-2026 ViralMint Contributors
 """REST /api/scout — start scouting + retrieve results."""
 import asyncio
+import json
 import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
