@@ -51,6 +51,7 @@ export default function Publish() {
   const pollRef = useRef(null)
 
   const selectedId = params.get("video") || ""
+  const requestedTarget = params.get("target") || ""
   const selected = useMemo(
     () => videos.find((video) => video.id === selectedId) || videos[0] || null,
     [videos, selectedId],
@@ -72,7 +73,7 @@ export default function Publish() {
       )
       setVideos(eligible)
       setSettings(settingsRes.data || {})
-      const requested = params.get("video")
+      const requested = selectedId
       if ((!requested || !eligible.some((video) => video.id === requested)) && eligible[0]) {
         setParams((prev) => {
           const next = new URLSearchParams(prev)
@@ -85,9 +86,14 @@ export default function Publish() {
     } finally {
       setLoading(false)
     }
-  }, [params, setParams])
+  }, [selectedId, setParams])
 
   useEffect(() => { load() }, [load])
+  useEffect(() => {
+    const onFocus = () => load()
+    window.addEventListener("focus", onFocus)
+    return () => window.removeEventListener("focus", onFocus)
+  }, [load])
   useEffect(() => () => { if (pollRef.current) clearTimeout(pollRef.current) }, [])
 
   useEffect(() => {
@@ -96,9 +102,18 @@ export default function Publish() {
       setCaption("")
       return
     }
-    setTitle(selected.youtube_title || selected.tiktok_title || selected.title || "")
-    setCaption(selected.tiktok_description || selected.youtube_description || "")
-  }, [selected?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+    const tiktokFirst = requestedTarget === "tiktok"
+    setTitle(
+      tiktokFirst
+        ? (selected.tiktok_title || selected.youtube_title || selected.title || "")
+        : (selected.youtube_title || selected.tiktok_title || selected.title || "")
+    )
+    setCaption(
+      tiktokFirst
+        ? (selected.tiktok_description || selected.youtube_description || "")
+        : (selected.youtube_description || selected.tiktok_description || "")
+    )
+  }, [selected?.id, requestedTarget]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const choose = (id) => {
     setParams((prev) => {
