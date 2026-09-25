@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, StrictBool
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +17,10 @@ from backend.core.exceptions import safe_json_loads as _safe_json
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+class PublishApprovalRequest(BaseModel):
+    approved: StrictBool
 
 
 @router.get("/videos")
@@ -237,14 +242,17 @@ async def generate_video(body: dict = None):
 
 
 @router.post("/videos/{video_id}/publish-approval")
-async def set_publish_approval(video_id: str, body: dict = None, db: AsyncSession = Depends(get_db)):
+async def set_publish_approval(
+    video_id: str,
+    body: PublishApprovalRequest,
+    db: AsyncSession = Depends(get_db),
+):
     """Explicit human gate for Phase-F publishing.
 
     Approval never starts an upload. It only records that the operator reviewed
     this exact GeneratedVideo and allows a later /upload action to run.
     """
-    body = body or {}
-    approved = bool(body.get("approved"))
+    approved = body.approved
     result = await db.execute(
         select(GeneratedVideo).where(GeneratedVideo.id == video_id)
     )
@@ -293,16 +301,11 @@ async def upload_video(video_id: str, body: dict, db: AsyncSession = Depends(get
             detail="Video must be explicitly approved for publishing first.",
         )
 
-    platforms = body.get("platforms", ["youtube"])
-    if not isinstance(platforms, list) or not platforms:
-        raise HTTPException(status_code=400, detail="At least one publish platform is required.")
-    allowed_platforms = {"youtube", "tiktok", "instagram"}
-    unknown = sorted({str(p) for p in platforms} - allowed_platforms)
-    if unknown:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported publish platform(s): {', '.join(unknown)}",
-        )
+    from backend.agents.uploader import normalize_publish_platforms
+    try:
+        platforms = normalize_publish_platforms(body.get("platforms", ["youtube"]))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     user_id = video.user_id or "local"
 
     from backend.agents.job_helper import create_job
