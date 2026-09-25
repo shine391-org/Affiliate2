@@ -347,16 +347,21 @@ class ScoutAgent:
         else:
             step_msg = f"Found {total_count} results ({new_count} new)"
 
+        job_result = {
+            "total_results": total_count,
+            "new_results": new_count,
+            "scout_result_ids": [row["id"] for row in results_to_send],
+        }
         await update_job_status(
             job_id, "success",
             progress_pct=100,
             current_step=step_msg,
-            output_data={"total_results": total_count, "new_results": new_count},
+            output_data=job_result,
         )
         await ws_manager.send({
             "type": "job_complete",
             "job_id": job_id,
-            "result": {"total_results": total_count, "new_results": new_count},
+            "result": job_result,
         }, user_id)
 
     async def _scout_platform(self, platform: str, niche: str, user_settings, user_id: str = "local") -> list[dict]:
