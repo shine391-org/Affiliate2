@@ -62,10 +62,10 @@ function parseScoreBreakdown(clip) {
 /* ── Score breakdown scoreboard ─────────────────────────────── */
 
 const SCORE_FACTOR_META = {
-  hook:         { label: "Hook",  blurb: "Does the opening 2-3 seconds stop the scroll? Scored on the first sentence only." },
-  flow:         { label: "Flow",  blurb: "Logical narrative arc with a satisfying close — no dangling thoughts." },
-  value:        { label: "Value", blurb: "Emotional or practical resonance — a payoff, actionable takeaway, or gut reaction." },
-  trend:        { label: "Trend", blurb: "Alignment with what audiences are clicking on right now in this niche." },
+  hook:         { label: "Hook",  blurb: "2–3 giây đầu có khiến người xem dừng lướt không? Chỉ chấm câu đầu tiên." },
+  flow:         { label: "Flow",  blurb: "Mạch kể logic, kết thúc trọn vẹn — không bỏ lửng ý." },
+  value:        { label: "Value", blurb: "Giá trị cảm xúc hoặc thực tế — có payoff, điều áp dụng được hoặc phản ứng mạnh." },
+  trend:        { label: "Trend", blurb: "Phù hợp với những gì khán giả đang nhấp vào trong ngách này." },
   shareability: { label: "Share", blurb: "Would a viewer quote this, screenshot it, or send it to a friend?" },
 }
 
@@ -203,7 +203,7 @@ function SourceVideoCard({ video, clipCount, isSelected, onClick, onPreview }) {
         {/* Preview button — stopPropagation so it doesn't also select the card.
             Only for locally-downloaded (streamable) sources. */}
         {onPreview && video.video_path && (
-          <Tooltip title="Preview video">
+          <Tooltip title="Xem trước video">
             <IconButton
               size="small"
               onClick={(e) => { e.stopPropagation(); onPreview(video) }}
@@ -220,7 +220,7 @@ function SourceVideoCard({ video, clipCount, isSelected, onClick, onPreview }) {
       </Box>
 
       <Typography variant="body2" sx={{ fontWeight: 600, fontSize: "0.8rem", lineHeight: 1.3 }} noWrap>
-        {video.title || "Untitled"}
+        {video.title || "Chưa đặt tên"}
       </Typography>
       <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.5 }}>
         <ContentCutIcon sx={{ fontSize: 13, color: clipCount > 0 ? "primary.main" : "text.disabled" }} />
@@ -299,7 +299,7 @@ function ClipCardImpl({ clip, isSelected, onSelect }) {
         />
         {/* Caption warning */}
         {clip.caption_status === "failed" && (
-          <Tooltip title="Captions failed to apply">
+          <Tooltip title="Không thể áp dụng phụ đề">
             <WarningAmberIcon sx={{ position: "absolute", top: 4, right: 4, fontSize: 18, color: "warning.main" }} />
           </Tooltip>
         )}
@@ -318,7 +318,7 @@ function ClipCardImpl({ clip, isSelected, onSelect }) {
       {/* Title */}
       <Box sx={{ p: 1 }}>
         <Typography variant="caption" sx={{ fontWeight: 600, fontSize: "0.7rem", lineHeight: 1.2, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-          {clip.title || "Untitled Clip"}
+          {clip.title || "Clip chưa đặt tên"}
         </Typography>
       </Box>
     </Paper>
@@ -452,7 +452,7 @@ export default function ClipStudio({ workflow = "manual" }) {
       // Don't auto-select — let user choose from filmstrip or sidebar
     } catch (e) {
       console.error("Failed to load clip studio data:", e)
-      showSnackbar("Failed to load clip data", "error")
+      showSnackbar("Không thể tải dữ liệu clip", "error")
     } finally {
       setLoading(false)
     }
@@ -596,7 +596,7 @@ export default function ClipStudio({ workflow = "manual" }) {
         "success",
       )
     } catch (e) {
-      showSnackbar(`Extract failed: ${e.response?.data?.detail || e.message}`, "error")
+      showSnackbar(`Tách clip thất bại: ${e.response?.data?.detail || e.message}`, "error")
     } finally {
       setExtracting(false)
     }
@@ -627,9 +627,9 @@ export default function ClipStudio({ workflow = "manual" }) {
     if (!selectedClip) return
     try {
       await http.post(`/api/videos/${selectedClip.id}/upload`, { platforms: [platform] })
-      showSnackbar(`Uploading to ${platform}...`, "success")
+      showSnackbar(`Đang tải lên ${platform}...`, "success")
     } catch (e) {
-      showSnackbar(`Upload failed: ${e.response?.data?.detail || e.message}`, "error")
+      showSnackbar(`Tải lên thất bại: ${e.response?.data?.detail || e.message}`, "error")
     }
   }
 
@@ -637,11 +637,11 @@ export default function ClipStudio({ workflow = "manual" }) {
     if (!selectedClip) return
     try {
       await http.delete(`/api/videos/${selectedClip.id}`)
-      showSnackbar("Clip deleted", "success")
+      showSnackbar("Đã xóa clip", "success")
       setClips(prev => prev.filter(c => c.id !== selectedClip.id))
       setSelectedClip(null)
     } catch (e) {
-      showSnackbar(`Delete failed: ${e.response?.data?.detail || e.message}`, "error")
+      showSnackbar(`Xóa thất bại: ${e.response?.data?.detail || e.message}`, "error")
     }
   }
 
@@ -668,7 +668,7 @@ export default function ClipStudio({ workflow = "manual" }) {
     setRegenThumb(true)
     try {
       const res = await http.post(`/api/videos/${selectedClip.id}/regenerate-thumbnail`)
-      showSnackbar("Thumbnail regenerated!", "success")
+      showSnackbar("Đã tạo lại ảnh thu nhỏ!", "success")
       // thumb_v busts the thumbnail URL — without a new value the regenerated
       // image never appears: same URL, so React doesn't reload the <img> and
       // the browser serves the bytes it already has.
@@ -676,7 +676,7 @@ export default function ClipStudio({ workflow = "manual" }) {
       setSelectedClip(prev => ({ ...prev, thumbnail_path: res.data.thumbnail_path, thumb_v: thumbV }))
       setClips(prev => prev.map(c => c.id === selectedClip.id ? { ...c, thumbnail_path: res.data.thumbnail_path, thumb_v: thumbV } : c))
     } catch (e) {
-      showSnackbar(`Thumbnail regen failed: ${e.response?.data?.detail || e.message}`, "error")
+      showSnackbar(`Tạo lại ảnh thu nhỏ thất bại: ${e.response?.data?.detail || e.message}`, "error")
     } finally {
       setRegenThumb(false)
     }
@@ -698,13 +698,13 @@ export default function ClipStudio({ workflow = "manual" }) {
     setSaving(true)
     try {
       const res = await http.patch(`/api/videos/${selectedClip.id}`, editDraft)
-      showSnackbar("Clip metadata updated", "success")
+      showSnackbar("Đã cập nhật metadata clip", "success")
       const updated = { ...selectedClip, ...res.data, youtube_tags: res.data.youtube_tags }
       setSelectedClip(updated)
       setClips(prev => prev.map(c => c.id === updated.id ? { ...c, ...updated } : c))
       setEditing(false)
     } catch (e) {
-      showSnackbar(`Save failed: ${e.response?.data?.detail || e.message}`, "error")
+      showSnackbar(`Lưu thất bại: ${e.response?.data?.detail || e.message}`, "error")
     } finally {
       setSaving(false)
     }
@@ -751,7 +751,7 @@ export default function ClipStudio({ workflow = "manual" }) {
         <Stack direction="row" spacing={1}>
           {/* Search */}
           <TextField
-            placeholder={smartCut ? "Search Smart Cuts..." : "Search clips..."}
+            placeholder={smartCut ? "Tìm đoạn cắt thông minh..." : "Tìm clip..."}
             size="small"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
@@ -766,9 +766,9 @@ export default function ClipStudio({ workflow = "manual" }) {
           </Button>
           <Menu anchorEl={sortAnchor} open={Boolean(sortAnchor)} onClose={() => setSortAnchor(null)}>
             {[
-              { key: "virality", label: "Top Viral", icon: <WhatshotIcon fontSize="small" /> },
-              { key: "newest", label: "Newest First", icon: <AccessTimeIcon fontSize="small" /> },
-              { key: "duration", label: "Longest First", icon: <AspectRatioIcon fontSize="small" /> },
+              { key: "virality", label: "Viral nhất", icon: <WhatshotIcon fontSize="small" /> },
+              { key: "newest", label: "Mới nhất trước", icon: <AccessTimeIcon fontSize="small" /> },
+              { key: "duration", label: "Dài nhất trước", icon: <AspectRatioIcon fontSize="small" /> },
             ].map(s => (
               <MenuItem key={s.key} selected={sortBy === s.key}
                 onClick={() => { setSortBy(s.key); setSortAnchor(null) }}>
@@ -779,15 +779,15 @@ export default function ClipStudio({ workflow = "manual" }) {
           </Menu>
 
           {/* Open Folder */}
-          <Tooltip title="Open clips folder">
+          <Tooltip title="Mở thư mục clip">
             <Button size="small" variant="outlined" sx={{ minWidth: 0, px: 1 }}
-              onClick={() => http.post("/api/settings/open-folder", { folder: "generated" }).catch(() => showSnackbar("Could not open folder", "error"))}>
+              onClick={() => http.post("/api/settings/open-folder", { folder: "generated" }).catch(() => showSnackbar("Không thể mở thư mục", "error"))}>
               <FolderOpenIcon fontSize="small" />
             </Button>
           </Tooltip>
 
           {/* Refresh */}
-          <Tooltip title="Refresh sources & clips">
+          <Tooltip title="Làm mới nguồn & clip">
             <Button size="small" variant="outlined" onClick={() => { setLoading(true); fetchData() }}
               startIcon={<RefreshIcon fontSize="small" />}
               sx={{ textTransform: "none" }}>
@@ -832,7 +832,7 @@ export default function ClipStudio({ workflow = "manual" }) {
             </Tooltip>
           )}
           {!smartCut && selectedSourceId && selectedSourceId !== "all" && (
-            <Tooltip describeChild title="AI picks the moments and cuts them straight away — no review step, any number of clips. To see the picks first and adjust them, use Ask AI on the bench.">
+            <Tooltip describeChild title="AI chọn khoảnh khắc và cắt ngay — không có bước duyệt, số clip tùy ý. Muốn xem trước và chỉnh lại, dùng Hỏi AI trên bàn cắt.">
               <span>
                 <Button
                   size="small" variant="contained" color="primary"
@@ -871,7 +871,7 @@ export default function ClipStudio({ workflow = "manual" }) {
 
           <TextField
             size="small"
-            placeholder="Filter..."
+            placeholder="Lọc..."
             value={sourceFilter}
             onChange={e => setSourceFilter(e.target.value)}
             slotProps={{ input: { startAdornment: <SearchIcon sx={{ fontSize: 14, color: "text.disabled", mr: 0.5 }} /> } }}
@@ -1038,13 +1038,13 @@ export default function ClipStudio({ workflow = "manual" }) {
                     <Chip label={`${formatTime(selectedClip.duration_seconds)}`} icon={<AccessTimeIcon />} size="small" variant="outlined" />
                     <Chip label={selectedClip.aspect_ratio || "9:16"} size="small" variant="outlined" />
                     {selectedClip.caption_status === "applied" && (
-                      <Chip icon={<CheckCircleIcon />} label="Captions" size="small" color="success" variant="outlined" />
+                      <Chip icon={<CheckCircleIcon />} label="Phụ đề" size="small" color="success" variant="outlined" />
                     )}
                     {selectedClip.caption_status === "failed" && (
-                      <Chip icon={<WarningAmberIcon />} label="Captions failed" size="small" color="warning" variant="filled" />
+                      <Chip icon={<WarningAmberIcon />} label="Phụ đề lỗi" size="small" color="warning" variant="filled" />
                     )}
                     {selectedClip.metadata_status === "fallback" && (
-                      <Chip icon={<WarningAmberIcon />} label="AI meta failed" size="small" color="warning" variant="outlined" />
+                      <Chip icon={<WarningAmberIcon />} label="Metadata AI lỗi" size="small" color="warning" variant="outlined" />
                     )}
                   </Stack>
                 </Box>

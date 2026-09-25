@@ -11,7 +11,7 @@ import useAppStore from "../../store/appStore"
  * Props:
  *  - filter(job) → bool    Optional predicate to pick which jobs to show.
  *  - onCancel(jobId)        If provided, a cancel button is shown per job.
- *  - fallbackLabel          Text shown when step/message are empty (default "Processing…").
+ *  - fallbackLabel          Text shown when step/message are empty (default "Đang xử lý…").
  *  - collapseThreshold      Number of jobs before auto-collapsing (default 2).
  */
 export default function ActiveJobsBanner({ filter, onCancel, fallbackLabel = "Processing…", collapseThreshold = 2 }) {
@@ -32,7 +32,7 @@ export default function ActiveJobsBanner({ filter, onCancel, fallbackLabel = "Pr
         <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1, cursor: "pointer" }}
           onClick={() => setExpanded(!expanded)}>
           <Chip
-            label={`${runningJobs.length} active jobs`}
+            label={`${runningJobs.length} tác vụ đang chạy`}
             size="small"
             color="primary"
             sx={{ fontWeight: 600, fontSize: "0.75rem" }}
@@ -83,7 +83,7 @@ function JobCard({ job, fallbackLabel, onCancel }) {
               {onCancel && (
                 <IconButton size="small" onClick={() => onCancel(job.jobId)}
                   sx={{ p: 0.25, color: "text.disabled", "&:hover": { color: "error.main" } }}
-                  title="Cancel job">
+                  title="Hủy tác vụ">
                   <CancelIcon sx={{ fontSize: 16 }} />
                 </IconButton>
               )}

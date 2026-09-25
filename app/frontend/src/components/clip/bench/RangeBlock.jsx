@@ -137,7 +137,7 @@ export default function RangeBlock({
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => { e.stopPropagation(); onRemove() }}
           role="button"
-          aria-label={`Remove range ${index + 1}`}
+          aria-label={`Xóa đoạn ${index + 1}`}
           sx={{
             position: "absolute", bottom: 3, right: EDGE_PX + 2,
             width: 16, height: 16, borderRadius: "50%",

@@ -48,10 +48,10 @@ import { autoCutEstimate } from "./autoClipCount"
 /* ── Extract Clips Dialog ──────────────────────────────────── */
 
 const WHISPER_QUALITIES = [
-  { value: "fast", label: "Fast (base)", desc: "~30s per 5min video" },
-  { value: "balanced", label: "Balanced (small)", desc: "~90s per 5min video" },
-  { value: "accurate", label: "Accurate (medium)", desc: "~3min per 5min video" },
-  { value: "best", label: "Best (large-v3)", desc: "~8min per 5min video" },
+  { value: "fast", label: "Nhanh (base)", desc: "~30 giây cho video 5 phút" },
+  { value: "balanced", label: "Cân bằng (small)", desc: "~90 giây cho video 5 phút" },
+  { value: "accurate", label: "Chính xác (medium)", desc: "~3 phút cho video 5 phút" },
+  { value: "best", label: "Tốt nhất (large-v3)", desc: "~8 phút cho video 5 phút" },
 ]
 
 // Style vocab comes from the shared captionOptions list (10 styles, guarded
@@ -62,10 +62,10 @@ const WHISPER_QUALITIES = [
 // (caption_service.captions_disabled handles "none" upstream).
 const CAPTION_STYLE_OPTIONS = CAPTION_STYLES.map((s) => ({ v: s.value, label: s.label }))
 const EMOJI_STYLE_OPTIONS = [
-  { v: "none", label: "Off" },
-  { v: "minimal", label: "Minimal" },
-  { v: "moderate", label: "Moderate" },
-  { v: "heavy", label: "Heavy" },
+  { v: "none", label: "Tắt" },
+  { v: "minimal", label: "Ít" },
+  { v: "moderate", label: "Vừa" },
+  { v: "heavy", label: "Nhiều" },
 ]
 
 /* ── Settings-group rows ──────────────────────────────────────
@@ -171,8 +171,8 @@ export default function ExtractDialog({ open, onClose, video, onExtract, setting
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-        <AutoAwesomeIcon color="secondary" /> Auto-cut clips
-        <Tooltip title="Reads the transcript, picks the most viral moments and cuts them straight away — no review step. To see the picks on a timeline and adjust them before cutting, use Ask AI on the bench." arrow>
+        <AutoAwesomeIcon color="secondary" /> Tự động cắt clip
+        <Tooltip title="Đọc bản chép lời, chọn những khoảnh khắc có tiềm năng viral nhất rồi cắt ngay — không qua bước duyệt. Muốn xem các đoạn trên timeline và chỉnh trước khi cắt, hãy dùng Hỏi AI trên bàn cắt." arrow>
           <IconButton size="small" sx={{ ml: "auto", color: "text.secondary" }}>
             <InfoOutlinedIcon sx={{ fontSize: 18 }} />
           </IconButton>
@@ -180,7 +180,7 @@ export default function ExtractDialog({ open, onClose, video, onExtract, setting
       </DialogTitle>
       <DialogContent>
         <Typography variant="body2" sx={{ color: "text.secondary", mb: 0.5 }}>
-          From: <strong>{video.title || "Untitled"}</strong> ({formatTime(video.duration_seconds)})
+          Từ: <strong>{video.title || "Chưa đặt tên"}</strong> ({formatTime(video.duration_seconds)})
         </Typography>
         <Typography variant="caption" sx={{ color: "text.secondary", display: "block", mb: 2 }}>
           Cuts as soon as you press the button — no review step.
@@ -205,19 +205,19 @@ export default function ExtractDialog({ open, onClose, video, onExtract, setting
               Clip length & count (leave empty for auto)
             </Typography>
             <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
-              <TextField label="Min (s)" type="number" size="small" sx={{ width: 90 }}
+              <TextField label="Tối thiểu (giây)" type="number" size="small" sx={{ width: 90 }}
                 value={ai.min_duration || ""}
                 error={!!durationError}
                 slotProps={{ htmlInput: { min: 10, max: 120 } }}
                 onChange={e => setAi(p => ({ ...p, min_duration: parseInt(e.target.value) || null }))} />
               <Typography variant="body2" sx={{ color: "text.secondary" }}>to</Typography>
-              <TextField label="Max (s)" type="number" size="small" sx={{ width: 90 }}
+              <TextField label="Tối đa (giây)" type="number" size="small" sx={{ width: 90 }}
                 value={ai.max_duration || ""}
                 error={!!durationError}
                 slotProps={{ htmlInput: { min: 15, max: 180 } }}
                 onChange={e => setAi(p => ({ ...p, max_duration: parseInt(e.target.value) || null }))} />
               <Box sx={{ flex: 1 }} />
-              <TextField label="Clips (max)" type="number" size="small" sx={{ width: 110 }}
+              <TextField label="Số clip (tối đa)" type="number" size="small" sx={{ width: 110 }}
                 value={ai.max_clips || ""}
                 slotProps={{ htmlInput: { min: 1, max: 99 } }}
                 onChange={e => setAi(p => ({ ...p, max_clips: parseInt(e.target.value) || null }))} />
@@ -270,11 +270,11 @@ export default function ExtractDialog({ open, onClose, video, onExtract, setting
                   this query first, then virality. Empty = pure virality default. */}
               <Box>
                 <Typography variant="caption" sx={{ fontWeight: 600, mb: 0.5, display: "block" }}>
-                  Find specific moments <Chip label="optional" size="small" variant="outlined" sx={{ ml: 0.5, height: 18, fontSize: "0.6rem" }} />
+                  Tìm khoảnh khắc cụ thể <Chip label="tùy chọn" size="small" variant="outlined" sx={{ ml: 0.5, height: 18, fontSize: "0.6rem" }} />
                 </Typography>
                 <TextField
                   size="small" fullWidth
-                  placeholder='e.g. "every joke that landed", "all Q&A moments", "moments where he raises his voice"'
+                  placeholder='ví dụ: "mọi câu đùa ăn điểm", "tất cả đoạn Q&A", "những lúc người nói cao giọng"'
                   value={ai.user_query}
                   onChange={e => setAi(p => ({ ...p, user_query: e.target.value }))}
                   slotProps={{ htmlInput: { maxLength: 500 } }}
@@ -284,7 +284,7 @@ export default function ExtractDialog({ open, onClose, video, onExtract, setting
                 </Typography>
               </Box>
 
-              {/* Target platform — biases the AI hook-type ranker. Each
+              {/* Nền tảng đích — biases the AI hook-type ranker. Each
                   platform's algorithm rewards different hook patterns:
                   TikTok prefers shocking_claim / emotional_peak / contrarian;
                   LinkedIn prefers actionable_tip / number_promise / contrarian;
@@ -292,18 +292,18 @@ export default function ExtractDialog({ open, onClose, video, onExtract, setting
                   virality ranking, no bias. */}
               <Box>
                 <Typography variant="caption" sx={{ fontWeight: 600, mb: 0.5, display: "block" }}>
-                  Target platform <Chip label="optional" size="small" variant="outlined" sx={{ ml: 0.5, height: 18, fontSize: "0.6rem" }} />
+                  Nền tảng đích <Chip label="tùy chọn" size="small" variant="outlined" sx={{ ml: 0.5, height: 18, fontSize: "0.6rem" }} />
                 </Typography>
                 <TextField select size="small" fullWidth
                   value={ai.target_platform}
                   onChange={e => setAi(p => ({ ...p, target_platform: e.target.value }))}
                 >
-                  <MenuItem value="">Any (general viral ranking)</MenuItem>
-                  <MenuItem value="tiktok">TikTok — shock / contrarian / emotional</MenuItem>
-                  <MenuItem value="youtube_shorts">YouTube Shorts — curiosity / numbers / story</MenuItem>
-                  <MenuItem value="reels">Instagram Reels — emotional / lifestyle</MenuItem>
-                  <MenuItem value="linkedin">LinkedIn — actionable / data-backed</MenuItem>
-                  <MenuItem value="twitter">Twitter / X — hot takes / debates</MenuItem>
+                  <MenuItem value="">Bất kỳ (xếp hạng viral chung)</MenuItem>
+                  <MenuItem value="tiktok">TikTok — gây sốc / trái chiều / cảm xúc</MenuItem>
+                  <MenuItem value="youtube_shorts">YouTube Shorts — tò mò / con số / câu chuyện</MenuItem>
+                  <MenuItem value="reels">Instagram Reels — cảm xúc / phong cách sống</MenuItem>
+                  <MenuItem value="linkedin">LinkedIn — áp dụng được / có dữ liệu</MenuItem>
+                  <MenuItem value="twitter">Twitter / X — góc nhìn nóng / tranh luận</MenuItem>
                 </TextField>
                 <Typography variant="caption" sx={{ color: "text.secondary", mt: 0.5, display: "block" }}>
                   Biases which hook types the AI prioritizes. Clip length is unchanged.
@@ -317,21 +317,21 @@ export default function ExtractDialog({ open, onClose, video, onExtract, setting
                   you can pick both. */}
               <Box>
                 <Typography variant="caption" sx={{ fontWeight: 600, mb: 0.5, display: "block" }}>
-                  Content genre <Chip label="optional" size="small" variant="outlined" sx={{ ml: 0.5, height: 18, fontSize: "0.6rem" }} />
+                  Thể loại nội dung <Chip label="tùy chọn" size="small" variant="outlined" sx={{ ml: 0.5, height: 18, fontSize: "0.6rem" }} />
                 </Typography>
                 <TextField select size="small" fullWidth
                   value={ai.genre}
                   onChange={e => setAi(p => ({ ...p, genre: e.target.value }))}
                 >
-                  <MenuItem value="">Auto-detect (no genre bias)</MenuItem>
-                  <MenuItem value="podcast">Podcast — guest's quotable moments</MenuItem>
+                  <MenuItem value="">Tự nhận diện (không thiên lệch thể loại)</MenuItem>
+                  <MenuItem value="podcast">Podcast — câu nói đáng trích của khách mời</MenuItem>
                   <MenuItem value="interview">Interview — best Q&amp;A answers</MenuItem>
                   <MenuItem value="qa">Q&amp;A / AMA — question + answer pairs</MenuItem>
-                  <MenuItem value="vlog">Vlog — reactions + storytelling beats</MenuItem>
-                  <MenuItem value="tutorial">Tutorial / how-to — standalone tips</MenuItem>
-                  <MenuItem value="gaming">Gaming — big plays + reactions</MenuItem>
-                  <MenuItem value="reaction">Reaction — emotional peaks</MenuItem>
-                  <MenuItem value="lecture">Lecture / educational — concept explainers</MenuItem>
+                  <MenuItem value="vlog">Vlog — phản ứng + nhịp kể chuyện</MenuItem>
+                  <MenuItem value="tutorial">Hướng dẫn — mẹo độc lập</MenuItem>
+                  <MenuItem value="gaming">Gaming — pha hay + phản ứng</MenuItem>
+                  <MenuItem value="reaction">Reaction — cao trào cảm xúc</MenuItem>
+                  <MenuItem value="lecture">Bài giảng / giáo dục — giải thích khái niệm</MenuItem>
                 </TextField>
                 <Typography variant="caption" sx={{ color: "text.secondary", mt: 0.5, display: "block" }}>
                   Tells the AI what shape a "good clip" has for this content type.
@@ -355,7 +355,7 @@ export default function ExtractDialog({ open, onClose, video, onExtract, setting
 
               <SettingRow
                 icon={<SubtitlesOutlinedIcon />}
-                label="Captions"
+                label="Phụ đề"
                 sublabel={!captionsOn ? "Off also hides the AI hook overlay" : null}
                 summary={captionsOn
                   ? (CAPTION_STYLE_OPTIONS.find(o => o.v === settings.caption_style)?.label || settings.caption_style)
@@ -401,7 +401,7 @@ export default function ExtractDialog({ open, onClose, video, onExtract, setting
 
               <SettingRow
                 icon={<GraphicEqOutlinedIcon />}
-                label="Remove silence & fillers"
+                label="Cắt im lặng & từ đệm"
                 sublabel={'Cuts "um"s and dead air inside each clip'}
                 control={<RowSwitch checked={settings.remove_silence} />}
                 onRowClick={() => set({ remove_silence: !settings.remove_silence })}
@@ -410,7 +410,7 @@ export default function ExtractDialog({ open, onClose, video, onExtract, setting
 
               <SettingRow
                 icon={<CropPortraitOutlinedIcon />}
-                label="Force vertical (9:16)"
+                label="Ép khung dọc (9:16)"
                 sublabel="Blur-fill landscape sources into portrait"
                 control={<RowSwitch checked={settings.force_vertical} />}
                 onRowClick={() => set({ force_vertical: !settings.force_vertical })}
@@ -419,7 +419,7 @@ export default function ExtractDialog({ open, onClose, video, onExtract, setting
 
               <SettingRow
                 icon={<RecordVoiceOverOutlinedIcon />}
-                label="Transcription"
+                label="Chép lời"
                 summary={hasSegments && !settings.force_retranscribe
                   ? "Cached · Whisper skipped"
                   : WHISPER_QUALITIES.find(q => q.value === settings.whisper_quality)?.label || settings.whisper_quality}
@@ -447,8 +447,8 @@ export default function ExtractDialog({ open, onClose, video, onExtract, setting
                     label={
                       <Typography variant="caption" sx={{ fontWeight: 600 }}>
                         Run Whisper {hasSegments
-                          ? <Chip label="cached transcript available" size="small" color="success" variant="outlined" sx={{ ml: 0.5, height: 18, fontSize: "0.65rem" }} />
-                          : <Chip label="required" size="small" color="warning" variant="outlined" sx={{ ml: 0.5, height: 18, fontSize: "0.65rem" }} />
+                          ? <Chip label="đã có bản chép lời cache" size="small" color="success" variant="outlined" sx={{ ml: 0.5, height: 18, fontSize: "0.65rem" }} />
+                          : <Chip label="bắt buộc" size="small" color="warning" variant="outlined" sx={{ ml: 0.5, height: 18, fontSize: "0.65rem" }} />
                         }
                       </Typography>
                     }
@@ -487,7 +487,7 @@ export default function ExtractDialog({ open, onClose, video, onExtract, setting
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
-        <Button onClick={onClose}>Cancel</Button>
+        <Button onClick={onClose}>Hủy</Button>
         <Button variant="contained" startIcon={<ContentCutIcon />}
           disabled={!canSubmit}
           onClick={() => {
@@ -501,7 +501,7 @@ export default function ExtractDialog({ open, onClose, video, onExtract, setting
             })
             onClose()
           }}>
-          {`Cut now · ${estimate.label}`}
+          {`Cắt ngay · ${estimate.label}`}
         </Button>
       </DialogActions>
     </Dialog>
