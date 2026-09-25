@@ -221,7 +221,7 @@ export default function Messaging() {
       setTgState(data.chat_id ? STATE.CONNECTED : STATE.AWAITING_START)
       setBotToken("")
       showSnackbar(
-        data.chat_id ? "Telegram connected" : "Bot configured — now send /start to your bot",
+        data.chat_id ? "Telegram đã kết nối" : "Đã cấu hình bot — hãy gửi /start cho bot",
         "success",
       )
     } catch (e) {
@@ -312,7 +312,7 @@ export default function Messaging() {
       setDcState(data.chat_id ? DC_STATE.CONNECTED : DC_STATE.AWAITING_DM)
       setDcToken("")
       showSnackbar(
-        data.chat_id ? "Discord connected" : "Bot online — invite it and DM it to finish setup",
+        data.chat_id ? "Discord đã kết nối" : "Bot đang online — hãy mời bot và nhắn riêng để hoàn tất thiết lập",
         "success",
       )
     } catch (e) {
@@ -368,7 +368,7 @@ export default function Messaging() {
       setSlBotToken("")
       setSlAppToken("")
       showSnackbar(
-        data.chat_id ? "Slack connected" : "Bot online — DM it in Slack to finish setup",
+        data.chat_id ? "Slack đã kết nối" : "Bot đang online — hãy nhắn riêng cho bot trên Slack để hoàn tất thiết lập",
         "success",
       )
     } catch (e) {
@@ -940,13 +940,13 @@ export default function Messaging() {
               </Box>
             )}
             <Typography variant="caption" color="text.secondary" sx={{ textAlign: "center" }}>
-              The code refreshes automatically. This dialog closes once pairing completes.
+              Mã sẽ tự làm mới. Hộp thoại này sẽ đóng khi ghép nối hoàn tất.
             </Typography>
           </Stack>
         </DialogContent>
         <DialogActions>
           <Button onClick={handleWADisconnect} color="error" startIcon={<LogoutIcon />}>
-            Cancel pairing
+            Hủy ghép nối
           </Button>
         </DialogActions>
       </Dialog>

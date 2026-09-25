@@ -278,7 +278,7 @@ export default function Chat() {
   }
 
   const handleDeleteSession = (sessionId) => {
-    openConfirm("Delete chat?", "This conversation will be permanently removed.", async () => {
+    openConfirm("Xóa cuộc trò chuyện?", "Cuộc trò chuyện này sẽ bị xóa vĩnh viễn.", async () => {
       try {
         await http.delete(`/api/chat/sessions/${sessionId}`)
         removeSession(sessionId)

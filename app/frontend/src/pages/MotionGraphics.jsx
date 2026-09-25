@@ -83,7 +83,7 @@ export default function MotionGraphics() {
         const { data } = await http.post("/api/generate/motion/studio/sync-renders")
         if (data?.imported > 0) {
           showSnackbar(
-            `${data.imported} video${data.imported > 1 ? "s" : ""} added to your Library`,
+            `${data.imported} video đã được thêm vào Thư viện`,
             "success")
         }
       } catch { /* the next tick retries; a toast here would be noise */ }
