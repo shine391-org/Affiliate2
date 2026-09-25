@@ -38,7 +38,7 @@ function SnapshotEditor({ post, reload }) {
       await http.post(route, sync ? {} : payload)
       await reload()
     } catch (e) {
-      setError(e.response?.data?.detail || e.message || "Could not save snapshot")
+      setError(e.response?.data?.detail || e.message || "Không thể lưu snapshot")
     } finally {
       setBusy(false)
     }
@@ -52,9 +52,9 @@ function SnapshotEditor({ post, reload }) {
         onChange={(event) => setMetrics((prev) => ({ ...prev, [field]: event.target.value }))} />)}
     </Stack>
     <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-      <Button variant="outlined" disabled={busy} onClick={() => save(false)}>Record manual snapshot</Button>
+      <Button variant="outlined" disabled={busy} onClick={() => save(false)}>Ghi snapshot thủ công</Button>
       {post.platform === "youtube" && post.platform_content_id &&
-        <Button variant="outlined" disabled={busy} onClick={() => save(true)}>Sync YouTube</Button>}
+        <Button variant="outlined" disabled={busy} onClick={() => save(true)}>Đồng bộ YouTube</Button>}
     </Stack>
   </Stack>
 }
@@ -85,24 +85,24 @@ export default function Performance() {
   return <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 1200, mx: "auto" }}>
     <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" gap={1} sx={{ mb: 2 }}>
       <Box>
-        <Typography variant="h5" sx={{ fontWeight: 800 }}>Performance</Typography>
-        <Typography color="text.secondary">Measured results for exact published Library assets. No automatic content changes.</Typography>
+        <Typography variant="h5" sx={{ fontWeight: 800 }}>Hiệu suất</Typography>
+        <Typography color="text.secondary">Kết quả đo từ đúng nội dung đã xuất bản trong Thư viện. Không tự động thay đổi nội dung.</Typography>
       </Box>
-      <Button variant="outlined" startIcon={<RefreshOutlinedIcon />} disabled={loading} onClick={load}>Refresh</Button>
+      <Button variant="outlined" startIcon={<RefreshOutlinedIcon />} disabled={loading} onClick={load}>Làm mới</Button>
     </Stack>
     {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
     {loading && !summary && <LinearProgress />}
     {summary && <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ my: 2 }}>
-      <Chip label={`Published posts ${summary.published_posts}`} />
-      <Chip label={`Measured ${summary.posts_with_metrics}`} />
+      <Chip label={`Bài đã xuất bản ${summary.published_posts}`} />
+      <Chip label={`Đã đo ${summary.posts_with_metrics}`} />
       {Object.entries(summary.by_platform || {}).map(([platform, counts]) =>
-        <Chip key={platform} variant="outlined" label={`${platform}: ${counts.with_metrics}/${counts.published} measured · ${formatMetric(counts.views)} views`} />)}
+        <Chip key={platform} variant="outlined" label={`${platform}: ${counts.with_metrics}/${counts.published} đã đo · ${formatMetric(counts.views)} lượt xem`} />)}
     </Stack>}
-    {selectedId && !visible.length && !loading && <Alert severity="warning">No published destination for this exact video. <a href={`/publish?video=${encodeURIComponent(selectedId)}`}>Open Publish</a></Alert>}
-    {!selectedId && !posts.length && !loading && <Alert severity="info">No published native videos yet. Review and approve an asset in Publish first.</Alert>}
+    {selectedId && !visible.length && !loading && <Alert severity="warning">Video này chưa có nền tảng xuất bản. <a href={`/publish?video=${encodeURIComponent(selectedId)}`}>Mở Xuất bản</a></Alert>}
+    {!selectedId && !posts.length && !loading && <Alert severity="info">Chưa có video nào được xuất bản. Hãy duyệt nội dung trong Xuất bản trước.</Alert>}
     {summary?.top_posts?.length > 0 && !selectedId && <Card variant="outlined" sx={{ mb: 2 }}><CardContent>
-      <Typography fontWeight={700}>Most viewed observations</Typography>
-      <Typography variant="body2" color="text.secondary">Views are raw observations, not a confident winner score. Compare posts from the same platform and age before repeating a format.</Typography>
+      <Typography fontWeight={700}>Các bài có lượt xem cao nhất</Typography>
+      <Typography variant="body2" color="text.secondary">Lượt xem là số đo thô, không phải điểm xếp hạng chắc chắn. Hãy so sánh các bài cùng nền tảng và độ tuổi trước khi lặp lại định dạng.</Typography>
       {summary.top_posts.map((post) => <Typography key={`${post.generated_video_id}:${post.platform}`} variant="body2">
         {post.platform} · {post.title || post.generated_video_id} · {formatMetric(post.latest_metrics.views)} views
       </Typography>)}
@@ -121,13 +121,13 @@ export default function Performance() {
           </Typography>
           <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
             {fields.map((field) => <Chip key={field} size="small" label={`${field}: ${formatMetric(post.latest_metrics?.[field])}`} />)}
-            <Chip size="small" label={`Known interactions / views: ${post.latest_metrics?.engagement_rate == null ? "–" : (post.latest_metrics.engagement_rate * 100).toFixed(2) + "%"}`} />
+            <Chip size="small" label={`Tương tác đã biết / lượt xem: ${post.latest_metrics?.engagement_rate == null ? "–" : (post.latest_metrics.engagement_rate * 100).toFixed(2) + "%"}`} />
           </Stack>
           <Typography variant="body2">{performanceDecision(post)}</Typography>
           <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-            <Button size="small" component="a" href={`/publish?video=${encodeURIComponent(post.generated_video_id)}`}>View published asset</Button>
-            <Button size="small" component="a" href={`/library?open=${encodeURIComponent(`generated:${post.generated_video_id}`)}`}>Open in Library</Button>
-            {post.source_downloaded_video_id && <Button size="small" component="a" href={`/studio?source=${encodeURIComponent(post.source_downloaded_video_id)}`}>Inspect source in Studio</Button>}
+            <Button size="small" component="a" href={`/publish?video=${encodeURIComponent(post.generated_video_id)}`}>Xem nội dung đã xuất bản</Button>
+            <Button size="small" component="a" href={`/library?open=${encodeURIComponent(`generated:${post.generated_video_id}`)}`}>Mở trong Thư viện</Button>
+            {post.source_downloaded_video_id && <Button size="small" component="a" href={`/studio?source=${encodeURIComponent(post.source_downloaded_video_id)}`}>Xem nguồn trong Studio</Button>}
           </Stack>
           <SnapshotEditor post={post} reload={load} />
         </Stack>

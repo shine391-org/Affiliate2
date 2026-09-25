@@ -20,8 +20,8 @@ function PlatformCard({ name, connected, connectLabel, onConnect, onPublish, bus
     <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
       <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
         <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>{name}</Typography>
-        <Chip size="small" label={connected ? "CONNECTED" : "NOT CONNECTED"} color={connected ? "success" : "default"} />
-        {published && <Chip size="small" label="PUBLISHED" color="success" variant="outlined" />}
+        <Chip size="small" label={connected ? "ĐÃ KẾT NỐI" : "CHƯA KẾT NỐI"} color={connected ? "success" : "default"} />
+        {published && <Chip size="small" label="ĐÃ XUẤT BẢN" color="success" variant="outlined" />}
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>{hint}</Typography>
       <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 1.25 }}>
@@ -224,9 +224,9 @@ export default function Publish() {
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <PageHero
         icon={<CloudUploadOutlinedIcon sx={{ fontSize: 22 }} />}
-        title="Publish"
+        title="Xuất bản"
         subtitle="One native owner for human-approved outputs and platform delivery"
-        actions={<Button size="small" variant="outlined" startIcon={<RefreshOutlinedIcon />} onClick={load} disabled={loading}>Refresh</Button>}
+        actions={<Button size="small" variant="outlined" startIcon={<RefreshOutlinedIcon />} onClick={load} disabled={loading}>Làm mới</Button>}
       />
 
       {error && <Alert severity="error" sx={{ mx: { xs: 1.5, md: 2.5 }, mt: 1 }}>{error}</Alert>}
@@ -237,11 +237,11 @@ export default function Publish() {
         gridTemplateRows: { xs: "minmax(180px, 36%) minmax(0, 1fr)", md: "minmax(0, 1fr)" },
       }}>
         <Box sx={{ overflow: "auto", p: 2, borderRight: { md: 1 }, borderBottom: { xs: 1, md: 0 }, borderColor: "divider" }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1 }}>Finished outputs</Typography>
+          <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1 }}>Đầu ra đã hoàn tất</Typography>
           {loading && !videos.length ? (
             <Stack alignItems="center" sx={{ py: 5 }}><CircularProgress size={28} /></Stack>
           ) : videos.length === 0 ? (
-            <Alert severity="info">No rendered output is ready for publishing yet.</Alert>
+            <Alert severity="info">Chưa có đầu ra đã kết xuất nào sẵn sàng để xuất bản.</Alert>
           ) : (
             <Stack spacing={1}>
               {videos.map((video) => (
@@ -253,9 +253,9 @@ export default function Publish() {
                   }}>
                   <Stack direction="row" spacing={0.75} alignItems="center">
                     <Typography variant="body2" sx={{ fontWeight: 800, flex: 1 }} noWrap>
-                      {video.title || "Untitled"}
+                      {video.title || "Chưa đặt tên"}
                     </Typography>
-                    {video.publish_approved && <Chip size="small" color="success" label="APPROVED" />}
+                    {video.publish_approved && <Chip size="small" color="success" label="ĐÃ DUYỆT" />}
                   </Stack>
                   <Typography variant="caption" color="text.secondary">
                     {video.source_type || video.gen_tier || "generated"} · {video.aspect_ratio || "—"}
@@ -273,7 +273,7 @@ export default function Publish() {
 
         <Box sx={{ overflow: "auto", p: { xs: 1.5, md: 2.5 } }}>
           {!selected ? (
-            <Alert severity="info">Select a finished output.</Alert>
+            <Alert severity="info">Chọn một đầu ra đã hoàn tất.</Alert>
           ) : (
             <Stack spacing={2}>
               <Stack direction={{ xs: "column", lg: "row" }} spacing={2}>
@@ -292,13 +292,13 @@ export default function Publish() {
                 </Box>
 
                 <Stack spacing={1.25} sx={{ flex: 1, minWidth: 0 }}>
-                  <Typography variant="h6" sx={{ fontWeight: 800 }}>{selected.title || "Untitled"}</Typography>
+                  <Typography variant="h6" sx={{ fontWeight: 800 }}>{selected.title || "Chưa đặt tên"}</Typography>
                   <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
                     <Chip size="small" label={selected.status} />
                     <Chip size="small" variant="outlined" label={selected.source_type || "generated"} />
                     {selected.publish_approved
-                      ? <Chip size="small" color="success" label="Human approved" />
-                      : <Chip size="small" color="warning" label="Approval required" />}
+                      ? <Chip size="small" color="success" label="Đã được người dùng duyệt" />
+                      : <Chip size="small" color="warning" label="Cần duyệt" />}
                   </Stack>
 
                   <Alert severity={selected.publish_approved ? "success" : "warning"} variant="outlined">
@@ -315,9 +315,9 @@ export default function Publish() {
                     </Button>
                   </Stack>
 
-                  <TextField label="Publish title" value={title} onChange={(e) => setTitle(e.target.value)}
+                  <TextField label="Tiêu đề xuất bản" value={title} onChange={(e) => setTitle(e.target.value)}
                     inputProps={{ maxLength: 150 }} helperText={`${title.length}/150`} fullWidth />
-                  <TextField label="Caption / description" value={caption} onChange={(e) => setCaption(e.target.value)}
+                  <TextField label="Caption / mô tả" value={caption} onChange={(e) => setCaption(e.target.value)}
                     multiline minRows={4} inputProps={{ maxLength: 5000 }} helperText={`${caption.length}/5000`} fullWidth />
                 </Stack>
               </Stack>
@@ -339,7 +339,7 @@ export default function Publish() {
 
               <Divider />
 
-              <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>Destinations</Typography>
+              <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>Nền tảng đích</Typography>
               <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "1fr 1fr" }, gap: 1.5 }}>
                 <PlatformCard
                   name="TikTok"

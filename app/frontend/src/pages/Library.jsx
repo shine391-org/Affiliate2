@@ -298,7 +298,7 @@ export default function Library() {
       const { data } = await http.post("/api/downloaded/import", form, {
         headers: { "Content-Type": "multipart/form-data" },
       })
-      showSnackbar(data.message || "Imported", "success")
+      showSnackbar(data.message || "Đã nhập", "success")
       refresh()
     } catch (e) {
       showSnackbar(e.response?.data?.detail || "Import failed", "error")
@@ -336,7 +336,7 @@ export default function Library() {
 
   const confirmDeleteOne = (item) => openConfirm(
     "Delete this item?",
-    `“${item.title}” is removed from disk. This cannot be undone.`,
+    `“${item.title}” sẽ bị xóa khỏi ổ đĩa. Không thể hoàn tác.`,
     () => deleteOne(item),
   )
 
@@ -378,7 +378,7 @@ export default function Library() {
     // Music tracks are yours on disk and there is no endpoint that removes
     // them. Counting them as failures is the honest read: the user asked and
     // it did not happen.
-    failures.push(...byStore.music.map((i) => `${i.title} (music tracks are removed from storage/music/)`))
+    failures.push(...byStore.music.map((i) => `${i.title} (tệp nhạc được xóa khỏi storage/music/)`))
     succeeded.forEach((i) => removeLocal(i.key))
     setSelected(new Map())
     refresh()
@@ -417,7 +417,7 @@ export default function Library() {
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <PageHero
         icon={<PhotoLibraryRoundedIcon sx={{ fontSize: 22 }} />}
-        title="Library"
+        title="Thư viện"
         subtitle={
           loading && !libraryTotal
             ? "Reading your library…"
@@ -431,7 +431,7 @@ export default function Library() {
         actions={
           <Stack direction="row" spacing={1} alignItems="center">
             <TextField
-              placeholder="Search library…"
+              placeholder="Tìm trong thư viện…"
               size="small"
               value={q}
               onChange={(e) => setQ(e.target.value)}
@@ -498,18 +498,18 @@ export default function Library() {
           }}>
             <LightbulbRoundedIcon sx={{ fontSize: 17, color: "#0097a7", mt: "1px" }} />
             <Typography sx={{ flex: 1, fontSize: "0.78rem", color: "text.secondary", lineHeight: 1.65 }}>
-              <strong>Two questions, two controls.</strong> The tabs say what a file <em>is</em>; the
-              From chips say where it <em>came from</em>. A downloaded mp3 is Audio + Sources, a
+              <strong>Hai câu hỏi, hai bộ lọc.</strong> Các tab cho biết tệp <em>là gì</em>;
+              các chip Nguồn cho biết tệp <em>đến từ đâu</em>. MP3 tải về là Âm thanh + Nguồn,
               voice-over is Audio + Created, an enhanced podcast is Audio + Edited — all three live
               in Audio, and none of them needs a tab of its own. Switch to
-              <strong> By source</strong> to see each download with everything you made from it.
+              <strong>Theo nguồn</strong> để xem từng nội dung tải về cùng mọi sản phẩm tạo từ nó.
               <br />
               Scout results are deliberately not here — a lead is not a file you own, so it has its
               own page. Jobs split in two: work in flight appears as a tile in the grid where it will
-              land, and the full log lives in <strong>Activity</strong> (top right), reachable from
+              land, and nhật ký đầy đủ nằm trong <strong>Hoạt động</strong> (top right), reachable from
               every page instead of only this one.
             </Typography>
-            <IconButton size="small" onClick={() => setShowWhy(false)} aria-label="Dismiss">
+            <IconButton size="small" onClick={() => setShowWhy(false)} aria-label="Đóng hướng dẫn">
               <CloseRoundedIcon sx={{ fontSize: 15 }} />
             </IconButton>
           </Stack>
@@ -593,8 +593,8 @@ export default function Library() {
                 : "Renders, downloads and anything you edit collect here."}
             </Typography>
             {filtersActive
-              ? <Button size="small" variant="outlined" onClick={clearFilters}>Clear filters</Button>
-              : <Button size="small" variant="contained" onClick={() => navigate("/stock")}>Make a video</Button>}
+              ? <Button size="small" variant="outlined" onClick={clearFilters}>Xóa bộ lọc</Button>
+              : <Button size="small" variant="contained" onClick={() => navigate("/stock")}>Tạo video</Button>}
           </Stack>
         ) : (
           <>
@@ -660,7 +660,7 @@ export default function Library() {
           },
           "& .MuiIconButton-root": { color: "primary.contrastText" },
         }}>
-          <Chip size="small" label={`${selected.size} selected`}
+          <Chip size="small" label={`${selected.size} mục đã chọn`}
             sx={{
               fontWeight: 800, height: 24,
               bgcolor: alpha("#fff", 0.22), color: "primary.contrastText",
@@ -674,7 +674,7 @@ export default function Library() {
             )}>
             Delete
           </Button>
-          <IconButton size="small" onClick={() => setSelected(new Map())} aria-label="Clear selection">
+          <IconButton size="small" onClick={() => setSelected(new Map())} aria-label="Bỏ chọn tất cả">
             <CloseRoundedIcon sx={{ fontSize: 16 }} />
           </IconButton>
         </Box>
@@ -716,7 +716,7 @@ export default function Library() {
         // the one place a single click destroys a file.
         onConfirmDelete={(item, perform) => openConfirm(
           "Delete this item?",
-          `“${item.title}” is removed from disk. This cannot be undone.`,
+          `“${item.title}” sẽ bị xóa khỏi ổ đĩa. Không thể hoàn tác.`,
           perform,
         )}
       />

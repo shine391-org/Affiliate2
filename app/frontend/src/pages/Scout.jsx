@@ -59,14 +59,14 @@ export default function Scout() {
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <PageHero
         icon={<TravelExploreIcon sx={{ fontSize: 22 }} />}
-        title="Discover / Spy"
+        title="Khám phá / Theo dõi"
         subtitle="Trending videos worth borrowing from — leads, not files"
         accentColor="#0097a7"
         actions={
           <Stack direction="row" spacing={1}>
-            <Tooltip title="Refresh results">
+            <Tooltip title="Làm mới kết quả">
               <Button size="small" variant="outlined" sx={{ minWidth: 0, px: 1 }}
-                aria-label="Refresh results"
+                aria-label="Làm mới kết quả"
                 onClick={() => { setPage(0); fetchResults(null, 0, rowsPerPage) }}>
                 <RefreshIcon fontSize="small" />
               </Button>
