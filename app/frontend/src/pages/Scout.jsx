@@ -28,7 +28,7 @@ import useAppStore from "../store/appStore"
 const DEFAULT_ROWS = 50
 
 export default function Scout() {
-  useDocumentTitle("Discover / Spy")
+  useDocumentTitle("Khám phá / Theo dõi")
   const navigate = useNavigate()
   const showSnackbar = useAppStore((s) => s.showSnackbar)
   const jobs = useAppStore((s) => s.jobs)   // polled once, app-wide, in Layout

@@ -13,7 +13,7 @@ import useDocumentTitle from "../hooks/useDocumentTitle"
 const DEFAULT_ROWS = 50
 
 export default function Candidates() {
-  useDocumentTitle("Discover / Candidates")
+  useDocumentTitle("Khám phá / Ứng viên")
   const navigate = useNavigate()
   const showSnackbar = useAppStore((state) => state.showSnackbar)
   const [results, setResults] = useState([])

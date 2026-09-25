@@ -29,7 +29,7 @@ import useDocumentTitle from "../hooks/useDocumentTitle"
  * store on every visit.
  */
 export default function MotionGraphics() {
-  useDocumentTitle("Motion Graphics")
+  useDocumentTitle("Đồ họa chuyển động")
   const theme = useTheme()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()

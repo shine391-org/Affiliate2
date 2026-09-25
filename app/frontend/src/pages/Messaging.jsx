@@ -51,7 +51,7 @@ const SL_STATE = {
 }
 
 export default function Messaging() {
-  useDocumentTitle("Messaging")
+  useDocumentTitle("Nhắn tin")
   const showSnackbar = useAppStore((s) => s.showSnackbar)
 
   const [loading, setLoading] = useState(true)
