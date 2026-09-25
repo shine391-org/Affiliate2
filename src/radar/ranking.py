@@ -86,27 +86,28 @@ def _fetch_content_with_latest_snapshot(conn: sqlite3.Connection) -> list[dict]:
         SELECT
             c.id AS cid,
             c.platform,
-            c.content_id,
-            c.canonical_url,
+            c.video_id AS content_id,
+            c.video_url AS canonical_url,
             c.creator_id,
-            c.creator_name,
+            c.author AS creator_name,
             c.title,
-            c.publish_time,
+            CAST(strftime('%s', c.upload_date) AS INTEGER) AS publish_time,
             s.views,
             s.likes,
             s.comments,
             s.shares,
             s.favorites,
             s.captured_at,
-            (SELECT COUNT(*) FROM metric_snapshots ms WHERE ms.content_id = c.content_id) AS snap_count
-        FROM content c
-        JOIN metric_snapshots s ON s.platform = c.platform AND s.content_id = c.content_id
-        WHERE s.captured_at = (
-            SELECT MAX(ms2.captured_at)
-            FROM metric_snapshots ms2
-            WHERE ms2.platform = c.platform AND ms2.content_id = c.content_id
+            (SELECT COUNT(*) FROM radar_observations ms
+             WHERE ms.scout_result_id = c.id) AS snap_count
+        FROM scout_results c
+        JOIN radar_observations s ON s.scout_result_id = c.id
+        WHERE c.user_id='local' AND s.rowid = (
+            SELECT ms2.rowid FROM radar_observations ms2
+            WHERE ms2.scout_result_id = c.id
+            ORDER BY ms2.captured_at DESC, ms2.rowid DESC LIMIT 1
         )
-        ORDER BY c.id
+        ORDER BY c.rowid
     """
     rows = conn.execute(query).fetchall()
     return [dict(r) for r in rows]
@@ -118,9 +119,12 @@ def _fetch_snapshots_for_content(
     """Fetch all snapshots for a content, ordered by captured_at."""
     rows = conn.execute(
         """SELECT captured_at, views, likes, comments, shares, favorites
-           FROM metric_snapshots
-           WHERE platform = ? AND content_id = ?
-           ORDER BY captured_at ASC""",
+           FROM radar_observations
+           WHERE scout_result_id = (
+               SELECT id FROM scout_results
+               WHERE user_id='local' AND platform=? AND video_id=? LIMIT 1
+           )
+           ORDER BY captured_at ASC, rowid ASC""",
         (platform, content_id),
     ).fetchall()
     return [dict(r) for r in rows]
@@ -129,7 +133,8 @@ def _fetch_snapshots_for_content(
 def _fetch_creator_content_counts(conn: sqlite3.Connection) -> dict[str, int]:
     """Fetch content count per creator_id across all platforms."""
     rows = conn.execute(
-        "SELECT creator_id, COUNT(*) as cnt FROM content GROUP BY creator_id"
+        """SELECT creator_id, COUNT(*) as cnt FROM scout_results
+        WHERE user_id='local' GROUP BY creator_id"""
     ).fetchall()
     return {r["creator_id"]: r["cnt"] for r in rows if r["creator_id"]}
 

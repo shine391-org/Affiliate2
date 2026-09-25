@@ -63,6 +63,7 @@ async def init_db():
         messaging_config, chat_session, user_profile,
         video_metrics, viral_formula,
         connected_channel, dynamic_template, caption_style,
+        phase_g,
     )
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -73,6 +74,8 @@ async def init_db():
         # Idempotent column additions for SQLite (no Alembic)
         await _add_column_if_missing(conn, "downloaded_videos", "transcript_segments_json", "TEXT", existing=_cols)
         await _add_column_if_missing(conn, "downloaded_videos", "media_metadata_json", "TEXT", existing=_cols)
+        await _add_column_if_missing(conn, "downloaded_videos", "source_sha256", "VARCHAR(64)", existing=_cols)
+        await _add_column_if_missing(conn, "downloaded_videos", "intelligence_source", "VARCHAR(50)", existing=_cols)
         # Job heartbeat (zombie-sweep staleness signal — see models/job.py)
         await _add_column_if_missing(conn, "jobs", "updated_at", "DATETIME", existing=_cols)
         await _add_column_if_missing(conn, "generated_videos", "source_type", "VARCHAR(30)", existing=_cols)
@@ -87,6 +90,19 @@ async def init_db():
         await _add_column_if_missing(conn, "generated_videos", "caption_status", "VARCHAR(20)", existing=_cols)
         await _add_column_if_missing(conn, "generated_videos", "metadata_status", "VARCHAR(20)", existing=_cols)
         await _add_column_if_missing(conn, "generated_videos", "publish_approved_at", "DATETIME", existing=_cols)
+        await _add_column_if_missing(conn, "generated_videos", "artifact_sha256", "VARCHAR(64)", existing=_cols)
+        await _add_column_if_missing(conn, "generated_videos", "publish_approval_artifact_sha256", "VARCHAR(64)", existing=_cols)
+        await _add_column_if_missing(conn, "generated_videos", "review_status", "VARCHAR(50)", existing=_cols)
+        await _add_column_if_missing(conn, "generated_videos", "review_note", "TEXT", existing=_cols)
+        await _add_column_if_missing(conn, "generated_videos", "reviewed_at", "DATETIME", existing=_cols)
+        await _add_column_if_missing(conn, "scout_results", "creator_id", "VARCHAR(200)", existing=_cols)
+        await _add_column_if_missing(conn, "scout_results", "first_seen_at", "DATETIME", existing=_cols)
+        await _add_column_if_missing(conn, "scout_results", "last_seen_at", "DATETIME", existing=_cols)
+        await _add_column_if_missing(conn, "video_metrics", "publication_record_id", "VARCHAR(36)", existing=_cols)
+        await _add_column_if_missing(conn, "video_metrics", "legacy_metric_id", "INTEGER", existing=_cols)
+        await _add_column_if_missing(conn, "video_metrics", "source", "VARCHAR(30)", existing=_cols)
+        await _add_column_if_missing(conn, "video_metrics", "note", "TEXT", existing=_cols)
+        await _add_column_if_missing(conn, "video_metrics", "raw_json", "TEXT", existing=_cols)
         # BYOK: per-user encrypted keys (override .env at runtime)
         await _add_column_if_missing(conn, "user_settings", "ai_provider", "VARCHAR(20)", existing=_cols)
         await _add_column_if_missing(conn, "user_settings", "ai_model", "VARCHAR(100)", existing=_cols)

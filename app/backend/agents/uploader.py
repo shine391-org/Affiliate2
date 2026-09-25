@@ -4,12 +4,16 @@
 Agent 5: Upload Orchestrator
 Uploads generated videos to YouTube and/or TikTok.
 """
+import hashlib
 import json
 import logging
+from datetime import datetime
+from pathlib import Path
 from sqlalchemy import select
 
 from backend.database import AsyncSessionLocal
 from backend.models.generated_video import GeneratedVideo
+from backend.models.phase_g import PublicationRecord
 from backend.models.user_settings import UserSettings
 from backend.core.crypto import decrypt, DecryptionError
 from backend.core.ws_manager import ws_manager
@@ -20,6 +24,28 @@ logger = logging.getLogger(__name__)
 
 
 ALLOWED_PUBLISH_PLATFORMS = {"youtube", "tiktok", "instagram"}
+
+
+def file_sha256(path: str | Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def approved_artifact_error(video: GeneratedVideo) -> str | None:
+    """Return why the current bytes are not the exact approved artifact."""
+    if not video.video_path:
+        return "Video file path is missing"
+    path = Path(video.video_path)
+    if not path.is_file():
+        return "Video file not found on disk"
+    if not video.publish_approval_artifact_sha256:
+        return "Publish approval is not bound to an exact video artifact. Re-approve the video."
+    if file_sha256(path) != video.publish_approval_artifact_sha256:
+        return "Video artifact changed since approval. Re-approve the current file before publishing."
+    return None
 
 
 def normalize_publish_platforms(platforms) -> list[str]:
@@ -108,6 +134,11 @@ class UploadAgent:
             )
             return
 
+        artifact_error = approved_artifact_error(video)
+        if artifact_error:
+            await update_job_status(job_id, "failed", error_message=artifact_error)
+            return
+
         already_uploaded = published_destinations(video)
         duplicates = [platform for platform in platforms if platform in already_uploaded]
         if duplicates:
@@ -136,6 +167,9 @@ class UploadAgent:
             pct = int((i / total_platforms) * 80) + 10
             await ws_manager.send_progress(job_id, pct, f"Uploading to {platform}...", user_id)
 
+            publication_id = await self._create_publication_record(
+                video, job_id, platform, user_settings
+            )
             try:
                 if platform == "youtube":
                     result = await self._upload_youtube(video, user_settings)
@@ -150,6 +184,9 @@ class UploadAgent:
                         "url": result.get("url", ""),
                         "video_id": result.get("video_id"),
                     }, user_id)
+                    await self._finish_publication_record(
+                        publication_id, platform, "PUBLISHED", result=result
+                    )
 
                 elif platform == "tiktok":
                     result = await self._upload_tiktok(video, user_settings)
@@ -163,6 +200,9 @@ class UploadAgent:
                         "platform": "tiktok",
                         "publish_id": result.get("publish_id"),
                     }, user_id)
+                    await self._finish_publication_record(
+                        publication_id, platform, "PUBLISHED", result=result
+                    )
 
                 elif platform == "instagram":
                     result = await self._upload_instagram(video, user_settings)
@@ -177,6 +217,9 @@ class UploadAgent:
                         "url": result.get("permalink", ""),
                         "media_id": result.get("media_id"),
                     }, user_id)
+                    await self._finish_publication_record(
+                        publication_id, platform, "PUBLISHED", result=result
+                    )
 
                 else:
                     logger.warning(f"Unknown upload platform: {platform}")
@@ -185,6 +228,9 @@ class UploadAgent:
             except UploadAuthError as e:
                 logger.error(f"Upload auth error for {platform}: {e}")
                 errors.append(f"{platform}: {str(e)}")
+                await self._finish_publication_record(
+                    publication_id, platform, "FAILED", error_message=str(e)
+                )
                 await ws_manager.send_constraint_warning(
                     constraint=f"{platform}_upload_auth",
                     message=str(e),
@@ -195,6 +241,9 @@ class UploadAgent:
             except Exception as e:
                 logger.error(f"Upload failed for {platform}: {e}", exc_info=True)
                 errors.append(f"{platform}: {str(e)}")
+                await self._finish_publication_record(
+                    publication_id, platform, "FAILED", error_message=str(e)
+                )
 
         # Final status
         if uploaded:
@@ -232,6 +281,76 @@ class UploadAgent:
                 existing.append(platform)
             v.uploaded_platforms_json = json.dumps(existing)
             v.status = "uploaded"
+            await db.commit()
+
+    async def _create_publication_record(
+        self,
+        video: GeneratedVideo,
+        job_id: str,
+        platform: str,
+        user_settings: UserSettings | None,
+    ) -> str:
+        title = video.youtube_title if platform == "youtube" else video.tiktok_title
+        caption = video.youtube_description if platform == "youtube" else video.tiktok_description
+        privacy = (
+            getattr(user_settings, "tiktok_default_privacy", None)
+            if platform == "tiktok" else None
+        )
+        record = PublicationRecord(
+            generated_video_id=video.id,
+            platform=platform,
+            job_id=job_id,
+            status="PUBLISHING",
+            title=title or video.title,
+            caption=caption,
+            privacy=privacy,
+            mapping_status="mapped",
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        async with AsyncSessionLocal() as db:
+            db.add(record)
+            await db.commit()
+            return record.id
+
+    async def _finish_publication_record(
+        self,
+        record_id: str,
+        platform: str,
+        status: str,
+        *,
+        result: dict | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        result = result or {}
+        provider_transaction_id = None
+        public_content_id = None
+        identifier_kind = None
+        external_url = None
+        if platform == "youtube":
+            public_content_id = result.get("video_id")
+            identifier_kind = "public_video_id" if public_content_id else None
+            external_url = result.get("url")
+        elif platform == "tiktok":
+            provider_transaction_id = result.get("publish_id")
+            identifier_kind = "upload_transaction_id" if provider_transaction_id else None
+        elif platform == "instagram":
+            public_content_id = result.get("media_id")
+            identifier_kind = "public_media_id" if public_content_id else None
+            external_url = result.get("permalink")
+        async with AsyncSessionLocal() as db:
+            record = await db.get(PublicationRecord, record_id)
+            if not record:
+                logger.warning("Publication record %s vanished during upload", record_id)
+                return
+            record.status = status
+            record.provider_transaction_id = provider_transaction_id
+            record.public_content_id = public_content_id
+            record.identifier_kind = identifier_kind
+            record.external_url = external_url
+            record.error_message = error_message
+            record.updated_at = datetime.utcnow()
+            record.published_at = datetime.utcnow() if status == "PUBLISHED" else None
             await db.commit()
 
     async def _upload_youtube(self, video: GeneratedVideo, user_settings) -> dict:

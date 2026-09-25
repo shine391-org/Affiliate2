@@ -6,6 +6,7 @@ import sqlite3
 import statistics
 from datetime import datetime, timezone
 from typing import Iterable
+from uuid import uuid4
 
 from .store import get_conn
 
@@ -145,17 +146,19 @@ def record_source_run(
     error: str | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> None:
-    """Persist provider EMPTY/AUTH_REQUIRED/ERROR runs for operational history."""
+    """Persist provider EMPTY/AUTH_REQUIRED/ERROR in the application DB."""
     own_conn = conn is None
     conn = conn or get_conn()
     now = _now_iso()
     try:
         conn.execute(
-            """INSERT INTO source_runs
-            (platform, keyword, started_at, finished_at, status,
+            """INSERT INTO radar_source_runs
+            (id, legacy_source_run_id, platform, keyword, started_at, finished_at, status,
              records_raw, records_normalized, records_new, records_updated, error)
-            VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
+                str(uuid4()),
+                None,
                 str(platform).lower(),
                 keyword,
                 now,
@@ -175,7 +178,7 @@ def record_source_run(
 
 
 def observe_scout_rows(rows: list[dict], niche: str, conn: sqlite3.Connection | None = None) -> dict:
-    """Append one immutable observation per unique native-provider content row."""
+    """Upsert canonical Scout identity and append immutable observations."""
     own_conn = conn is None
     conn = conn or get_conn()
     captured_at = _now_iso()
@@ -197,11 +200,12 @@ def observe_scout_rows(rows: list[dict], niche: str, conn: sqlite3.Connection | 
             )
 
             existing = conn.execute(
-                "SELECT id FROM content WHERE platform=? AND content_id=?",
+                """SELECT id FROM scout_results
+                WHERE user_id='local' AND platform=? AND video_id=?""",
                 key,
             ).fetchone()
             values = (
-                row.get("video_url"),
+                row.get("video_url") or f"legacy://{platform}/{content_id}",
                 row.get("creator_id"),
                 row.get("author"),
                 row.get("title"),
@@ -210,50 +214,60 @@ def observe_scout_rows(rows: list[dict], niche: str, conn: sqlite3.Connection | 
                 source_keyword,
             )
             if existing is None:
+                scout_id = str(uuid4())
                 conn.execute(
-                    """INSERT INTO content
-                    (platform, content_id, canonical_url, creator_id, creator_name,
-                     title, description, publish_time, source_keyword,
-                     first_seen_at, last_seen_at, created_at, updated_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    (platform, content_id, *values, captured_at, captured_at, captured_at, captured_at),
+                    """INSERT INTO scout_results
+                    (id,user_id,platform,video_id,video_url,creator_id,author,title,
+                     description,upload_date,niche,views,likes,comments,shares,
+                     is_downloaded,is_analyzed,first_seen_at,last_seen_at,created_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        scout_id, "local", platform, content_id, *values,
+                        _metric_value(row, "views"), _metric_value(row, "likes"),
+                        _metric_value(row, "comments"), _metric_value(row, "shares"),
+                        0, 0, captured_at, captured_at, captured_at,
+                    ),
                 )
                 stats["new"] += 1
             else:
+                scout_id = existing["id"]
                 conn.execute(
-                    """UPDATE content SET
-                    canonical_url=?, creator_id=?, creator_name=?, title=?,
-                    description=?, publish_time=?,
-                    last_seen_at=?, updated_at=?
-                    WHERE platform=? AND content_id=?""",
-                    (*values[:-1], captured_at, captured_at, platform, content_id),
+                    """UPDATE scout_results SET
+                    video_url=?, creator_id=?, author=?, title=?, description=?,
+                    upload_date=?, last_seen_at=?
+                    WHERE id=?""",
+                    (*values[:-1], captured_at, scout_id),
                 )
                 stats["updated"] += 1
 
             conn.execute(
-                """INSERT INTO metric_snapshots
-                (platform, content_id, captured_at, views, likes, comments, shares, favorites)
-                VALUES (?,?,?,?,?,?,?,?)""",
+                """INSERT INTO radar_observations
+                (id,scout_result_id,legacy_snapshot_id,captured_at,views,likes,comments,shares,favorites,created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?)""",
                 (
-                    platform,
-                    content_id,
+                    str(uuid4()),
+                    scout_id,
+                    None,
                     captured_at,
                     _metric_value(row, "views"),
                     _metric_value(row, "likes"),
                     _metric_value(row, "comments"),
                     _metric_value(row, "shares"),
                     _metric_value(row, "favorites"),
+                    captured_at,
                 ),
             )
             stats["observed"] += 1
 
         for (platform, keyword), stats in per_source.items():
             conn.execute(
-                """INSERT INTO source_runs
-                (platform, keyword, started_at, finished_at, status,
+                """INSERT INTO radar_source_runs
+                (id,legacy_source_run_id,platform, keyword, started_at, finished_at, status,
                  records_raw, records_normalized, records_new, records_updated)
-                VALUES (?,?,?,?,?,?,?,?,?)""",
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                 (
+                    str(uuid4()),
+                    None,
                     platform,
                     keyword,
                     captured_at,
@@ -280,24 +294,24 @@ def observe_scout_rows(rows: list[dict], niche: str, conn: sqlite3.Connection | 
 def _latest_rows(conn: sqlite3.Connection) -> list[dict]:
     rows = conn.execute(
         """SELECT
-            c.platform, c.content_id, c.canonical_url, c.creator_id,
-            c.creator_name, c.title, c.publish_time,
+            c.platform, c.video_id AS content_id, c.video_url AS canonical_url, c.creator_id,
+            c.author AS creator_name, c.title,
+            CAST(strftime('%s', c.upload_date) AS INTEGER) AS publish_time,
             s.views, s.likes, s.comments, s.shares, s.favorites,
             s.captured_at,
             (
-                SELECT COUNT(*) FROM metric_snapshots ms
-                WHERE ms.platform=c.platform AND ms.content_id=c.content_id
+                SELECT COUNT(*) FROM radar_observations ms
+                WHERE ms.scout_result_id=c.id
             ) AS snapshot_count
-        FROM content c
-        JOIN metric_snapshots s
-          ON s.platform=c.platform AND s.content_id=c.content_id
-        WHERE s.id = (
-            SELECT ms2.id FROM metric_snapshots ms2
-            WHERE ms2.platform=c.platform AND ms2.content_id=c.content_id
-            ORDER BY ms2.captured_at DESC, ms2.id DESC
+        FROM scout_results c
+        JOIN radar_observations s ON s.scout_result_id=c.id
+        WHERE c.user_id='local' AND s.rowid = (
+            SELECT ms2.rowid FROM radar_observations ms2
+            WHERE ms2.scout_result_id=c.id
+            ORDER BY ms2.captured_at DESC, ms2.rowid DESC
             LIMIT 1
         )
-        ORDER BY c.id"""
+        ORDER BY c.rowid"""
     ).fetchall()
     return [dict(row) for row in rows]
 
@@ -305,9 +319,13 @@ def _latest_rows(conn: sqlite3.Connection) -> list[dict]:
 def _snapshots(conn: sqlite3.Connection, platform: str, content_id: str) -> list[dict]:
     rows = conn.execute(
         """SELECT captured_at, views, likes, comments, shares, favorites
-        FROM metric_snapshots
-        WHERE platform=? AND content_id=?
-        ORDER BY captured_at ASC, id ASC""",
+        FROM radar_observations
+        WHERE scout_result_id=(
+            SELECT id FROM scout_results
+            WHERE user_id='local' AND platform=? AND video_id=?
+            LIMIT 1
+        )
+        ORDER BY captured_at ASC, rowid ASC""",
         (platform, content_id),
     ).fetchall()
     return [dict(row) for row in rows]

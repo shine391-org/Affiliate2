@@ -19,7 +19,6 @@ New-Item -ItemType Directory -Force -Path $RuntimeRoot | Out-Null
 
 $env:VIRALMINT_DATA_DIR = $RepoRoot
 $env:CONTENT_ENGINE_ROOT = $RepoRoot
-$env:VIRALMINT_OVERLAY = "viralmint_overlay"
 $env:VIRALMINT_NO_BROWSER = "1"
 $env:PYTHONPATH = "$RepoRoot;$AppRoot" + $(if ($env:PYTHONPATH) { ";$env:PYTHONPATH" } else { "" })
 

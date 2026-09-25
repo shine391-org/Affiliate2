@@ -269,9 +269,14 @@ async def set_publish_approval(
             )
         if not video.video_path or not Path(video.video_path).is_file():
             raise HTTPException(status_code=400, detail="Video file not found on disk")
+        from backend.agents.uploader import file_sha256
+        artifact_hash = file_sha256(video.video_path)
+        video.artifact_sha256 = artifact_hash
+        video.publish_approval_artifact_sha256 = artifact_hash
         video.publish_approved_at = datetime.utcnow()
     else:
         video.publish_approved_at = None
+        video.publish_approval_artifact_sha256 = None
     await db.commit()
     await db.refresh(video)
     return {
@@ -280,6 +285,7 @@ async def set_publish_approval(
         "publish_approved_at": (
             video.publish_approved_at.isoformat() if video.publish_approved_at else None
         ),
+        "publish_approval_artifact_sha256": video.publish_approval_artifact_sha256,
     }
 
 
@@ -290,6 +296,7 @@ async def upload_video(video_id: str, body: dict, db: AsyncSession = Depends(get
         raise HTTPException(status_code=400, detail="Publish request must be an object")
     from backend.agents.uploader import (
         normalize_publish_platforms, published_destinations, disconnected_destinations,
+        approved_artifact_error,
     )
     from backend.agents.job_helper import create_job
     from backend.core.task_runner import run_upload as task_upload, dispatch
@@ -314,6 +321,9 @@ async def upload_video(video_id: str, body: dict, db: AsyncSession = Depends(get
                                 detail="Video must be explicitly approved for publishing first.")
         if not video.video_path:
             raise HTTPException(status_code=400, detail="Video file path is missing")
+        artifact_error = approved_artifact_error(video)
+        if artifact_error:
+            raise HTTPException(status_code=409, detail=artifact_error)
         duplicates = set(platforms) & published_destinations(video)
         if duplicates:
             raise HTTPException(status_code=409,

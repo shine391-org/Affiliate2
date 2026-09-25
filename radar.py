@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import sys
 import time
@@ -22,6 +23,7 @@ from pathlib import Path
 
 # Ensure src/ is on the path when run from project root
 sys.path.insert(0, str(Path(__file__).parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent / "app"))
 
 from radar.ingest import ingest
 from radar.ranking import CandidateScore, rank_candidates
@@ -383,11 +385,14 @@ def cmd_analyze(args) -> int:
 
 def cmd_performance(args) -> int:
     """Export observed post-publication performance evidence (Phase 4)."""
-    from viralmint_overlay.performance_service import build_feedback_summary
-    from viralmint_overlay.performance_store import PerformanceStore
-    from viralmint_overlay.review_store import ReviewStore
+    from backend.services.performance_tracker import get_performance_overview
 
-    summary = build_feedback_summary(PerformanceStore(), ReviewStore())
+    overview = asyncio.run(get_performance_overview())
+    summary = {
+        **overview,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "patterns": [],
+    }
     fmt = args.format or "json"
 
     if fmt == "json":

@@ -12,6 +12,7 @@ from backend.core.exceptions import safe_json_loads
 from backend.database import AsyncSessionLocal
 from backend.models.generated_video import GeneratedVideo
 from backend.models.user_settings import UserSettings
+from backend.models.phase_g import PublicationRecord
 from backend.models.video_metrics import VideoMetrics
 
 logger = logging.getLogger(__name__)
@@ -197,9 +198,17 @@ async def get_performance_overview(user_id: str = "local") -> dict:
         rows = (await db.execute(select(VideoMetrics).where(
             VideoMetrics.generated_video_id.in_(ids)
         ).order_by(VideoMetrics.fetched_at.asc(), VideoMetrics.id.asc()))).scalars().all() if ids else []
+        pub_rows = (await db.execute(select(PublicationRecord).where(
+            PublicationRecord.generated_video_id.in_(ids)
+        ).order_by(PublicationRecord.platform, PublicationRecord.published_at.desc()))).scalars().all() if ids else []
     latest = {}
     for row in rows:
         latest[(row.generated_video_id, row.platform)] = row
+    published_at_by_video = {}
+    for row in pub_rows:
+        key = (row.generated_video_id, row.platform)
+        if key not in published_at_by_video:
+            published_at_by_video[key] = row.published_at
     posts = []
     by_platform = {}
     for video in videos:
@@ -208,10 +217,11 @@ async def get_performance_overview(user_id: str = "local") -> dict:
                 continue
             row = latest.get((video.id, platform))
             data = _snapshot(row, video) if row else None
+            pub_row = published_at_by_video.get((video.id, platform))
             posts.append({"generated_video_id": video.id, "title": video.title,
                           "thumbnail_url": f"/api/videos/{video.id}/thumbnail" if video.thumbnail_path else None,
                           "platform": platform, "platform_content_id": _platform_id(video, platform),
-                          "published_at": None,  # Not persisted by old uploader; do not invent it.
+                          "published_at": pub_row.isoformat() if pub_row else None,
                           "latest_metrics": data, "state": data["state"] if data else "INSUFFICIENT_DATA",
                           "source_downloaded_video_id": video.source_downloaded_video_id,
                           "hook_type": video.clip_hook_type, "format": video.source_type,

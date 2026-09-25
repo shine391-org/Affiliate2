@@ -51,15 +51,15 @@ def get_config_key(key: str) -> Any:
 def load_overlay() -> str | None:
     """Import the configured overlay package (side-effect: registers plugins).
 
-    Reads VIRALMINT_OVERLAY env var (default: 'viralmint_overlay'). Returns the
-    imported module name, or None if no overlay is installed. Silent on
-    ImportError so OSS works standalone.
+    Reads VIRALMINT_OVERLAY when an explicitly requested compatibility overlay
+    is needed. Phase G keeps the default empty so canonical runtime ownership
+    cannot silently fall back to legacy persistence.
     """
     import importlib
     import logging
     import os
 
-    name = os.getenv("VIRALMINT_OVERLAY", "viralmint_overlay")
+    name = os.getenv("VIRALMINT_OVERLAY", "").strip()
     if not name:
         return None
     try:

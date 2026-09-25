@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (c) 2025-2026 ViralMint Contributors
-from sqlalchemy import Column, String, Text, Integer, Float, DateTime, Boolean
+from sqlalchemy import Column, String, Text, Integer, Float, DateTime, Boolean, UniqueConstraint
 from datetime import datetime
 from uuid import uuid4
 from backend.database import Base
@@ -8,6 +8,9 @@ from backend.database import Base
 
 class ScoutResult(Base):
     __tablename__ = "scout_results"
+    __table_args__ = (
+        UniqueConstraint("user_id", "platform", "video_id", name="uq_scout_source_identity"),
+    )
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid4()))
     user_id = Column(String(36), default="local", index=True)
@@ -25,6 +28,7 @@ class ScoutResult(Base):
     description = Column(Text, nullable=True)
     author = Column(String(200), nullable=True)
     author_url = Column(Text, nullable=True)
+    creator_id = Column(String(200), nullable=True, index=True)
     thumbnail_url = Column(Text, nullable=True)
 
     # Metrics
@@ -48,3 +52,5 @@ class ScoutResult(Base):
     is_analyzed = Column(Boolean, default=False)
 
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    first_seen_at = Column(DateTime, nullable=True)
+    last_seen_at = Column(DateTime, nullable=True)
