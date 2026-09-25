@@ -34,7 +34,7 @@ export default function Candidates() {
       setTotal(candidateResponse.data?.total || 0)
       setDownloads(downloadResponse.data?.videos || [])
     } catch (error) {
-      showSnackbar(error.response?.data?.detail || "Could not load candidates", "error")
+      showSnackbar(error.response?.data?.detail || "Không thể tải danh sách ứng viên", "error")
     } finally {
       setLoading(false)
     }

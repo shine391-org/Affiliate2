@@ -398,16 +398,16 @@ function ChannelDetail({ channel, onBack }) {
         <Avatar src={channel.thumbnail_url || channelInfo?.thumbnail_url} sx={{ width: 44, height: 44 }} />
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography variant="h6" sx={{ fontWeight: 600, fontSize: "1rem" }}>
-            {channel.channel_name || channelInfo?.title || channelInfo?.display_name || "Channel"}
+            {channel.channel_name || channelInfo?.title || channelInfo?.display_name || "Kênh"}
           </Typography>
           <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }}>
             <Chip size="small" variant="outlined"
-              label={`${formatCount(channel.subscriber_count || channelInfo?.subscriber_count || channelInfo?.follower_count || 0)} ${isYT ? "subscribers" : "followers"}`} />
+              label={`${formatCount(channel.subscriber_count || channelInfo?.subscriber_count || channelInfo?.follower_count || 0)} ${isYT ? "người đăng ký" : "người theo dõi"}`} />
             <Chip size="small" variant="outlined"
-              label={`${formatCount(channel.video_count || channelInfo?.video_count || 0)} videos`} />
+              label={`${formatCount(channel.video_count || channelInfo?.video_count || 0)} video`} />
             {channelInfo?.median_views > 0 && (
               <Chip size="small" variant="outlined" color="info"
-                label={`Median: ${formatCount(channelInfo.median_views)} views`} />
+                label={`Trung vị: ${formatCount(channelInfo.median_views)} lượt xem`} />
             )}
           </Stack>
         </Box>
@@ -477,7 +477,7 @@ function ChannelDetail({ channel, onBack }) {
           {/* Sort control */}
           <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
             <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, fontSize: "0.7rem" }}>
-              {videos.length} video{videos.length !== 1 ? "s" : ""}
+              {videos.length} video
             </Typography>
             <FormControl size="small" sx={{ minWidth: 130 }}>
               <Select value={sortBy} onChange={(e) => { setSortBy(e.target.value); setPage(0) }}
@@ -601,10 +601,10 @@ function PlatformTab({ platform }) {
     <Box>
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
         <Typography variant="body2" sx={{ color: "text.secondary", fontWeight: 600 }}>
-          {channels.length} channel{channels.length !== 1 ? "s" : ""} connected
+          {channels.length} kênh đã kết nối
         </Typography>
         <Button variant="contained" startIcon={<AddIcon />} onClick={() => setShowAdd(true)}>
-          Add Channel
+          Thêm kênh
         </Button>
       </Stack>
 
