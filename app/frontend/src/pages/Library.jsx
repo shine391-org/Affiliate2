@@ -19,7 +19,6 @@ import { useNavigate, useSearchParams } from "react-router-dom"
 import {
   Box, Typography, Stack, TextField, Button, Chip, IconButton,
   Tooltip, Menu, MenuItem, CircularProgress, alpha, useTheme,
-  Dialog, DialogTitle, DialogContent, DialogActions,
 } from "@mui/material"
 import SearchIcon from "@mui/icons-material/Search"
 import CloseRoundedIcon from "@mui/icons-material/CloseRounded"
@@ -391,27 +390,15 @@ export default function Library() {
     )
   }
 
-  /** Publishing — this variant ships an uploader, and the Library is where a
-   *  finished video is reviewed before it goes out. The confirm dialog shows
-   *  the per-platform title and description the pipeline drafted, because
-   *  "Upload" with no preview is a one-click irreversible publish.
+  /** Publish has one canonical owner now. Library never starts an irreversible
+   *  upload itself; it hands the exact GeneratedVideo identity to /publish,
+   *  where approval and destination confirmation are explicit.
    */
-  const [uploadPreview, setUploadPreview] = useState(
-    { open: false, videoId: null, platforms: [], video: null })
-
-  const openUploadPreview = (id, platforms, video) =>
-    setUploadPreview({ open: true, videoId: id, platforms, video })
-
-  const doUpload = async () => {
-    const { videoId, platforms } = uploadPreview
-    setUploadPreview((prev) => ({ ...prev, open: false }))
-    try {
-      await http.post(`/api/videos/${videoId}/upload`, { platforms })
-      showSnackbar(`Upload started for ${platforms.join(", ")}`, "success")
-      refresh()
-    } catch (e) {
-      showSnackbar(e.response?.data?.detail || e.message, "error")
-    }
+  const openUploadPreview = (id, platforms = []) => {
+    const target = platforms[0]
+    const query = new URLSearchParams({ video: id })
+    if (target) query.set("target", target)
+    navigate(`/publish?${query.toString()}`)
   }
 
   const cancelJob = async (jobId) => {
@@ -714,57 +701,6 @@ export default function Library() {
       </Menu>
 
       <ConfirmDialog />
-
-      {/* Publish confirm. An upload is irreversible and public, so the exact
-          title and description that will go out are shown first — the same
-          preview the previous page carried, kept rather than simplified. */}
-      <Dialog open={uploadPreview.open} maxWidth="sm" fullWidth
-        onClose={() => setUploadPreview((prev) => ({ ...prev, open: false }))}>
-        <DialogTitle>
-          Confirm upload to{" "}
-          {uploadPreview.platforms.map((pl) => pl.charAt(0).toUpperCase() + pl.slice(1)).join(", ")}
-        </DialogTitle>
-        <DialogContent>
-          {uploadPreview.video && (
-            <Stack spacing={1.5} sx={{ pt: 1 }}>
-              {uploadPreview.platforms.includes("youtube") && (
-                <>
-                  <Typography variant="caption" color="text.secondary">YouTube title</Typography>
-                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                    {uploadPreview.video.youtube_title || uploadPreview.video.title || "(untitled)"}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">YouTube description</Typography>
-                  <Typography variant="body2" sx={{
-                    whiteSpace: "pre-wrap", maxHeight: 120, overflow: "auto", color: "text.secondary",
-                  }}>
-                    {uploadPreview.video.youtube_description || "(no description)"}
-                  </Typography>
-                </>
-              )}
-              {uploadPreview.platforms.includes("tiktok") && (
-                <>
-                  <Typography variant="caption" color="text.secondary">TikTok title</Typography>
-                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                    {uploadPreview.video.tiktok_title || uploadPreview.video.title || "(untitled)"}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">TikTok description</Typography>
-                  <Typography variant="body2" sx={{
-                    whiteSpace: "pre-wrap", maxHeight: 120, overflow: "auto", color: "text.secondary",
-                  }}>
-                    {uploadPreview.video.tiktok_description || "(no description)"}
-                  </Typography>
-                </>
-              )}
-            </Stack>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setUploadPreview((prev) => ({ ...prev, open: false }))}>
-            Cancel
-          </Button>
-          <Button variant="contained" onClick={doUpload}>Upload</Button>
-        </DialogActions>
-      </Dialog>
 
       <AssetDrawer
         item={drawerItem}
