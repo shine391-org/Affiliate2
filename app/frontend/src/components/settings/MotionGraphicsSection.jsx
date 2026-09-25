@@ -67,7 +67,7 @@ export default function MotionGraphicsSection() {
           pollRef.current = setTimeout(tick, 2000)
         } else {
           pollRef.current = null
-          showSnackbar("Lost contact with the server while installing — reload to check status.", "warning")
+          showSnackbar("Mất kết nối với máy chủ khi cài đặt — hãy tải lại để kiểm tra trạng thái.", "warning")
         }
         return
       }
@@ -77,9 +77,9 @@ export default function MotionGraphicsSection() {
       } else {
         pollRef.current = null
         if (data.installed && !data.error) {
-          showSnackbar("Motion Graphics ready — you can now render motion video locally.", "success")
+          showSnackbar("Đồ họa chuyển động đã sẵn sàng — giờ có thể kết xuất video chuyển động cục bộ.", "success")
         } else if (data.error) {
-          showSnackbar(`Motion Graphics install failed: ${data.error}`, "error")
+          showSnackbar(`Cài Đồ họa chuyển động thất bại: ${data.error}`, "error")
         }
       }
     }
@@ -113,10 +113,10 @@ export default function MotionGraphicsSection() {
         await fetchStatus()
         startPoll()
       } else {
-        showSnackbar(res.data?.error || "Could not start install", "error")
+        showSnackbar(res.data?.error || "Không thể bắt đầu cài đặt", "error")
       }
     } catch (e) {
-      showSnackbar(`Install failed: ${e.message}`, "error")
+      showSnackbar(`Cài đặt thất bại: ${e.message}`, "error")
     } finally {
       setBusy(false)
     }
@@ -129,9 +129,9 @@ export default function MotionGraphicsSection() {
       await http.post("/api/settings/motion-graphics/uninstall")
       setTestResult(null)
       await fetchStatus()
-      showSnackbar("Motion Graphics removed.", "success")
+      showSnackbar("Đã gỡ Đồ họa chuyển động.", "success")
     } catch (e) {
-      showSnackbar(`Uninstall failed: ${e.message}`, "error")
+      showSnackbar(`Gỡ cài đặt thất bại: ${e.message}`, "error")
     } finally {
       setBusy(false)
     }
@@ -181,21 +181,21 @@ export default function MotionGraphicsSection() {
     >
       <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ mb: 1 }}>
         <MovieFilterIcon sx={{ fontSize: 18, color: "primary.main" }} />
-        <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Motion Graphics</Typography>
+        <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Đồ họa chuyển động</Typography>
 
         {installed && (
           <>
-            <Chip size="small" color="success" variant="outlined" icon={<CheckCircleIcon sx={{ fontSize: 14 }} />} label="Installed" />
+            <Chip size="small" color="success" variant="outlined" icon={<CheckCircleIcon sx={{ fontSize: 14 }} />} label="Đã cài" />
             <Typography variant="caption" sx={{ color: "text.secondary" }}>
               {status.disk_size_mb || status.approx_download_mb} MB on disk
               {status.engine_cache_mb ? ` · +${status.engine_cache_mb} MB engine cache` : ""}
             </Typography>
           </>
         )}
-        {showInstall && <Chip size="small" variant="outlined" label="Optional" />}
-        {showUpdate && <Chip size="small" color="warning" variant="outlined" label="Update available" />}
-        {installing && <Chip size="small" color="info" variant="outlined" label="Installing…" />}
-        {!platform_supported && <Chip size="small" color="default" variant="outlined" label="Unsupported platform" />}
+        {showInstall && <Chip size="small" variant="outlined" label="Tùy chọn" />}
+        {showUpdate && <Chip size="small" color="warning" variant="outlined" label="Có bản cập nhật" />}
+        {installing && <Chip size="small" color="info" variant="outlined" label="Đang cài…" />}
+        {!platform_supported && <Chip size="small" color="default" variant="outlined" label="Nền tảng không hỗ trợ" />}
 
         <Box sx={{ flexGrow: 1 }} />
 
@@ -277,7 +277,7 @@ export default function MotionGraphicsSection() {
       )}
 
       <Dialog open={uninstallConfirm} onClose={() => setUninstallConfirm(false)}>
-        <DialogTitle>Remove Motion Graphics?</DialogTitle>
+        <DialogTitle>Gỡ Đồ họa chuyển động?</DialogTitle>
         <DialogContent>
           <DialogContentText sx={{ fontSize: "0.88rem" }}>
             This deletes the portable Node runtime and the HyperFrames engine
@@ -294,8 +294,8 @@ export default function MotionGraphicsSection() {
           </DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setUninstallConfirm(false)} disabled={busy}>Cancel</Button>
-          <Button onClick={uninstall} color="error" variant="contained" disabled={busy}>Remove</Button>
+          <Button onClick={() => setUninstallConfirm(false)} disabled={busy}>Hủy</Button>
+          <Button onClick={uninstall} color="error" variant="contained" disabled={busy}>Xóa</Button>
         </DialogActions>
       </Dialog>
     </Box>
