@@ -56,7 +56,7 @@ function ResultPreview({ jobId }) {
         <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, fontSize: "0.65rem", flex: 1 }}>
           {chapters.length} chương — dán vào mô tả YouTube
         </Typography>
-        <Tooltip title="Copy all chapters">
+        <Tooltip title="Sao chép tất cả chương">
           <IconButton size="small" onClick={() => copy(plainText)}>
             <ContentCopyIcon sx={{ fontSize: "1rem" }} />
           </IconButton>

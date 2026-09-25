@@ -68,7 +68,7 @@ export default function ToolAutoZoom() {
         <Alert severity="info" sx={{ fontSize: "0.82rem" }}>
           Needs clear speech (word timings drive the pulses). A clip with no
           detectable speech is returned unchanged. Run this{" "}
-          <strong>sau</strong> bước Thêm phụ đề for a synced caption + zoom combo.
+          <strong>sau</strong> bước Thêm phụ đề để đồng bộ phụ đề và hiệu ứng zoom.
         </Alert>
       </Stack>
     </ToolRunner>

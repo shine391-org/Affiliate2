@@ -87,7 +87,7 @@ function Field({ label, value, onCopy, multiline }) {
           {value}
         </Typography>
       </Box>
-      <Tooltip title="Copy">
+      <Tooltip title="Sao chép">
         <IconButton size="small" onClick={() => onCopy(value)} sx={{ flexShrink: 0 }}>
           <ContentCopyIcon sx={{ fontSize: "0.95rem" }} />
         </IconButton>
@@ -177,7 +177,7 @@ export default function ToolMetadata() {
               fullWidth
               autoFocus
               label="Chủ đề"
-              placeholder='e.g. "AI startup ideas for solo founders in 2026"'
+              placeholder='ví dụ: "Ý tưởng startup AI cho người sáng lập solo năm 2026"'
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
               slotProps={{ htmlInput: { maxLength: 500 } }}
