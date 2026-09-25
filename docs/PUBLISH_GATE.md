@@ -1,5 +1,11 @@
 # Phase 3.5 — Publish Gate
 
+> **Legacy overlay reference.** Phase F moved primary Publish ownership to the
+> canonical app: `GeneratedVideo` + explicit `publish_approved_at` +
+> `UploadAgent` + `/publish`. The candidate/remake gate documented below
+> remains compatibility evidence until native parity cleanup. Do not extend it
+> with new product behavior. See `docs/PHASE_F_CONVERGENCE.md`.
+
 Phase 3.5 turns an **APPROVED** final into an explicit per-platform publishing action.
 
 No platform publish is triggered by approval alone.
