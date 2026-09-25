@@ -82,7 +82,7 @@ export default function LocalizationProfilesSection({ settings }) {
   const discoverModels = async () => {
     const provider = settings?.ai_provider || ""
     if (!provider || provider === "anthropic") {
-      showSnackbar("Model discovery is not available for this AI connection", "warning")
+      showSnackbar("Kết nối AI này không hỗ trợ dò tìm mô hình", "warning")
       return
     }
     setDiscovering(true)
@@ -94,9 +94,9 @@ export default function LocalizationProfilesSection({ settings }) {
       })
       const models = data?.models || []
       setDiscoveredModels(models)
-      showSnackbar(models.length ? `Found ${models.length} models on the configured connection` : "No models returned", models.length ? "success" : "warning")
+      showSnackbar(models.length ? `Tìm thấy ${models.length} mô hình trên kết nối đã cấu hình` : "Không có mô hình nào được trả về", models.length ? "success" : "warning")
     } catch (err) {
-      showSnackbar(err.response?.data?.detail || "Model discovery failed", "error")
+      showSnackbar(err.response?.data?.detail || "Dò tìm mô hình thất bại", "error")
     } finally {
       setDiscovering(false)
     }
@@ -105,7 +105,7 @@ export default function LocalizationProfilesSection({ settings }) {
   const save = async () => {
     if (!draft) return
     if (!draft.translation_guardrails?.trim() || !draft.rewrite_guardrails?.trim()) {
-      showSnackbar("C6 and C7 semantic guardrails cannot be empty", "error")
+      showSnackbar("Guardrail ngữ nghĩa C6 và C7 không được để trống", "error")
       return
     }
     setBusy(true)
@@ -129,9 +129,9 @@ export default function LocalizationProfilesSection({ settings }) {
       setSelectedId(payload.id)
       setDraft(clone(data.profiles.find((p) => p.id === payload.id) || payload))
       setGlossaryText(glossaryToText(payload.glossary))
-      showSnackbar("Localization profile saved", "success")
+      showSnackbar("Đã lưu hồ sơ bản địa hóa", "success")
     } catch (err) {
-      showSnackbar(err.response?.data?.detail || err.message || "Profile save failed", "error")
+      showSnackbar(err.response?.data?.detail || err.message || "Lưu hồ sơ thất bại", "error")
     } finally {
       setBusy(false)
     }
@@ -143,7 +143,7 @@ export default function LocalizationProfilesSection({ settings }) {
     try {
       const { data } = await http.post(`/api/settings/localization-profiles/${selectedId}/default`)
       setStore(data)
-      showSnackbar("Default localization profile updated", "success")
+      showSnackbar("Đã cập nhật hồ sơ bản địa hóa mặc định", "success")
     } finally {
       setBusy(false)
     }
@@ -185,13 +185,13 @@ export default function LocalizationProfilesSection({ settings }) {
       const profile = data.profiles?.find((p) => p.id === nextId) || null
       setDraft(profile ? clone(profile) : null)
       setGlossaryText(glossaryToText(profile?.glossary))
-      showSnackbar("Localization profile removed", "info")
+      showSnackbar("Đã xóa hồ sơ bản địa hóa", "info")
     } finally {
       setBusy(false)
     }
   }
 
-  if (!draft) return <Typography variant="body2" color="text.secondary">Loading localization profiles…</Typography>
+  if (!draft) return <Typography variant="body2" color="text.secondary">Đang tải hồ sơ bản địa hóa…</Typography>
 
   return (
     <Stack spacing={2}>
@@ -202,30 +202,30 @@ export default function LocalizationProfilesSection({ settings }) {
 
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
         <FormControl size="small" fullWidth>
-          <InputLabel>Profile</InputLabel>
-          <Select value={selectedId} label="Profile" onChange={(e) => setSelectedId(e.target.value)}>
+          <InputLabel>Hồ sơ</InputLabel>
+          <Select value={selectedId} label="Hồ sơ" onChange={(e) => setSelectedId(e.target.value)}>
             {store.profiles.map((p) => (
               <MenuItem key={p.id} value={p.id}>
                 {p.name}{p.id === store.default_profile_id ? " · default" : ""}
               </MenuItem>
             ))}
             {!store.profiles.some((p) => p.id === selectedId) && draft && (
-              <MenuItem value={selectedId}>{draft.name} · unsaved</MenuItem>
+              <MenuItem value={selectedId}>{draft.name} · chưa lưu</MenuItem>
             )}
           </Select>
         </FormControl>
-        <Button startIcon={<AddOutlinedIcon />} variant="outlined" onClick={addProfile} disabled={busy}>New</Button>
+        <Button startIcon={<AddOutlinedIcon />} variant="outlined" onClick={addProfile} disabled={busy}>Mới</Button>
       </Stack>
 
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
-        <TextField size="small" fullWidth label="Profile ID" value={draft.id || ""} onChange={(e) => patch("id", e.target.value)} />
-        <TextField size="small" fullWidth label="Name" value={draft.name || ""} onChange={(e) => patch("name", e.target.value)} />
+        <TextField size="small" fullWidth label="ID hồ sơ" value={draft.id || ""} onChange={(e) => patch("id", e.target.value)} />
+        <TextField size="small" fullWidth label="Tên" value={draft.name || ""} onChange={(e) => patch("name", e.target.value)} />
       </Stack>
 
       <Box sx={{ p: 1.5, border: 1, borderColor: "divider", borderRadius: 2 }}>
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }}>
           <Box sx={{ flex: 1 }}>
-            <Typography variant="subtitle2">Configured AI connection</Typography>
+            <Typography variant="subtitle2">Kết nối AI đã cấu hình</Typography>
             <Typography variant="caption" color="text.secondary">
               {globalProvider} · global/default model {globalModel}
             </Typography>
@@ -243,7 +243,7 @@ export default function LocalizationProfilesSection({ settings }) {
         {discoveredModels.length > 0 && (
           <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
             {discoveredModels.slice(0, 8).map((model) => <Chip key={model} label={model} size="small" variant="outlined" />)}
-            {discoveredModels.length > 8 && <Chip label={`+${discoveredModels.length - 8} more`} size="small" />}
+            {discoveredModels.length > 8 && <Chip label={`+${discoveredModels.length - 8} mô hình nữa`} size="small" />}
           </Stack>
         )}
       </Box>
@@ -255,50 +255,50 @@ export default function LocalizationProfilesSection({ settings }) {
       <Accordion defaultExpanded disableGutters>
         <AccordionSummary expandIcon={<ExpandMoreOutlinedIcon />}>
           <Box>
-            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Translation (C6)</Typography>
-            <Typography variant="caption" color="text.secondary">Faithful translation model, style, instructions and glossary</Typography>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Bản dịch (C6)</Typography>
+            <Typography variant="caption" color="text.secondary">Mô hình dịch chính xác, phong cách, hướng dẫn và bảng thuật ngữ</Typography>
           </Box>
         </AccordionSummary>
         <AccordionDetails>
           <Stack spacing={2}>
             <FormControl size="small" fullWidth>
-              <InputLabel>Translation style</InputLabel>
-              <Select value={draft.translation_preset || "natural_vietnamese"} label="Translation style" onChange={(e) => patch("translation_preset", e.target.value)}>
+              <InputLabel>Phong cách dịch</InputLabel>
+              <Select value={draft.translation_preset || "natural_vietnamese"} label="Phong cách dịch" onChange={(e) => patch("translation_preset", e.target.value)}>
                 {PRESETS.map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
               </Select>
             </FormControl>
             <TextField
-              size="small" fullWidth label="C6 translation model"
+              size="small" fullWidth label="Mô hình dịch C6"
               value={draft.translation_model || ""}
               onChange={(e) => patch("translation_model", e.target.value)}
               placeholder={globalModel}
               inputProps={{ list: "localization-model-suggestions" }}
-              helperText="Blank = inherit the global/default model. Type any compatible model ID or use Discover models."
+              helperText="Để trống = dùng mô hình mặc định/toàn cục. Nhập ID mô hình tương thích hoặc dùng Dò tìm mô hình."
             />
             <TextField
-              size="small" fullWidth label="Compatible Base URL override (optional)"
+              size="small" fullWidth label="Ghi đè Base URL tương thích (tùy chọn)"
               value={draft.translation_base_url || ""}
               onChange={(e) => patch("translation_base_url", e.target.value)}
-              placeholder={settings?.ai_base_url || "inherit Settings endpoint"}
-              helperText="Connection credentials remain in AI Connections."
+              placeholder={settings?.ai_base_url || "kế thừa endpoint trong Cài đặt"}
+              helperText="Thông tin xác thực kết nối vẫn nằm trong Kết nối AI."
             />
             <Alert severity="info" variant="outlined">
               Translation instructions are additive. Semantic guardrails are editable in Prompt Guardrails below; the parser protocol (stable IDs/order and JSON shape) remains app-owned.
             </Alert>
             <TextField
               size="small" multiline minRows={4}
-              label="Translation instructions"
+              label="Hướng dẫn dịch"
               value={draft.translation_instructions || ""}
               onChange={(e) => patch("translation_instructions", e.target.value)}
-              helperText="Add domain/style preferences for this profile. Leave blank to use the profile semantic guardrails + preset only."
+              helperText="Thêm ưu tiên về lĩnh vực/phong cách cho hồ sơ. Để trống để chỉ dùng guardrail ngữ nghĩa + preset."
             />
             <TextField
               size="small" multiline minRows={4}
-              label="Glossary"
+              label="Bảng thuật ngữ"
               value={glossaryText}
               onChange={(e) => setGlossaryText(e.target.value)}
               placeholder={"产品 => sản phẩm\n免税 => miễn thuế"}
-              helperText="One term per line: source => target"
+              helperText="Mỗi dòng một thuật ngữ: nguồn => đích"
             />
           </Stack>
         </AccordionDetails>
@@ -307,61 +307,61 @@ export default function LocalizationProfilesSection({ settings }) {
       <Accordion disableGutters>
         <AccordionSummary expandIcon={<ExpandMoreOutlinedIcon />}>
           <Box>
-            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Voice & Timing (C7)</Typography>
-            <Typography variant="caption" color="text.secondary">Independent rewrite model, voice defaults and timing policy</Typography>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Giọng đọc & Nhịp (C7)</Typography>
+            <Typography variant="caption" color="text.secondary">Mô hình viết lại độc lập, giọng mặc định và chính sách nhịp</Typography>
           </Box>
         </AccordionSummary>
         <AccordionDetails>
           <Stack spacing={2}>
             <TextField
-              size="small" fullWidth label="C7 duration rewrite model"
+              size="small" fullWidth label="Mô hình viết lại thời lượng C7"
               value={draft.rewrite_model || ""}
               onChange={(e) => patch("rewrite_model", e.target.value)}
               placeholder={globalModel}
               inputProps={{ list: "localization-model-suggestions" }}
-              helperText="May use a smaller/faster model than C6. Blank = inherit global/default model."
+              helperText="Có thể dùng mô hình nhỏ/nhanh hơn C6. Để trống = dùng mô hình mặc định/toàn cục."
             />
             <TextField
-              size="small" fullWidth label="Compatible Base URL override (optional)"
+              size="small" fullWidth label="Ghi đè Base URL tương thích (tùy chọn)"
               value={draft.rewrite_base_url || ""}
               onChange={(e) => patch("rewrite_base_url", e.target.value)}
-              placeholder={settings?.ai_base_url || "inherit Settings endpoint"}
+              placeholder={settings?.ai_base_url || "kế thừa endpoint trong Cài đặt"}
             />
             <Alert severity="info" variant="outlined">
               Rewrite instructions are additive. Semantic guardrails are editable in Prompt Guardrails below; the parser protocol (stable IDs/order and JSON shape) remains app-owned.
             </Alert>
             <TextField
               size="small" multiline minRows={4}
-              label="C7 rewrite instructions"
+              label="Hướng dẫn viết lại C7"
               value={draft.rewrite_instructions || ""}
               onChange={(e) => patch("rewrite_instructions", e.target.value)}
               placeholder="Example: Prefer compact spoken Vietnamese; remove filler before facts; keep product features, quantities and causal meaning."
-              helperText="Applied only to C7 duration rewrite for this profile, after the editable semantic guardrails."
+              helperText="Chỉ áp dụng cho bước viết lại thời lượng C7 của hồ sơ này, sau guardrail ngữ nghĩa có thể chỉnh sửa."
             />
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
               <FormControl size="small" fullWidth>
-                <InputLabel>TTS provider</InputLabel>
-                <Select value={draft.tts_provider || ""} label="TTS provider" onChange={(e) => patch("tts_provider", e.target.value || null)}>
-                  <MenuItem value=""><em>Inherit TTS connection</em></MenuItem>
+                <InputLabel>Nhà cung cấp TTS</InputLabel>
+                <Select value={draft.tts_provider || ""} label="Nhà cung cấp TTS" onChange={(e) => patch("tts_provider", e.target.value || null)}>
+                  <MenuItem value=""><em>Kế thừa kết nối TTS</em></MenuItem>
                   {["edge_tts", "openai_tts", "openai_compatible_tts", "azure_tts", "elevenlabs", "gpt_sovits"].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
                 </Select>
               </FormControl>
-              <TextField size="small" fullWidth label="Voice ID" value={draft.tts_voice || ""} onChange={(e) => patch("tts_voice", e.target.value || null)} placeholder={settings?.preferred_tts_voice || "inherit language/provider default"} />
+              <TextField size="small" fullWidth label="ID giọng đọc" value={draft.tts_voice || ""} onChange={(e) => patch("tts_voice", e.target.value || null)} placeholder={settings?.preferred_tts_voice || "kế thừa mặc định ngôn ngữ/nhà cung cấp"} />
             </Stack>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
-              <TextField size="small" type="number" fullWidth label="Preferred speed ceiling" value={draft.dub_speed_accept ?? 1.15} onChange={(e) => patch("dub_speed_accept", Number(e.target.value))} inputProps={{ step: 0.01, min: 1, max: 2 }} />
-              <TextField size="small" type="number" fullWidth label="Hard speed ceiling" value={draft.dub_speed_max ?? 1.3} onChange={(e) => patch("dub_speed_max", Number(e.target.value))} inputProps={{ step: 0.01, min: 1, max: 2 }} />
-              <TextField size="small" type="number" fullWidth label="Rewrite attempts" value={draft.dub_rewrite_attempts ?? 2} onChange={(e) => patch("dub_rewrite_attempts", Number(e.target.value))} inputProps={{ step: 1, min: 0, max: 5 }} />
+              <TextField size="small" type="number" fullWidth label="Giới hạn tốc độ ưu tiên" value={draft.dub_speed_accept ?? 1.15} onChange={(e) => patch("dub_speed_accept", Number(e.target.value))} inputProps={{ step: 0.01, min: 1, max: 2 }} />
+              <TextField size="small" type="number" fullWidth label="Giới hạn tốc độ tối đa" value={draft.dub_speed_max ?? 1.3} onChange={(e) => patch("dub_speed_max", Number(e.target.value))} inputProps={{ step: 0.01, min: 1, max: 2 }} />
+              <TextField size="small" type="number" fullWidth label="Số lần viết lại" value={draft.dub_rewrite_attempts ?? 2} onChange={(e) => patch("dub_rewrite_attempts", Number(e.target.value))} inputProps={{ step: 1, min: 0, max: 5 }} />
             </Stack>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
               <FormControl size="small" fullWidth>
-                <InputLabel>Video retime</InputLabel>
-                <Select value={draft.video_retime_mode || "fallback"} label="Video retime" onChange={(e) => patch("video_retime_mode", e.target.value)}>
-                  <MenuItem value="off">Off</MenuItem>
-                  <MenuItem value="fallback">Fallback only</MenuItem>
+                <InputLabel>Điều chỉnh tốc độ video</InputLabel>
+                <Select value={draft.video_retime_mode || "fallback"} label="Điều chỉnh tốc độ video" onChange={(e) => patch("video_retime_mode", e.target.value)}>
+                  <MenuItem value="off">Tắt</MenuItem>
+                  <MenuItem value="fallback">Chỉ dự phòng</MenuItem>
                 </Select>
               </FormControl>
-              <TextField size="small" type="number" fullWidth label="Max video slowdown" value={draft.video_retime_max_slowdown ?? 1.12} onChange={(e) => patch("video_retime_max_slowdown", Number(e.target.value))} inputProps={{ step: 0.01, min: 1, max: 1.35 }} />
+              <TextField size="small" type="number" fullWidth label="Mức làm chậm video tối đa" value={draft.video_retime_max_slowdown ?? 1.12} onChange={(e) => patch("video_retime_max_slowdown", Number(e.target.value))} inputProps={{ step: 0.01, min: 1, max: 1.35 }} />
             </Stack>
           </Stack>
         </AccordionDetails>
@@ -463,14 +463,14 @@ export default function LocalizationProfilesSection({ settings }) {
               <FormControl size="small" fullWidth>
                 <InputLabel>Alignment</InputLabel>
                 <Select value={draft.alignment_mode || "whisperx"} label="Alignment" onChange={(e) => patch("alignment_mode", e.target.value)}>
-                  <MenuItem value="off">Off</MenuItem>
+                  <MenuItem value="off">Tắt</MenuItem>
                   <MenuItem value="whisperx">WhisperX</MenuItem>
                 </Select>
               </FormControl>
               <FormControl size="small" fullWidth>
                 <InputLabel>Diarization</InputLabel>
                 <Select value={draft.diarization_mode || "auto"} label="Diarization" onChange={(e) => patch("diarization_mode", e.target.value)}>
-                  <MenuItem value="off">Off</MenuItem>
+                  <MenuItem value="off">Tắt</MenuItem>
                   <MenuItem value="auto">Auto</MenuItem>
                   <MenuItem value="whisperx">WhisperX / pyannote</MenuItem>
                 </Select>

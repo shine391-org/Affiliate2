@@ -37,7 +37,7 @@ export default function DownloadSessionSection({ settings, updateSettings }) {
         download_cookie_browser: browser,
         download_cookie_profile: profile,
       })
-      showSnackbar("Download browser session saved", "success")
+      showSnackbar("Đã lưu phiên trình duyệt để tải xuống", "success")
     } finally {
       setSaving(false)
     }
@@ -53,7 +53,7 @@ export default function DownloadSessionSection({ settings, updateSettings }) {
       })
       setProbe(data)
       if (data.ok) {
-        showSnackbar(`Browser session readable via ${data.resolved_browser || browser}`, "success")
+        showSnackbar(`Đọc được phiên trình duyệt qua ${data.resolved_browser || browser}`, "success")
       } else {
         showSnackbar(
           data.error || "Browser cookie store is not readable",
@@ -61,7 +61,7 @@ export default function DownloadSessionSection({ settings, updateSettings }) {
         )
       }
     } catch (err) {
-      const message = err?.response?.data?.detail || "Browser session test failed"
+      const message = err?.response?.data?.detail || "Kiểm tra phiên trình duyệt thất bại"
       setProbe({ ok: false, error: message })
       showSnackbar(message, "error")
     } finally {
@@ -87,19 +87,19 @@ export default function DownloadSessionSection({ settings, updateSettings }) {
 
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
           <FormControl size="small" fullWidth>
-            <InputLabel>Browser</InputLabel>
-            <Select value={browser} label="Browser" onChange={(event) => { setBrowser(event.target.value); setProbe(null) }}>
+            <InputLabel>Trình duyệt</InputLabel>
+            <Select value={browser} label="Trình duyệt" onChange={(event) => { setBrowser(event.target.value); setProbe(null) }}>
               {BROWSERS.map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
             </Select>
           </FormControl>
           <TextField
             size="small"
             fullWidth
-            label="Browser profile (optional)"
+            label="Hồ sơ trình duyệt (tùy chọn)"
             value={profile}
             onChange={(event) => { setProfile(event.target.value); setProbe(null) }}
             placeholder="Default"
-            helperText="Leave blank to let yt-dlp use the browser's most recently accessed profile. Enter e.g. Default or Profile 1 when you need an exact login profile."
+            helperText="Để trống để yt-dlp dùng hồ sơ trình duyệt được truy cập gần nhất. Nhập Default hoặc Profile 1 nếu cần đúng hồ sơ đã đăng nhập."
           />
         </Stack>
 
@@ -130,7 +130,7 @@ export default function DownloadSessionSection({ settings, updateSettings }) {
                 Cookie store is readable from <strong>{probe.resolved_browser}</strong>
                 {probe.profile ? ` / ${probe.profile}` : ""}.
               </span>
-              <Chip size="small" label={`${probe.cookie_count || 0} total`} />
+              <Chip size="small" label={`${probe.cookie_count || 0} tổng`} />
               <Chip size="small" label={`Douyin ${probe.douyin_cookie_count || 0}`} />
               <Chip size="small" label={`TikTok ${probe.tiktok_cookie_count || 0}`} />
             </Stack>
