@@ -409,7 +409,7 @@ export default function Tools() {
               </Box>
             ) : (
               <Typography variant="body2" sx={{ color: "text.secondary", textAlign: "center", py: 6 }}>
-                No utilities match “{query.trim()}”. Try “caption”, “audio”, “speed”, or “download”.
+                Không có tiện ích nào khớp “{query.trim()}”. Hãy thử “phụ đề”, “âm thanh”, “tốc độ” hoặc “tải xuống”.
               </Typography>
             )
           ) : (

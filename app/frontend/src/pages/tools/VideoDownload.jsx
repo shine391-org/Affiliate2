@@ -421,7 +421,7 @@ export default function VideoDownload() {
             )}
             {failed && (
               <Alert severity="error">
-                {terminal?.step || "The download failed."}
+                {terminal?.step || "Tải xuống thất bại."}
               </Alert>
             )}
           </Stack>

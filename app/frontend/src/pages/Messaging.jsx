@@ -226,7 +226,7 @@ export default function Messaging() {
       )
     } catch (e) {
       setTgState(STATE.DISCONNECTED)
-      showSnackbar(e.response?.data?.detail || "Connect failed", "error")
+      showSnackbar(e.response?.data?.detail || "Kết nối thất bại", "error")
     } finally {
       setSaving(false)
     }
@@ -239,7 +239,7 @@ export default function Messaging() {
       setTgInfo({ bot_username: "", bot_url: "", chat_id: "" })
       showSnackbar("Telegram đã ngắt kết nối", "info")
     } catch (e) {
-      showSnackbar(e.response?.data?.detail || "Disconnect failed", "error")
+      showSnackbar(e.response?.data?.detail || "Ngắt kết nối thất bại", "error")
     }
   }
 
@@ -249,7 +249,7 @@ export default function Messaging() {
       await http.post("/api/messaging/telegram/test")
       showSnackbar("Đã gửi tin nhắn thử — kiểm tra Telegram", "success")
     } catch (e) {
-      showSnackbar(e.response?.data?.detail || "Test failed — did you send /start to the bot?", "error")
+      showSnackbar(e.response?.data?.detail || "Gửi thử thất bại — bạn đã gửi /start cho bot chưa?", "error")
     } finally {
       setTesting(false)
     }
@@ -264,7 +264,7 @@ export default function Messaging() {
       showSnackbar("Đang tạo mã QR — hãy quét bằng điện thoại", "info")
     } catch (e) {
       setWaState(WA_STATE.DISCONNECTED)
-      showSnackbar(e.response?.data?.detail || "WhatsApp connect failed", "error")
+      showSnackbar(e.response?.data?.detail || "Kết nối WhatsApp thất bại", "error")
     } finally {
       setWaSaving(false)
     }
@@ -278,7 +278,7 @@ export default function Messaging() {
       setWaQr("")
       showSnackbar("WhatsApp đã ngắt kết nối", "info")
     } catch (e) {
-      showSnackbar(e.response?.data?.detail || "Disconnect failed", "error")
+      showSnackbar(e.response?.data?.detail || "Ngắt kết nối thất bại", "error")
     }
   }
 
@@ -288,7 +288,7 @@ export default function Messaging() {
       await http.post("/api/messaging/whatsapp/test")
       showSnackbar("Đã gửi tin nhắn thử — kiểm tra WhatsApp", "success")
     } catch (e) {
-      showSnackbar(e.response?.data?.detail || "Test failed — is WhatsApp paired?", "error")
+      showSnackbar(e.response?.data?.detail || "Gửi thử thất bại — WhatsApp đã ghép nối chưa?", "error")
     } finally {
       setWaTesting(false)
     }
@@ -317,7 +317,7 @@ export default function Messaging() {
       )
     } catch (e) {
       setDcState(DC_STATE.DISCONNECTED)
-      showSnackbar(e.response?.data?.detail || "Discord connect failed", "error")
+      showSnackbar(e.response?.data?.detail || "Kết nối Discord thất bại", "error")
     } finally {
       setDcSaving(false)
     }
@@ -330,7 +330,7 @@ export default function Messaging() {
       setDcInfo({ bot_username: "", bot_invite_url: "", chat_id: "", error: "" })
       showSnackbar("Discord đã ngắt kết nối", "info")
     } catch (e) {
-      showSnackbar(e.response?.data?.detail || "Disconnect failed", "error")
+      showSnackbar(e.response?.data?.detail || "Ngắt kết nối thất bại", "error")
     }
   }
 
@@ -340,7 +340,7 @@ export default function Messaging() {
       await http.post("/api/messaging/discord/test")
       showSnackbar("Đã gửi tin nhắn thử — kiểm tra Discord", "success")
     } catch (e) {
-      showSnackbar(e.response?.data?.detail || "Test failed — DM your bot first", "error")
+      showSnackbar(e.response?.data?.detail || "Gửi thử thất bại — hãy nhắn riêng cho bot trước", "error")
     } finally {
       setDcTesting(false)
     }
@@ -373,7 +373,7 @@ export default function Messaging() {
       )
     } catch (e) {
       setSlState(SL_STATE.DISCONNECTED)
-      showSnackbar(e.response?.data?.detail || "Slack connect failed", "error")
+      showSnackbar(e.response?.data?.detail || "Kết nối Slack thất bại", "error")
     } finally {
       setSlSaving(false)
     }
@@ -386,7 +386,7 @@ export default function Messaging() {
       setSlInfo({ bot_user_id: "", team_name: "", chat_id: "", error: "" })
       showSnackbar("Slack đã ngắt kết nối", "info")
     } catch (e) {
-      showSnackbar(e.response?.data?.detail || "Disconnect failed", "error")
+      showSnackbar(e.response?.data?.detail || "Ngắt kết nối thất bại", "error")
     }
   }
 
@@ -396,7 +396,7 @@ export default function Messaging() {
       await http.post("/api/messaging/slack/test")
       showSnackbar("Đã gửi tin nhắn thử — kiểm tra Slack", "success")
     } catch (e) {
-      showSnackbar(e.response?.data?.detail || "Test failed — DM your bot first", "error")
+      showSnackbar(e.response?.data?.detail || "Gửi thử thất bại — hãy nhắn riêng cho bot trước", "error")
     } finally {
       setSlTesting(false)
     }
@@ -635,7 +635,7 @@ export default function Messaging() {
                 straight from your phone. Pairs in seconds, just like WhatsApp Web.
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Click Connect to generate a QR code, then open WhatsApp → Settings → Linked
+                Bấm Kết nối để tạo mã QR, sau đó mở WhatsApp → Cài đặt → Thiết bị liên kết
                 Devices → Link a Device to scan it.
               </Typography>
               <Box>
@@ -651,7 +651,7 @@ export default function Messaging() {
                   sx={{ bgcolor: "#25D366", "&:hover": { bgcolor: "#128C7E" } }}
                 >
                   {waState === WA_STATE.PAIRING
-                    ? "Waiting for scan…"
+                    ? "Đang chờ quét…"
                     : waSaving ? "Generating QR…" : "Connect WhatsApp"}
                 </Button>
               </Box>
@@ -789,7 +789,7 @@ export default function Messaging() {
             <Box sx={{ flex: 1 }}>
               <Typography variant="h6" sx={{ fontWeight: 600 }}>Slack</Typography>
               <Typography variant="caption" color="text.secondary">
-                Socket Mode — no public URL needed. DM your bot to chat and get notifications.
+                Socket Mode — không cần URL công khai. Nhắn riêng cho bot để trò chuyện và nhận thông báo.
               </Typography>
             </Box>
             {slStatusChip()}
@@ -840,8 +840,8 @@ export default function Messaging() {
           {slState === SL_STATE.AWAITING_DM && (
             <Stack spacing={2}>
               <Alert severity="info" variant="outlined">
-                Bot online{slInfo.team_name ? ` in ${slInfo.team_name}` : ""}. Open Slack and
-                DM your bot (search its name in the sidebar) to activate notifications.
+                Bot đang online{slInfo.team_name ? ` trong ${slInfo.team_name}` : ""}. Mở Slack và
+                nhắn riêng cho bot (tìm tên bot ở thanh bên) để bật thông báo.
               </Alert>
               <Stack direction="row" spacing={1.5}>
                 <Button variant="outlined" onClick={fetchStatus}>Làm mới trạng thái</Button>
