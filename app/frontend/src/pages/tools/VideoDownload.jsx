@@ -363,7 +363,7 @@ export default function VideoDownload() {
                   value={job?.percent || 0}
                 />
                 <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: "block" }}>
-                  {job?.step || "Starting…"}
+                  {job?.step || "Đang bắt đầu…"}
                 </Typography>
               </Box>
             )}
@@ -374,11 +374,11 @@ export default function VideoDownload() {
                 icon={<CheckCircleOutlinedIcon />}
                 action={
                   <Button size="small" onClick={() => navigate("/library")}>
-                    Open Library
+                    Mở Thư viện
                   </Button>
                 }
               >
-                {finalStep || terminal?.step || "Download complete."}
+                {finalStep || terminal?.step || "Tải xuống hoàn tất."}
               </Alert>
             )}
 
@@ -407,12 +407,12 @@ export default function VideoDownload() {
                     )}
                     {v.extras_dropped && (
                       <Typography variant="caption" color="warning.main">
-                        embed extras (cover art / metadata) couldn't be added to this file
+                        không thể nhúng dữ liệu bổ sung (ảnh bìa / metadata) vào tệp này
                       </Typography>
                     )}
                     {(v.subtitle_files || []).length > 0 && (
                       <Typography variant="caption" color="text.secondary">
-                        subtitles saved next to the video: {v.subtitle_files.join(", ")}
+                        phụ đề đã lưu cạnh video: {v.subtitle_files.join(", ")}
                       </Typography>
                     )}
                   </Stack>

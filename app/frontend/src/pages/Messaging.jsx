@@ -855,7 +855,7 @@ export default function Messaging() {
           {(slState === SL_STATE.DISCONNECTED || slState === SL_STATE.CONNECTING) && (
             <Stack spacing={2}>
               <Typography variant="body2" color="text.secondary">
-                Create a Slack app at{" "}
+                Tạo ứng dụng Slack tại{" "}
                 <Link href="https://api.slack.com/apps" target="_blank" rel="noreferrer">api.slack.com/apps</Link>.
                 Bật <strong>Socket Mode</strong>, tạo token cấp ứng dụng với{" "}
                 <code>connections:write</code>, và cài bot vào workspace với các scope{" "}
@@ -864,7 +864,7 @@ export default function Messaging() {
                 <code>message.im</code> .
               </Typography>
               <TextField
-                label="Bot token (xoxb-…)"
+                label="Token bot (xoxb-…)"
                 type="password"
                 fullWidth
                 size="small"
@@ -875,7 +875,7 @@ export default function Messaging() {
                 autoComplete="off"
               />
               <TextField
-                label="App-level token (xapp-…)"
+                label="Token cấp ứng dụng (xapp-…)"
                 type="password"
                 fullWidth
                 size="small"

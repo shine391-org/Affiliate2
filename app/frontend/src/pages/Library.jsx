@@ -301,7 +301,7 @@ export default function Library() {
       showSnackbar(data.message || "Đã nhập", "success")
       refresh()
     } catch (e) {
-      showSnackbar(e.response?.data?.detail || "Import failed", "error")
+      showSnackbar(e.response?.data?.detail || "Nhập tệp thất bại", "error")
     } finally {
       setImporting(false)
     }
@@ -320,7 +320,7 @@ export default function Library() {
     const del = DELETE_BY_SOURCE[item.source]
     if (!del) {
       showSnackbar(
-        "Music tracks live in storage/music/ — remove the file there", "info",
+        "Tệp nhạc nằm trong storage/music/ — hãy xóa trực tiếp tại đó", "info",
       )
       return
     }
@@ -330,12 +330,12 @@ export default function Library() {
       refresh()  // facet counts and pageCount come from the server
       showSnackbar("Đã xóa", "success")
     } catch (e) {
-      showSnackbar(e.response?.data?.detail || "Could not delete that item", "error")
+      showSnackbar(e.response?.data?.detail || "Không thể xóa mục này", "error")
     }
   }
 
   const confirmDeleteOne = (item) => openConfirm(
-    "Delete this item?",
+    "Xóa mục này?",
     `“${item.title}” sẽ bị xóa khỏi ổ đĩa. Không thể hoàn tác.`,
     () => deleteOne(item),
   )
@@ -384,8 +384,8 @@ export default function Library() {
     refresh()
     showSnackbar(
       failures.length
-        ? `Deleted ${ok}; ${failures.length} could not be deleted`
-        : `Deleted ${ok} item${ok === 1 ? "" : "s"}`,
+        ? `Đã xóa ${ok}; ${failures.length} mục không thể xóa`
+        : `Đã xóa ${ok} mục`,
       failures.length ? "warning" : "success",
     )
   }
@@ -406,7 +406,7 @@ export default function Library() {
       await http.delete(`/api/jobs/${jobId}`)
       showSnackbar("Đã hủy tác vụ", "info")
     } catch (e) {
-      showSnackbar(e.response?.data?.detail || "Could not cancel that job", "error")
+      showSnackbar(e.response?.data?.detail || "Không thể hủy tác vụ này", "error")
     }
   }
 
@@ -715,7 +715,7 @@ export default function Library() {
         // Same confirm every other delete route gets — the drawer must not be
         // the one place a single click destroys a file.
         onConfirmDelete={(item, perform) => openConfirm(
-          "Delete this item?",
+          "Xóa mục này?",
           `“${item.title}” sẽ bị xóa khỏi ổ đĩa. Không thể hoàn tác.`,
           perform,
         )}

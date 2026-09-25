@@ -319,7 +319,7 @@ export default function Publish() {
 
                   <TextField label="Tiêu đề xuất bản" value={title} onChange={(e) => setTitle(e.target.value)}
                     inputProps={{ maxLength: 150 }} helperText={`${title.length}/150`} fullWidth />
-                  <TextField label="Caption / mô tả" value={caption} onChange={(e) => setCaption(e.target.value)}
+                  <TextField label="Nội dung mô tả" value={caption} onChange={(e) => setCaption(e.target.value)}
                     multiline minRows={4} inputProps={{ maxLength: 5000 }} helperText={`${caption.length}/5000`} fullWidth />
                 </Stack>
               </Stack>
