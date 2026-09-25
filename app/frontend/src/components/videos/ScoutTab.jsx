@@ -11,7 +11,7 @@ export default function ScoutTab({ jobs, scoutResults, scoutTotal = 0, onFetchRe
       {scoutJobs.length > 0 && (
         <Stack direction="row" spacing={0.5} flexWrap="wrap" sx={{ mb: 2 }}>
           <Chip
-            label="All Results"
+            label="Tất cả kết quả"
             onClick={() => { setSelectedJobId(null); onFetchResults(null, 0, rowsPerPage) }}
             color={!selectedJobId ? "primary" : "default"}
             variant={!selectedJobId ? "filled" : "outlined"}
@@ -46,8 +46,8 @@ export default function ScoutTab({ jobs, scoutResults, scoutTotal = 0, onFetchRe
         </>
       ) : (
         <Box sx={{ textAlign: "center", py: 8, color: "text.secondary" }}>
-          <Typography variant="h6" sx={{ mb: 0.5 }}>No scout results yet</Typography>
-          <Typography variant="body2">Ask the chat assistant to scout trending videos for your niche.</Typography>
+          <Typography variant="h6" sx={{ mb: 0.5 }}>Chưa có kết quả quét</Typography>
+          <Typography variant="body2">Hãy nhờ trợ lý quét video đang lên trong ngách của bạn.</Typography>
         </Box>
       )}
     </Box>
