@@ -5,14 +5,14 @@ import { glassSelectedGlow } from "../../utils/glassFx"
 // ── Visual style palettes — id maps directly to the backend's
 //    `visual_style` param (cinematic/vlog/card/educational/documentary).
 export const STYLES = [
-  { id: "cinematic",   label: "Cinematic",   tag: "Movie-trailer feel",   cA: "#1B5E5F", cB: "#C2552E" },
-  { id: "vlog",        label: "Vlog",        tag: "Personal · handheld",  cA: "#C58A4A", cB: "#5C3E20" },
-  { id: "card",        label: "Quote / Card",tag: "Text moments · moody", cA: "#1E1B2E", cB: "#0A0810" },
-  { id: "educational", label: "Educational", tag: "Clean · diagram",      cA: "#2B4566", cB: "#B7D2E8" },
-  { id: "documentary", label: "Documentary", tag: "Factual · grain",      cA: "#4A5568", cB: "#1A202C" },
-  { id: "noir",        label: "Noir",        tag: "B&W · high contrast",  cA: "#2A2A2E", cB: "#0B0B0D" },
-  { id: "neon",        label: "Neon",        tag: "Cyberpunk · vivid",    cA: "#12063A", cB: "#3A0F58" },
-  { id: "vintage",     label: "Vintage",     tag: "Retro · faded film",   cA: "#C9A46B", cB: "#6B4E32" },
+  { id: "cinematic",   label: "Cinematic",   tag: "Cảm giác trailer phim",   cA: "#1B5E5F", cB: "#C2552E" },
+  { id: "vlog",        label: "Vlog",        tag: "Cá nhân · cầm tay",  cA: "#C58A4A", cB: "#5C3E20" },
+  { id: "card",        label: "Trích dẫn / Thẻ",tag: "Khoảnh khắc chữ · cảm xúc", cA: "#1E1B2E", cB: "#0A0810" },
+  { id: "educational", label: "Giáo dục", tag: "Sạch · sơ đồ",      cA: "#2B4566", cB: "#B7D2E8" },
+  { id: "documentary", label: "Tài liệu", tag: "Thực tế · hạt phim",      cA: "#4A5568", cB: "#1A202C" },
+  { id: "noir",        label: "Noir",        tag: "Đen trắng · tương phản cao",  cA: "#2A2A2E", cB: "#0B0B0D" },
+  { id: "neon",        label: "Neon",        tag: "Cyberpunk · rực",    cA: "#12063A", cB: "#3A0F58" },
+  { id: "vintage",     label: "Vintage",     tag: "Retro · màu phim nhạt",   cA: "#C9A46B", cB: "#6B4E32" },
 ]
 
 // ── Procedural live preview canvas ─────────────────────────────────

@@ -130,14 +130,14 @@ export default function TemplateGallery({ mode, onApply, variant }) {
       const resp = await http.post(`/api/templates/refresh?mode=${mode}&niche=${encodeURIComponent(refreshNiche.trim())}`)
       if (resp.data?.templates?.length) {
         setTrendingTemplates(prev => [...resp.data.templates, ...prev.filter(t => t.niche !== refreshNiche.trim().toLowerCase())])
-        showSnackbar(`Generated ${resp.data.templates.length} trending templates`, "success")
+        showSnackbar(`Đã tạo ${resp.data.templates.length} mẫu đang thịnh hành`, "success")
       } else {
-        showSnackbar(resp.data?.message || resp.data?.error || "No templates generated — try a different niche", "warning")
+        showSnackbar(resp.data?.message || resp.data?.error || "Không tạo được mẫu — hãy thử ngách khác", "warning")
       }
     } catch (err) {
       console.error("Template generation failed:", err)
-      const detail = err.response?.data?.detail || err.response?.data?.error || err.message || "Unknown error"
-      showSnackbar(`Template generation failed: ${detail}`, "error")
+      const detail = err.response?.data?.detail || err.response?.data?.error || err.message || "Lỗi không xác định"
+      showSnackbar(`Tạo mẫu thất bại: ${detail}`, "error")
     } finally {
       setGenerating(false)
     }
@@ -149,9 +149,9 @@ export default function TemplateGallery({ mode, onApply, variant }) {
     try {
       await http.delete(`/api/templates/${template.id}`)
       setTrendingTemplates(prev => prev.filter(t => t.id !== template.id))
-      showSnackbar("Template deleted", "success")
+      showSnackbar("Đã xóa mẫu", "success")
     } catch {
-      showSnackbar("Failed to delete template", "error")
+      showSnackbar("Xóa mẫu thất bại", "error")
     }
   }
 
@@ -194,7 +194,7 @@ export default function TemplateGallery({ mode, onApply, variant }) {
           {trendingTemplates.length > 0 && (
             <Chip
               icon={<TrendingUpIcon sx={{ fontSize: 14 }} />}
-              label={`${trendingTemplates.length} trending`}
+              label={`${trendingTemplates.length} đang thịnh hành`}
               size="small"
               color="warning"
               variant="outlined"
@@ -257,7 +257,7 @@ export default function TemplateGallery({ mode, onApply, variant }) {
           <TrendingUpIcon sx={{ fontSize: 16, color: "text.secondary" }} />
           <TextField
             size="small"
-            placeholder="Enter niche to generate trending templates..."
+            placeholder="Nhập ngách để tạo mẫu đang thịnh hành..."
             value={refreshNiche}
             onChange={(e) => setRefreshNiche(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleGenerateTrending()}
@@ -266,7 +266,7 @@ export default function TemplateGallery({ mode, onApply, variant }) {
               "& .MuiInputBase-root": { height: 32, fontSize: "0.8rem" },
             }}
           />
-          <Tooltip title="Generate trending templates from YouTube search data + your scout results">
+          <Tooltip title="Tạo mẫu đang thịnh hành từ dữ liệu tìm kiếm YouTube + kết quả quét">
             <span>
               <Button
                 size="small"
@@ -316,7 +316,7 @@ function TemplateCard({ template: t, isSelected, onSelect, onDelete, isTrending 
         <Stack direction="row" alignItems="center" justifyContent="space-between">
           <Chip
             icon={<TrendingUpIcon sx={{ fontSize: 10 }} />}
-            label={t.niche || "trending"}
+            label={t.niche || "đang thịnh hành"}
             size="small"
             color="warning"
             sx={{

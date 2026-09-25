@@ -21,8 +21,8 @@ export default function TemplatesDrawer({ open, onClose, mode = "stock", onApply
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <AutoAwesomeIcon sx={{ fontSize: 20, color: "primary.main" }} />
           <Box>
-            <Typography variant="subtitle1" sx={{ fontWeight: 700, lineHeight: 1.1 }}>Templates</Typography>
-            <Typography variant="caption" sx={{ color: "text.secondary" }}>Pick a starting point</Typography>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700, lineHeight: 1.1 }}>Mẫu</Typography>
+            <Typography variant="caption" sx={{ color: "text.secondary" }}>Chọn điểm bắt đầu</Typography>
           </Box>
         </Box>
         <IconButton onClick={onClose} size="small"><CloseIcon /></IconButton>

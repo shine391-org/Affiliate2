@@ -41,8 +41,8 @@ export default function JobHistoryTab({ jobs, jobTotal, onDelete, onBulkDelete, 
   if (recentJobs.length === 0) {
     return (
       <Box sx={{ textAlign: "center", py: 8, color: "text.secondary" }}>
-        <Typography variant="h6" sx={{ mb: 0.5 }}>No jobs yet</Typography>
-        <Typography variant="body2">Start scouting from the Chat page to see jobs here.</Typography>
+        <Typography variant="h6" sx={{ mb: 0.5 }}>Chưa có tác vụ</Typography>
+        <Typography variant="body2">Bắt đầu quét từ trang Trợ lý để xem tác vụ tại đây.</Typography>
       </Box>
     )
   }
@@ -97,12 +97,12 @@ export default function JobHistoryTab({ jobs, jobTotal, onDelete, onBulkDelete, 
                 {j.created_at ? new Date(j.created_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : ""}
               </Typography>
               {isActive && (
-                <IconButton size="small" onClick={() => onCancel(j.id)} title="Cancel job" sx={{ color: "text.disabled", "&:hover": { color: "warning.main" } }}>
+                <IconButton size="small" onClick={() => onCancel(j.id)} title="Hủy tác vụ" sx={{ color: "text.disabled", "&:hover": { color: "warning.main" } }}>
                   <CancelIcon sx={{ fontSize: 16 }} />
                 </IconButton>
               )}
               {isDeletable && (
-                <IconButton size="small" onClick={() => onDelete(j.id)} title="Delete job" sx={{ color: "text.disabled", "&:hover": { color: "error.main" } }}>
+                <IconButton size="small" onClick={() => onDelete(j.id)} title="Xóa tác vụ" sx={{ color: "text.disabled", "&:hover": { color: "error.main" } }}>
                   <DeleteOutlineIcon sx={{ fontSize: 16 }} />
                 </IconButton>
               )}
