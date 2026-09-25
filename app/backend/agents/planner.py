@@ -707,8 +707,25 @@ class PlannerAgent:
 
         elif action_type == "start_upload":
             generated_video_id = action.get("generated_video_id")
-            platforms = action.get("platforms", ["youtube"])
             if generated_video_id:
+                from backend.agents.uploader import normalize_publish_platforms
+                try:
+                    platforms = normalize_publish_platforms(
+                        action.get("platforms", ["youtube"])
+                    )
+                except ValueError as exc:
+                    await ws_manager.send_constraint_warning(
+                        constraint="publish_platforms",
+                        message=str(exc),
+                        severity="error",
+                        user_id=user_id,
+                    )
+                    await self._followup(
+                        user_id,
+                        f"I didn't start publishing because the destination selection is invalid: {exc}",
+                    )
+                    return
+
                 # Planner and phone messaging use the same publish gate as the
                 # web UI. Never let an action block bypass explicit approval.
                 from sqlalchemy import select
