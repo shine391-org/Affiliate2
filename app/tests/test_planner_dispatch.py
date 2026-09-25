@@ -258,6 +258,24 @@ class TestDispatch:
                    "platforms": ["youtube", "tiktok"]})
         assert asyncio.run(_job_count("upload")) == before + 1
 
+    def test_start_upload_normalizes_a_single_platform_string(self, bus):
+        video_id = asyncio.run(_generated_video(approved=True))
+        before = asyncio.run(_job_count("upload"))
+        self._run({"type": "start_upload", "generated_video_id": video_id,
+                   "platforms": "youtube"})
+        assert asyncio.run(_job_count("upload")) == before + 1
+
+    @pytest.mark.parametrize("platforms", [None, [], ["myspace"], [1]])
+    def test_start_upload_rejects_invalid_platforms_before_job_creation(
+            self, bus, platforms):
+        video_id = asyncio.run(_generated_video(approved=True))
+        before = asyncio.run(_job_count("upload"))
+        self._run({"type": "start_upload", "generated_video_id": video_id,
+                   "platforms": platforms})
+        assert asyncio.run(_job_count("upload")) == before
+        warnings = [m for m in bus["sent"] if m.get("type") == "constraint_warning"]
+        assert warnings and warnings[-1]["constraint"] == "publish_platforms"
+
     def test_start_upload_without_approval_creates_nothing(self, bus):
         video_id = asyncio.run(_generated_video(approved=False))
         before = asyncio.run(_job_count("upload"))
