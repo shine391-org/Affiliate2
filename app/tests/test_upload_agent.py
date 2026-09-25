@@ -311,12 +311,15 @@ class TestSuccessfulUploads:
             vid = await _make_video(tiktok_title="short caption")
             jid = await _job()
             await UploadAgent().run(jid, vid, ["instagram"])
-            return await _video_row(vid)
-        video = asyncio.run(run())
+            return await _video_row(vid), await _publication_rows(vid)
+        video, publications = asyncio.run(run())
         call = providers["calls"]["instagram"]
         assert call["caption"] == "short caption"
         assert call["access_token"] == "IGT" and call["ig_user_id"] == "ig_user_1"
         assert video.instagram_media_id == "ig1"
+        assert len(publications) == 1
+        assert publications[0].status == "PUBLISHED"
+        assert publications[0].caption == call["caption"]
 
     def test_uploading_to_every_platform_at_once(self, ws, providers):
         async def run():
