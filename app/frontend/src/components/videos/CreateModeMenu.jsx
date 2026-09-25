@@ -21,9 +21,9 @@ export default function CreateModeMenu({ anchorEl, onClose, sourceId, navigate }
         music_enabled: true,
         music_genre: "lofi",
       })
-      showSnackbar("Quick video generation started! Check the Generated tab.", "success")
+      showSnackbar("Đã bắt đầu tạo video nhanh! Hãy kiểm tra tab Đã tạo.", "success")
     } catch (e) {
-      showSnackbar(e.response?.data?.detail || `Quick generate failed: ${e.message}`, "error")
+      showSnackbar(e.response?.data?.detail || `Tạo nhanh thất bại: ${e.message}`, "error")
     } finally {
       setQuickLoading(false)
     }
@@ -35,8 +35,8 @@ export default function CreateModeMenu({ anchorEl, onClose, sourceId, navigate }
         sx={{ borderBottom: 1, borderColor: "divider", mb: 0.5 }}>
         <ListItemIcon><AutoFixHighIcon fontSize="small" color="primary" /></ListItemIcon>
         <ListItemText
-          primary={quickLoading ? "Starting..." : "Quick Stock Video"}
-          secondary="One-click: Pexels stock footage + free voice + viral captions"
+          primary={quickLoading ? "Đang bắt đầu..." : "Video kho nhanh"}
+          secondary="Một bấm: video kho Pexels + giọng miễn phí + phụ đề viral"
           primaryTypographyProps={{ fontWeight: 700, color: "primary.main" }}
           secondaryTypographyProps={{ fontSize: "0.7rem" }}
         />
@@ -46,7 +46,7 @@ export default function CreateModeMenu({ anchorEl, onClose, sourceId, navigate }
       </Typography>
       <MenuItem onClick={() => { onClose(); navigate(`/stock?source=${sourceId}`) }}>
         <ListItemIcon><PhotoLibraryIcon fontSize="small" /></ListItemIcon>
-        <ListItemText>Stock Video</ListItemText>
+        <ListItemText>Video kho</ListItemText>
       </MenuItem>
     </Menu>
   )
