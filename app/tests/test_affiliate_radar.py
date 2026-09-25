@@ -78,6 +78,39 @@ def test_snapshot_count_is_platform_scoped():
     assert signals[("bilibili", "same")]["radar_snapshot_count"] == 1
 
 
+def test_observation_refreshes_current_projection_and_keeps_job_history():
+    conn = _conn()
+    observe_scout_rows(
+        [_row("douyin", "refresh", views=100, likes=10)],
+        "first",
+        conn,
+        job_id="job-old",
+    )
+    observe_scout_rows(
+        [_row("douyin", "refresh", views=250, likes=25)],
+        "second",
+        conn,
+        job_id="job-new",
+    )
+
+    current = conn.execute(
+        """SELECT views, likes, job_id FROM scout_results
+        WHERE platform='douyin' AND video_id='refresh'"""
+    ).fetchone()
+    assert tuple(current) == (250, 25, "job-new")
+
+    observation_jobs = [
+        row[0]
+        for row in conn.execute(
+            """SELECT ro.job_id FROM radar_observations ro
+            JOIN scout_results sr ON sr.id=ro.scout_result_id
+            WHERE sr.platform='douyin' AND sr.video_id='refresh'
+            ORDER BY ro.rowid"""
+        ).fetchall()
+    ]
+    assert observation_jobs == ["job-old", "job-new"]
+
+
 def test_unknown_metric_remains_null_in_radar_snapshot():
     conn = _conn()
     row = _row("douyin", "nullviews")
