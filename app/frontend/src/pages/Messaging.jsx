@@ -500,7 +500,7 @@ export default function Messaging() {
                   onClick={handleTest}
                   disabled={testing}
                 >
-                  Send test message
+                  Gửi tin nhắn thử
                 </Button>
                 <Button
                   variant="outlined"
@@ -508,7 +508,7 @@ export default function Messaging() {
                   startIcon={<LogoutIcon />}
                   onClick={handleDisconnect}
                 >
-                  Disconnect
+                  Ngắt kết nối
                 </Button>
               </Stack>
             </Stack>
@@ -530,7 +530,7 @@ export default function Messaging() {
               <Stack direction="row" spacing={1.5}>
                 <Button variant="outlined" onClick={fetchStatus}>Làm mới trạng thái</Button>
                 <Button variant="outlined" color="error" startIcon={<LogoutIcon />} onClick={handleDisconnect}>
-                  Cancel
+                  Hủy
                 </Button>
               </Stack>
             </Stack>
@@ -614,7 +614,7 @@ export default function Messaging() {
                   disabled={waTesting}
                   sx={{ bgcolor: "#25D366", "&:hover": { bgcolor: "#128C7E" } }}
                 >
-                  Send test message
+                  Gửi tin nhắn thử
                 </Button>
                 <Button
                   variant="outlined"
@@ -622,7 +622,7 @@ export default function Messaging() {
                   startIcon={<LogoutIcon />}
                   onClick={handleWADisconnect}
                 >
-                  Disconnect
+                  Ngắt kết nối
                 </Button>
               </Stack>
             </Stack>
@@ -704,7 +704,7 @@ export default function Messaging() {
                   disabled={dcTesting}
                   sx={{ bgcolor: "#5865F2", "&:hover": { bgcolor: "#4752C4" } }}
                 >
-                  Send test message
+                  Gửi tin nhắn thử
                 </Button>
                 <Button
                   variant="outlined"
@@ -712,7 +712,7 @@ export default function Messaging() {
                   startIcon={<LogoutIcon />}
                   onClick={handleDCDisconnect}
                 >
-                  Disconnect
+                  Ngắt kết nối
                 </Button>
               </Stack>
             </Stack>
@@ -726,7 +726,7 @@ export default function Messaging() {
                   <>
                     {" "}
                     <Link href={dcInfo.bot_invite_url} target="_blank" rel="noreferrer" sx={{ fontWeight: 600 }}>
-                      Invite it to a server
+                      Mời bot vào máy chủ
                     </Link>
                     {" "}nếu bạn chưa làm, sau đó
                   </>
@@ -736,7 +736,7 @@ export default function Messaging() {
               <Stack direction="row" spacing={1.5}>
                 <Button variant="outlined" onClick={fetchStatus}>Làm mới trạng thái</Button>
                 <Button variant="outlined" color="error" startIcon={<LogoutIcon />} onClick={handleDCDisconnect}>
-                  Cancel
+                  Hủy
                 </Button>
               </Stack>
             </Stack>
@@ -823,7 +823,7 @@ export default function Messaging() {
                   disabled={slTesting}
                   sx={{ bgcolor: "#611F69", "&:hover": { bgcolor: "#4A154B" } }}
                 >
-                  Send test message
+                  Gửi tin nhắn thử
                 </Button>
                 <Button
                   variant="outlined"
@@ -831,7 +831,7 @@ export default function Messaging() {
                   startIcon={<LogoutIcon />}
                   onClick={handleSLDisconnect}
                 >
-                  Disconnect
+                  Ngắt kết nối
                 </Button>
               </Stack>
             </Stack>
@@ -846,7 +846,7 @@ export default function Messaging() {
               <Stack direction="row" spacing={1.5}>
                 <Button variant="outlined" onClick={fetchStatus}>Làm mới trạng thái</Button>
                 <Button variant="outlined" color="error" startIcon={<LogoutIcon />} onClick={handleSLDisconnect}>
-                  Cancel
+                  Hủy
                 </Button>
               </Stack>
             </Stack>
