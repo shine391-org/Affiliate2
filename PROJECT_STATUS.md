@@ -1,6 +1,6 @@
 # PROJECT_STATUS.md
 
-## Overall status: PHASE D SMART CUT QA PENDING — PHASE F NEXT
+## Overall status: PHASE D SMART CUT QA PENDING — PHASE F F1 ACTIVE
 
 Phase A and Phase B are complete and merged to `master`.
 
@@ -190,3 +190,24 @@ Localization HQ + Smart Cut + publishing/performance learning.
 Next implementation phase: **Phase F — Review / Publish / Performance native migration**.
 
 See `docs/PHASE_E_DONOR_AUDIT.md` only if Creative Remake is reconsidered later.
+
+
+---
+
+## Phase F — Publish / Performance / Messaging convergence
+
+**F1 NATIVE PUBLISH OWNER WIRED — LOCAL QA PENDING.**
+
+Primary `/publish` now operates on canonical `GeneratedVideo` outputs instead
+of the old candidate/remake overlay identity. A persisted human approval gate
+(`publish_approved_at`) is required before the existing native UploadAgent can
+be queued. Approval never auto-publishes.
+
+F1 currently surfaces native TikTok + YouTube account/upload ownership. Facebook
+and old overlay publication history remain transitional and are not faked into
+the new UI.
+
+Next: **F2 native Performance convergence**, followed by F3 Messaging event
+integration.
+
+See `docs/PHASE_F_CONVERGENCE.md`.
