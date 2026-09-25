@@ -10,6 +10,7 @@ from sqlalchemy import select
 
 from backend.database import AsyncSessionLocal
 from backend.models.scout_result import ScoutResult
+from backend.models.phase_g import RadarObservation
 from backend.agents.job_helper import create_job
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,13 @@ async def get_scout_results(
             .order_by(ScoutResult.created_at.desc())
         )
         if job_id:
-            query = query.where(ScoutResult.job_id == job_id)
+            query = query.where(
+                ScoutResult.id.in_(
+                    select(RadarObservation.scout_result_id).where(
+                        RadarObservation.job_id == job_id
+                    )
+                )
+            )
         query = query.offset(offset).limit(limit)
 
         result = await db.execute(query)
@@ -54,7 +61,13 @@ async def get_scout_results(
         from sqlalchemy import func
         count_query = select(func.count(ScoutResult.id)).where(ScoutResult.user_id == "local")
         if job_id:
-            count_query = count_query.where(ScoutResult.job_id == job_id)
+            count_query = count_query.where(
+                ScoutResult.id.in_(
+                    select(RadarObservation.scout_result_id).where(
+                        RadarObservation.job_id == job_id
+                    )
+                )
+            )
         total = (await db.execute(count_query)).scalar()
 
     payload = [
