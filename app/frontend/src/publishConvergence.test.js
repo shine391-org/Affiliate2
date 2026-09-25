@@ -14,8 +14,8 @@ test("Publish is a native GeneratedVideo workspace, not the legacy candidate ove
 })
 
 test("approval and publish remain separate human actions", () => {
-  assert.ok(publish.includes("Approve for publishing"))
-  assert.ok(publish.includes("Publishing still requires a separate platform button and confirmation."))
+  assert.ok(publish.includes("Duyệt để xuất bản"))
+  assert.ok(publish.includes("Việc xuất bản vẫn cần bấm nút nền tảng riêng và xác nhận."))
   assert.ok(publish.includes("window.confirm"))
 })
 
@@ -27,7 +27,7 @@ test("native Publish reuses existing upload account ownership", () => {
 })
 
 test("transitional platforms are stated honestly instead of faked", () => {
-  assert.ok(publish.includes("Facebook/Instagram and legacy overlay publication history"))
+  assert.ok(publish.includes("Lịch sử xuất bản Facebook/Instagram và overlay cũ"))
   assert.ok(publish.includes("stay transitional"))
 })
 
@@ -46,5 +46,5 @@ test("Publish preserves an explicit Library deep-link instead of substituting a 
 
 test("an already-published destination cannot be accidentally published twice", () => {
   assert.ok(publish.includes("disabled={!connected || busy || published}"))
-  assert.ok(publish.includes('{published ? "Published" : "Publish"}'))
+  assert.ok(publish.includes('{published ? "Đã xuất bản" : "Xuất bản"}'))
 })

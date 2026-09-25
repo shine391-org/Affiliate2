@@ -19,8 +19,15 @@ import {
 } from "../reviewModel"
 import { loadReviewItems } from "../reviewSources"
 
+const STATUS_LABELS = { NEEDS_REVIEW: "Cần duyệt", FAILED: "Thất bại", COMPLETE: "Hoàn tất" }
+const CATEGORY_LABELS = { Translation: "Bản dịch", Timing: "Nhịp", Audio: "Âm thanh", Storyboard: "Storyboard", Visual: "Hình ảnh", QC: "QC", Publish: "Xuất bản" }
+const WORKFLOW_LABELS = { Localize: "Bản địa hóa", "Smart Cut": "Cắt thông minh", "Creative Remake": "Làm lại sáng tạo" }
+const displayStatus = (value) => STATUS_LABELS[value] || String(value || "").replaceAll("_", " ")
+const displayCategory = (value) => CATEGORY_LABELS[value] || value
+const displayWorkflow = (value) => WORKFLOW_LABELS[value] || value
+
 export default function LocalizationReview() {
-  useDocumentTitle("Review")
+  useDocumentTitle("Duyệt")
   const [params, setParams] = useSearchParams()
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
@@ -39,7 +46,7 @@ export default function LocalizationReview() {
       setItems(next)
       setLoadError("")
     } catch (error) {
-      setLoadError(error?.response?.data?.detail || "Could not refresh the review queue.")
+      setLoadError(error?.response?.data?.detail || "Không thể làm mới hàng đợi duyệt.")
     } finally {
       loadedOnce.current = true
       setLoading(false)
@@ -96,7 +103,7 @@ export default function LocalizationReview() {
       <PageHero
         icon={<FactCheckOutlinedIcon sx={{ fontSize: 22 }} />}
         title="Duyệt"
-        subtitle="One exception workspace. Current live items come from the canonical localization QC queue."
+        subtitle="Một nơi xử lý ngoại lệ. Các mục hiện tại đến từ hàng đợi QC bản địa hóa chuẩn."
         actions={<Button variant="outlined" startIcon={<RefreshOutlinedIcon />} onClick={load}>Làm mới</Button>}
       />
       <Box sx={{ px: { xs: 1.5, md: 2.5 }, py: 1.25, borderBottom: 1, borderColor: "divider", overflowX: "auto", flexShrink: 0 }}>
@@ -114,26 +121,26 @@ export default function LocalizationReview() {
         gridTemplateRows: { xs: "minmax(180px, 42%) minmax(0, 1fr)", md: "minmax(0, 1fr)" },
       }}>
         <Box sx={{ overflow: "auto", p: 2, borderRight: { md: 1 }, borderBottom: { xs: 1, md: 0 }, borderColor: "divider" }}>
-          {loading ? <Stack alignItems="center" sx={{ py: 5 }}><CircularProgress size={28} /></Stack> : visible.length === 0 ? <Alert severity="success">No real items match this review filter.</Alert> : <Stack spacing={1}>{visible.map((item) => <Paper key={item.id} variant="outlined" onClick={() => choose(item)} sx={{ p: 1.5, borderRadius: 2, cursor: "pointer", borderColor: selected === reviewSelectionId(item) ? "primary.main" : "divider", bgcolor: selected === reviewSelectionId(item) ? "action.selected" : "background.paper" }}><Stack direction="row" spacing={0.75} alignItems="center"><Typography variant="body2" sx={{ fontWeight: 800, flex: 1 }} noWrap>{item.source}</Typography><Chip size="small" color={item.severity} label={item.status} /></Stack><Typography variant="caption" color="text.secondary">{item.workflow} · {item.project || reviewSelectionId(item)}</Typography><Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>{item.categories.map((category) => <Chip key={category} size="small" variant="outlined" label={category} />)}</Stack>{item.reasons.map((reason, index) => <Typography key={index} variant="caption" color="error.main" sx={{ display: "block", mt: 0.5 }}>{reason.stage}: {reason.error || "failed"}</Typography>)}</Paper>)}</Stack>}
+          {loading ? <Stack alignItems="center" sx={{ py: 5 }}><CircularProgress size={28} /></Stack> : visible.length === 0 ? <Alert severity="success">Không có mục thực tế nào khớp bộ lọc này.</Alert> : <Stack spacing={1}>{visible.map((item) => <Paper key={item.id} variant="outlined" onClick={() => choose(item)} sx={{ p: 1.5, borderRadius: 2, cursor: "pointer", borderColor: selected === reviewSelectionId(item) ? "primary.main" : "divider", bgcolor: selected === reviewSelectionId(item) ? "action.selected" : "background.paper" }}><Stack direction="row" spacing={0.75} alignItems="center"><Typography variant="body2" sx={{ fontWeight: 800, flex: 1 }} noWrap>{item.source}</Typography><Chip size="small" color={item.severity} label={displayStatus(item.status)} /></Stack><Typography variant="caption" color="text.secondary">{displayWorkflow(item.workflow)} · {item.project || reviewSelectionId(item)}</Typography><Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>{item.categories.map((category) => <Chip key={category} size="small" variant="outlined" label={displayCategory(category)} />)}</Stack>{item.reasons.map((reason, index) => <Typography key={index} variant="caption" color="error.main" sx={{ display: "block", mt: 0.5 }}>{reason.stage}: {reason.error || "thất bại"}</Typography>)}</Paper>)}</Stack>}
         </Box>
         <Box sx={{ overflow: "auto", p: { xs: 1.5, md: 2.5 } }}>
           {selectedItem?.detail_kind === "localization-expert" && selectedItem.job_id ? (
             <LocalizationExpertPanel jobId={selectedItem.job_id} />
           ) : selectedItem ? (
             <Stack spacing={1.5}>
-              <Typography variant="h6" sx={{ fontWeight: 800 }}>{selectedItem.workflow}</Typography>
+              <Typography variant="h6" sx={{ fontWeight: 800 }}>{displayWorkflow(selectedItem.workflow)}</Typography>
               <Alert severity={selectedItem.severity || "warning"}>
-                {selectedItem.source} · {selectedItem.status}
+                {selectedItem.source} · {displayStatus(selectedItem.status)}
               </Alert>
               <Typography variant="body2" color="text.secondary">
-                This workflow uses the generic Review envelope. Its Phase-specific detail editor will plug into this surface without creating another Review app.
+                Quy trình này dùng khung Duyệt chung. Trình chỉnh sửa chi tiết theo từng Phase sẽ gắn vào đây mà không tạo thêm ứng dụng Duyệt khác.
               </Typography>
-              {selectedItem.action_target && <Button variant="outlined" href={selectedItem.action_target}>Open workflow</Button>}
+              {selectedItem.action_target && <Button variant="outlined" href={selectedItem.action_target}>Mở quy trình</Button>}
             </Stack>
           ) : (
             <Stack spacing={1} alignItems="center" justifyContent="center" sx={{ minHeight: 240 }}>
               <FactCheckOutlinedIcon color="disabled" sx={{ fontSize: 44 }} />
-              <Typography variant="body2" color="text.secondary">Select an exception to inspect and resolve it in its canonical workflow.</Typography>
+              <Typography variant="body2" color="text.secondary">Chọn một ngoại lệ để kiểm tra và xử lý trong quy trình chuẩn của nó.</Typography>
             </Stack>
           )}
         </Box>

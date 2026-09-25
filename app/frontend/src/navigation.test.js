@@ -13,13 +13,13 @@ test("primary navigation is workflow-first and ordered", () => {
   assert.deepEqual(
     PRIMARY_NAV_ITEMS.map(({ label, to }) => [label, to]),
     [
-      ["Discover", "/discover/spy"],
-      ["Library", "/library"],
+      ["Khám phá", "/discover/spy"],
+      ["Thư viện", "/library"],
       ["Studio", "/studio"],
-      ["Review", "/review"],
-      ["Publish", "/publish"],
-      ["Performance", "/performance"],
-      ["Utilities", "/utilities"],
+      ["Duyệt", "/review"],
+      ["Xuất bản", "/publish"],
+      ["Hiệu suất", "/performance"],
+      ["Công cụ", "/utilities"],
     ],
   )
 })
@@ -27,7 +27,7 @@ test("primary navigation is workflow-first and ordered", () => {
 test("settings is the only bottom navigation destination", () => {
   assert.deepEqual(
     BOTTOM_NAV_ITEMS.map(({ label, to }) => [label, to]),
-    [["Settings", "/settings"]],
+    [["Cài đặt", "/settings"]],
   )
 })
 

@@ -48,8 +48,8 @@ test("Smart Cut render jobs appear under Smart Cut ownership and open their firs
       source_type: "smart_cut",
     }),
   })
-  assert.equal(item.where, "Smart Cut")
-  assert.equal(item.producer, "Smart Cut")
+  assert.equal(item.where, "Cắt thông minh")
+  assert.equal(item.producer, "Cắt thông minh")
   assert.equal(item.origin, "edited")
   assert.equal(item.libraryBound, true)
   assert.equal(item.result_key, "gv:cut-1")

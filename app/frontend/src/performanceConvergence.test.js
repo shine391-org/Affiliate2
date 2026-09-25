@@ -8,8 +8,8 @@ const page = readFileSync(new URL("./plugins/performance/Performance.jsx", impor
 test("unknown is not a fabricated zero; only observed views suggest a reference", () => {
   assert.equal(formatMetric(null), "–")
   assert.equal(formatMetric(0), "0")
-  assert.equal(performanceDecision({ latest_metrics: null }), "No measured result yet")
-  assert.match(performanceDecision({ latest_metrics: { views: 300 }, state: "INSUFFICIENT_DATA" }), /early observation/i)
+  assert.equal(performanceDecision({ latest_metrics: null }), "Chưa có kết quả đo")
+  assert.match(performanceDecision({ latest_metrics: { views: 300 }, state: "INSUFFICIENT_DATA" }), /Quan sát ban đầu/i)
 })
 
 test("canonical performance page reads native owner and links exact GeneratedVideo", () => {
