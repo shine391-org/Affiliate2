@@ -44,6 +44,8 @@ def seeded():
         from backend.models.downloaded_video import DownloadedVideo
         from backend.models.generated_video import GeneratedVideo
         from backend.models.scout_result import ScoutResult
+        from backend.models.user_settings import UserSettings
+        from sqlalchemy import select
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         ids = {}
@@ -60,6 +62,12 @@ def seeded():
             ch = ConnectedChannel(user_id="local", platform="youtube",
                                   channel_id="UC1", channel_name="My Chan",
                                   channel_url="https://youtube.com/channel/UC1")
+            settings = (await db.execute(select(UserSettings).where(
+                UserSettings.user_id == "local"))).scalars().first()
+            if settings is None:
+                settings = UserSettings(user_id="local")
+                db.add(settings)
+            settings.youtube_credentials_json_encrypted = "stored-test-token"
             db.add_all([gv, dv, sr, ch])
             await db.commit()
             ids.update(video=gv.id, downloaded=dv.id, scout=sr.id, channel=ch.id)
@@ -207,12 +215,22 @@ class TestVideos:
         assert queued.json()["job_id"]
 
     def test_single_publish_platform_string_is_normalized(self, client, seeded):
+        async def another_video():
+            from backend.database import AsyncSessionLocal
+            from backend.models.generated_video import GeneratedVideo
+            async with AsyncSessionLocal() as db:
+                video = GeneratedVideo(user_id="local", title="Another publish candidate",
+                                       status="ready", video_path=str(_TMP / "media" / "gen.mp4"))
+                db.add(video)
+                await db.commit()
+                return video.id
+        video_id = asyncio.run(another_video())
         client.post(
-            f"/api/videos/{seeded['video']}/publish-approval",
+            f"/api/videos/{video_id}/publish-approval",
             json={"approved": True},
         )
         queued = client.post(
-            f"/api/videos/{seeded['video']}/upload",
+            f"/api/videos/{video_id}/upload",
             json={"platforms": "youtube"},
         )
         assert queued.status_code == 200

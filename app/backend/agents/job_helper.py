@@ -38,6 +38,37 @@ _EVENT_DATA_KEYS = (
 
 _TERMINAL = {"success", "failed", "cancelled"}
 
+async def _notify_phase_f_job(job_type: str, status: str, user_id: str,
+                              job_id: str, input_json: str | None,
+                              output_json: str | None, error: str | None,
+                              current_step: str | None):
+    """Best-effort channel delivery; persisted Job remains the state owner."""
+    try:
+        from backend.messaging.base import NotificationEvent
+        from backend.messaging.manager import messaging
+        try:
+            inputs = json.loads(input_json or "{}")
+            outputs = json.loads(output_json or "{}")
+        except (TypeError, ValueError):
+            inputs, outputs = {}, {}
+        if not isinstance(inputs, dict) or not isinstance(outputs, dict):
+            inputs, outputs = {}, {}
+        data = {"job_id": job_id,
+                "generated_video_id": outputs.get("generated_video_id") or inputs.get("generated_video_id")}
+        if status == "failed":
+            await messaging.notify(NotificationEvent.JOB_FAILED, user_id,
+                                   job_type=job_type, error=error or current_step or "No error reported", **data)
+        elif job_type == "generate":
+            await messaging.notify(NotificationEvent.VIDEO_GENERATED, user_id, **data)
+        elif job_type == "upload":
+            platforms = outputs.get("uploaded_platforms") or []
+            await messaging.notify(NotificationEvent.VIDEO_UPLOADED, user_id,
+                                   platform=", ".join(platforms) or "the selected destination",
+                                   errors=outputs.get("errors") or [], **data)
+    except Exception:
+        logger.warning("Phase F job notification failed for %s", job_id, exc_info=True)
+
+
 
 async def _record_job_behavior(job_type: str, user_id: str, input_json: str, output_json: str):
     """Best-effort: record a UserBehavior event for a completed job. Never
@@ -147,6 +178,11 @@ async def update_job_status(
         if status == "success" and prev_status not in _TERMINAL:
             asyncio.create_task(_record_job_behavior(
                 job.job_type, job.user_id, job.input_json, job.output_json,
+            ))
+        if job.job_type in ("generate", "upload") and status in ("success", "failed") and prev_status != status:
+            asyncio.create_task(_notify_phase_f_job(
+                job.job_type, status, job.user_id, job.id, job.input_json,
+                job.output_json, job.error_message, job.current_step,
             ))
 
 

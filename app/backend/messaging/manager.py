@@ -145,8 +145,10 @@ def _build_payload(event: NotificationEvent, data: dict) -> NotificationPayload:
             event=event,
             title="Video ready",
             body=(
-                f"🎬 *{title}*{dur_str} is generated and ready.\n"
-                "Open ViralMint to preview, export, or post it."
+                f"🎬 *{title}*{dur_str} is generated and ready for review.\n"
+                f"GeneratedVideo ID: {data.get('generated_video_id') or 'unavailable'}; "
+                f"job: {data.get('job_id') or 'unavailable'}.\n"
+                "Open Affiliate2 to review; publishing still requires explicit approval."
             ),
             data=data,
         )
@@ -155,10 +157,14 @@ def _build_payload(event: NotificationEvent, data: dict) -> NotificationPayload:
         title = data.get("title") or "Your video"
         platform = data.get("platform", "the platform")
         url = (data.get("url") or "").strip()
-        body = f"📤 *{title}* is live on {platform}."
+        body = (f"📤 *{title}* published to {platform}.\n"
+                f"GeneratedVideo ID: {data.get('generated_video_id') or 'unavailable'}; "
+                f"job: {data.get('job_id') or 'unavailable'}.")
         if url:
             body += f"\n{url}"
-        body += "\n\nNice one — want me to scout a fresh batch for the next one?"
+        if data.get("errors"):
+            body += "\nOther destinations failed: " + "; ".join(data["errors"])
+        body += "\nCheck Publish for the persisted destination and Performance for available metrics."
         return NotificationPayload(event=event, title="Published",
                                    body=body, data=data)
 
@@ -169,9 +175,10 @@ def _build_payload(event: NotificationEvent, data: dict) -> NotificationPayload:
             event=event,
             title=f"{job_type.title()} hit a snag",
             body=(
-                f"⚠️ The {job_type} job didn't finish.\n"
-                f"_{err}_\n\n"
-                "Want me to retry? Reply *retry* or open ViralMint for details."
+                f"⚠️ The {job_type} job {data.get('job_id') or '(unknown ID)'} failed.\n"
+                f"{err}\n\n"
+                "Check this job and reconnect in Settings if authentication is required; "
+                "retry only after resolving the cause."
             ),
             data=data,
         )

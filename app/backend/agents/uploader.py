@@ -46,6 +46,24 @@ def normalize_publish_platforms(platforms) -> list[str]:
     return normalized
 
 
+def published_destinations(video: GeneratedVideo) -> set[str]:
+    """Actual persisted publish destinations, not transaction IDs."""
+    saved = safe_json_loads(video.uploaded_platforms_json, [], logger)
+    return set(saved) if isinstance(saved, list) else set()
+
+
+def disconnected_destinations(settings: UserSettings | None, platforms: list[str]) -> list[str]:
+    """Cheap pre-queue check; UploadAgent still validates/decrypts at execution."""
+    fields = {
+        "youtube": ("youtube_credentials_json_encrypted",),
+        "tiktok": ("tiktok_upload_token_encrypted", "tiktok_cookie_encrypted"),
+        "instagram": ("instagram_access_token_encrypted",),
+    }
+    return [p for p in platforms if not settings or not any(
+        getattr(settings, field, None) for field in fields[p]
+    )]
+
+
 class UploadAgent:
     async def run(
         self,
@@ -90,7 +108,7 @@ class UploadAgent:
             )
             return
 
-        already_uploaded = set(safe_json_loads(video.uploaded_platforms_json, [], logger))
+        already_uploaded = published_destinations(video)
         duplicates = [platform for platform in platforms if platform in already_uploaded]
         if duplicates:
             await update_job_status(

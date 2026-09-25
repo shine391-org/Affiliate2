@@ -48,3 +48,19 @@ async def test_tiktok_scout_does_not_read_legacy_upload_cookie(monkeypatch):
         UploadCookieTrap(),
     )
     assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_planner_credential_summary_uses_retired_cookie_contract(monkeypatch):
+    from backend.core.user_intelligence import UserIntelligence
+    from backend.config import settings
+    monkeypatch.setattr(settings, "TIKHUB_API_KEY", "")
+    monkeypatch.setattr(settings, "AI_PROVIDER", "compatible")
+    monkeypatch.setattr(settings, "AI_BASE_URL", "http://127.0.0.1:17991/v1")
+    monkeypatch.setattr(settings, "AI_MODEL", "qa-stub")
+    row = UserSettings(user_id="local", tiktok_cookie_encrypted="legacy-upload-only")
+    status = await UserIntelligence().get_credential_status(row)
+    assert status["tiktok_scout"]["configured"] is False
+    assert status["douyin_scout"]["configured"] is False
+    assert status["tiktok_upload"]["configured"] is True
+    assert status["ai_provider"]["configured"] is True

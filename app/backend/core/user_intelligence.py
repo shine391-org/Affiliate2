@@ -514,20 +514,17 @@ Return a JSON array of 3 strings. No explanation."""
         ai_user_key = bool(user_settings and user_settings.ai_api_key_encrypted)
         status = {
             "ai_provider": {
-                "configured": bool(env.ANTHROPIC_API_KEY or env.OPENAI_API_KEY or ai_user_key),
+                "configured": bool(env.ANTHROPIC_API_KEY or env.OPENAI_API_KEY or ai_user_key
+                                   or (env.AI_PROVIDER == "compatible" and env.AI_BASE_URL and env.AI_MODEL)),
             },
             "youtube_scout": {
                 "configured": bool(env.YOUTUBE_API_KEY),
             },
             "tiktok_scout": {
-                "configured": bool(env.TIKHUB_API_KEY) or (
-                    user_settings and bool(user_settings.tiktok_cookie_encrypted)
-                ),
+                "configured": bool(env.TIKHUB_API_KEY),
             },
             "douyin_scout": {
-                "configured": bool(env.TIKHUB_API_KEY) or (
-                    user_settings and bool(user_settings.douyin_cookie_encrypted)
-                ),
+                "configured": bool(env.TIKHUB_API_KEY),
             },
             "youtube_upload": {
                 "configured": user_settings and bool(user_settings.youtube_credentials_json_encrypted),
@@ -545,18 +542,6 @@ Return a JSON array of 3 strings. No explanation."""
                 "configured": bool(env.PEXELS_API_KEY),
             },
         }
-
-        # Add cookie age warnings
-        if user_settings:
-            for platform, cookie_field, set_at_field in [
-                ("tiktok_scout", "tiktok_cookie_encrypted", "tiktok_cookie_set_at"),
-                ("douyin_scout", "douyin_cookie_encrypted", "douyin_cookie_set_at"),
-            ]:
-                cookie = getattr(user_settings, cookie_field, None)
-                set_at = getattr(user_settings, set_at_field, None)
-                if cookie and set_at:
-                    age_days = (datetime.utcnow() - set_at).days
-                    status[platform]["age_days"] = age_days
 
         return status
 

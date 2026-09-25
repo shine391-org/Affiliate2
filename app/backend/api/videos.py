@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (c) 2025-2026 ViralMint Contributors
 """REST endpoints for generated videos."""
+import asyncio
 import json
 import logging
 from datetime import datetime
@@ -17,6 +18,7 @@ from backend.core.exceptions import safe_json_loads as _safe_json
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+_publish_queue_lock = asyncio.Lock()  # local-first server: serialize preflight + job creation
 
 
 class PublishApprovalRequest(BaseModel):
@@ -283,42 +285,68 @@ async def set_publish_approval(
 
 @router.post("/videos/{video_id}/upload")
 async def upload_video(video_id: str, body: dict, db: AsyncSession = Depends(get_db)):
-    """Trigger upload of a generated video to specified platforms."""
-    result = await db.execute(
-        select(GeneratedVideo).where(GeneratedVideo.id == video_id)
+    """Queue a canonical UploadAgent job only after the exact asset is ready."""
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Publish request must be an object")
+    from backend.agents.uploader import (
+        normalize_publish_platforms, published_destinations, disconnected_destinations,
     )
-    video = result.scalar_one_or_none()
-    if not video:
-        raise HTTPException(status_code=404, detail="Video not found")
-    if video.status not in ("ready", "uploaded"):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Video status is '{video.status}', must be 'ready' or 'uploaded'",
-        )
-    if not video.publish_approved_at:
-        raise HTTPException(
-            status_code=403,
-            detail="Video must be explicitly approved for publishing first.",
-        )
+    from backend.agents.job_helper import create_job
+    from backend.core.task_runner import run_upload as task_upload, dispatch
+    from backend.models.user_settings import UserSettings
+    from backend.models.job import Job
 
-    from backend.agents.uploader import normalize_publish_platforms
     try:
         platforms = normalize_publish_platforms(body.get("platforms", ["youtube"]))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    user_id = video.user_id or "local"
 
-    from backend.agents.job_helper import create_job
-    job = await create_job("upload", user_id, {
-        "generated_video_id": video_id,
-        "platforms": platforms,
-    })
-
-    from backend.core.task_runner import run_upload as task_upload, dispatch
-    dispatch(task_upload(
-        job_id=job.id, generated_video_id=video_id, platforms=platforms, user_id=user_id,
-    ))
-
+    async with _publish_queue_lock:
+        video = await db.get(GeneratedVideo, video_id)
+        if not video:
+            raise HTTPException(status_code=404, detail="Video not found")
+        await db.refresh(video)
+        if video.status not in ("ready", "uploaded"):
+            raise HTTPException(status_code=400,
+                                detail=f"Video status is '{video.status}', must be 'ready' or 'uploaded'")
+        if not video.publish_approved_at:
+            raise HTTPException(status_code=403,
+                                detail="Video must be explicitly approved for publishing first.")
+        if not video.video_path:
+            raise HTTPException(status_code=400, detail="Video file path is missing")
+        duplicates = set(platforms) & published_destinations(video)
+        if duplicates:
+            raise HTTPException(status_code=409,
+                                detail="Already published to: " + ", ".join(sorted(duplicates)))
+        user_id = video.user_id or "local"
+        settings = (await db.execute(select(UserSettings).where(
+            UserSettings.user_id == user_id))).scalar_one_or_none()
+        disconnected = disconnected_destinations(settings, platforms)
+        if disconnected:
+            raise HTTPException(status_code=409, detail=(
+                "Disconnected publish account(s): " + ", ".join(disconnected)
+                + ". Reconnect in Settings before publishing."
+            ))
+        active = (await db.execute(select(Job).where(
+            Job.user_id == user_id, Job.job_type == "upload",
+            Job.status.in_(["pending", "running"])
+        ))).scalars().all()
+        for existing in active:
+            try:
+                submitted = json.loads(existing.input_json or "{}")
+            except (TypeError, ValueError):
+                continue
+            if (isinstance(submitted, dict)
+                    and submitted.get("generated_video_id") == video_id
+                    and set(submitted.get("platforms", [])) & set(platforms)):
+                raise HTTPException(status_code=409,
+                                    detail=f"Publish job already pending/running: {existing.id}")
+        job = await create_job("upload", user_id, {
+            "generated_video_id": video_id, "platforms": platforms,
+        })
+        dispatch(task_upload(
+            job_id=job.id, generated_video_id=video_id, platforms=platforms, user_id=user_id,
+        ))
     return {"job_id": job.id}
 
 

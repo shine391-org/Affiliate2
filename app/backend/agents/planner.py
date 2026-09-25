@@ -156,6 +156,14 @@ Use `start_upload` only for a GeneratedVideo that the user has already explicitl
 <action>{{"type": "show_scout_results"}}</action>
 <action>{{"type": "show_downloaded"}}</action>
 <action>{{"type": "show_videos"}}</action>
+<action>{{"type": "show_video", "generated_video_id": "uuid"}}</action>
+<action>{{"type": "show_publish_status", "generated_video_id": "uuid"}}</action>
+<action>{{"type": "show_performance", "generated_video_id": "uuid"}}</action>
+<action>{{"type": "show_youtube_performance"}}</action>
+<action>{{"type": "show_outperforming_videos"}}</action>
+<action>{{"type": "show_latest_performance_snapshot"}}</action>
+<action>{{"type": "show_job_status", "job_id": "uuid"}}</action>
+For these factual queries, never invent metrics, approval, or job states: the action returns the authoritative result. Do not add numeric claims in prose.
 <action>{{"type": "content_calendar", "days": 7}}</action>
 ```
 
@@ -196,7 +204,10 @@ PROACTIVE news behavior:
 - `start_scout` — User wants to search by niche/topic across platforms. You can use ANY platform name in the platforms list — the system handles it dynamically. Never refuse a platform.
 - `start_download` — Download specific scout results by ID.
 - `show_downloaded` — User asks about their downloaded/analyzed videos. Shows the list inline in chat with generate buttons.
-- `show_videos` — User asks about generated videos. Navigates to videos page.
+- `show_videos` — User asks about generated assets. Return the canonical recent GeneratedVideo list in chat.
+- `show_video` / `show_publish_status` — Use an exact generated_video_id; if ambiguous, ask which video rather than guessing.
+- `show_performance` — Exact generated_video_id; `show_youtube_performance` — published YouTube posts; `show_latest_performance_snapshot` — last measured post; `show_outperforming_videos` — observed top views, NOT a proven winner without comparable publish windows.
+- `show_job_status` — Exact job_id; the backend provides the persisted status and actual error.
 - `start_wizard` — Set up missing credentials when user agrees.
 - `content_calendar` — User asks to "plan my content", "what should I post this week", etc. Generates an AI-powered day-by-day plan.
 
@@ -241,6 +252,23 @@ Note: Scouting credentials (YouTube API key, TikHub token, Pexels) are configure
 """
 
 ACTION_PATTERN = re.compile(r"<action>(.*?)</action>", re.DOTALL)
+FACTUAL_ACTIONS = {
+    "show_videos", "show_video", "show_publish_status", "show_performance",
+    "show_youtube_performance", "show_outperforming_videos",
+    "show_latest_performance_snapshot", "show_job_status",
+}
+
+
+def _has_factual_action(blocks: list[str]) -> bool:
+    """F3 actions render only backend-owned facts, never model prose."""
+    for block in blocks:
+        try:
+            action = json.loads(block.strip())
+        except (TypeError, ValueError):
+            continue
+        if isinstance(action, dict) and action.get("type") in (FACTUAL_ACTIONS | {"start_upload"}):
+            return True
+    return False
 
 # Quick-reply chips — the AI optionally appends a JSON array of short reply
 # strings inside <quick_replies>...</quick_replies>. Each becomes a clickable
@@ -457,11 +485,11 @@ class PlannerAgent:
             await ws_manager.send({"type": "chat_done", "full_response": welcome}, user_id)
             return
 
+        # Buffer until action blocks are known: streaming model tokens could
+        # display invented metrics or a raw <action> before authoritative data arrives.
         full_response = ""
-
         async for token in ai.chat_stream(messages=messages, system=system, max_tokens=1024):
             full_response += token
-            await ws_manager.send({"type": "chat_token", "token": token}, user_id)
 
         # Signal completion. Strip both <action> and <quick_replies> markers from
         # the user-visible text; the chips ride on chat_done as a structured
@@ -472,6 +500,8 @@ class PlannerAgent:
         quick_replies = _parse_quick_replies(full_response)
         qr_stripped = QUICK_REPLIES_PATTERN.sub("", full_response)
         clean_response = ACTION_PATTERN.sub("", qr_stripped).strip()
+        if _has_factual_action(ACTION_PATTERN.findall(qr_stripped)):
+            clean_response = ""  # backend facts below, never model-invented counts
         await ws_manager.send({
             "type": "chat_done",
             "full_response": clean_response,
@@ -618,6 +648,8 @@ class PlannerAgent:
         qr_stripped = QUICK_REPLIES_PATTERN.sub("", full_response)
         clean_response = ACTION_PATTERN.sub("", qr_stripped).strip()
         actions = ACTION_PATTERN.findall(qr_stripped)
+        if _has_factual_action(actions):
+            clean_response = ""  # channel response comes only from native services
         # Mirror the web path: a deliberate clarifying-question turn (chips, no
         # action block) must NOT get a premature action keyword-inferred.
         if not actions and not quick_replies:
@@ -656,9 +688,123 @@ class PlannerAgent:
 
         return clean_response or "Working on it. ✅"
 
+    async def _show_native_fact(self, kind: str, action: dict, user_id: str):
+        """Read canonical application state; messaging never owns a second store."""
+        from sqlalchemy import select
+        from backend.database import AsyncSessionLocal
+        from backend.models.generated_video import GeneratedVideo
+        from backend.models.job import Job
+
+        if kind == "show_job_status":
+            job_id = action.get("job_id")
+            if not isinstance(job_id, str) or not job_id.strip():
+                await self._followup(user_id, "A valid job_id is required.")
+                return
+            async with AsyncSessionLocal() as db:
+                job = await db.get(Job, job_id)
+                if job is None or job.user_id != user_id:
+                    await self._followup(user_id, f"Job {job_id} not found.")
+                    return
+                await self._followup(user_id,
+                    f"Job {job.id} ({job.job_type}): {job.status}. "
+                    f"Progress: {job.progress_pct}%. "
+                    f"Error: {job.error_message or 'none reported'}."
+                )
+            return
+
+        if kind in {"show_video", "show_publish_status", "show_performance"}:
+            video_id = action.get("generated_video_id")
+            if not isinstance(video_id, str) or not video_id.strip():
+                await self._followup(user_id, "A valid generated_video_id is required; select a generated asset first.")
+                return
+            async with AsyncSessionLocal() as db:
+                video = await db.get(GeneratedVideo, video_id)
+                if video is None or video.user_id != user_id:
+                    await self._followup(user_id, f"Generated video {video_id} not found.")
+                    return
+                summary = (f"{video.title or 'Untitled'} (GeneratedVideo {video.id}): "
+                           f"status {video.status}; publish approval "
+                           f"{'approved' if video.publish_approved_at else 'not approved'}.")
+                try:
+                    destinations = json.loads(video.uploaded_platforms_json or "[]")
+                except (TypeError, ValueError):
+                    destinations = []
+                if not isinstance(destinations, list):
+                    destinations = []
+                if kind == "show_publish_status":
+                    await self._followup(user_id, summary +
+                        f" Published destinations: {', '.join(destinations) if destinations else 'none'}; "
+                        f"YouTube content ID: {video.youtube_video_id or 'unavailable'}. "
+                        "A publish transaction ID is not a public post ID.")
+                    return
+                if kind == "show_video":
+                    await self._followup(user_id, summary)
+                    return
+            # Ownership has been checked before calling the native Performance owner.
+            from backend.services.performance_tracker import get_video_performance
+            data = await get_video_performance(video_id)
+            if not data["latest"]:
+                await self._followup(user_id, summary + " Performance: insufficient data (no snapshot).")
+                return
+            parts = [summary]
+            for platform, snapshot in data["latest"].items():
+                fmt = lambda value: "unavailable" if value is None else str(value)
+                parts.append(f"{platform}: views {fmt(snapshot['views'])}, "
+                             f"likes {fmt(snapshot['likes'])}, comments {fmt(snapshot['comments'])}; "
+                             f"last sync {snapshot['fetched_at'] or 'unavailable'}; "
+                             f"{'stale' if snapshot['stale'] else 'current'}; "
+                             f"{snapshot['state']}.")
+            await self._followup(user_id, "\n".join(parts))
+            return
+
+        if kind == "show_videos":
+            async with AsyncSessionLocal() as db:
+                rows = (await db.execute(select(GeneratedVideo).where(
+                    GeneratedVideo.user_id == user_id).order_by(
+                    GeneratedVideo.created_at.desc()).limit(10))).scalars().all()
+            await self._followup(user_id, "Recent generated assets:\n" + "\n".join(
+                f"{row.id} — {row.title or 'Untitled'} ({row.status}; "
+                f"approval {'approved' if row.publish_approved_at else 'not approved'})"
+                for row in rows) if rows else "No generated assets found.")
+            return
+
+        from backend.services.performance_tracker import get_performance_overview
+        overview = await get_performance_overview(user_id)
+        posts = overview["posts"]
+        if kind == "show_youtube_performance":
+            posts = [post for post in posts if post["platform"] == "youtube"]
+        elif kind == "show_latest_performance_snapshot":
+            posts = [post for post in posts if post["latest_metrics"]]
+            posts.sort(key=lambda post: post["latest_metrics"]["fetched_at"] or "", reverse=True)
+            posts = posts[:1]
+        elif kind == "show_outperforming_videos":
+            posts = overview["top_posts"]
+        else:
+            posts = posts[:10]
+        if not posts:
+            await self._followup(user_id, "Insufficient performance data: no matching published posts or snapshots.")
+            return
+        lines = []
+        for post in posts[:10]:
+            m = post["latest_metrics"]
+            views = "unavailable" if m is None or m["views"] is None else m["views"]
+            sync = m["fetched_at"] if m else "unavailable"
+            stale = "; stale" if m and m["stale"] else ""
+            lines.append(f"{post['generated_video_id']} — {post['title']} [{post['platform']}]: "
+                         f"views {views}; last sync {sync}{stale}; {post['state']}.")
+        prefix = ("Highest observed views (not a proven outperforming claim without comparable "
+                  "publish windows):\n" if kind == "show_outperforming_videos" else "Performance snapshots:\n")
+        await self._followup(user_id, prefix + "\n".join(lines))
+
     async def _dispatch_action(self, action: dict, user_settings, user_id: str):
+        if not isinstance(action, dict):
+            await self._followup("Invalid action: expected an object.")
+            return
         action_type = action.get("type")
         logger.info("DISPATCH action=%s | user=%s | payload=%s", action_type, user_id, json.dumps(action, ensure_ascii=False)[:200])
+        if action_type in FACTUAL_ACTIONS:
+            await self._show_native_fact(action_type, action, user_id)
+            return
 
         if action_type == "start_scout":
             await self._check_and_start_scout(action, user_settings, user_id)
@@ -706,77 +852,45 @@ class PlannerAgent:
                 ))
 
         elif action_type == "start_upload":
-            generated_video_id = action.get("generated_video_id")
-            if generated_video_id:
-                from backend.agents.uploader import normalize_publish_platforms
+            video_id = action.get("generated_video_id")
+            if not isinstance(video_id, str) or not video_id.strip():
+                await self._followup(user_id, "A valid generated_video_id is required; no publish job started.")
+                return
+            from fastapi import HTTPException
+            from backend.api.videos import upload_video
+            from backend.database import AsyncSessionLocal
+            from backend.models.generated_video import GeneratedVideo
+            async with AsyncSessionLocal() as db:
+                row = await db.get(GeneratedVideo, video_id)
+                if row is None or row.user_id != user_id:
+                    await ws_manager.send_constraint_warning(
+                        constraint="publish_video_missing", message="Generated video not found.",
+                        severity="error", user_id=user_id,
+                    )
+                    await self._followup(user_id, "That generated video was not found; no publish job started.")
+                    return
                 try:
-                    platforms = normalize_publish_platforms(
-                        action.get("platforms", ["youtube"])
-                    )
-                except ValueError as exc:
+                    result = await upload_video(video_id, {
+                        "platforms": action.get("platforms", ["youtube"]),
+                    }, db=db)
+                except HTTPException as exc:
+                    detail = str(exc.detail)
+                    constraint = ("publish_approval" if exc.status_code == 403
+                                  else "publish_platforms" if exc.status_code == 400 and "platform" in detail.lower()
+                                  else "publish_account" if "Disconnected" in detail
+                                  else "publish_preflight")
                     await ws_manager.send_constraint_warning(
-                        constraint="publish_platforms",
-                        message=str(exc),
-                        severity="error",
+                        constraint=constraint, message=detail,
+                        severity="warning" if exc.status_code == 403 else "error",
                         user_id=user_id,
                     )
-                    await self._followup(
-                        user_id,
-                        f"I didn't start publishing because the destination selection is invalid: {exc}",
-                    )
+                    await self._followup(user_id,
+                        f"I didn't publish it: {detail}" if exc.status_code == 403
+                        else f"No publish job started: {detail}")
                     return
-
-                # Planner and phone messaging use the same publish gate as the
-                # web UI. Never let an action block bypass explicit approval.
-                from sqlalchemy import select
-                from backend.database import AsyncSessionLocal
-                from backend.models.generated_video import GeneratedVideo
-                async with AsyncSessionLocal() as db:
-                    row = (await db.execute(
-                        select(GeneratedVideo).where(
-                            GeneratedVideo.id == generated_video_id
-                        )
-                    )).scalar_one_or_none()
-                if row is None:
-                    await ws_manager.send_constraint_warning(
-                        constraint="publish_video_missing",
-                        message="That generated video no longer exists.",
-                        severity="error",
-                        user_id=user_id,
-                    )
-                    await self._followup(user_id, "That generated video no longer exists, so I didn't start a publish job.")
-                    return
-                if not row.publish_approved_at:
-                    await ws_manager.send_constraint_warning(
-                        constraint="publish_approval",
-                        message=(
-                            "Publishing is blocked until you explicitly approve "
-                            "that exact video in Publish."
-                        ),
-                        severity="warning",
-                        user_id=user_id,
-                    )
-                    await self._followup(
-                        user_id,
-                        "I didn't publish it because that exact video has not been approved in Publish yet.",
-                    )
-                    return
-
-                from backend.agents.job_helper import create_job
-                from backend.core.task_runner import run_upload, dispatch
-                job = await create_job(
-                    "upload",
-                    user_id,
-                    {
-                        "generated_video_id": generated_video_id,
-                        "platforms": platforms,
-                        "publish_approved": True,
-                    },
-                )
-                dispatch(run_upload(
-                    job_id=job.id, generated_video_id=generated_video_id,
-                    platforms=platforms, user_id=user_id,
-                ))
+            await self._followup(user_id,
+                f"Publish job {result['job_id']} started for GeneratedVideo {video_id}. "
+                "Check job status for the provider result; queued is not published.")
 
         elif action_type == "show_scout_results":
             await self._show_scout_results(action, user_id)

@@ -82,7 +82,18 @@ async def _job_count(job_type: str) -> int:
 async def _generated_video(*, approved: bool) -> str:
     from backend.database import AsyncSessionLocal
     from backend.models.generated_video import GeneratedVideo
+    from backend.models.user_settings import UserSettings
+    from sqlalchemy import select
     async with AsyncSessionLocal() as db:
+        settings = (await db.execute(select(UserSettings).where(
+            UserSettings.user_id == "local"))).scalar_one_or_none()
+        if settings is None:
+            db.add(UserSettings(user_id="local",
+                youtube_credentials_json_encrypted="stored-test-token",
+                tiktok_upload_token_encrypted="stored-test-token"))
+        else:
+            settings.youtube_credentials_json_encrypted = "stored-test-token"
+            settings.tiktok_upload_token_encrypted = "stored-test-token"
         row = GeneratedVideo(
             user_id="local",
             title="Publish candidate",
