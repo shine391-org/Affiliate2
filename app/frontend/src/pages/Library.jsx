@@ -81,7 +81,7 @@ function treeKeys(families, loners) {
 }
 
 export default function Library() {
-  useDocumentTitle("Library")
+  useDocumentTitle("Thư viện")
   const theme = useTheme()
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()

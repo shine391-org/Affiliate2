@@ -73,7 +73,7 @@ function ResultPreview({ jobId }) {
 }
 
 export default function ToolAutoChapters() {
-  useDocumentTitle("Auto Chapters")
+  useDocumentTitle("Tự tạo chương")
   const [targetCount, setTargetCount] = useState(0)
 
   return (

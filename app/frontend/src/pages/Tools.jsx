@@ -347,7 +347,7 @@ function CategorySection({ category, tools, onPick }) {
 // ── Page ───────────────────────────────────────────────────────────────────
 
 export default function Tools() {
-  useDocumentTitle("Utilities")
+  useDocumentTitle("Công cụ")
   const navigate = useNavigate()
   const visibleTools = TOOLS.filter((tool) => !WORKFLOW_OWNED_UTILITY_IDS.has(tool.id))
   const pick = (id) => {

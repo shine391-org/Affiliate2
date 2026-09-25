@@ -663,7 +663,7 @@ function PlatformTab({ platform }) {
 /* ── Main Page ─────────────────────────────────────────────────── */
 
 export default function Channels() {
-  useDocumentTitle("Discover / Channels")
+  useDocumentTitle("Khám phá / Kênh")
   const [tab, setTab] = useState(0)
   return (
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>

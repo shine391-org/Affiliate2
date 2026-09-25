@@ -65,7 +65,7 @@ function Section({ icon, title, description, children, accentColor }) {
 
 
 export default function Settings() {
-  useDocumentTitle("Settings")
+  useDocumentTitle("Cài đặt")
   const { settings, loading, error, fetchSettings, updateSettings } = useSettings()
   const [params, setParams] = useSearchParams()
   const section = normalizeSettingsSection(params.get("section"))

@@ -5,7 +5,7 @@ import useDocumentTitle from "../../hooks/useDocumentTitle"
 import { MEDIA_ACCEPT } from "../../components/tools/mediaAccept"
 
 export default function ToolAudioEnhance() {
-  useDocumentTitle("Enhance Audio")
+  useDocumentTitle("Cải thiện âm thanh")
   return (
     <ToolRunner
       title="Cải thiện âm thanh"
