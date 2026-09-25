@@ -73,16 +73,24 @@ The native UI states this honestly instead of displaying unsupported buttons.
 
 ## F2 — Performance convergence
 
-Next:
+**Native path implemented; locally verified with isolated SQLite and browser QA.**
 
-- make native `VideoMetrics` / `performance_tracker` the one primary
-  Performance owner;
-- retain append-only snapshots;
-- preserve YouTube/TikTok metrics where trustworthy;
-- add manual snapshot entry where an API signal is unavailable;
-- link every metric directly to `GeneratedVideo.id`;
-- keep Radar feedback descriptive/human-controlled;
-- retire overlay performance storage only after result parity.
+- `/performance` and `/api/videos/performance/overview` read canonical
+  `GeneratedVideo` destinations and append-only `VideoMetrics` snapshots.
+- Missing provider fields remain NULL (not fabricated zeros); duplicate manual
+  observations do not append another snapshot. Partial interaction counts do not
+  produce a misleading engagement rate.
+- YouTube Data API sync uses the Settings API key and verifies the returned post
+  ID. Missing credentials/provider errors surface explicitly. Manual entry works
+  for published destinations where an API cannot provide reliable data.
+- TikTok's upload transaction ID is not treated as a public video ID; no fake
+  TikTok sync or automatic winning-score claim is made. Native performance
+  feedback remains descriptive and human-controlled.
+- Native intelligence consumes this same overview, while historical overlay
+  publication/performance paths remain compatibility-only until parity.
+
+Local integration exercised the API and UI on an isolated database. Live
+provider/account sync and production data parity have **not** been verified.
 
 ## F3 — Messaging / Operations
 

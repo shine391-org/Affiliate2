@@ -1,292 +1,245 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (c) 2025-2026 ViralMint Contributors
-"""
-Post-upload performance tracking service.
-Periodically polls YouTube/TikTok APIs for video metrics after upload.
-
-Polling schedule:
-- First 24h: every 2 hours
-- Days 2-7: every 6 hours
-- After 7 days: daily
-- After 30 days: stop polling
-"""
+"""Native post-upload performance snapshots for exact GeneratedVideo assets."""
 import asyncio
 import json
 import logging
 from datetime import datetime, timedelta
-from pathlib import Path
-
 from sqlalchemy import select, and_
 
+from backend.core.api_keys import get_youtube_api_key
+from backend.core.exceptions import safe_json_loads
 from backend.database import AsyncSessionLocal
 from backend.models.generated_video import GeneratedVideo
+from backend.models.user_settings import UserSettings
 from backend.models.video_metrics import VideoMetrics
 
 logger = logging.getLogger(__name__)
+PLATFORMS = {"youtube", "tiktok", "instagram"}
+METRIC_FIELDS = ("views", "likes", "comments", "shares")
+
+
+def normalize_metrics(payload: dict) -> dict:
+    """Never coerce a missing, negative or malformed provider value to zero."""
+    if not isinstance(payload, dict):
+        raise ValueError("Metrics must be an object")
+    result = {}
+    for field in METRIC_FIELDS:
+        value = payload.get(field)
+        if value is None:
+            result[field] = None
+        elif isinstance(value, bool) or not str(value).isdigit():
+            raise ValueError(f"{field} must be a non-negative integer")
+        else:
+            result[field] = int(value)
+    if all(value is None for value in result.values()):
+        raise ValueError("At least one metric is required")
+    return result
+
+
+def _platform_id(video, platform):
+    return {"youtube": video.youtube_video_id,
+            "tiktok": video.tiktok_publish_id,
+            "instagram": video.instagram_media_id}.get(platform)
+
+
+def _uploaded_platforms(video):
+    value = safe_json_loads(video.uploaded_platforms_json, [], logger)
+    return list(dict.fromkeys(p for p in value if isinstance(p, str))) if isinstance(value, list) else []
+
+
+def _should_poll_now(video: GeneratedVideo, last_synced_at: datetime | None = None) -> bool:
+    """Use the platform snapshot timestamp; a metadata edit is not a sync."""
+    if not video.created_at:
+        return False
+    age = datetime.utcnow() - video.created_at
+    if age >= timedelta(days=30):
+        return False
+    interval = (timedelta(hours=2) if age < timedelta(days=1)
+                else timedelta(hours=6) if age < timedelta(days=7)
+                else timedelta(days=1))
+    return last_synced_at is None or datetime.utcnow() - last_synced_at >= interval
 
 
 async def poll_all_uploaded_videos():
-    """
-    Refresh metrics for all uploaded videos. Can be invoked on demand
-    (e.g. from an admin API endpoint or a manual maintenance script).
-    """
+    """Explicit maintenance call; no tight background polling or retry storm."""
     async with AsyncSessionLocal() as db:
-        # Find videos uploaded in the last 30 days
-        cutoff = datetime.utcnow() - timedelta(days=30)
-        result = await db.execute(
-            select(GeneratedVideo).where(
-                and_(
-                    GeneratedVideo.status == "uploaded",
-                    GeneratedVideo.created_at >= cutoff,
-                )
-            )
-        )
-        videos = result.scalars().all()
-
-    if not videos:
-        return
-
+        videos = (await db.execute(select(GeneratedVideo).where(
+            GeneratedVideo.status == "uploaded",
+            GeneratedVideo.created_at >= datetime.utcnow() - timedelta(days=30),
+        ))).scalars().all()
     for video in videos:
-        # Check if we should poll this video now
-        if not _should_poll_now(video):
+        if "youtube" not in _uploaded_platforms(video) or not video.youtube_video_id:
             continue
-
-        platforms = json.loads(video.uploaded_platforms_json or "[]")
-
-        for platform in platforms:
-            try:
-                if platform == "youtube" and video.youtube_video_id:
-                    metrics = await fetch_youtube_metrics(video.youtube_video_id)
-                    if metrics:
-                        await _save_metrics(video.id, "youtube", metrics)
-                elif platform == "tiktok" and video.tiktok_publish_id:
-                    metrics = await fetch_tiktok_metrics(video.tiktok_publish_id)
-                    if metrics:
-                        await _save_metrics(video.id, "tiktok", metrics)
-            except Exception as e:
-                logger.warning(f"Failed to fetch {platform} metrics for {video.id}: {e}")
-
-    logger.info(f"Performance tracking: polled {len(videos)} uploaded videos")
+        try:
+            async with AsyncSessionLocal() as db:
+                last = (await db.execute(select(VideoMetrics).where(
+                    VideoMetrics.generated_video_id == video.id,
+                    VideoMetrics.platform == "youtube",
+                ).order_by(VideoMetrics.fetched_at.desc()).limit(1))).scalar_one_or_none()
+            if not _should_poll_now(video, last.fetched_at if last else None):
+                continue
+            metrics = await fetch_youtube_metrics(video.youtube_video_id, video.user_id or "local")
+            if metrics is not None:
+                await _save_metrics(video.id, "youtube", metrics)
+        except Exception as exc:
+            logger.warning("YouTube metric sync failed for %s: %s", video.id, exc)
+    # TikTok publish_id is an upload transaction ID, not necessarily a public
+    # post ID. Do not query it as if the video mapping were proven.
 
 
-def _should_poll_now(video: GeneratedVideo) -> bool:
-    """Determine if enough time has passed since the last poll for this video."""
-    if not video.updated_at:
-        return True
-
-    age = datetime.utcnow() - video.created_at
-    time_since_last_update = datetime.utcnow() - video.updated_at
-
-    if age < timedelta(hours=24):
-        # First 24h: every 2 hours
-        return time_since_last_update >= timedelta(hours=2)
-    elif age < timedelta(days=7):
-        # Days 2-7: every 6 hours
-        return time_since_last_update >= timedelta(hours=6)
-    elif age < timedelta(days=30):
-        # After 7 days: daily
-        return time_since_last_update >= timedelta(days=1)
-    else:
-        # After 30 days: stop polling
-        return False
-
-
-async def fetch_youtube_metrics(youtube_video_id: str) -> dict | None:
-    """Fetch video stats from YouTube Data API v3."""
-    from backend.config import settings as env
-
-    api_key = env.YOUTUBE_API_KEY
+async def fetch_youtube_metrics(youtube_video_id: str, user_id: str = "local") -> dict | None:
+    """YouTube Data API v3; BYOK in Settings takes priority over .env."""
+    import httpx
+    async with AsyncSessionLocal() as db:
+        row = (await db.execute(select(UserSettings).where(
+            UserSettings.user_id == user_id))).scalar_one_or_none()
+    api_key = get_youtube_api_key(row)
     if not api_key:
         return None
 
     def _fetch():
-        import httpx
-        resp = httpx.get(
-            "https://www.googleapis.com/youtube/v3/videos",
-            params={
-                "part": "statistics,contentDetails",
-                "id": youtube_video_id,
-                "key": api_key,
-            },
-            timeout=10,
-        )
+        resp = httpx.get("https://www.googleapis.com/youtube/v3/videos",
+                         params={"part": "statistics", "id": youtube_video_id, "key": api_key}, timeout=10)
         if resp.status_code != 200:
-            logger.warning(f"YouTube API error: {resp.status_code}")
+            logger.warning("YouTube API error: %s", resp.status_code)
             return None
-
         data = resp.json()
-        items = data.get("items", [])
-        if not items:
+        items = data.get("items") if isinstance(data, dict) else None
+        if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], dict):
             return None
-
-        stats = items[0].get("statistics", {})
-        return {
-            "views": int(stats.get("viewCount", 0)),
-            "likes": int(stats.get("likeCount", 0)),
-            "comments": int(stats.get("commentCount", 0)),
-            "shares": 0,  # YouTube API doesn't expose shares
-        }
-
+        # Reject missing or mismatched content IDs rather than attributing
+        # unrelated provider statistics to this GeneratedVideo.
+        item = items[0]
+        if item.get("id") != youtube_video_id:
+            return None
+        stats = item.get("statistics")
+        if not isinstance(stats, dict):
+            return None
+        try:
+            return normalize_metrics({
+                "views": stats.get("viewCount"), "likes": stats.get("likeCount"),
+                "comments": stats.get("commentCount"), "shares": None,
+            })
+        except ValueError as exc:
+            logger.warning("Malformed YouTube statistics: %s", exc)
+            return None
     return await asyncio.to_thread(_fetch)
 
 
 async def fetch_tiktok_metrics(publish_id: str) -> dict | None:
-    """
-    Fetch video stats from TikTok API.
-    Note: TikTok's API requires the access token, so this may not work
-    for all users. Returns None if no token is available.
-    """
-    # Load user's TikTok access token
-    from backend.core.crypto import decrypt_safe
-    from backend.models.user_settings import UserSettings
+    """Disabled: upload publish_id is not proven to be a public video ID."""
+    return None
 
+
+async def _save_metrics(generated_video_id: str, platform: str, metrics: dict) -> bool:
+    """Append a changed snapshot only for an exact published asset/platform."""
+    if platform not in PLATFORMS:
+        raise ValueError("Unsupported platform")
+    values = normalize_metrics(metrics)
     async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            select(UserSettings).where(UserSettings.user_id == "local")
-        )
-        settings = result.scalar_one_or_none()
-
-    if not settings or not settings.tiktok_upload_token_encrypted:
-        return None
-
-    access_token = decrypt_safe(settings.tiktok_upload_token_encrypted)
-    if not access_token:
-        return None
-
-    def _fetch():
-        import httpx
-        resp = httpx.post(
-            "https://open.tiktokapis.com/v2/video/query/",
-            headers={
-                "Authorization": f"Bearer {access_token}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "filters": {"video_ids": [publish_id]},
-                "fields": ["view_count", "like_count", "comment_count", "share_count"],
-            },
-            timeout=10,
-        )
-        if resp.status_code != 200:
-            return None
-
-        data = resp.json()
-        videos = data.get("data", {}).get("videos", [])
-        if not videos:
-            return None
-
-        v = videos[0]
-        return {
-            "views": v.get("view_count", 0),
-            "likes": v.get("like_count", 0),
-            "comments": v.get("comment_count", 0),
-            "shares": v.get("share_count", 0),
-        }
-
-    return await asyncio.to_thread(_fetch)
-
-
-async def _save_metrics(generated_video_id: str, platform: str, metrics: dict):
-    """Save a metrics snapshot to the video_metrics table."""
-    async with AsyncSessionLocal() as db:
-        record = VideoMetrics(
-            generated_video_id=generated_video_id,
-            platform=platform,
-            views=metrics.get("views", 0),
-            likes=metrics.get("likes", 0),
-            comments=metrics.get("comments", 0),
-            shares=metrics.get("shares", 0),
-            watch_time_hours=metrics.get("watch_time_hours"),
-            avg_view_duration=metrics.get("avg_view_duration"),
-            ctr=metrics.get("ctr"),
-        )
-        db.add(record)
+        video = (await db.execute(select(GeneratedVideo).where(
+            GeneratedVideo.id == generated_video_id))).scalar_one_or_none()
+        if not video or video.status != "uploaded" or platform not in _uploaded_platforms(video):
+            raise ValueError("Video is not published to this platform")
+        latest = (await db.execute(select(VideoMetrics).where(
+            VideoMetrics.generated_video_id == generated_video_id,
+            VideoMetrics.platform == platform,
+        ).order_by(VideoMetrics.fetched_at.desc()).limit(1))).scalar_one_or_none()
+        if latest and all(getattr(latest, key) == value for key, value in values.items()):
+            return False
+        db.add(VideoMetrics(generated_video_id=generated_video_id, platform=platform, **values))
         await db.commit()
+    return True
+
+
+def _snapshot(row, video):
+    now = datetime.utcnow()
+    values = {key: getattr(row, key) for key in METRIC_FIELDS}
+    views = values["views"]
+    # A rate from only one reported interaction field looks complete but is not.
+    has_engagement = values["likes"] is not None and values["comments"] is not None
+    engagement = sum(values[key] or 0 for key in ("likes", "comments", "shares"))
+    return {**values, "watch_time_hours": row.watch_time_hours,
+            "avg_view_duration": row.avg_view_duration, "ctr": row.ctr,
+            "fetched_at": row.fetched_at.isoformat() if row.fetched_at else None,
+            "stale": row.fetched_at is None or now - row.fetched_at > timedelta(days=2),
+            "platform_content_id": _platform_id(video, row.platform),
+            "engagement_rate": (engagement / views if has_engagement and views and views > 0 else None),
+            "state": "INSUFFICIENT_DATA"}
 
 
 async def get_video_performance(generated_video_id: str) -> dict:
-    """Get all metrics history for a video, grouped by platform."""
     async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            select(VideoMetrics)
-            .where(VideoMetrics.generated_video_id == generated_video_id)
-            .order_by(VideoMetrics.fetched_at.asc())
-        )
-        records = result.scalars().all()
+        video = (await db.execute(select(GeneratedVideo).where(
+            GeneratedVideo.id == generated_video_id))).scalar_one_or_none()
+        if video is None:
+            raise ValueError("Video not found")
+        records = (await db.execute(select(VideoMetrics).where(
+            VideoMetrics.generated_video_id == generated_video_id,
+        ).order_by(VideoMetrics.fetched_at.asc(), VideoMetrics.id.asc()))).scalars().all()
+    history = {}
+    for row in records:
+        if row.platform in _uploaded_platforms(video):
+            history.setdefault(row.platform, []).append(_snapshot(row, video))
+    return {"generated_video_id": generated_video_id,
+            "latest": {key: values[-1] for key, values in history.items()},
+            "history": history}
 
-    platforms = {}
-    for r in records:
-        if r.platform not in platforms:
-            platforms[r.platform] = []
-        platforms[r.platform].append({
-            "views": r.views,
-            "likes": r.likes,
-            "comments": r.comments,
-            "shares": r.shares,
-            "watch_time_hours": r.watch_time_hours,
-            "avg_view_duration": r.avg_view_duration,
-            "ctr": r.ctr,
-            "fetched_at": r.fetched_at.isoformat() if r.fetched_at else None,
-        })
 
-    # Summary: latest metrics per platform
+async def get_performance_overview(user_id: str = "local") -> dict:
+    """One native Performance owner; facts only, no inferred winning score."""
+    async with AsyncSessionLocal() as db:
+        videos = (await db.execute(select(GeneratedVideo).where(
+            GeneratedVideo.user_id == user_id, GeneratedVideo.status == "uploaded",
+        ).order_by(GeneratedVideo.created_at.desc()))).scalars().all()
+        ids = [v.id for v in videos]
+        rows = (await db.execute(select(VideoMetrics).where(
+            VideoMetrics.generated_video_id.in_(ids)
+        ).order_by(VideoMetrics.fetched_at.asc(), VideoMetrics.id.asc()))).scalars().all() if ids else []
     latest = {}
-    for platform, snapshots in platforms.items():
-        if snapshots:
-            latest[platform] = snapshots[-1]
-
-    return {
-        "generated_video_id": generated_video_id,
-        "latest": latest,
-        "history": platforms,
-    }
+    for row in rows:
+        latest[(row.generated_video_id, row.platform)] = row
+    posts = []
+    by_platform = {}
+    for video in videos:
+        for platform in _uploaded_platforms(video):
+            if platform not in PLATFORMS:
+                continue
+            row = latest.get((video.id, platform))
+            data = _snapshot(row, video) if row else None
+            posts.append({"generated_video_id": video.id, "title": video.title,
+                          "thumbnail_url": f"/api/videos/{video.id}/thumbnail" if video.thumbnail_path else None,
+                          "platform": platform, "platform_content_id": _platform_id(video, platform),
+                          "published_at": None,  # Not persisted by old uploader; do not invent it.
+                          "latest_metrics": data, "state": data["state"] if data else "INSUFFICIENT_DATA",
+                          "source_downloaded_video_id": video.source_downloaded_video_id,
+                          "hook_type": video.clip_hook_type, "format": video.source_type,
+                          "niche": video.niche, "gen_tier": video.gen_tier,
+                          "aspect_ratio": video.aspect_ratio})
+            bucket = by_platform.setdefault(platform, {"published": 0, "with_metrics": 0, "views": None})
+            bucket["published"] += 1
+            if data:
+                bucket["with_metrics"] += 1
+                if data["views"] is not None:
+                    bucket["views"] = (bucket["views"] or 0) + data["views"]
+    measured = [p for p in posts if p["latest_metrics"] and p["latest_metrics"]["views"] is not None]
+    measured.sort(key=lambda p: p["latest_metrics"]["views"], reverse=True)
+    return {"published_posts": len(posts), "posts_with_metrics": sum(bool(p["latest_metrics"]) for p in posts),
+            "by_platform": by_platform, "posts": posts, "top_posts": measured[:5]}
 
 
 async def get_performance_summary(user_id: str = "local") -> dict:
-    """Get aggregate performance stats across all uploaded videos."""
-    async with AsyncSessionLocal() as db:
-        # Get all uploaded videos
-        result = await db.execute(
-            select(GeneratedVideo).where(
-                and_(
-                    GeneratedVideo.user_id == user_id,
-                    GeneratedVideo.status == "uploaded",
-                )
-            )
-        )
-        videos = result.scalars().all()
-
-        if not videos:
-            return {"total_views": 0, "total_likes": 0, "total_videos": 0, "best_video": None}
-
-        # Get latest metrics for each video
-        total_views = 0
-        total_likes = 0
-        best_video = None
-        best_views = 0
-
-        for v in videos:
-            metrics_result = await db.execute(
-                select(VideoMetrics)
-                .where(VideoMetrics.generated_video_id == v.id)
-                .order_by(VideoMetrics.fetched_at.desc())
-                .limit(1)
-            )
-            latest = metrics_result.scalar_one_or_none()
-            if latest:
-                total_views += latest.views
-                total_likes += latest.likes
-                if latest.views > best_views:
-                    best_views = latest.views
-                    best_video = {"id": v.id, "title": v.title, "views": latest.views}
-
-    return {
-        "total_views": total_views,
-        "total_likes": total_likes,
-        "total_videos": len(videos),
-        "best_video": best_video,
-    }
-
+    """Compatibility shape for existing Assistant/cards; sourced from same owner."""
+    overview = await get_performance_overview(user_id)
+    measured = [p for p in overview["posts"] if p["latest_metrics"]]
+    return {"total_views": sum(p["latest_metrics"]["views"] or 0 for p in measured),
+            "total_likes": sum(p["latest_metrics"]["likes"] or 0 for p in measured),
+            "total_videos": len({p["generated_video_id"] for p in overview["posts"]}),
+            "best_video": ({"id": overview["top_posts"][0]["generated_video_id"],
+                            "title": overview["top_posts"][0]["title"],
+                            "views": overview["top_posts"][0]["latest_metrics"]["views"]}
+                           if overview["top_posts"] else None)}
 
 _WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday",
              "friday", "saturday", "sunday")

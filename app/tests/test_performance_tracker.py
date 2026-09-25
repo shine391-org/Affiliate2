@@ -75,35 +75,17 @@ async def _add_uploaded_video(db, **overrides):
 def test_should_poll_now_cadence_branches():
     from backend.models.generated_video import GeneratedVideo
     now = datetime.utcnow()
-
-    # No updated_at → always poll.
-    v = GeneratedVideo(created_at=now, updated_at=None)
-    assert pt._should_poll_now(v) is True
-
-    # < 24h old: needs >= 2h since last update.
-    v = GeneratedVideo(created_at=now - timedelta(hours=1),
-                       updated_at=now - timedelta(hours=1))
-    assert pt._should_poll_now(v) is False
-    v.updated_at = now - timedelta(hours=3)
-    assert pt._should_poll_now(v) is True
-
-    # 2-7 days old: needs >= 6h.
-    v = GeneratedVideo(created_at=now - timedelta(days=3),
-                       updated_at=now - timedelta(hours=3))
-    assert pt._should_poll_now(v) is False
-    v.updated_at = now - timedelta(hours=7)
-    assert pt._should_poll_now(v) is True
-
-    # 7-30 days old: needs >= 1 day.
-    v = GeneratedVideo(created_at=now - timedelta(days=10),
-                       updated_at=now - timedelta(hours=12))
-    assert pt._should_poll_now(v) is False
-    v.updated_at = now - timedelta(days=2)
-    assert pt._should_poll_now(v) is True
-
-    # > 30 days: never poll again.
-    v = GeneratedVideo(created_at=now - timedelta(days=40),
-                       updated_at=now - timedelta(days=40))
+    v = GeneratedVideo(created_at=now, updated_at=now)
+    assert pt._should_poll_now(v) is True  # no metric snapshot yet
+    assert pt._should_poll_now(v, now - timedelta(hours=1)) is False
+    assert pt._should_poll_now(v, now - timedelta(hours=3)) is True
+    v.created_at = now - timedelta(days=3)
+    assert pt._should_poll_now(v, now - timedelta(hours=3)) is False
+    assert pt._should_poll_now(v, now - timedelta(hours=7)) is True
+    v.created_at = now - timedelta(days=10)
+    assert pt._should_poll_now(v, now - timedelta(hours=12)) is False
+    assert pt._should_poll_now(v, now - timedelta(days=2)) is True
+    v.created_at = now - timedelta(days=40)
     assert pt._should_poll_now(v) is False
 
 
@@ -114,7 +96,7 @@ def test_save_metrics_and_video_performance_history():
         from backend.database import AsyncSessionLocal
 
         async with AsyncSessionLocal() as db:
-            gv = await _add_uploaded_video(db)
+            gv = await _add_uploaded_video(db, uploaded_platforms_json='["youtube", "tiktok"]')
             vid = gv.id
             await db.commit()
 
@@ -327,14 +309,14 @@ def test_fetch_youtube_metrics_parses_api_response():
         fake_resp = MagicMock()
         fake_resp.status_code = 200
         fake_resp.json.return_value = {
-            "items": [{"statistics": {
+            "items": [{"id": "abc", "statistics": {
                 "viewCount": "1500", "likeCount": "120", "commentCount": "8"}}]
         }
         with patch.object(settings, "YOUTUBE_API_KEY", "fake-key"), \
              patch("httpx.get", return_value=fake_resp):
             metrics = await pt.fetch_youtube_metrics("abc")
 
-        assert metrics == {"views": 1500, "likes": 120, "comments": 8, "shares": 0}
+        assert metrics == {"views": 1500, "likes": 120, "comments": 8, "shares": None}
 
     _run(body)
 

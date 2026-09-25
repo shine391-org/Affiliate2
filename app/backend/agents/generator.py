@@ -371,8 +371,9 @@ class GeneratorAgent:
                 perf_section = (
                     f"\n\nCreator's past performance data (use to guide content decisions):\n"
                     f"Best niches: {', '.join(perf['best_niches'][:3])}\n"
-                    f"Avg engagement: {perf['avg_engagement']}%\n"
-                    f"Top video: {perf['top_videos'][0]['title']} ({perf['top_videos'][0]['views']:,} views)"
+                    + (f"Avg known interactions / views: {perf['avg_engagement']}%\n"
+                       if perf["avg_engagement"] is not None else "")
+                    + f"Top video: {perf['top_videos'][0]['title']} ({perf['top_videos'][0]['views']:,} views)"
                 )
         except Exception:
             pass

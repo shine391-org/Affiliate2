@@ -423,7 +423,8 @@ def test_performance_insights_aggregates_when_enough_data():
                 gv = GeneratedVideo(user_id=_UID, status="uploaded",
                                     niche="finance" if i < 2 else "cooking",
                                     title=f"vid {i}", gen_tier="standard",
-                                    aspect_ratio="9:16")
+                                    aspect_ratio="9:16", uploaded_platforms_json='["youtube"]',
+                                    youtube_video_id=f"yt-existing-{i}")
                 db.add(gv)
                 await db.flush()
                 db.add(VideoMetrics(
@@ -438,9 +439,36 @@ def test_performance_insights_aggregates_when_enough_data():
         assert insights["total_videos_analyzed"] == 3
         assert "finance" in insights["best_niches"]
         assert insights["avg_views"] > 0
+        assert insights["avg_engagement"] > 1  # percent, not a raw fraction
         assert len(insights["top_videos"]) <= 5
         assert "finance" in insights["engagement_rate_by_niche"]
 
+    _run(body)
+
+
+def test_performance_insights_ignores_unpublished_and_unknown_metrics():
+    async def body():
+        from backend.database import AsyncSessionLocal
+        from backend.models.generated_video import GeneratedVideo
+        from backend.models.video_metrics import VideoMetrics
+        async with AsyncSessionLocal() as db:
+            for i in range(3):
+                gv = GeneratedVideo(user_id=_UID, status="uploaded", title=f"known {i}",
+                    niche="finance", uploaded_platforms_json='["youtube"]', youtube_video_id=f"yt-{i}")
+                db.add(gv)
+                await db.flush()
+                db.add(VideoMetrics(generated_video_id=gv.id, platform="youtube",
+                    views=100 + i, likes=None, comments=None, fetched_at=datetime.utcnow()))
+            phantom = GeneratedVideo(user_id=_UID, status="ready", title="phantom", niche="fake")
+            db.add(phantom)
+            await db.flush()
+            db.add(VideoMetrics(generated_video_id=phantom.id, platform="youtube", views=999999))
+            await db.commit()
+        facts = await UserIntelligence().get_performance_insights(_UID)
+        assert facts["total_videos_analyzed"] == 3
+        assert all(row["likes"] is None for row in facts["top_videos"])
+        assert all(row["engagement_rate"] is None for row in facts["top_videos"])
+        assert "fake" not in facts["best_niches"]
     _run(body)
 
 

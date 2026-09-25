@@ -706,49 +706,27 @@ Return ONLY the JSON array."""
         Analyze uploaded video performance to feed back into AI decisions.
         Returns insights about what content works best for this creator.
         """
-        from backend.models.generated_video import GeneratedVideo
-        from backend.models.video_metrics import VideoMetrics
-        from backend.core.exceptions import safe_json_loads
+        from backend.services.performance_tracker import get_performance_overview
 
-        async with AsyncSessionLocal() as db:
-            # Get uploaded videos with metrics
-            result = await db.execute(
-                select(GeneratedVideo).where(
-                    GeneratedVideo.user_id == user_id,
-                    GeneratedVideo.status == "uploaded",
-                ).order_by(GeneratedVideo.created_at.desc()).limit(50)
-            )
-            videos = result.scalars().all()
-
-        if len(videos) < 3:
-            return None  # Not enough data
-
-        # Collect performance data per video
-        video_data = []
-        async with AsyncSessionLocal() as db:
-            for v in videos:
-                metrics_result = await db.execute(
-                    select(VideoMetrics)
-                    .where(VideoMetrics.generated_video_id == v.id)
-                    .order_by(VideoMetrics.fetched_at.desc())
-                    .limit(1)
-                )
-                latest = metrics_result.scalar_one_or_none()
-                if not latest:
-                    continue
-
-                engagement = (latest.likes + latest.comments * 2) / max(latest.views, 1) * 100
-                video_data.append({
-                    "title": v.title,
-                    "niche": v.niche or "",
-                    "views": latest.views,
-                    "likes": latest.likes,
-                    "comments": latest.comments,
-                    "engagement_rate": round(engagement, 2),
-                    "gen_tier": v.gen_tier,
-                    "aspect_ratio": v.aspect_ratio,
-                })
-
+        overview = await get_performance_overview(user_id)
+        # A video may have multiple published posts. Keep the strongest observed
+        # post per asset for the legacy video-level context, without inventing data.
+        by_video = {}
+        for post in overview["posts"]:
+            metric = post["latest_metrics"]
+            if not metric or metric["views"] is None:
+                continue
+            vid = post["generated_video_id"]
+            if vid not in by_video or metric["views"] > by_video[vid]["views"]:
+                by_video[vid] = {
+                    "title": post["title"], "niche": post["niche"] or "",
+                    "views": metric["views"], "likes": metric["likes"],
+                    "comments": metric["comments"],
+                    "engagement_rate": (round(metric["engagement_rate"] * 100, 2)
+                                        if metric["engagement_rate"] is not None else None),
+                    "gen_tier": post["gen_tier"], "aspect_ratio": post["aspect_ratio"],
+                }
+        video_data = list(by_video.values())
         if len(video_data) < 3:
             return None
 
@@ -762,7 +740,8 @@ Return ONLY the JSON array."""
             if n not in niche_stats:
                 niche_stats[n] = {"views": [], "engagement": []}
             niche_stats[n]["views"].append(vd["views"])
-            niche_stats[n]["engagement"].append(vd["engagement_rate"])
+            if vd["engagement_rate"] is not None:
+                niche_stats[n]["engagement"].append(vd["engagement_rate"])
 
         best_niches = sorted(
             niche_stats.keys(),
@@ -772,8 +751,9 @@ Return ONLY the JSON array."""
 
         engagement_by_niche = {
             n: round(sum(niche_stats[n]["engagement"]) / len(niche_stats[n]["engagement"]), 1)
-            for n in best_niches
+            for n in best_niches if niche_stats[n]["engagement"]
         }
+        measured_engagement = [v["engagement_rate"] for v in video_data if v["engagement_rate"] is not None]
 
         return {
             "best_niches": best_niches,
@@ -781,7 +761,7 @@ Return ONLY the JSON array."""
             "engagement_rate_by_niche": engagement_by_niche,
             "total_videos_analyzed": len(video_data),
             "avg_views": round(sum(v["views"] for v in video_data) / len(video_data)),
-            "avg_engagement": round(sum(v["engagement_rate"] for v in video_data) / len(video_data), 2),
+            "avg_engagement": round(sum(measured_engagement) / len(measured_engagement), 2) if measured_engagement else None,
         }
 
     async def get_news_context(self, user_id: str = "local") -> dict:

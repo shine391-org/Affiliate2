@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, StrictBool
+from pydantic import BaseModel, StrictBool, StrictInt
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -610,6 +610,59 @@ async def performance_summary():
     """Get aggregate performance stats across all uploaded videos."""
     from backend.services.performance_tracker import get_performance_summary
     return await get_performance_summary()
+
+
+class ManualMetricsRequest(BaseModel):
+    platform: str
+    views: StrictInt | None = None
+    likes: StrictInt | None = None
+    comments: StrictInt | None = None
+    shares: StrictInt | None = None
+
+
+@router.get("/videos/performance/overview")
+async def performance_overview():
+    from backend.services.performance_tracker import get_performance_overview
+    return await get_performance_overview()
+
+
+@router.post("/videos/{video_id}/performance/metrics")
+async def add_video_metrics(video_id: str, body: ManualMetricsRequest, db: AsyncSession = Depends(get_db)):
+    """Manual observation for a published destination, not a new publication."""
+    from backend.services.performance_tracker import _save_metrics
+    video = (await db.execute(select(GeneratedVideo).where(GeneratedVideo.id == video_id))).scalar_one_or_none()
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    try:
+        changed = await _save_metrics(video_id, body.platform, body.model_dump(exclude={"platform"}))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"changed": changed, "performance": await get_video_performance(video_id, db)}
+
+
+@router.post("/videos/{video_id}/performance/sync")
+async def sync_video_metrics(video_id: str, db: AsyncSession = Depends(get_db)):
+    """Explicit YouTube sync; never contact a provider from the UI directly."""
+    from backend.services.performance_tracker import fetch_youtube_metrics, _save_metrics, _uploaded_platforms
+    from backend.core.api_keys import get_youtube_api_key
+    from backend.models.user_settings import UserSettings
+    video = (await db.execute(select(GeneratedVideo).where(GeneratedVideo.id == video_id))).scalar_one_or_none()
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    if video.status != "uploaded" or "youtube" not in _uploaded_platforms(video) or not video.youtube_video_id:
+        raise HTTPException(status_code=400, detail="No published YouTube post ID for this video")
+    settings = (await db.execute(select(UserSettings).where(UserSettings.user_id == (video.user_id or "local")))).scalar_one_or_none()
+    if not get_youtube_api_key(settings):
+        raise HTTPException(status_code=409, detail="YouTube Data API key is not configured. Add it in Settings.")
+    try:
+        metrics = await fetch_youtube_metrics(video.youtube_video_id, video.user_id or "local")
+    except Exception as exc:
+        logger.warning("YouTube performance sync failed: %s", exc)
+        raise HTTPException(status_code=502, detail="YouTube metric sync failed; retry later or enter a manual snapshot.") from exc
+    if metrics is None:
+        raise HTTPException(status_code=502, detail="YouTube returned no valid metrics for this post. Check access or enter a manual snapshot.")
+    changed = await _save_metrics(video.id, "youtube", metrics)
+    return {"changed": changed, "performance": await get_video_performance(video_id, db)}
 
 
 @router.get("/videos/performance/optimal-time")

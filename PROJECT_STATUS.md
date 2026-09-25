@@ -196,7 +196,7 @@ See `docs/PHASE_E_DONOR_AUDIT.md` only if Creative Remake is reconsidered later.
 
 ## Phase F — Publish / Performance / Messaging convergence
 
-**F1 NATIVE PUBLISH OWNER WIRED — LOCAL QA PENDING.**
+**F1 NATIVE PUBLISH WIRED; F2 NATIVE PERFORMANCE LOCAL VERIFIED (LIVE PROVIDER QA PENDING).**
 
 Primary `/publish` now operates on canonical `GeneratedVideo` outputs instead
 of the old candidate/remake overlay identity. A persisted human approval gate
@@ -207,7 +207,12 @@ F1 currently surfaces native TikTok + YouTube account/upload ownership. Facebook
 and old overlay publication history remain transitional and are not faked into
 the new UI.
 
-Next: **F2 native Performance convergence**, followed by F3 Messaging event
-integration.
+F2 `/performance` now reads native post-scoped `VideoMetrics` for exact
+`GeneratedVideo.id` destinations. Missing provider fields stay unknown, manual
+entry is available, and explicit YouTube sync uses the configured Settings key.
+The older overlay metrics remain compatibility-only pending live provider and
+result-parity QA; no unsupported TikTok public-ID lookup is invented.
+
+Next: **F3 Messaging event integration**, then F4 end-to-end QA.
 
 See `docs/PHASE_F_CONVERGENCE.md`.

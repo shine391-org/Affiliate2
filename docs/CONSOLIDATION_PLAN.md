@@ -260,7 +260,7 @@ revisited.
 
 ## Phase F — Review / Publish / Performance native migration
 
-Status: **F1 NATIVE PUBLISH OWNER WIRED — LOCAL QA PENDING 🚧**
+Status: **F1 NATIVE PUBLISH WIRED / F2 NATIVE PERFORMANCE LOCAL VERIFIED — LIVE PROVIDER QA PENDING 🚧**
 
 See `docs/PHASE_F_CONVERGENCE.md`.
 
@@ -273,8 +273,15 @@ F1:
 - native YouTube/TikTok publishing is surfaced first;
 - old candidate/remake overlay Publish remains compatibility-only until parity cleanup.
 
+F2:
+- `/performance` now uses native `VideoMetrics` / `performance_tracker`, keyed
+  by exact `GeneratedVideo.id` and published platform;
+- missing/unsupported metrics remain unknown rather than zero; manual snapshots
+  and explicit YouTube sync are available, with real provider QA pending;
+- performance-derived intelligence reads the same native overview; overlay
+  history remains available until parity.
+
 Next:
-- F2 converge Performance onto native `VideoMetrics` / `performance_tracker`;
 - F3 wire MessagingManager to meaningful review/publish/performance events;
 - F4 verify the end-to-end affiliate loop;
 - delete overlay sync only after parity.

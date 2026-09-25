@@ -13,10 +13,11 @@ class VideoMetrics(Base):
     generated_video_id = Column(String(36), nullable=False, index=True)
     platform = Column(String(20), nullable=False)  # youtube | tiktok | instagram
 
-    views = Column(Integer, default=0)
-    likes = Column(Integer, default=0)
-    comments = Column(Integer, default=0)
-    shares = Column(Integer, default=0)
+    # Unknown provider fields stay NULL, never a fabricated zero.
+    views = Column(Integer, nullable=True)
+    likes = Column(Integer, nullable=True)
+    comments = Column(Integer, nullable=True)
+    shares = Column(Integer, nullable=True)
     watch_time_hours = Column(Float, nullable=True)    # YouTube only
     avg_view_duration = Column(Float, nullable=True)   # YouTube only (seconds)
     ctr = Column(Float, nullable=True)                 # YouTube only (click-through rate %)

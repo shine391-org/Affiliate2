@@ -47,6 +47,14 @@ Source Providers         Canonical Media       AI / ASR / TTS /
 
 Legacy `src/radar/`, `viralmint_overlay/` and `overlay/` remain transitional until their behavior is migrated and verified.
 
+Phase F distribution ownership: the primary Publish workspace persists approval
+and platform IDs on `GeneratedVideo`; the primary Performance workspace uses
+native append-only `VideoMetrics` via `performance_tracker`, scoped to the exact
+published video and destination. Unavailable provider fields remain NULL. The
+old overlay publication/performance stores remain compatibility-only paths until
+live result parity; they do not drive the primary feedback UI. See
+`docs/PHASE_F_CONVERGENCE.md`.
+
 ## Product/OSS ownership boundary
 
 Affiliate2 is the product.
