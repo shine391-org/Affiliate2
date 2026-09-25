@@ -35,7 +35,7 @@ const VOL_PRESETS = [
 ]
 
 export default function ToolTransform() {
-  useDocumentTitle("Transform")
+  useDocumentTitle("Biến đổi")
   const [operation, setOperation] = useState("flip_h")
   const [loopCount, setLoopCount] = useState(2)
   const [volume, setVolume] = useState(2)

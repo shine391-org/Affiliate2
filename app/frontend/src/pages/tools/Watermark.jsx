@@ -18,7 +18,7 @@ const POSITIONS = [
 ]
 
 export default function ToolWatermark() {
-  useDocumentTitle("Add Watermark")
+  useDocumentTitle("Thêm watermark")
   const [position, setPosition] = useState("bottom-right")
   const [opacity, setOpacity] = useState(0.8)
   const [sizePct, setSizePct] = useState(8)

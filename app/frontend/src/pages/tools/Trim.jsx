@@ -20,7 +20,7 @@ function parseTime(s) {
 }
 
 export default function ToolTrim() {
-  useDocumentTitle("Trim / Cut")
+  useDocumentTitle("Cắt đoạn")
   const [start, setStart] = useState("0:00")
   const [end, setEnd] = useState("")
 
