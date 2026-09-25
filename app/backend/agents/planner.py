@@ -709,11 +709,51 @@ class PlannerAgent:
             generated_video_id = action.get("generated_video_id")
             platforms = action.get("platforms", ["youtube"])
             if generated_video_id:
+                # Planner and phone messaging use the same publish gate as the
+                # web UI. Never let an action block bypass explicit approval.
+                from sqlalchemy import select
+                from backend.database import AsyncSessionLocal
+                from backend.models.generated_video import GeneratedVideo
+                async with AsyncSessionLocal() as db:
+                    row = (await db.execute(
+                        select(GeneratedVideo).where(
+                            GeneratedVideo.id == generated_video_id
+                        )
+                    )).scalar_one_or_none()
+                if row is None:
+                    await ws_manager.send_constraint_warning(
+                        constraint="publish_video_missing",
+                        message="That generated video no longer exists.",
+                        severity="error",
+                        user_id=user_id,
+                    )
+                    return
+                if not row.publish_approved_at:
+                    await ws_manager.send_constraint_warning(
+                        constraint="publish_approval",
+                        message=(
+                            "Publishing is blocked until you explicitly approve "
+                            "that exact video in Publish."
+                        ),
+                        severity="warning",
+                        user_id=user_id,
+                    )
+                    return
+
                 from backend.agents.job_helper import create_job
                 from backend.core.task_runner import run_upload, dispatch
-                job = await create_job("upload", user_id, {"generated_video_id": generated_video_id})
+                job = await create_job(
+                    "upload",
+                    user_id,
+                    {
+                        "generated_video_id": generated_video_id,
+                        "platforms": platforms,
+                        "publish_approved": True,
+                    },
+                )
                 dispatch(run_upload(
-                    job_id=job.id, generated_video_id=generated_video_id, platforms=platforms, user_id=user_id,
+                    job_id=job.id, generated_video_id=generated_video_id,
+                    platforms=platforms, user_id=user_id,
                 ))
 
         elif action_type == "show_scout_results":
