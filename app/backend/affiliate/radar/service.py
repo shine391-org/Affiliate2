@@ -177,8 +177,14 @@ def record_source_run(
             conn.close()
 
 
-def observe_scout_rows(rows: list[dict], niche: str, conn: sqlite3.Connection | None = None) -> dict:
-    """Upsert canonical Scout identity and append immutable observations."""
+def observe_scout_rows(
+    rows: list[dict],
+    niche: str,
+    conn: sqlite3.Connection | None = None,
+    *,
+    job_id: str | None = None,
+) -> dict:
+    """Upsert the current Scout projection and append immutable observations."""
     own_conn = conn is None
     conn = conn or get_conn()
     captured_at = _now_iso()
@@ -217,12 +223,12 @@ def observe_scout_rows(rows: list[dict], niche: str, conn: sqlite3.Connection | 
                 scout_id = str(uuid4())
                 conn.execute(
                     """INSERT INTO scout_results
-                    (id,user_id,platform,video_id,video_url,creator_id,author,title,
+                    (id,user_id,job_id,platform,video_id,video_url,creator_id,author,title,
                      description,upload_date,niche,views,likes,comments,shares,
                      is_downloaded,is_analyzed,first_seen_at,last_seen_at,created_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (
-                        scout_id, "local", platform, content_id, *values,
+                        scout_id, "local", job_id, platform, content_id, *values,
                         _metric_value(row, "views"), _metric_value(row, "likes"),
                         _metric_value(row, "comments"), _metric_value(row, "shares"),
                         0, 0, captured_at, captured_at, captured_at,
@@ -233,21 +239,30 @@ def observe_scout_rows(rows: list[dict], niche: str, conn: sqlite3.Connection | 
                 scout_id = existing["id"]
                 conn.execute(
                     """UPDATE scout_results SET
-                    video_url=?, creator_id=?, author=?, title=?, description=?,
-                    upload_date=?, last_seen_at=?
+                    video_url=COALESCE(?,video_url), creator_id=COALESCE(?,creator_id),
+                    author=COALESCE(?,author), title=COALESCE(?,title),
+                    description=COALESCE(?,description), upload_date=COALESCE(?,upload_date),
+                    views=?, likes=?, comments=?, shares=?, job_id=COALESCE(?,job_id),
+                    last_seen_at=?
                     WHERE id=?""",
-                    (*values[:-1], captured_at, scout_id),
+                    (
+                        *values[:-1],
+                        _metric_value(row, "views"), _metric_value(row, "likes"),
+                        _metric_value(row, "comments"), _metric_value(row, "shares"),
+                        job_id, captured_at, scout_id,
+                    ),
                 )
                 stats["updated"] += 1
 
             conn.execute(
                 """INSERT INTO radar_observations
-                (id,scout_result_id,legacy_snapshot_id,captured_at,views,likes,comments,shares,favorites,created_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (id,scout_result_id,legacy_snapshot_id,job_id,captured_at,views,likes,comments,shares,favorites,created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     str(uuid4()),
                     scout_id,
                     None,
+                    job_id,
                     captured_at,
                     _metric_value(row, "views"),
                     _metric_value(row, "likes"),
@@ -461,6 +476,8 @@ def enrich_scout_payload(rows: list[dict]) -> list[dict]:
     return rows
 
 
-def observe_and_enrich_scout_rows(rows: list[dict], niche: str) -> list[dict]:
-    observe_scout_rows(rows, niche)
+def observe_and_enrich_scout_rows(
+    rows: list[dict], niche: str, *, job_id: str | None = None
+) -> list[dict]:
+    observe_scout_rows(rows, niche, job_id=job_id)
     return enrich_scout_payload(rows)
