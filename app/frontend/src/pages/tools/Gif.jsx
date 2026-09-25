@@ -20,11 +20,11 @@ export default function ToolGif() {
   return (
     <ToolRunner
       title="Video → GIF"
-      description="Convert any video clip into an animated GIF with optimal palette"
+      description="Chuyển clip thành GIF động với bảng màu tối ưu"
       icon={<GifOutlinedIcon fontSize="large" />}
       endpoint="/api/tools/gif"
       processLabel="Make GIF"
-      downloadLabel="Download GIF"
+      downloadLabel="Tải GIF"
       fieldBuilder={() => ({
         fps, width,
         start_seconds: startSeconds,
@@ -76,13 +76,13 @@ export default function ToolGif() {
           </Typography>
           <Stack direction="row" spacing={2}>
             <TextField
-              label="Start (sec)" type="number" size="small" sx={{ width: 130 }}
+              label="Bắt đầu (giây)" type="number" size="small" sx={{ width: 130 }}
               value={startSeconds}
               onChange={(e) => setStartSeconds(Math.max(0, parseFloat(e.target.value) || 0))}
               slotProps={{ htmlInput: { min: 0, step: 0.1 } }}
             />
             <TextField
-              label="Duration (sec)" type="number" size="small" sx={{ width: 150 }}
+              label="Thời lượng (giây)" type="number" size="small" sx={{ width: 150 }}
               value={durationSeconds}
               onChange={(e) => setDurationSeconds(Math.max(0, Math.min(60, parseFloat(e.target.value) || 0)))}
               slotProps={{ htmlInput: { min: 0, max: 60, step: 0.5 } }}

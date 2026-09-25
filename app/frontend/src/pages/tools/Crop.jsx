@@ -11,7 +11,7 @@ import useDocumentTitle from "../../hooks/useDocumentTitle"
 
 // Aspect presets, as width/height ratios. "free" leaves the box unconstrained.
 const PRESETS = [
-  { value: "free", label: "Free", ratio: 0 },
+  { value: "free", label: "Tự do", ratio: 0 },
   { value: "9:16", label: "9:16", ratio: 9 / 16 },
   { value: "1:1", label: "1:1", ratio: 1 },
   { value: "16:9", label: "16:9", ratio: 16 / 9 },
@@ -154,7 +154,7 @@ function CropCanvas({ box, setBox, preset }) {
             : "Drag a box over the frame. Tap once to reset to the whole frame."}
         </Typography>
         {box && (
-          <Button size="small" onClick={() => setBox(null)}>Reset</Button>
+          <Button size="small" onClick={() => setBox(null)}>Đặt lại</Button>
         )}
       </Stack>
     </Box>
@@ -168,12 +168,12 @@ export default function ToolCrop() {
 
   return (
     <ToolRunner
-      title="Crop Video"
-      description="Drag a box over the frame and keep just that part."
+      title="Cắt khung video"
+      description="Kéo vùng chọn trên khung hình và chỉ giữ phần đó."
       icon={<CropOutlinedIcon fontSize="large" />}
       endpoint="/api/tools/crop"
       processLabel="Crop"
-      downloadLabel="Download cropped"
+      downloadLabel="Tải bản đã cắt"
       canSubmit={!!box}
       disabledReason={box ? "" : "Drag a crop box over the frame"}
       costNote={
