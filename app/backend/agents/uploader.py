@@ -90,6 +90,19 @@ class UploadAgent:
             )
             return
 
+        already_uploaded = set(safe_json_loads(video.uploaded_platforms_json, [], logger))
+        duplicates = [platform for platform in platforms if platform in already_uploaded]
+        if duplicates:
+            await update_job_status(
+                job_id,
+                "failed",
+                error_message=(
+                    "Already published to: " + ", ".join(duplicates)
+                    + ". Republish is not supported by the standard Publish flow."
+                ),
+            )
+            return
+
         # Load user settings
         async with AsyncSessionLocal() as db:
             result = await db.execute(
