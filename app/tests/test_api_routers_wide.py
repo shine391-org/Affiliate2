@@ -157,6 +157,65 @@ class TestVideos:
         assert client.post("/api/videos/nope/upload",
                            json={"platforms": ["youtube"]}).status_code == 404
 
+    def test_publish_requires_explicit_human_approval(self, client, seeded):
+        client.post(
+            f"/api/videos/{seeded['video']}/publish-approval",
+            json={"approved": False},
+        )
+        blocked = client.post(
+            f"/api/videos/{seeded['video']}/upload",
+            json={"platforms": ["youtube"]},
+        )
+        assert blocked.status_code == 403
+        assert "approved" in blocked.json()["detail"].lower()
+
+    def test_publish_approval_is_visible_and_does_not_auto_upload(self, client, seeded):
+        approved = client.post(
+            f"/api/videos/{seeded['video']}/publish-approval",
+            json={"approved": True},
+        )
+        assert approved.status_code == 200
+        assert approved.json()["publish_approved"] is True
+        detail = client.get(f"/api/videos/{seeded['video']}").json()
+        assert detail["publish_approved"] is True
+        assert detail["publish_approved_at"]
+
+    def test_approved_video_can_queue_native_upload(self, client, seeded):
+        client.post(
+            f"/api/videos/{seeded['video']}/publish-approval",
+            json={"approved": True},
+        )
+        queued = client.post(
+            f"/api/videos/{seeded['video']}/upload",
+            json={"platforms": ["youtube"]},
+        )
+        assert queued.status_code == 200
+        assert queued.json()["job_id"]
+
+    def test_unknown_publish_platform_is_rejected_before_queueing(self, client, seeded):
+        client.post(
+            f"/api/videos/{seeded['video']}/publish-approval",
+            json={"approved": True},
+        )
+        bad = client.post(
+            f"/api/videos/{seeded['video']}/upload",
+            json={"platforms": ["myspace"]},
+        )
+        assert bad.status_code == 400
+        assert "unsupported" in bad.json()["detail"].lower()
+
+    def test_revoke_publish_approval_closes_the_gate_again(self, client, seeded):
+        revoked = client.post(
+            f"/api/videos/{seeded['video']}/publish-approval",
+            json={"approved": False},
+        )
+        assert revoked.status_code == 200
+        assert revoked.json()["publish_approved"] is False
+        assert client.post(
+            f"/api/videos/{seeded['video']}/upload",
+            json={"platforms": ["youtube"]},
+        ).status_code == 403
+
     def test_a_video_can_be_deleted(self, client):
         async def add():
             from backend.database import AsyncSessionLocal
