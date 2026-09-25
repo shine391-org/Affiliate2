@@ -49,7 +49,7 @@ export default function Candidates() {
       <PageHero
         icon={<Inventory2OutlinedIcon sx={{ fontSize: 22 }} />}
         title="Khám phá / Ứng viên"
-        subtitle="Persisted Scout and Radar leads. Saved/shortlist state is not yet available, so this view does not fake it."
+        subtitle="Các lead đã lưu từ Scout và Radar. Trạng thái đã lưu/danh sách rút gọn chưa khả dụng nên màn hình này không giả lập dữ liệu."
         accentColor="#7c3aed"
         actions={
           <Button size="small" variant="outlined" startIcon={<RefreshIcon />}

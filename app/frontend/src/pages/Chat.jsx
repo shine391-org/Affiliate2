@@ -210,7 +210,7 @@ export default function Chat() {
       setSessions(res.data)
     }).catch((err) => {
       console.error("Failed to load chat sessions:", err)
-      showSnackbar("Could not load chat history", "warning")
+      showSnackbar("Không thể tải lịch sử trò chuyện", "warning")
     })
 
     const savedSessionId = sessionStorage.getItem("vm_active_session")
@@ -287,9 +287,9 @@ export default function Chat() {
           setMessages([])
           setSuggestions(STARTER_SUGGESTIONS)
         }
-        showSnackbar("Chat deleted", "info")
+        showSnackbar("Đã xóa cuộc trò chuyện", "info")
       } catch {
-        showSnackbar("Failed to delete chat", "error")
+        showSnackbar("Xóa cuộc trò chuyện thất bại", "error")
       }
     })
   }

@@ -78,7 +78,7 @@ function ConnectForm({ platform, onConnected }) {
       })
       setResults(data.results || [])
       if ((data.results || []).length === 0) {
-        setError("No channels found. Try a different name or use the URL option below.")
+        setError("Không tìm thấy kênh. Hãy thử tên khác hoặc dùng tùy chọn URL bên dưới.")
       }
     } catch (e) {
       setError(e.response?.data?.detail || e.message)
@@ -363,9 +363,9 @@ function ChannelDetail({ channel, onBack }) {
   const handleAnalyze = async (video) => {
     try {
       await http.post("/api/channels/analyze", { video_url: video.url, title: video.title })
-      showSnackbar(`Analyzing: ${video.title || "video"}`, "info")
+      showSnackbar(`Đang phân tích: ${video.title || "video"}`, "info")
     } catch (e) {
-      showSnackbar(`Failed to start analysis: ${e.response?.data?.detail || e.message}`, "error")
+      showSnackbar(`Không thể bắt đầu phân tích: ${e.response?.data?.detail || e.message}`, "error")
     }
   }
 
@@ -374,9 +374,9 @@ function ChannelDetail({ channel, onBack }) {
       await http.post("/api/downloaded/batch-download", {
         urls: [{ url: video.url, title: video.title || "" }],
       })
-      showSnackbar(`Downloading: ${video.title || "video"}`, "info", { label: "View in Library", href: "/library" })
+      showSnackbar(`Đang tải xuống: ${video.title || "video"}`, "info", { label: "Xem trong Thư viện", href: "/library" })
     } catch (e) {
-      showSnackbar(`Download failed: ${e.response?.data?.detail || e.message}`, "error")
+      showSnackbar(`Tải xuống thất bại: ${e.response?.data?.detail || e.message}`, "error")
     }
   }
 
@@ -411,7 +411,7 @@ function ChannelDetail({ channel, onBack }) {
             )}
           </Stack>
         </Box>
-        <Tooltip title="Refresh">
+        <Tooltip title="Làm mới">
           <IconButton size="small" onClick={handleRefresh}>
             <RefreshIcon fontSize="small" />
           </IconButton>
@@ -482,9 +482,9 @@ function ChannelDetail({ channel, onBack }) {
             <FormControl size="small" sx={{ minWidth: 130 }}>
               <Select value={sortBy} onChange={(e) => { setSortBy(e.target.value); setPage(0) }}
                 sx={{ fontSize: "0.82rem", "& .MuiSelect-select": { py: 0.5 } }}>
-                <MenuItem value="recent">Recent</MenuItem>
-                <MenuItem value="views">Most Views</MenuItem>
-                <MenuItem value="likes">Most Likes</MenuItem>
+                <MenuItem value="recent">Gần đây</MenuItem>
+                <MenuItem value="views">Nhiều lượt xem nhất</MenuItem>
+                <MenuItem value="likes">Nhiều lượt thích nhất</MenuItem>
               </Select>
             </FormControl>
           </Stack>
@@ -492,7 +492,7 @@ function ChannelDetail({ channel, onBack }) {
           {/* Video cards grid */}
           {sorted.length === 0 ? (
             <Paper elevation={0} sx={{ p: 3, textAlign: "center", border: 1, borderColor: "divider", borderRadius: 2 }}>
-              <Typography variant="body2" sx={{ color: "text.secondary" }}>No videos found.</Typography>
+              <Typography variant="body2" sx={{ color: "text.secondary" }}>Không tìm thấy video.</Typography>
             </Paper>
           ) : (
             <>
@@ -540,7 +540,7 @@ function PlatformTab({ platform }) {
         setSelectedChannel(list[0])
       }
     } catch (e) {
-      showSnackbar(`Failed to load channels: ${e.message}`, "error")
+      showSnackbar(`Không thể tải kênh: ${e.message}`, "error")
     } finally {
       setLoading(false)
     }
@@ -552,9 +552,9 @@ function PlatformTab({ platform }) {
     try {
       await http.post("/api/channels/disconnect", { id: ch.id })
       setChannels((prev) => prev.filter((c) => c.id !== ch.id))
-      showSnackbar(`${ch.channel_name || "Channel"} disconnected`, "info")
+      showSnackbar(`${ch.channel_name || "Kênh"} đã ngắt kết nối`, "info")
     } catch (e) {
-      showSnackbar(`Failed to disconnect: ${e.message}`, "error")
+      showSnackbar(`Ngắt kết nối thất bại: ${e.message}`, "error")
     }
   }
 
@@ -645,7 +645,7 @@ function PlatformTab({ platform }) {
                 <Button size="small" variant="text" sx={{ minWidth: 0 }}>
                   View videos
                 </Button>
-                <Tooltip title="Disconnect">
+                <Tooltip title="Ngắt kết nối">
                   <IconButton size="small" onClick={(e) => { e.stopPropagation(); handleDisconnect(ch) }}
                     sx={{ color: "text.secondary" }}>
                     <LinkOffIcon fontSize="small" />
