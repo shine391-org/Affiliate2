@@ -1091,15 +1091,15 @@ export default function ClipStudio({ workflow = "manual" }) {
 
                   {editing ? (
                     <Stack spacing={2}>
-                      <TextField label="Clip Title" size="small" fullWidth
+                      <TextField label="Tiêu đề clip" size="small" fullWidth
                         value={editDraft.title} onChange={e => setEditDraft(p => ({ ...p, title: e.target.value }))} />
                       <Divider />
                       <Typography variant="overline" sx={{ color: "text.secondary" }}>YouTube Shorts</Typography>
-                      <TextField label="Title" size="small" fullWidth
+                      <TextField label="Tiêu đề" size="small" fullWidth
                         value={editDraft.youtube_title} onChange={e => setEditDraft(p => ({ ...p, youtube_title: e.target.value }))} />
-                      <TextField label="Description" size="small" fullWidth multiline minRows={2} maxRows={4}
+                      <TextField label="Mô tả" size="small" fullWidth multiline minRows={2} maxRows={4}
                         value={editDraft.youtube_description} onChange={e => setEditDraft(p => ({ ...p, youtube_description: e.target.value }))} />
-                      <TextField label="Tags (comma-separated)" size="small" fullWidth
+                      <TextField label="Thẻ (cách nhau bằng dấu phẩy)" size="small" fullWidth
                         value={editDraft.youtube_tags} onChange={e => setEditDraft(p => ({ ...p, youtube_tags: e.target.value }))} />
                       <Divider />
                       <Typography variant="overline" sx={{ color: "text.secondary" }}>TikTok</Typography>

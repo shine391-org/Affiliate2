@@ -367,8 +367,8 @@ export default function Tools() {
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <PageHero
         icon={<BuildOutlinedIcon sx={{ fontSize: 22 }} />}
-        title="Utilities"
-        subtitle="Single-purpose utilities to refine finished videos"
+        title="Tiện ích"
+        subtitle="Các tiện ích chuyên dụng để tinh chỉnh video đã hoàn thiện"
       />
 
       {/* Body */}
@@ -381,7 +381,7 @@ export default function Tools() {
             size="small"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search utilities — e.g. caption, reframe, speed, download…"
+            placeholder="Tìm tiện ích — ví dụ: phụ đề, đổi khung, tốc độ, tải xuống…"
             sx={{ mb: 2.5 }}
             slotProps={{
               input: {

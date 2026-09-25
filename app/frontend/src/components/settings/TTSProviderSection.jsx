@@ -108,12 +108,12 @@ export default function TTSProviderSection({ settings, updateSettings }) {
         size="small"
         value={voice}
         onChange={(e) => setVoice(e.target.value)}
-        helperText="Để trống để dùng mặc định của nhà cung cấp/ngôn ngữ. Chế độ nâng cao có thể override per speaker or segment."
+        helperText="Để trống để dùng mặc định của nhà cung cấp/ngôn ngữ. Chế độ nâng cao có thể ghi đè theo từng người nói hoặc từng đoạn."
       />
 
       {provider !== "edge_tts" && (
         <TextField
-          label="Model"
+          label="Mô hình"
           size="small"
           value={model}
           onChange={(e) => setModel(e.target.value)}
@@ -133,7 +133,7 @@ export default function TTSProviderSection({ settings, updateSettings }) {
 
       {meta.region && (
         <TextField
-          label="Azure Region"
+          label="Vùng Azure"
           size="small"
           value={region}
           onChange={(e) => setRegion(e.target.value)}

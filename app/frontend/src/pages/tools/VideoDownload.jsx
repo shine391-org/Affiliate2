@@ -200,7 +200,7 @@ export default function VideoDownload() {
       <PageHero
         icon={<DownloadForOfflineOutlinedIcon />}
         title="Tải video"
-        subtitle="Paste a link — download from YouTube, TikTok, Douyin, Bilibili, X and other yt-dlp sources. Login-gated sites reuse your configured browser session."
+        subtitle="Dán liên kết để tải từ YouTube, TikTok, Douyin, Bilibili, X và các nguồn yt-dlp khác. Trang yêu cầu đăng nhập sẽ dùng lại phiên trình duyệt đã cấu hình."
         backTo="/utilities"
         actions={
           <Button size="small" variant="outlined" onClick={() => navigate("/settings?section=services")}>
@@ -328,7 +328,7 @@ export default function VideoDownload() {
                                    onChange={(e) => setThumbnail(e.target.checked)} />}
                 label={<Typography variant="body2">Nhúng ảnh bìa</Typography>}
               />
-              <Tooltip title="Adds title/artist tags and chapter markers to the file">
+              <Tooltip title="Thêm thẻ tiêu đề/nghệ sĩ và mốc chương vào tệp">
                 <FormControlLabel
                   control={<Checkbox size="small" checked={metadata} disabled={busy}
                                      onChange={(e) => setMetadata(e.target.checked)} />}
