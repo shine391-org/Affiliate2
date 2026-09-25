@@ -637,7 +637,8 @@ async def sync_video_metrics(video_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=502, detail="YouTube metric sync failed; retry later or enter a manual snapshot.") from exc
     if metrics is None:
         raise HTTPException(status_code=502, detail="YouTube returned no valid metrics for this post. Check access or enter a manual snapshot.")
-    changed = await _save_metrics(video.id, "youtube", metrics, source="youtube_api")\n    return {"changed": changed, "performance": await get_video_performance(video_id, db)}
+    changed = await _save_metrics(video.id, "youtube", metrics, source="youtube_api")
+    return {"changed": changed, "performance": await get_video_performance(video_id, db)}
 
 
 @router.get("/videos/performance/optimal-time")
