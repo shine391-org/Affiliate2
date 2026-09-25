@@ -727,6 +727,7 @@ class PlannerAgent:
                         severity="error",
                         user_id=user_id,
                     )
+                    await self._followup(user_id, "That generated video no longer exists, so I didn't start a publish job.")
                     return
                 if not row.publish_approved_at:
                     await ws_manager.send_constraint_warning(
@@ -737,6 +738,10 @@ class PlannerAgent:
                         ),
                         severity="warning",
                         user_id=user_id,
+                    )
+                    await self._followup(
+                        user_id,
+                        "I didn't publish it because that exact video has not been approved in Publish yet.",
                     )
                     return
 
