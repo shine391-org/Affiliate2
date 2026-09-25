@@ -16,7 +16,7 @@ const INTENSITY = [
 ]
 
 export default function ToolAutoZoom() {
-  useDocumentTitle("Auto-Zoom")
+  useDocumentTitle("Tự động zoom")
   const [zoom, setZoom] = useState(1.15)
   const [wordsPerGroup, setWordsPerGroup] = useState(3)
 

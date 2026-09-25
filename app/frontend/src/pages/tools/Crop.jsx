@@ -162,7 +162,7 @@ function CropCanvas({ box, setBox, preset }) {
 }
 
 export default function ToolCrop() {
-  useDocumentTitle("Crop Video")
+  useDocumentTitle("Cắt khung video")
   const [box, setBox] = useState(null)          // {x,y,w,h} normalized, or null
   const [preset, setPreset] = useState("free")
 

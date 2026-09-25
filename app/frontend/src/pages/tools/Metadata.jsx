@@ -97,7 +97,7 @@ function Field({ label, value, onCopy, multiline }) {
 }
 
 export default function ToolMetadata() {
-  useDocumentTitle("Metadata Generator")
+  useDocumentTitle("Tạo metadata")
   const [mode, setMode] = useState("text")
   const [text, setText] = useState("")
   const [topic, setTopic] = useState("")

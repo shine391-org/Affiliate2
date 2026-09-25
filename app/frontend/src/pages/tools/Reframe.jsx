@@ -4,7 +4,7 @@ import ToolRunner from "../../components/tools/ToolRunner"
 import useDocumentTitle from "../../hooks/useDocumentTitle"
 
 export default function ToolReframe() {
-  useDocumentTitle("Reframe to Vertical")
+  useDocumentTitle("Đổi khung dọc")
   return (
     <ToolRunner
       title="Đổi khung dọc"

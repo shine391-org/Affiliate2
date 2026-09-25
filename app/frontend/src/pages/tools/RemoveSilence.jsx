@@ -5,7 +5,7 @@ import useDocumentTitle from "../../hooks/useDocumentTitle"
 import { MEDIA_ACCEPT } from "../../components/tools/mediaAccept"
 
 export default function ToolRemoveSilence() {
-  useDocumentTitle("Silence Remover")
+  useDocumentTitle("Cắt khoảng lặng")
   return (
     <ToolRunner
       title="Cắt khoảng lặng"

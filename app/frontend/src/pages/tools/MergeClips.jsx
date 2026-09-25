@@ -37,7 +37,7 @@ const ASPECT_OPTIONS = [
 const CARD_W = 140
 
 export default function ToolMergeClips() {
-  useDocumentTitle("Merge Clips")
+  useDocumentTitle("Ghép clip")
   const navigate = useNavigate()
   const inputRef = useRef(null)
   const [clips, setClips] = useState([])      // [{ id, file, url }]
