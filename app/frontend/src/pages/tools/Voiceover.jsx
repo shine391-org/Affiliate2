@@ -102,13 +102,13 @@ export default function ToolVoiceover() {
           setVoicesByProvider((prev) => ({ ...prev, [provider]: list }))
         } else {
           // Empty response — fall back to the hardcoded list.
-          setVoicesError("No voices returned by backend, using fallback list")
+          setVoicesError("Backend không trả về giọng đọc, đang dùng danh sách dự phòng")
         }
       })
       .catch((err) => {
         if (cancelled) return
         const msg = err.response?.data?.detail || err.message || "Lỗi mạng"
-        setVoicesError(`Couldn't load voice list (${msg}). Using fallback.`)
+        setVoicesError(`Không thể tải danh sách giọng (${msg}). Đang dùng danh sách dự phòng.`)
         // Tool stays usable via fallbackFor(provider) — see `voices` above.
       })
       .finally(() => { if (!cancelled) setVoicesLoading(false) })

@@ -29,10 +29,10 @@ function VPHChip({ vph }) {
 function OutlierChip({ score }) {
   if (!score || score < 3) return null
   let color, label
-  if (score >= 20) { color = "error"; label = `🔥 ${score}x MONSTER` }
-  else if (score >= 10) { color = "error"; label = `⚡ ${score}x BREAKOUT` }
-  else if (score >= 5) { color = "warning"; label = `🚀 ${score}x STRONG` }
-  else { color = "info"; label = `${score}x outlier` }
+  if (score >= 20) { color = "error"; label = `🔥 ${score}x BÙNG NỔ` }
+  else if (score >= 10) { color = "error"; label = `⚡ ${score}x ĐỘT PHÁ` }
+  else if (score >= 5) { color = "warning"; label = `🚀 ${score}x MẠNH` }
+  else { color = "info"; label = `${score}x ngoại lệ` }
   return <Chip label={label} size="small" color={color} variant="outlined" sx={{ fontWeight: 700, fontSize: "0.65rem", height: 22 }} />
 }
 

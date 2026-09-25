@@ -252,7 +252,7 @@ export default function ToolRunner({
     if (!f) return
     const maxBytes = maxMB * 1024 * 1024
     if (f.size > maxBytes) {
-      setError(`File too large (max ${maxMB} MB)`)
+      setError(`Tệp quá lớn (tối đa ${maxMB} MB)`)
       return
     }
     setFile(f)
@@ -278,7 +278,7 @@ export default function ToolRunner({
     const form = new FormData()
     if (!hideFileInput) {
       if (!file) {
-        setError("Please select a file")
+        setError("Hãy chọn một tệp")
         return
       }
       form.append("file", file)

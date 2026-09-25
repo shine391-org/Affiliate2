@@ -318,14 +318,14 @@ export default function DownloadedDetail({ video, onUseAsInspiration, onClose, o
                   icon={<WhatshotIcon sx={{ fontSize: 16 }} />}
                   loading={aiActionLoading === "strengthen_hook"}
                   onClick={() => handleAiAction("strengthen_hook")}
-                  tooltip="Rewrite the hook to be more attention-grabbing"
+                  tooltip="Viết lại hook để thu hút chú ý hơn"
                 />
                 <AIActionButton
                   label="Cải thiện góc"
                   icon={<AutoFixHighIcon sx={{ fontSize: 16 }} />}
                   loading={aiActionLoading === "improve_angle"}
                   onClick={() => handleAiAction("improve_angle")}
-                  tooltip="Elaborate and strengthen the suggested video angle"
+                  tooltip="Mở rộng và làm mạnh hơn góc video đề xuất"
                 />
                 <AIActionButton
                   label="5 ý tưởng tiêu đề"
@@ -339,21 +339,21 @@ export default function DownloadedDetail({ video, onUseAsInspiration, onClose, o
                   icon={<ContentCutIcon sx={{ fontSize: 16 }} />}
                   loading={aiActionLoading === "rewrite_shorter"}
                   onClick={() => handleAiAction("rewrite_shorter")}
-                  tooltip="Shorten the suggested angle to 1-2 punchy sentences"
+                  tooltip="Rút góc đề xuất còn 1–2 câu ngắn, mạnh"
                 />
                 <AIActionButton
                   label="Cho TikTok"
                   icon={<AspectRatioIcon sx={{ fontSize: 16 }} />}
                   loading={aiActionLoading === "rewrite_for_platform"}
                   onClick={() => handleAiAction("rewrite_for_platform", { platform: "TikTok" })}
-                  tooltip="Adapt concept specifically for TikTok's format"
+                  tooltip="Điều chỉnh ý tưởng riêng cho định dạng TikTok"
                 />
                 <AIActionButton
                   label="Dịch"
                   icon={<TravelExploreIcon sx={{ fontSize: 16 }} />}
                   loading={aiActionLoading === "translate"}
                   onClick={() => handleAiAction("translate", { language: "Chinese" })}
-                  tooltip="Translate all insights into Chinese"
+                  tooltip="Dịch toàn bộ insight sang tiếng Trung"
                 />
               </Stack>
 
@@ -387,8 +387,8 @@ export default function DownloadedDetail({ video, onUseAsInspiration, onClose, o
                   ) : aiActionResult.action === "rewrite_for_platform" && typeof aiActionResult.result === "object" ? (
                     <Stack spacing={1}>
                       {aiActionResult.result.hook && <InsightRow label="Hook" color="secondary.main" value={aiActionResult.result.hook} />}
-                      {aiActionResult.result.suggested_angle && <InsightRow label="Angle" color="primary.main" value={aiActionResult.result.suggested_angle} />}
-                      {aiActionResult.result.suggested_title && <InsightRow label="Title" color="primary.main" value={aiActionResult.result.suggested_title} />}
+                      {aiActionResult.result.suggested_angle && <InsightRow label="Góc" color="primary.main" value={aiActionResult.result.suggested_angle} />}
+                      {aiActionResult.result.suggested_title && <InsightRow label="Tiêu đề" color="primary.main" value={aiActionResult.result.suggested_title} />}
                       {aiActionResult.result.format_tips && <InsightRow label="Mẹo định dạng" color="warning.main" value={aiActionResult.result.format_tips} />}
                     </Stack>
                   ) : aiActionResult.action === "translate" && typeof aiActionResult.result === "object" ? (

@@ -115,7 +115,7 @@ export default function ToolMergeClips() {
         for (const c of merged.slice(MAX_CLIPS)) {
           try { URL.revokeObjectURL(c.url) } catch { /* noop */ }
         }
-        setError(`Max ${MAX_CLIPS} clips per merge — keeping the first ${MAX_CLIPS}.`)
+        setError(`Tối đa ${MAX_CLIPS} clip mỗi lần ghép — chỉ giữ ${MAX_CLIPS} clip đầu tiên.`)
         return merged.slice(0, MAX_CLIPS)
       }
       return merged
@@ -191,7 +191,7 @@ export default function ToolMergeClips() {
   const submit = async () => {
     setError("")
     if (clips.length < MIN_CLIPS) {
-      setError(`Need at least ${MIN_CLIPS} clips.`)
+      setError(`Cần ít nhất ${MIN_CLIPS} clip.`)
       return
     }
     const form = new FormData()
