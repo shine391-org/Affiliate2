@@ -180,6 +180,20 @@ class TestVideos:
         assert detail["publish_approved"] is True
         assert detail["publish_approved_at"]
 
+    @pytest.mark.parametrize("bad_value", ["false", "true", 1, 0, None])
+    def test_publish_approval_rejects_non_boolean_values(self, client, seeded, bad_value):
+        client.post(
+            f"/api/videos/{seeded['video']}/publish-approval",
+            json={"approved": False},
+        )
+        malformed = client.post(
+            f"/api/videos/{seeded['video']}/publish-approval",
+            json={"approved": bad_value},
+        )
+        assert malformed.status_code == 422
+        detail = client.get(f"/api/videos/{seeded['video']}").json()
+        assert detail["publish_approved"] is False
+
     def test_approved_video_can_queue_native_upload(self, client, seeded):
         client.post(
             f"/api/videos/{seeded['video']}/publish-approval",
@@ -188,6 +202,18 @@ class TestVideos:
         queued = client.post(
             f"/api/videos/{seeded['video']}/upload",
             json={"platforms": ["youtube"]},
+        )
+        assert queued.status_code == 200
+        assert queued.json()["job_id"]
+
+    def test_single_publish_platform_string_is_normalized(self, client, seeded):
+        client.post(
+            f"/api/videos/{seeded['video']}/publish-approval",
+            json={"approved": True},
+        )
+        queued = client.post(
+            f"/api/videos/{seeded['video']}/upload",
+            json={"platforms": "youtube"},
         )
         assert queued.status_code == 200
         assert queued.json()["job_id"]
