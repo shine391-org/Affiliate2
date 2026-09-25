@@ -46,76 +46,12 @@ async def list_videos(
     if source_type:
         base_query = base_query.where(GeneratedVideo.source_type == source_type)
 
-    # Self-heal + BACKFILL: prune rows whose rendered file is gone, then
-    # re-query so the caller still gets a full page.
-    #
-    # Only rows that HAD a file (video_path set) but it's now missing on disk —
-    # a draft/failed row with no path yet is legitimately file-less and left
-    # alone. Local is_file() is authoritative so the delete is safe; it stops
-    # broken/dead tiles from lingering in the Library forever.
-    #
-    # Why the loop: pruning used to happen *within* the fetched page and the
-    # page was returned short. With enough stale rows the whole page could be
-    # pruned, so a limit-3 request answered `videos: []` next to `total: 431` —
-    # which reads as a bug to any caller and gives it no way forward. Deleting
-    # rows inside [offset, offset+limit) shifts later rows INTO that window, so
-    # re-running the same offset/limit query is the correct backfill.
-    live: list = []
-    pruned = 0
-    passes = 0
-    _MAX_PASSES = 5  # bounds the work when a whole tail of rows is orphaned
-    # Distinguish a missing FILE from a missing VOLUME: with the storage
-    # root itself absent (external drive asleep/unmounted, VIRALMINT_DATA_DIR
-    # on removable media), every row's is_file() is False and this prune
-    # would delete the user's entire video table + sibling files on a single
-    # page load. Skip pruning entirely until storage is back; rows render as
-    # they are and the next healthy request prunes true orphans.
-    from backend.config import settings as _settings
-    _storage_present = _settings.STORAGE_ROOT.exists()
-    while True:
-        passes += 1
-        # Rows already kept occupy [offset, offset + len(live)) in the CURRENT
-        # (post-delete) ordering, because deletions were all inside the window
-        # and rows before `offset` are untouched. So the next slice starts
-        # after them — re-using the original `offset` on a later pass would
-        # re-fetch what `live` already holds and duplicate it in the response.
-        result = await db.execute(
-            base_query.offset(offset + len(live)).limit(limit - len(live)))
-        page = result.scalars().all()
-        if not page:
-            break
-        pruned_this_pass = 0
-        for v in page:
-            if _storage_present and v.video_path and not Path(v.video_path).is_file():
-                try:
-                    for ps in (v.video_path, v.audio_path,
-                               v.thumbnail_path, v.video_path_landscape):
-                        if ps:
-                            pp = Path(ps)
-                            if pp.exists():
-                                pp.unlink(missing_ok=True)
-                    await db.delete(v)
-                    pruned += 1
-                    pruned_this_pass += 1
-                    continue
-                except Exception:
-                    logger.warning("Could not prune orphaned video row %s", v.id)
-            live.append(v)
-        if pruned_this_pass:
-            # Commit so the next pass's OFFSET sees the shrunk table (and so
-            # `total` below reflects the pruned set).
-            await db.commit()
-        if len(live) >= limit or not pruned_this_pass:
-            break
-        if passes >= _MAX_PASSES:
-            logger.warning(
-                "Videos: stopped backfilling after %d passes (%d pruned, page "
-                "has %d/%d) — many orphaned rows in this range",
-                passes, pruned, len(live), limit)
-            break
-    if pruned:
-        logger.info("Videos: pruned %d orphaned row(s) with missing files", pruned)
-    videos = live
+    # Listing is read-only. A missing local render is state to surface, not a
+    # reason to destroy canonical history. GeneratedVideo may already anchor
+    # publication attempts and performance metrics, so cleanup must be an
+    # explicit maintenance/user action rather than a GET side effect.
+    result = await db.execute(base_query.offset(offset).limit(limit))
+    videos = result.scalars().all()
 
     from sqlalchemy import func
     count_query = select(func.count(GeneratedVideo.id))
@@ -136,6 +72,7 @@ async def list_videos(
                 "aspect_ratio": v.aspect_ratio,
                 "gen_tier": v.gen_tier,
                 "video_path": v.video_path,
+                "artifact_missing": bool(v.video_path and not Path(v.video_path).is_file()),
                 "thumbnail_path": v.thumbnail_path,
                 "youtube_title": v.youtube_title,
                 "youtube_description": v.youtube_description,
@@ -185,6 +122,7 @@ async def get_video(video_id: str, db: AsyncSession = Depends(get_db)):
         "aspect_ratio": v.aspect_ratio,
         "gen_tier": v.gen_tier,
         "video_path": v.video_path,
+        "artifact_missing": bool(v.video_path and not Path(v.video_path).is_file()),
         "audio_path": v.audio_path,
         "thumbnail_path": v.thumbnail_path,
         "duration_seconds": v.duration_seconds,
