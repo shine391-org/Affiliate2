@@ -178,6 +178,18 @@ class TestPreconditions:
         assert row.status == "failed" and "path is missing" in row.error_message
         assert "youtube" not in providers["calls"]
 
+    def test_a_single_platform_string_is_normalized_before_upload(self, ws, providers):
+        async def run():
+            await _make_settings(
+                youtube_credentials_json_encrypted=encrypt('{"token":"t"}'))
+            vid = await _make_video()
+            jid = await _job()
+            await UploadAgent().run(jid, vid, "youtube")
+            return await _job_row(jid)
+        row = asyncio.run(run())
+        assert row.status == "success"
+        assert "youtube" in providers["calls"]
+
 
 # ── per-platform success ────────────────────────────────────────────────────
 
@@ -272,14 +284,18 @@ class TestSuccessfulUploads:
         assert set(json.loads(video.uploaded_platforms_json)) == {
             "youtube", "tiktok", "instagram"}
 
-    def test_re_uploading_does_not_duplicate_the_platform(self, ws, providers):
+    def test_re_uploading_an_existing_destination_is_blocked(self, ws, providers):
         async def run():
             await _make_settings(
                 youtube_credentials_json_encrypted=encrypt('{"token":"t"}'))
             vid = await _make_video(uploaded_platforms_json=json.dumps(["youtube"]))
-            await UploadAgent().run(await _job(), vid, ["youtube"])
-            return await _video_row(vid)
-        video = asyncio.run(run())
+            jid = await _job()
+            await UploadAgent().run(jid, vid, ["youtube"])
+            return await _job_row(jid), await _video_row(vid)
+        job, video = asyncio.run(run())
+        assert job.status == "failed"
+        assert "already published" in job.error_message.lower()
+        assert "youtube" not in providers["calls"]
         assert json.loads(video.uploaded_platforms_json) == ["youtube"]
 
 
@@ -325,7 +341,7 @@ class TestPartialFailure:
             await UploadAgent().run(jid, await _make_video(), ["myspace"])
             return await _job_row(jid)
         job = asyncio.run(run())
-        assert job.status == "failed" and "Unknown platform" in job.error_message
+        assert job.status == "failed" and "Unsupported publish platform" in job.error_message
 
 
 # ── auth failures route to the setup wizard ─────────────────────────────────
