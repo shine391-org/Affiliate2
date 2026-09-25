@@ -282,10 +282,10 @@ async def upload_video(video_id: str, body: dict, db: AsyncSession = Depends(get
     video = result.scalar_one_or_none()
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
-    if video.status not in ("ready", "uploaded", "failed"):
+    if video.status not in ("ready", "uploaded"):
         raise HTTPException(
             status_code=400,
-            detail=f"Video status is '{video.status}', must be 'ready', 'uploaded', or 'failed'",
+            detail=f"Video status is '{video.status}', must be 'ready' or 'uploaded'",
         )
     if not video.publish_approved_at:
         raise HTTPException(
