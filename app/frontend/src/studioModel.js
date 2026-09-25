@@ -1,16 +1,16 @@
 export const STUDIO_MODES = [
-  { value: "localize", label: "Localize", path: "/studio/localize", active: true, phase: "C" },
-  { value: "smart-cut", label: "Smart Cut", path: "/studio/smart-cut", active: true, phase: "D" },
-  { value: "remake", label: "Creative Remake", path: "/studio/remake", active: false, phase: "E" },
-  { value: "manual", label: "Manual Edit", path: "/studio/manual", active: true, phase: "C" },
+  { value: "localize", label: "Bản địa hóa", path: "/studio/localize", active: true, phase: "C" },
+  { value: "smart-cut", label: "Cắt thông minh", path: "/studio/smart-cut", active: true, phase: "D" },
+  { value: "remake", label: "Làm lại sáng tạo", path: "/studio/remake", active: false, phase: "E" },
+  { value: "manual", label: "Chỉnh thủ công", path: "/studio/manual", active: true, phase: "C" },
 ]
 
 export const LOCALIZE_STEPS = [
-  { value: "source", label: "Source" },
-  { value: "transcript", label: "Transcript" },
-  { value: "translation", label: "Translation" },
-  { value: "voice-timing", label: "Voice & Timing" },
-  { value: "render", label: "Render" },
+  { value: "source", label: "Nguồn" },
+  { value: "transcript", label: "Bản chép lời" },
+  { value: "translation", label: "Bản dịch" },
+  { value: "voice-timing", label: "Giọng đọc & Nhịp" },
+  { value: "render", label: "Kết xuất" },
   { value: "qc", label: "QC" },
 ]
 

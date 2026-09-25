@@ -17,21 +17,21 @@
  * words_per_group) rather than being decorative.
  */
 export const CAPTION_STYLES = [
-  { value: "viral", label: "Viral", description: "Yellow highlight, ~6-word phrases" },
-  { value: "classic", label: "Classic", description: "Full sentence, no highlight" },
-  { value: "bold", label: "Bold", description: "Green highlight, ~4-word phrases" },
-  { value: "neon", label: "Neon", description: "Pink text, yellow highlight, ~6 words" },
-  { value: "minimal", label: "Minimal", description: "Plain Arial, long lines, no highlight" },
-  { value: "karaoke", label: "Karaoke", description: "Grey text lights up word by word" },
-  { value: "glow", label: "Glow", description: "Soft orange glow, ~6-word phrases" },
-  { value: "urban", label: "Bold Urban", description: "Arial Black, punchy ~3-word bursts" },
-  { value: "warm", label: "Warm Glow", description: "Georgia serif, warm cream tone" },
-  { value: "mono", label: "Monochrome", description: "Verdana, grey highlight, understated" },
+  { value: "viral", label: "Viral", description: "Tô vàng, cụm khoảng 6 từ" },
+  { value: "classic", label: "Classic", description: "Cả câu, không tô sáng" },
+  { value: "bold", label: "Bold", description: "Tô xanh, cụm khoảng 4 từ" },
+  { value: "neon", label: "Neon", description: "Chữ hồng, tô vàng, khoảng 6 từ" },
+  { value: "minimal", label: "Minimal", description: "Arial đơn giản, dòng dài, không tô sáng" },
+  { value: "karaoke", label: "Karaoke", description: "Chữ xám sáng dần từng từ" },
+  { value: "glow", label: "Glow", description: "Phát sáng cam nhẹ, cụm khoảng 6 từ" },
+  { value: "urban", label: "Urban đậm", description: "Arial Black, nhịp mạnh khoảng 3 từ" },
+  { value: "warm", label: "Ánh sáng ấm", description: "Georgia serif, tông kem ấm" },
+  { value: "mono", label: "Đơn sắc", description: "Verdana, tô xám, nhẹ nhàng" },
 ]
 
 export const EMOJI_LEVELS = [
-  { value: "none", label: "None" },
-  { value: "minimal", label: "Minimal" },
-  { value: "moderate", label: "Moderate" },
-  { value: "heavy", label: "Heavy" },
+  { value: "none", label: "Không" },
+  { value: "minimal", label: "Ít" },
+  { value: "moderate", label: "Vừa" },
+  { value: "heavy", label: "Nhiều" },
 ]
