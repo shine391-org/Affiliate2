@@ -153,7 +153,7 @@ export default function GeneratedDetail({ video, onUpload, onDelete, onClose, on
                 onClick={handleRegenThumbnail}>
                 {regenThumb ? "Generating..." : "Regen Thumbnail"}
               </Button>
-              {video.status === "ready" && (
+              {["ready", "uploaded"].includes(video.status) && (
                 <>
                   <Button variant="contained" size="small" color="error" startIcon={<UploadIcon />}
                     onClick={() => onUpload(video.id, ["youtube"])}>
