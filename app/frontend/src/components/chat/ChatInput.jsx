@@ -210,7 +210,7 @@ export default function ChatInput({ onSend, disabled }) {
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Message ViralMint..."
+          placeholder="Nhắn cho ViralMint..."
           disabled={disabled}
           multiline
           maxRows={6}

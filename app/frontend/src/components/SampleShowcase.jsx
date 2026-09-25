@@ -253,7 +253,7 @@ function SampleCard({ sample, onUse }) {
  * @param {(sample) => void} onUse  called when a card is clicked
  * @param {string} [title]
  */
-export default function SampleShowcase({ samples = [], onUse, title = "Start from a sample", open: openProp, onToggle }) {
+export default function SampleShowcase({ samples = [], onUse, title = "Bắt đầu từ mẫu", open: openProp, onToggle }) {
   // Controlled when the parent passes `open` (it reserves preview-gutter space
   // for the panel); otherwise self-manage + persist.
   const [openState, setOpenState] = useState(() => {
@@ -286,8 +286,8 @@ export default function SampleShowcase({ samples = [], onUse, title = "Start fro
         }}
         onClick={toggle}
       >
-        <Tooltip title="Show sample videos" placement="right">
-          <IconButton size="small" aria-label="Show samples" sx={{ p: 0.5 }}>
+        <Tooltip title="Hiện video mẫu" placement="right">
+          <IconButton size="small" aria-label="Hiện mẫu" sx={{ p: 0.5 }}>
             <AutoAwesomeIcon sx={{ fontSize: 18, color: "#C44CE3" }} />
           </IconButton>
         </Tooltip>
@@ -320,8 +320,8 @@ export default function SampleShowcase({ samples = [], onUse, title = "Start fro
       <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, mb: 0.75, flexShrink: 0 }}>
         <AutoAwesomeIcon sx={{ fontSize: 15, color: "#C44CE3" }} />
         <Typography noWrap sx={{ fontSize: "0.72rem", fontWeight: 800, lineHeight: 1.1, flex: 1, minWidth: 0 }}>{title}</Typography>
-        <Tooltip title="Collapse" placement="right">
-          <IconButton size="small" onClick={toggle} aria-label="Collapse samples" sx={{ p: 0.25 }}>
+        <Tooltip title="Thu gọn" placement="right">
+          <IconButton size="small" onClick={toggle} aria-label="Thu gọn mẫu" sx={{ p: 0.25 }}>
             <ChevronLeftIcon fontSize="small" />
           </IconButton>
         </Tooltip>

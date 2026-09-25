@@ -30,7 +30,7 @@ export default function DownloadedListCard({ videos }) {
   const handleGenerate = async (id) => {
     try {
       const { data } = await http.post(`/api/downloaded/${id}/generate`)
-      showSnackbar("Video generation started!", "success")
+      showSnackbar("Đã bắt đầu tạo video!", "success")
     } catch (err) {
       showSnackbar(err.response?.data?.detail || err.message, "error")
     }
@@ -97,7 +97,7 @@ export default function DownloadedListCard({ videos }) {
                   </Typography>
                 )}
                 {v.has_insights && (
-                  <Chip icon={<LightbulbIcon sx={{ fontSize: 10 }} />} label="analyzed" size="small" color="success" variant="outlined"
+                  <Chip icon={<LightbulbIcon sx={{ fontSize: 10 }} />} label="đã phân tích" size="small" color="success" variant="outlined"
                     sx={{ fontSize: "0.55rem", height: 16, "& .MuiChip-icon": { ml: 0.3 } }} />
                 )}
               </Stack>
@@ -109,7 +109,7 @@ export default function DownloadedListCard({ videos }) {
             </Box>
 
             {/* Generate button */}
-            <Tooltip title="Generate video from this" arrow>
+            <Tooltip title="Tạo video từ nội dung này" arrow>
               <IconButton size="small" onClick={() => handleGenerate(v.id)}
                 sx={{ color: "primary.main", "&:hover": { bgcolor: "action.hover" } }}>
                 <MovieCreationIcon sx={{ fontSize: "1.1rem" }} />
