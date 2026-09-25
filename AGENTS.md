@@ -30,8 +30,9 @@ Current scope:
 Phase C implementation is frozen for architecture work; localization quality
 tuning is profile/model/prompt driven unless real-media QA exposes a technical
 defect. Phase D Smart Cut is wired and awaits local QA. Phase E Creative Remake
-is intentionally deferred after donor audit. Phase F Review / Publish /
-Performance native migration is the next architecture task.
+is intentionally deferred after donor audit. Phase F is active: F1 native
+Publish ownership is wired and awaits QA; F2 native Performance convergence is
+next.
 
 Read before changing Phase-C code:
 
@@ -172,6 +173,21 @@ legacy Clipper behavior, not the Smart Cut product path.
 Phase E is intentionally deferred. Keep `docs/PHASE_E_DONOR_AUDIT.md` as
 reference only. Do not implement source shot mapping, storyboard or full-remake
 orchestration unless product evidence reopens the phase.
+
+## Phase-F distribution boundary
+
+Read `docs/PHASE_F_CONVERGENCE.md`.
+
+Primary Publish must operate on canonical GeneratedVideo IDs and reuse the
+existing UploadAgent/UserSettings credential owners. Human publish approval is
+explicit and never triggers an upload automatically. Keep overlay
+candidate/remake publishing as compatibility-only until parity; do not build a
+second native upload agent.
+
+Performance should converge onto native VideoMetrics/performance_tracker before
+overlay stores are removed. Messaging is transport only: route events/actions
+through canonical app services and PlannerAgent rather than implementing
+channel-specific business logic.
 
 ## Branch/change protocol
 
