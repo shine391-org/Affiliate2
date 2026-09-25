@@ -72,19 +72,19 @@ export default function ActivityPanel({
         px: 2, py: 1.75, borderBottom: 1, borderColor: "divider", flexShrink: 0,
       }}>
         <Box sx={{ flex: 1 }}>
-          <Typography sx={{ fontSize: "1rem", fontWeight: 700, letterSpacing: "-0.02em" }}>Activity</Typography>
+          <Typography sx={{ fontSize: "1rem", fontWeight: 700, letterSpacing: "-0.02em" }}>Hoạt động</Typography>
           <Typography sx={{ fontSize: "0.72rem", color: "text.secondary" }}>
             {allRunning.length} running · {allFailed.length} failed · {allDone.length} finished
           </Typography>
         </Box>
-        <IconButton size="small" onClick={onClose} aria-label="Close">
+        <IconButton size="small" onClick={onClose} aria-label="Đóng">
           <CloseRoundedIcon fontSize="small" />
         </IconButton>
       </Stack>
 
       <Box sx={{ flex: 1, overflow: "auto", px: 2, py: 2 }}>
         {failed.length > 0 && (
-          <Section label="Needs attention" tone={theme.palette.error.main}
+          <Section label="Cần xử lý" tone={theme.palette.error.main}
             more={allFailed.length - failed.length}
             onShowAll={() => setShowAll((s) => ({ ...s, failed: true }))}
             onClear={() => onClearSection?.(allFailed.map((j) => j.id), "failed")}
@@ -97,7 +97,7 @@ export default function ActivityPanel({
         {/* No clear-all for running work: cancelling a batch of renders in one
             click is not something to make easy. */}
         {running.length > 0 && (
-          <Section label="Running" more={allRunning.length - running.length}
+          <Section label="Đang chạy" more={allRunning.length - running.length}
             onShowAll={() => setShowAll((s) => ({ ...s, running: true }))}>
             {running.map((j) => (
               <JobRow key={j.id} job={j} onToast={onToast} onCancel={onCancel} onDelete={onDelete} />
@@ -105,7 +105,7 @@ export default function ActivityPanel({
           </Section>
         )}
         {done.length > 0 && (
-          <Section label="Recent" more={allDone.length - done.length}
+          <Section label="Gần đây" more={allDone.length - done.length}
             onShowAll={() => setShowAll((s) => ({ ...s, done: true }))}
             onClear={() => onClearSection?.(allDone.map((j) => j.id), "finished")}
             clearLabel={`Clear ${allDone.length}`}>
@@ -210,8 +210,8 @@ function JobRow({ job, onToast, onOpenResult, onCancel, onDelete }) {
           </Button>
         )}
         {job.state === "done" && job.result_key && (
-          <Tooltip title="Open what it made">
-            <IconButton size="small" aria-label="Open result"
+          <Tooltip title="Mở kết quả đã tạo">
+            <IconButton size="small" aria-label="Mở kết quả"
               onClick={() => onOpenResult?.(job.result_key)}>
               <NorthEastRoundedIcon sx={{ fontSize: 15 }} />
             </IconButton>
@@ -221,8 +221,8 @@ function JobRow({ job, onToast, onOpenResult, onCancel, onDelete }) {
             and losing that was a regression. For a RUNNING job this cancels first
             and then removes the row (the endpoint cancels a live job rather than
             deleting it, by design). */}
-        <Tooltip title={job.state === "running" ? "Cancel and remove" : "Remove from the log"}>
-          <IconButton size="small" aria-label="Remove job"
+        <Tooltip title={job.state === "running" ? "Hủy và xóa" : "Xóa khỏi nhật ký"}>
+          <IconButton size="small" aria-label="Xóa tác vụ"
             onClick={() => onDelete?.(job)}>
             <DeleteOutlineRoundedIcon sx={{ fontSize: 15 }} />
           </IconButton>
@@ -255,7 +255,7 @@ function ExpandableError({ message }) {
   return (
     <Typography
       onClick={(e) => { e.stopPropagation(); setOpen((v) => !v) }}
-      title={open ? "" : "Click to expand"}
+      title={open ? "" : "Bấm để mở rộng"}
       sx={{
         mt: 0.75, fontSize: "0.72rem", color: "error.main", cursor: "pointer",
         ...(open

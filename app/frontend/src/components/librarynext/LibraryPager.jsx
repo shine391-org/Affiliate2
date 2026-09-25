@@ -71,7 +71,7 @@ export default function LibraryPager({
             <Select
               size="small" value={pageSize}
               onChange={(e) => onPageSize(Number(e.target.value))}
-              aria-label="Items per page"
+              aria-label="Số mục mỗi trang"
               sx={{
                 height: 26, fontSize: "0.75rem",
                 "& .MuiSelect-select": { py: 0, pl: 1 },
