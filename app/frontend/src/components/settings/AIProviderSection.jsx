@@ -229,7 +229,7 @@ export default function AIProviderSection({ settings, updateSettings }) {
         fullWidth
         value={effectiveModel}
         onChange={(e) => setModel(e.target.value)}
-        placeholder="e.g. qwen3:14b or provider/model"
+        placeholder="ví dụ: qwen3:14b hoặc provider/model"
         disabled={saving || probing}
         inputProps={{ list: "ai-model-suggestions" }}
         helperText="Nhập bất kỳ ID mô hình nào hoặc dò tìm từ endpoint được hỗ trợ."

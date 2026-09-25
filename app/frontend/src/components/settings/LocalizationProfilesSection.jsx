@@ -335,7 +335,7 @@ export default function LocalizationProfilesSection({ settings }) {
               label="Hướng dẫn viết lại C7"
               value={draft.rewrite_instructions || ""}
               onChange={(e) => patch("rewrite_instructions", e.target.value)}
-              placeholder="Example: Prefer compact spoken Vietnamese; remove filler before facts; keep product features, quantities and causal meaning."
+              placeholder="Ví dụ: Ưu tiên tiếng Việt nói gọn; bỏ từ đệm trước dữ kiện; giữ nguyên tính năng sản phẩm, số lượng và quan hệ nhân quả."
               helperText="Chỉ áp dụng cho bước viết lại thời lượng C7 của hồ sơ này, sau guardrail ngữ nghĩa có thể chỉnh sửa."
             />
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
@@ -370,8 +370,8 @@ export default function LocalizationProfilesSection({ settings }) {
       <Accordion disableGutters>
         <AccordionSummary expandIcon={<ExpandMoreOutlinedIcon />}>
           <Box>
-            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Prompt Guardrails (Advanced)</Typography>
-            <Typography variant="caption" color="text.secondary">Editable semantic rules per profile; stable IDs/order and JSON output protocol stay locked for parser safety</Typography>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Quy tắc bảo vệ prompt (Nâng cao)</Typography>
+            <Typography variant="caption" color="text.secondary">Có thể chỉnh quy tắc ngữ nghĩa theo từng hồ sơ; ID/thứ tự ổn định và giao thức đầu ra JSON vẫn bị khóa để bảo vệ bộ phân tích</Typography>
           </Box>
         </AccordionSummary>
         <AccordionDetails>
@@ -383,8 +383,8 @@ export default function LocalizationProfilesSection({ settings }) {
             <Box>
               <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }} sx={{ mb: 1 }}>
                 <Box sx={{ flex: 1 }}>
-                  <Typography variant="subtitle2">C6 translation semantic guardrails</Typography>
-                  <Typography variant="caption" color="text.secondary">Meaning/fidelity rules used before style, glossary and custom translation instructions.</Typography>
+                  <Typography variant="subtitle2">Quy tắc bảo vệ ngữ nghĩa bản dịch C6</Typography>
+                  <Typography variant="caption" color="text.secondary">Quy tắc về ý nghĩa/độ trung thành được áp dụng trước phong cách, bảng thuật ngữ và hướng dẫn dịch tùy chỉnh.</Typography>
                 </Box>
                 <Button
                   size="small"
@@ -400,11 +400,11 @@ export default function LocalizationProfilesSection({ settings }) {
                 fullWidth
                 multiline
                 minRows={7}
-                label="C6 semantic guardrails"
+                label="Quy tắc ngữ nghĩa C6"
                 value={draft.translation_guardrails || ""}
                 onChange={(e) => patch("translation_guardrails", e.target.value)}
                 error={!draft.translation_guardrails?.trim()}
-                helperText="Editable. Structural rules for stable IDs/order and JSON output are not part of this field and remain locked in code."
+                helperText="Có thể chỉnh sửa. Quy tắc cấu trúc cho ID/thứ tự ổn định và đầu ra JSON không nằm trong trường này và vẫn bị khóa trong mã."
               />
             </Box>
 
@@ -413,8 +413,8 @@ export default function LocalizationProfilesSection({ settings }) {
             <Box>
               <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }} sx={{ mb: 1 }}>
                 <Box sx={{ flex: 1 }}>
-                  <Typography variant="subtitle2">C7 duration-rewrite semantic guardrails</Typography>
-                  <Typography variant="caption" color="text.secondary">Meaning-preservation rules applied before profile-specific compression/style instructions.</Typography>
+                  <Typography variant="subtitle2">Quy tắc bảo vệ ngữ nghĩa viết lại thời lượng C7</Typography>
+                  <Typography variant="caption" color="text.secondary">Quy tắc giữ nguyên ý nghĩa được áp dụng trước hướng dẫn nén/phong cách riêng của hồ sơ.</Typography>
                 </Box>
                 <Button
                   size="small"
@@ -430,11 +430,11 @@ export default function LocalizationProfilesSection({ settings }) {
                 fullWidth
                 multiline
                 minRows={7}
-                label="C7 semantic guardrails"
+                label="Quy tắc ngữ nghĩa C7"
                 value={draft.rewrite_guardrails || ""}
                 onChange={(e) => patch("rewrite_guardrails", e.target.value)}
                 error={!draft.rewrite_guardrails?.trim()}
-                helperText="Editable. Stable IDs/order and JSON output remain locked so C7 cannot break the persisted pipeline contract."
+                helperText="Có thể chỉnh sửa. ID/thứ tự ổn định và đầu ra JSON vẫn bị khóa để C7 không phá vỡ hợp đồng pipeline đã lưu."
               />
             </Box>
           </Stack>
@@ -444,42 +444,42 @@ export default function LocalizationProfilesSection({ settings }) {
       <Accordion disableGutters>
         <AccordionSummary expandIcon={<ExpandMoreOutlinedIcon />}>
           <Box>
-            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>ASR / Alignment</Typography>
-            <Typography variant="caption" color="text.secondary">Reusable transcript quality and speaker-analysis defaults</Typography>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>ASR / Căn chỉnh</Typography>
+            <Typography variant="caption" color="text.secondary">Mặc định dùng lại cho chất lượng bản chép lời và phân tích người nói</Typography>
           </Box>
         </AccordionSummary>
         <AccordionDetails>
           <Stack spacing={2}>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
               <FormControl size="small" fullWidth>
-                <InputLabel>ASR quality</InputLabel>
-                <Select value={draft.asr_quality || "best"} label="ASR quality" onChange={(e) => patch("asr_quality", e.target.value)}>
+                <InputLabel>Chất lượng ASR</InputLabel>
+                <Select value={draft.asr_quality || "best"} label="Chất lượng ASR" onChange={(e) => patch("asr_quality", e.target.value)}>
                   {["fast", "balanced", "accurate", "best"].map((v) => <MenuItem key={v} value={v}>{v}</MenuItem>)}
                 </Select>
               </FormControl>
-              <TextField size="small" fullWidth label="ASR model override" value={draft.asr_model || ""} onChange={(e) => patch("asr_model", e.target.value || null)} />
+              <TextField size="small" fullWidth label="Ghi đè mô hình ASR" value={draft.asr_model || ""} onChange={(e) => patch("asr_model", e.target.value || null)} />
             </Stack>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
               <FormControl size="small" fullWidth>
-                <InputLabel>Alignment</InputLabel>
-                <Select value={draft.alignment_mode || "whisperx"} label="Alignment" onChange={(e) => patch("alignment_mode", e.target.value)}>
+                <InputLabel>Căn chỉnh</InputLabel>
+                <Select value={draft.alignment_mode || "whisperx"} label="Căn chỉnh" onChange={(e) => patch("alignment_mode", e.target.value)}>
                   <MenuItem value="off">Tắt</MenuItem>
                   <MenuItem value="whisperx">WhisperX</MenuItem>
                 </Select>
               </FormControl>
               <FormControl size="small" fullWidth>
-                <InputLabel>Diarization</InputLabel>
-                <Select value={draft.diarization_mode || "auto"} label="Diarization" onChange={(e) => patch("diarization_mode", e.target.value)}>
+                <InputLabel>Tách người nói</InputLabel>
+                <Select value={draft.diarization_mode || "auto"} label="Tách người nói" onChange={(e) => patch("diarization_mode", e.target.value)}>
                   <MenuItem value="off">Tắt</MenuItem>
-                  <MenuItem value="auto">Auto</MenuItem>
+                  <MenuItem value="auto">Tự động</MenuItem>
                   <MenuItem value="whisperx">WhisperX / pyannote</MenuItem>
                 </Select>
               </FormControl>
-              <TextField size="small" type="number" fullWidth label="Expected speakers" value={draft.diarization_speakers ?? ""} onChange={(e) => patch("diarization_speakers", e.target.value === "" ? null : Number(e.target.value))} inputProps={{ min: 1, max: 16 }} />
+              <TextField size="small" type="number" fullWidth label="Số người nói dự kiến" value={draft.diarization_speakers ?? ""} onChange={(e) => patch("diarization_speakers", e.target.value === "" ? null : Number(e.target.value))} inputProps={{ min: 1, max: 16 }} />
             </Stack>
             <FormControlLabel
               control={<Checkbox checked={!!draft.semantic_segmentation} onChange={(e) => patch("semantic_segmentation", e.target.checked)} />}
-              label="AI semantic segmentation"
+              label="Phân đoạn ngữ nghĩa bằng AI"
             />
           </Stack>
         </AccordionDetails>
@@ -488,48 +488,48 @@ export default function LocalizationProfilesSection({ settings }) {
       <Accordion disableGutters>
         <AccordionSummary expandIcon={<ExpandMoreOutlinedIcon />}>
           <Box>
-            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Audio / Render / QC</Typography>
-            <Typography variant="caption" color="text.secondary">Output defaults, not provider credentials</Typography>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Âm thanh / Kết xuất / QC</Typography>
+            <Typography variant="caption" color="text.secondary">Mặc định đầu ra, không phải thông tin xác thực nhà cung cấp</Typography>
           </Box>
         </AccordionSummary>
         <AccordionDetails>
           <Stack spacing={2}>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
               <FormControl size="small" fullWidth>
-                <InputLabel>Audio mode</InputLabel>
-                <Select value={draft.audio_mode || "hq_clean"} label="Audio mode" onChange={(e) => patch("audio_mode", e.target.value)}>
-                  <MenuItem value="hq_clean">HQ clean background</MenuItem>
-                  <MenuItem value="fast_duck">Fast duck</MenuItem>
+                <InputLabel>Chế độ âm thanh</InputLabel>
+                <Select value={draft.audio_mode || "hq_clean"} label="Chế độ âm thanh" onChange={(e) => patch("audio_mode", e.target.value)}>
+                  <MenuItem value="hq_clean">Nền sạch HQ</MenuItem>
+                  <MenuItem value="fast_duck">Hạ nền nhanh</MenuItem>
                 </Select>
               </FormControl>
               <FormControl size="small" fullWidth>
-                <InputLabel>Render profile</InputLabel>
-                <Select value={draft.render_profile || "hq"} label="Render profile" onChange={(e) => patch("render_profile", e.target.value)}>
-                  <MenuItem value="draft">Draft</MenuItem>
-                  <MenuItem value="balanced">Balanced</MenuItem>
+                <InputLabel>Hồ sơ kết xuất</InputLabel>
+                <Select value={draft.render_profile || "hq"} label="Hồ sơ kết xuất" onChange={(e) => patch("render_profile", e.target.value)}>
+                  <MenuItem value="draft">Nháp</MenuItem>
+                  <MenuItem value="balanced">Cân bằng</MenuItem>
                   <MenuItem value="hq">HQ</MenuItem>
                 </Select>
               </FormControl>
               <FormControl size="small" fullWidth>
-                <InputLabel>QC profile</InputLabel>
-                <Select value={draft.qc_profile || "strict"} label="QC profile" onChange={(e) => patch("qc_profile", e.target.value)}>
-                  <MenuItem value="standard">Standard</MenuItem>
-                  <MenuItem value="strict">Strict</MenuItem>
+                <InputLabel>Hồ sơ QC</InputLabel>
+                <Select value={draft.qc_profile || "strict"} label="Hồ sơ QC" onChange={(e) => patch("qc_profile", e.target.value)}>
+                  <MenuItem value="standard">Tiêu chuẩn</MenuItem>
+                  <MenuItem value="strict">Nghiêm ngặt</MenuItem>
                 </Select>
               </FormControl>
             </Stack>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
-              <TextField size="small" fullWidth label="Caption style" value={draft.caption_style || "viral"} onChange={(e) => patch("caption_style", e.target.value)} />
+              <TextField size="small" fullWidth label="Kiểu phụ đề" value={draft.caption_style || "viral"} onChange={(e) => patch("caption_style", e.target.value)} />
               <FormControl size="small" fullWidth>
-                <InputLabel>Target aspect</InputLabel>
-                <Select value={draft.target_aspect || "9:16"} label="Target aspect" onChange={(e) => patch("target_aspect", e.target.value)}>
+                <InputLabel>Tỷ lệ khung hình đích</InputLabel>
+                <Select value={draft.target_aspect || "9:16"} label="Tỷ lệ khung hình đích" onChange={(e) => patch("target_aspect", e.target.value)}>
                   {["source", "9:16", "16:9", "1:1"].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
                 </Select>
               </FormControl>
             </Stack>
             <FormControlLabel
               control={<Checkbox checked={draft.preserve_background !== false} onChange={(e) => patch("preserve_background", e.target.checked)} />}
-              label="Preserve separated background / music"
+              label="Giữ nền / nhạc đã tách"
             />
           </Stack>
         </AccordionDetails>
@@ -539,8 +539,8 @@ export default function LocalizationProfilesSection({ settings }) {
 
       <Divider />
       <Stack direction="row" spacing={1} justifyContent="flex-end" flexWrap="wrap" useFlexGap>
-        {!isDefault && <Button variant="text" onClick={makeDefault} disabled={busy}>Make default</Button>}
-        {store.profiles.length > 1 && <Button color="error" variant="outlined" startIcon={<DeleteOutlineOutlinedIcon />} onClick={remove} disabled={busy}>Delete</Button>}
+        {!isDefault && <Button variant="text" onClick={makeDefault} disabled={busy}>Đặt mặc định</Button>}
+        {store.profiles.length > 1 && <Button color="error" variant="outlined" startIcon={<DeleteOutlineOutlinedIcon />} onClick={remove} disabled={busy}>Xóa</Button>}
         <Button variant="contained" startIcon={<SaveOutlinedIcon />} onClick={save} disabled={busy}>
           {busy ? "Saving…" : "Save profile"}
         </Button>
