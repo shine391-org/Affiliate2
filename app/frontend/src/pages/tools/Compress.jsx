@@ -74,7 +74,7 @@ function OutcomePreview({ resolution, level }) {
 }
 
 export default function ToolCompress() {
-  useDocumentTitle("Compress Video")
+  useDocumentTitle("Nén video")
   const [resolution, setResolution] = useState("original")
   const [level, setLevel] = useState("high")
 

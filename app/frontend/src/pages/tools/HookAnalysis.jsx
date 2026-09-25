@@ -22,7 +22,7 @@ import useDocumentTitle from "../../hooks/useDocumentTitle"
  * job_complete and render the analysis card directly.
  */
 export default function ToolHookAnalysis() {
-  useDocumentTitle("Hook Detector")
+  useDocumentTitle("Phân tích hook")
   const theme = useTheme()
   const showSnackbar = useAppStore((s) => s.showSnackbar)
   const [result, setResult] = useState(null)

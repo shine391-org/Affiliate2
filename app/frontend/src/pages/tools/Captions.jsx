@@ -14,7 +14,7 @@ import useDocumentTitle from "../../hooks/useDocumentTitle"
 import { CAPTION_STYLES as STYLES, EMOJI_LEVELS } from "../../components/tools/captionOptions"
 
 export default function ToolCaptions() {
-  useDocumentTitle("Add Captions")
+  useDocumentTitle("Thêm phụ đề")
   const [style, setStyle] = useState("viral")
   const [emojiStyle, setEmojiStyle] = useState("moderate")
 

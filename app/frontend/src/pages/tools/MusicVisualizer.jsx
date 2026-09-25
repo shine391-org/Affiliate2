@@ -18,7 +18,7 @@ const PALETTES = [
 const ASPECTS = ["9:16", "1:1", "16:9"]
 
 export default function ToolMusicVisualizer() {
-  useDocumentTitle("Music Visualizer")
+  useDocumentTitle("Trực quan hóa nhạc")
   const [style, setStyle] = useState("waves")
   const [palette, setPalette] = useState("sunset")
   const [aspect, setAspect] = useState("9:16")
