@@ -11,30 +11,30 @@ import ToolRunner from "../../components/tools/ToolRunner"
 import useDocumentTitle from "../../hooks/useDocumentTitle"
 
 const LANGUAGES = [
-  { code: "vi", name: "Vietnamese" },
-  { code: "en", name: "English" },
-  { code: "es", name: "Spanish" },
-  { code: "fr", name: "French" },
-  { code: "de", name: "German" },
-  { code: "it", name: "Italian" },
-  { code: "pt", name: "Portuguese" },
-  { code: "nl", name: "Dutch" },
-  { code: "pl", name: "Polish" },
-  { code: "ru", name: "Russian" },
-  { code: "ja", name: "Japanese" },
-  { code: "ko", name: "Korean" },
-  { code: "zh", name: "Chinese (Mandarin)" },
-  { code: "ar", name: "Arabic" },
-  { code: "hi", name: "Hindi" },
-  { code: "tr", name: "Turkish" },
-  { code: "sv", name: "Swedish" },
-  { code: "da", name: "Danish" },
-  { code: "no", name: "Norwegian" },
-  { code: "fi", name: "Finnish" },
+  { code: "vi", name: "Tiếng Việt" },
+  { code: "en", name: "Tiếng Anh" },
+  { code: "es", name: "Tiếng Tây Ban Nha" },
+  { code: "fr", name: "Tiếng Pháp" },
+  { code: "de", name: "Tiếng Đức" },
+  { code: "it", name: "Tiếng Ý" },
+  { code: "pt", name: "Tiếng Bồ Đào Nha" },
+  { code: "nl", name: "Tiếng Hà Lan" },
+  { code: "pl", name: "Tiếng Ba Lan" },
+  { code: "ru", name: "Tiếng Nga" },
+  { code: "ja", name: "Tiếng Nhật" },
+  { code: "ko", name: "Tiếng Hàn" },
+  { code: "zh", name: "Tiếng Trung (Quan thoại)" },
+  { code: "ar", name: "Tiếng Ả Rập" },
+  { code: "hi", name: "Tiếng Hindi" },
+  { code: "tr", name: "Tiếng Thổ Nhĩ Kỳ" },
+  { code: "sv", name: "Tiếng Thụy Điển" },
+  { code: "da", name: "Tiếng Đan Mạch" },
+  { code: "no", name: "Tiếng Na Uy" },
+  { code: "fi", name: "Tiếng Phần Lan" },
 ]
 
 export default function ToolTranslate() {
-  useDocumentTitle("Translate + Dub")
+  useDocumentTitle("Dịch + lồng tiếng")
   const [target, setTarget] = useState("vi")
   const [mode, setMode] = useState("full_dub")
   const [voiceId, setVoiceId] = useState("")
@@ -77,26 +77,26 @@ export default function ToolTranslate() {
 
   return (
     <ToolRunner
-      title="Translate + Dub"
-      description="Donor-derived semantic translation, smart dubbing, clean background audio and HQ render"
+      title="Dịch + lồng tiếng"
+      description="Dịch ngữ nghĩa, lồng tiếng thông minh, âm nền sạch và kết xuất HQ"
       icon={<TranslateOutlinedIcon fontSize="large" />}
       endpoint="/api/tools/translate"
       fieldBuilder={fields}
-      processLabel={mode === "full_dub" ? "HQ translate + dub to " + targetName : "Translate captions to " + targetName}
+      processLabel={mode === "full_dub" ? "Dịch HQ + lồng tiếng sang " + targetName : "Dịch phụ đề sang " + targetName}
       resultPreview={(jobId) => <LocalizationExpertPanel jobId={jobId} />}
     >
       <Stack spacing={2.5}>
         <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
           <FormControl size="small" fullWidth>
-            <InputLabel>Target language</InputLabel>
-            <Select value={target} label="Target language" onChange={(e) => setTarget(e.target.value)}>
+            <InputLabel>Ngôn ngữ đích</InputLabel>
+            <Select value={target} label="Ngôn ngữ đích" onChange={(e) => setTarget(e.target.value)}>
               {LANGUAGES.map((l) => <MenuItem key={l.code} value={l.code}>{l.name}</MenuItem>)}
             </Select>
           </FormControl>
 
           <FormControl size="small" fullWidth>
-            <InputLabel>Localization profile</InputLabel>
-            <Select value={profileId} label="Localization profile" onChange={(e) => setProfileId(e.target.value)}>
+            <InputLabel>Hồ sơ bản địa hóa</InputLabel>
+            <Select value={profileId} label="Hồ sơ bản địa hóa" onChange={(e) => setProfileId(e.target.value)}>
               {profiles.map((p) => <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>)}
             </Select>
           </FormControl>
@@ -107,14 +107,14 @@ export default function ToolTranslate() {
             <Typography variant="body2" sx={{ fontWeight: 600 }}>{selectedProfile.name}</Typography>
             <Typography variant="caption" color="text.secondary">
               ASR {selectedProfile.asr_quality}
-              {" · alignment " + (selectedProfile.alignment_mode || "off")}
-              {" · diarization " + (selectedProfile.diarization_mode || "off")}
-              {" · translation " + (selectedProfile.translation_preset || "natural_vietnamese")}
-              {" · C6 model " + (selectedProfile.translation_model || "global")}
-              {" · C7 rewrite " + (selectedProfile.rewrite_model || "global")}
-              {" · audio " + selectedProfile.audio_mode}
-              {" · render " + selectedProfile.render_profile}
-              {" · speed ceiling " + Number(selectedProfile.dub_speed_max || 1.3).toFixed(2) + "×"}
+              {" · căn chỉnh " + (selectedProfile.alignment_mode || "off")}
+              {" · tách người nói " + (selectedProfile.diarization_mode || "off")}
+              {" · dịch " + (selectedProfile.translation_preset || "natural_vietnamese")}
+              {" · mô hình C6 " + (selectedProfile.translation_model || "global")}
+              {" · viết lại C7 " + (selectedProfile.rewrite_model || "global")}
+              {" · âm thanh " + selectedProfile.audio_mode}
+              {" · kết xuất " + selectedProfile.render_profile}
+              {" · giới hạn tốc độ " + Number(selectedProfile.dub_speed_max || 1.3).toFixed(2) + "×"}
             </Typography>
           </Alert>
         )}
@@ -129,9 +129,9 @@ export default function ToolTranslate() {
             }
             label={
               <Box>
-                <Typography variant="body2" sx={{ fontWeight: 600 }}>Review translation before dubbing</Typography>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>Duyệt bản dịch trước khi lồng tiếng</Typography>
                 <Typography variant="caption" color="text.secondary">
-                  Pause after C6 so you can compare source ↔ target, edit bad lines, then continue the same job from C7 without repeating ASR.
+                  Tạm dừng sau C6 để so sánh nguồn ↔ đích, sửa dòng chưa tốt rồi tiếp tục cùng tác vụ từ C7 mà không chạy lại ASR.
                 </Typography>
               </Box>
             }
@@ -148,9 +148,9 @@ export default function ToolTranslate() {
               control={<Radio size="small" />}
               label={
                 <Box>
-                  <Typography variant="body2" sx={{ fontWeight: 600 }}>HQ full dub</Typography>
+                  <Typography variant="body2" sx={{ fontWeight: 600 }}>Lồng tiếng HQ đầy đủ</Typography>
                   <Typography variant="caption" color="text.secondary">
-                    Clean vocal/background separation, semantic translation, measured TTS fitting and final-timing captions.
+                    Tách giọng/nền sạch, dịch ngữ nghĩa, căn TTS theo thời lượng đo được và phụ đề theo nhịp cuối.
                   </Typography>
                 </Box>
               }
@@ -160,9 +160,9 @@ export default function ToolTranslate() {
               control={<Radio size="small" />}
               label={
                 <Box>
-                  <Typography variant="body2" sx={{ fontWeight: 600 }}>Translated captions only</Typography>
+                  <Typography variant="body2" sx={{ fontWeight: 600 }}>Chỉ phụ đề đã dịch</Typography>
                   <Typography variant="caption" color="text.secondary">
-                    Keep original audio; use the same semantic translation pipeline for captions.
+                    Giữ âm thanh gốc; dùng cùng pipeline dịch ngữ nghĩa cho phụ đề.
                   </Typography>
                 </Box>
               }
@@ -172,39 +172,39 @@ export default function ToolTranslate() {
 
         {mode === "full_dub" && (
           <TextField
-            label="Voice override (optional)"
+            label="Ghi đè giọng đọc (tùy chọn)"
             size="small"
             value={voiceId}
             onChange={(e) => setVoiceId(e.target.value)}
-            placeholder="Leave empty to use profile / speaker voice mapping"
-            helperText="Works with the provider configured in Settings. Expert mode can override individual segments after rendering."
+            placeholder="Để trống để dùng ánh xạ giọng theo hồ sơ / người nói"
+            helperText="Dùng nhà cung cấp đã cấu hình trong Cài đặt. Chế độ nâng cao có thể ghi đè từng đoạn sau khi kết xuất."
           />
         )}
 
         <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
           <FormControl size="small" fullWidth>
-            <InputLabel>Caption style</InputLabel>
-            <Select value={captionStyle} label="Caption style" onChange={(e) => setCaptionStyle(e.target.value)}>
+            <InputLabel>Kiểu phụ đề</InputLabel>
+            <Select value={captionStyle} label="Kiểu phụ đề" onChange={(e) => setCaptionStyle(e.target.value)}>
               {CAPTION_STYLES.map((s) => <MenuItem key={s.value} value={s.value}>{s.label}</MenuItem>)}
             </Select>
           </FormControl>
           <FormControl size="small" fullWidth>
-            <InputLabel>Emoji intensity</InputLabel>
-            <Select value={emojiStyle} label="Emoji intensity" onChange={(e) => setEmojiStyle(e.target.value)}>
-              <MenuItem value="none">None</MenuItem>
-              <MenuItem value="minimal">Minimal</MenuItem>
-              <MenuItem value="moderate">Moderate</MenuItem>
-              <MenuItem value="heavy">Heavy</MenuItem>
+            <InputLabel>Mức emoji</InputLabel>
+            <Select value={emojiStyle} label="Mức emoji" onChange={(e) => setEmojiStyle(e.target.value)}>
+              <MenuItem value="none">Không</MenuItem>
+              <MenuItem value="minimal">Ít</MenuItem>
+              <MenuItem value="moderate">Vừa</MenuItem>
+              <MenuItem value="heavy">Nhiều</MenuItem>
             </Select>
           </FormControl>
         </Stack>
 
         <Alert severity="success" variant="outlined">
-          HQ mode no longer drops a line because one Whisper cue is too short.
-          Adjacent cues are planned into dubbing chunks; generated TTS is measured,
-          rewritten when necessary, fitted after synthesis, and can use bounded
-          video retiming only as a last resort. The result panel exposes QC and
-          expert rerun controls without re-uploading the source.
+          Chế độ HQ không còn bỏ dòng chỉ vì một cue Whisper quá ngắn.
+          Các cue liền nhau được gom thành đoạn lồng tiếng; TTS tạo ra được đo thời lượng,
+          được viết lại khi cần, căn sau tổng hợp và có thể dùng điều chỉnh video giới hạn
+          chỉ như phương án cuối. Bảng kết quả hiển thị QC và
+          điều khiển chạy lại nâng cao mà không cần tải lại nguồn.
         </Alert>
       </Stack>
     </ToolRunner>

@@ -107,7 +107,7 @@ export default function MotionGraphics() {
   const hero = (
     <PageHero
       icon={<MovieFilterIcon sx={{ fontSize: 22 }} />}
-      title="Motion Graphics"
+      title="Đồ họa chuyển động"
       subtitle="Design animated compositions — kinetic type, stat cards, lower thirds — and render them locally"
       dense
       actions={
@@ -163,18 +163,18 @@ export default function MotionGraphics() {
         <Stack alignItems="center" justifyContent="center" spacing={1.5}
           sx={{ height: "100%", color: "text.secondary" }}>
           <CircularProgress />
-          <Typography variant="body2">Starting the studio…</Typography>
+          <Typography variant="body2">Đang khởi động studio…</Typography>
         </Stack>
       )}
       {startError && !starting && (
         <Stack alignItems="center" justifyContent="center" spacing={1}
           sx={{ height: "100%", color: "text.secondary" }}>
-          <Typography variant="body2">Couldn’t start the studio: {startError}</Typography>
-          <Button size="small" onClick={() => window.location.reload()}>Retry</Button>
+          <Typography variant="body2">Không thể khởi động studio: {startError}</Typography>
+          <Button size="small" onClick={() => window.location.reload()}>Thử lại</Button>
         </Stack>
       )}
       {studioUrl && (
-        <iframe key={reloadKey} src={studioUrl} title="Motion Studio"
+        <iframe key={reloadKey} src={studioUrl} title="Studio chuyển động"
           style={{ width: "100%", height: "100%", border: 0, display: "block" }} />
       )}
 

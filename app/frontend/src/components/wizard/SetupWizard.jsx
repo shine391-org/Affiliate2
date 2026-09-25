@@ -71,13 +71,13 @@ export default function SetupWizard() {
         {isComplete ? (
           <Stack alignItems="center" spacing={2} sx={{ py: 4 }}>
             <CheckCircleIcon sx={{ fontSize: 48, color: "primary.main" }} />
-            <Typography variant="h6" sx={{ color: "primary.main" }}>Setup complete!</Typography>
-            <Button variant="contained" onClick={() => setActiveWizard(null)}>Done</Button>
+            <Typography variant="h6" sx={{ color: "primary.main" }}>Thiết lập hoàn tất!</Typography>
+            <Button variant="contained" onClick={() => setActiveWizard(null)}>Xong</Button>
           </Stack>
         ) : (
           <>
             <Typography variant="caption" sx={{ color: "text.secondary" }}>
-              Step {currentStepIdx + 1} of {steps.length}
+              Bước {currentStepIdx + 1} / {steps.length}
             </Typography>
             <WizardStep step={currentStep} onComplete={handleStepComplete} onCancel={handleClose} />
             {stepStatus && (

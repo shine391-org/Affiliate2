@@ -21,7 +21,7 @@ export default function WizardStep({ step, onComplete }) {
       {step.action === "open_url" && (
         <Stack spacing={1.5}>
           <Link href={step.url} target="_blank" rel="noopener noreferrer" sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-            Open in browser <OpenInNewIcon fontSize="small" />
+            Mở trong trình duyệt <OpenInNewIcon fontSize="small" />
           </Link>
           <Button variant="contained" onClick={() => onComplete(step.id, true)} sx={{ alignSelf: "flex-start" }}>
             Continue
@@ -31,7 +31,7 @@ export default function WizardStep({ step, onComplete }) {
 
       {step.action === "wait_confirm" && (
         <Button variant="contained" onClick={() => onComplete(step.id, true)}>
-          {step.confirm_label || "Continue"}
+          {step.confirm_label || "Tiếp tục"}
         </Button>
       )}
 
@@ -54,7 +54,7 @@ export default function WizardStep({ step, onComplete }) {
 
       {step.action === "oauth_button" && (
         <Button variant="contained" component="a" href={step.endpoint} target="_blank" rel="noopener noreferrer">
-          {step.button_label || "Connect"}
+          {step.button_label || "Kết nối"}
         </Button>
       )}
 
