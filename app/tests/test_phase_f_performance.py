@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import httpx
+from sqlalchemy import select
 
 from backend.database import AsyncSessionLocal, init_db
 from backend.models.generated_video import GeneratedVideo
