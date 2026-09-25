@@ -28,7 +28,7 @@ test("native Publish reuses existing upload account ownership", () => {
 
 test("transitional platforms are stated honestly instead of faked", () => {
   assert.ok(publish.includes("Lịch sử xuất bản Facebook/Instagram và overlay cũ"))
-  assert.ok(publish.includes("stay transitional"))
+  assert.ok(publish.includes("Chúng vẫn ở trạng thái chuyển tiếp"))
 })
 
 test("Library hands irreversible publish actions to the canonical Publish owner", () => {

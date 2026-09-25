@@ -30,7 +30,7 @@ test("Smart Cut is review-first and does not expose direct Auto-cut", () => {
 test("Smart Cut uses the Studio header as its source owner", () => {
   assert.ok(clipStudio.includes('display: smartCut ? "none" : "flex"'))
   assert.ok(clipStudio.includes('Studio header is the one Smart Cut source owner'))
-  assert.ok(clipStudio.includes('Select a source in the Studio header'))
+  assert.ok(studio.includes("Hãy chọn nguồn từ Thư viện trước."))
 })
 
 test("Smart Cut render jobs appear under Smart Cut ownership and open their first Library output", () => {
