@@ -183,7 +183,7 @@ export default function MotionComposePanel({ aspect, setAspect, onComposed, onNe
 
         <Button fullWidth variant="contained" startIcon={<AutoAwesomeIcon />}
           disabled={running || !topic.trim()} onClick={() => compose(null)}>
-          {running ? "Đang tạo…" : "Tạo composition"}
+          {running ? "Đang tạo…" : "Tạo bố cục"}
         </Button>
 
         {running && (
@@ -198,7 +198,7 @@ export default function MotionComposePanel({ aspect, setAspect, onComposed, onNe
 
         {job?.status === "failed" && (
           <Alert severity="error" sx={{ mt: 2, fontSize: "0.78rem", whiteSpace: "pre-wrap" }}>
-            {job.error || "Tạo composition thất bại."}
+            {job.error || "Tạo bố cục thất bại."}
           </Alert>
         )}
 
@@ -206,7 +206,7 @@ export default function MotionComposePanel({ aspect, setAspect, onComposed, onNe
           <>
             <Divider sx={{ my: 2.5 }} />
             <Typography variant="caption" sx={{ display: "block", color: "text.secondary", mb: 1 }}>
-              Tinh chỉnh — thao tác này viết lại composition đang chạy. Bản trước
+              Tinh chỉnh — thao tác này viết lại bố cục đang chạy. Bản trước
               vẫn được giữ trong mục Comps của studio.
             </Typography>
             <RefineBox onSubmit={compose} disabled={running} />

@@ -101,7 +101,7 @@ export default function StudioLocalize({ source, sourcesLoading }) {
       form.append("profile_id", profileId)
       form.append("review_translation", String(mode === "full_dub" && reviewTranslation))
       const { data } = await http.post("/api/tools/translate", form, { headers: { "Content-Type": "multipart/form-data" }, timeout: 120000 })
-      startJob(data.job_id, "tool:translate", "Starting HQ localization…")
+      startJob(data.job_id, "tool:translate", "Đang bắt đầu bản địa hóa HQ…")
       setParams((previous) => {
         const next = new URLSearchParams(previous)
         next.set("job", data.job_id)

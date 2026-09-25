@@ -196,7 +196,7 @@ export default function LocalizationProfilesSection({ settings }) {
   return (
     <Stack spacing={2}>
       <Alert severity="info" variant="outlined">
-        Connections and credentials live in Settings. This profile stores reusable production defaults only:
+        Kết nối và thông tin xác thực nằm trong Cài đặt. Hồ sơ này chỉ lưu các mặc định sản xuất có thể dùng lại:
         Chính sách cho dịch C6, viết lại nhịp C7, ASR, giọng/nhịp, âm thanh/kết xuất và QC.
       </Alert>
 
@@ -206,7 +206,7 @@ export default function LocalizationProfilesSection({ settings }) {
           <Select value={selectedId} label="Hồ sơ" onChange={(e) => setSelectedId(e.target.value)}>
             {store.profiles.map((p) => (
               <MenuItem key={p.id} value={p.id}>
-                {p.name}{p.id === store.default_profile_id ? " · default" : ""}
+                {p.name}{p.id === store.default_profile_id ? " · mặc định" : ""}
               </MenuItem>
             ))}
             {!store.profiles.some((p) => p.id === selectedId) && draft && (
@@ -227,7 +227,7 @@ export default function LocalizationProfilesSection({ settings }) {
           <Box sx={{ flex: 1 }}>
             <Typography variant="subtitle2">Kết nối AI đã cấu hình</Typography>
             <Typography variant="caption" color="text.secondary">
-              {globalProvider} · global/default model {globalModel}
+              {globalProvider} · mô hình toàn cục/mặc định {globalModel}
             </Typography>
           </Box>
           <Button
@@ -237,7 +237,7 @@ export default function LocalizationProfilesSection({ settings }) {
             onClick={discoverModels}
             disabled={discovering}
           >
-            {discovering ? "Discovering…" : "Discover models"}
+            {discovering ? "Đang dò tìm…" : "Dò tìm mô hình"}
           </Button>
         </Stack>
         {discoveredModels.length > 0 && (
@@ -283,7 +283,7 @@ export default function LocalizationProfilesSection({ settings }) {
               helperText="Thông tin xác thực kết nối vẫn nằm trong Kết nối AI."
             />
             <Alert severity="info" variant="outlined">
-              Translation instructions are additive. Semantic guardrails are editable in Prompt Guardrails below; the parser protocol (stable IDs/order and JSON shape) remains app-owned.
+              Hướng dẫn dịch được bổ sung thêm. Quy tắc bảo vệ ngữ nghĩa có thể chỉnh ở phần bên dưới; giao thức parser (ID/thứ tự ổn định và cấu trúc JSON) vẫn do ứng dụng quản lý.
             </Alert>
             <TextField
               size="small" multiline minRows={4}
@@ -328,7 +328,7 @@ export default function LocalizationProfilesSection({ settings }) {
               placeholder={settings?.ai_base_url || "kế thừa endpoint trong Cài đặt"}
             />
             <Alert severity="info" variant="outlined">
-              Rewrite instructions are additive. Semantic guardrails are editable in Prompt Guardrails below; the parser protocol (stable IDs/order and JSON shape) remains app-owned.
+              Hướng dẫn viết lại được bổ sung thêm. Quy tắc bảo vệ ngữ nghĩa có thể chỉnh ở phần bên dưới; giao thức parser (ID/thứ tự ổn định và cấu trúc JSON) vẫn do ứng dụng quản lý.
             </Alert>
             <TextField
               size="small" multiline minRows={4}
@@ -377,7 +377,7 @@ export default function LocalizationProfilesSection({ settings }) {
         <AccordionDetails>
           <Stack spacing={2}>
             <Alert severity="warning" variant="outlined">
-              These rules directly affect translation fidelity. Edit them when the policy is wrong, but keep both fields non-empty. Use Reset to restore the app-recommended defaults.
+              Các quy tắc này ảnh hưởng trực tiếp đến độ trung thành của bản dịch. Chỉ sửa khi chính sách chưa đúng và luôn giữ cả hai trường có nội dung. Dùng Đặt lại để khôi phục mặc định do ứng dụng đề xuất.
             </Alert>
 
             <Box>
@@ -392,7 +392,7 @@ export default function LocalizationProfilesSection({ settings }) {
                   disabled={!store.prompt_defaults?.translation_guardrails}
                   onClick={() => patch("translation_guardrails", store.prompt_defaults?.translation_guardrails || "")}
                 >
-                  Reset C6 default
+                  Đặt lại mặc định C6
                 </Button>
               </Stack>
               <TextField
@@ -422,7 +422,7 @@ export default function LocalizationProfilesSection({ settings }) {
                   disabled={!store.prompt_defaults?.rewrite_guardrails}
                   onClick={() => patch("rewrite_guardrails", store.prompt_defaults?.rewrite_guardrails || "")}
                 >
-                  Reset C7 default
+                  Đặt lại mặc định C7
                 </Button>
               </Stack>
               <TextField

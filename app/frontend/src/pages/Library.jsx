@@ -54,8 +54,8 @@ const IMPORT_ACCEPT = "video/*,audio/*,.mp4,.mov,.avi,.mkv,.webm,.mp3,.wav,.m4a,
 
 // Reads as a sentence in the empty state: "no audio files that were …".
 const ORIGIN_PHRASE = {
-  created: "made in ViralMint",
-  edited: "made from something you already own",
+  created: "được tạo trong ViralMint",
+  edited: "được chỉnh từ nội dung bạn đã có",
   imported: "brought in from outside",
 }
 
@@ -420,12 +420,12 @@ export default function Library() {
         title="Thư viện"
         subtitle={
           loading && !libraryTotal
-            ? "Reading your library…"
+            ? "Đang đọc Thư viện…"
             // Library-wide count only. The per-origin numbers live on the From
             // chips, where they are filter-scoped on purpose — printing them
             // here next to a library-wide total made the header contradict
             // itself as soon as you picked a media tab.
-            : `${libraryTotal} items`
+            : `${libraryTotal} mục`
         }
         accentColor="#0097a7"
         actions={
@@ -446,7 +446,7 @@ export default function Library() {
                 button over without one, so clicking it did nothing. */}
             <Button size="small" variant="outlined" component="label"
               disabled={importing} startIcon={<FileUploadRoundedIcon />}>
-              {importing ? "Importing…" : "Import"}
+              {importing ? "Đang nhập…" : "Nhập tệp"}
               <input type="file" hidden accept={IMPORT_ACCEPT} onChange={handleImport} />
             </Button>
             <Button size="small" variant="outlined" onClick={openActivity}
@@ -500,14 +500,14 @@ export default function Library() {
             <Typography sx={{ flex: 1, fontSize: "0.78rem", color: "text.secondary", lineHeight: 1.65 }}>
               <strong>Hai câu hỏi, hai bộ lọc.</strong> Các tab cho biết tệp <em>là gì</em>;
               các chip Nguồn cho biết tệp <em>đến từ đâu</em>. MP3 tải về là Âm thanh + Nguồn,
-              voice-over is Audio + Created, an enhanced podcast is Audio + Edited — all three live
-              in Audio, and none of them needs a tab of its own. Switch to
+              lồng tiếng là Âm thanh + Đã tạo, podcast đã cải thiện là Âm thanh + Đã chỉnh — cả ba đều nằm
+              trong Âm thanh và không cần tab riêng. Chuyển sang
               <strong>Theo nguồn</strong> để xem từng nội dung tải về cùng mọi sản phẩm tạo từ nó.
               <br />
-              Scout results are deliberately not here — a lead is not a file you own, so it has its
-              own page. Jobs split in two: work in flight appears as a tile in the grid where it will
-              và nhật ký đầy đủ nằm trong <strong>Hoạt động</strong> (góc trên bên phải), có thể mở từ
-              every page instead of only this one.
+              Kết quả Scout không nằm ở đây — lead không phải tệp bạn sở hữu nên có trang riêng.
+              Tác vụ được chia hai: công việc đang chạy xuất hiện dưới dạng ô trong lưới tại nơi đầu ra sẽ nằm,
+              còn nhật ký đầy đủ nằm trong <strong>Hoạt động</strong> (góc trên bên phải), có thể mở từ
+              mọi trang thay vì chỉ trang này.
             </Typography>
             <IconButton size="small" onClick={() => setShowWhy(false)} aria-label="Đóng hướng dẫn">
               <CloseRoundedIcon sx={{ fontSize: 15 }} />
@@ -524,14 +524,14 @@ export default function Library() {
             <Box component="span" sx={{ color: originTextColor(origins[0], theme.palette.mode === "dark"), fontWeight: 700 }}>
               {ORIGINS[origins[0]]?.label}
             </Box>
-            {" is "}
+            {" gồm "}
             {facets.producers.slice(0, 5).map((p, i) => (
               <Box component="span" key={p.key}>
                 {i > 0 ? " · " : ""}
                 <strong>{p.count}</strong> {p.label.toLowerCase()}
               </Box>
             ))}
-            {facets.producers.length > 5 && ` · +${facets.producers.length - 5} more tools`}
+            {facets.producers.length > 5 && ` · +${facets.producers.length - 5} công cụ khác`}
           </Typography>
         )}
 
@@ -544,9 +544,9 @@ export default function Library() {
             <ErrorOutlineRoundedIcon sx={{ fontSize: 18, color: "error.main" }} />
             <Typography sx={{ flex: 1, fontSize: "0.8rem", color: "text.secondary" }}>
               <strong>
-                {recentFailures.length} {recentFailures.length === 1 ? "run" : "runs"} didn't finish
+                {recentFailures.length} tác vụ chưa hoàn tất
               </strong>{" "}
-              in the last day — nothing was added to your library.
+              trong 24 giờ qua — chưa có gì được thêm vào Thư viện.
             </Typography>
             <Button size="small" variant="outlined" color="error"
               onClick={openActivity}>
@@ -581,16 +581,16 @@ export default function Library() {
           <Stack alignItems="center" spacing={1.5} sx={{ py: 10 }}>
             <InventoryRoundedIcon sx={{ fontSize: 40, color: "text.disabled" }} />
             <Typography sx={{ fontSize: "0.95rem", fontWeight: 600 }}>
-              {filtersActive ? "Nothing matches those filters" : "Your library is empty"}
+              {filtersActive ? "Không có mục nào khớp bộ lọc" : "Thư viện đang trống"}
             </Typography>
             <Typography sx={{
               fontSize: "0.82rem", color: "text.secondary", textAlign: "center", maxWidth: 380,
             }}>
               {filtersActive
                 ? (media !== "all" && origins.length === 1
-                  ? `You have no ${MEDIA[media]?.plural} that were ${ORIGIN_PHRASE[origins[0]]}.`
-                  : "Widen the media tab or the From chips to see more.")
-                : "Renders, downloads and anything you edit collect here."}
+                  ? `Bạn không có ${MEDIA[media]?.plural} ${ORIGIN_PHRASE[origins[0]]}.`
+                  : "Mở rộng tab loại tệp hoặc chip Nguồn để xem thêm.")
+                : "Bản kết xuất, nội dung tải xuống và mọi tệp bạn chỉnh sửa sẽ tập trung tại đây."}
             </Typography>
             {filtersActive
               ? <Button size="small" variant="outlined" onClick={clearFilters}>Xóa bộ lọc</Button>
@@ -667,10 +667,10 @@ export default function Library() {
             }} />
           <Button size="small" startIcon={<DeleteOutlineRoundedIcon sx={{ fontSize: 16 }} />}
             onClick={() => openConfirm(
-              `Delete ${selected.size} item${selected.size === 1 ? "" : "s"}?`,
-              "The files are removed from disk. This cannot be undone.",
+              `Xóa ${selected.size} mục?`,
+              "Các tệp sẽ bị xóa khỏi ổ đĩa và không thể hoàn tác.",
               deleteSelected,
-              { confirmLabel: `Delete ${selected.size}` },
+              { confirmLabel: `Xóa ${selected.size}` },
             )}>
             Delete
           </Button>
