@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  backend:
+    name: Backend / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    defaults:
+      run:
+        working-directory: app
+
+    env:
+      PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/app
+      CONTENT_ENGINE_ROOT: ${{ github.workspace }}
+      SECRET_KEY: ci-secret-key-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      ENCRYPTION_KEY: vAuauCJy9NGdkXbUl4h0Yc-Wl5SwcEA23WuU5vJ-Q2g=
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: app/requirements.txt
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg imagemagick
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio ruff
+
+      - name: Lint
+        run: ruff check backend tests --select=E9,F63,F7,F82 --output-format=github
+
+      - name: Run application tests
+        run: pytest tests/ -q
+
+      - name: Run Radar regression tests
+        run: pytest ../tests/test_radar.py ../tests/test_ranking.py -q --import-mode=importlib
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: app/frontend
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: app/frontend/package-lock.json
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Test frontend
+        run: npm test
+
+      - name: Build frontend
+        run: npm run build
