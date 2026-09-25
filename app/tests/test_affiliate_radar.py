@@ -13,7 +13,8 @@ from backend.affiliate.radar.service import (
     observe_scout_rows,
     record_source_run,
 )
-from backend.affiliate.radar.store import DDL
+from backend.affiliate.radar.store import DB_PATH, DDL
+from backend.config import DATA_DIR
 
 
 def _conn():
@@ -46,6 +47,10 @@ def _row(platform, video_id, creator_id="creator", views=100, likes=10, comments
     }
 
 
+def test_default_store_is_the_canonical_application_database():
+    assert DB_PATH == DATA_DIR / "viralmint.db"
+
+
 def test_observation_identity_is_platform_scoped():
     conn = _conn()
     observe_scout_rows(
@@ -54,7 +59,7 @@ def test_observation_identity_is_platform_scoped():
         conn,
     )
     count = conn.execute(
-        "SELECT COUNT(*) FROM content WHERE content_id='same'"
+        "SELECT COUNT(*) FROM scout_results WHERE video_id='same'"
     ).fetchone()[0]
     assert count == 2
 
@@ -80,7 +85,9 @@ def test_unknown_metric_remains_null_in_radar_snapshot():
     row["radar_metrics"]["views"] = None
     observe_scout_rows([row], "test", conn)
     stored = conn.execute(
-        "SELECT views FROM metric_snapshots WHERE platform='douyin' AND content_id='nullviews'"
+        """SELECT ro.views FROM radar_observations ro
+        JOIN scout_results sr ON sr.id=ro.scout_result_id
+        WHERE sr.platform='douyin' AND sr.video_id='nullviews'"""
     ).fetchone()[0]
     assert stored is None
 
@@ -129,7 +136,7 @@ def test_provider_non_success_run_is_persisted():
         conn=conn,
     )
     row = conn.execute(
-        "SELECT platform, keyword, status, records_raw, error FROM source_runs"
+        "SELECT platform, keyword, status, records_raw, error FROM radar_source_runs"
     ).fetchone()
     assert tuple(row[:4]) == ("douyin", "健身", "AUTH_REQUIRED", 0)
     assert "login required" in row["error"]
@@ -142,16 +149,18 @@ def test_velocity_uses_controlled_snapshot_interval_without_real_wait():
 
     ids = [
         row["id"] for row in conn.execute(
-            "SELECT id FROM metric_snapshots WHERE platform='bilibili' AND content_id='velocity' ORDER BY id"
+            """SELECT ro.id FROM radar_observations ro
+            JOIN scout_results sr ON sr.id=ro.scout_result_id
+            WHERE sr.platform='bilibili' AND sr.video_id='velocity' ORDER BY ro.rowid"""
         ).fetchall()
     ]
     assert len(ids) == 2
     conn.execute(
-        "UPDATE metric_snapshots SET captured_at='2026-09-22T00:00:00Z' WHERE id=?",
+        "UPDATE radar_observations SET captured_at='2026-09-22T00:00:00Z' WHERE id=?",
         (ids[0],),
     )
     conn.execute(
-        "UPDATE metric_snapshots SET captured_at='2026-09-22T00:31:00Z' WHERE id=?",
+        "UPDATE radar_observations SET captured_at='2026-09-22T00:31:00Z' WHERE id=?",
         (ids[1],),
     )
     conn.commit()
@@ -204,7 +213,7 @@ def test_refined_native_success_records_actual_source_keyword_per_platform():
     runs = [
         tuple(row)
         for row in conn.execute(
-            "SELECT platform, keyword, status FROM source_runs ORDER BY id"
+            "SELECT platform, keyword, status FROM radar_source_runs ORDER BY rowid"
         ).fetchall()
     ]
     assert runs == [
@@ -248,25 +257,27 @@ def test_velocity_ranking_uses_legacy_score_not_log_of_hourly_delta(monkeypatch)
 
     ids = {
         row["content_id"]: [x["id"] for x in conn.execute(
-            "SELECT id FROM metric_snapshots WHERE platform='bilibili' AND content_id=? ORDER BY id",
+            """SELECT ro.id FROM radar_observations ro
+            JOIN scout_results sr ON sr.id=ro.scout_result_id
+            WHERE sr.platform='bilibili' AND sr.video_id=? ORDER BY ro.rowid""",
             (row["content_id"],),
         ).fetchall()]
         for row in [{"content_id": "slow-big"}, {"content_id": "fast-small"}]
     }
     conn.execute(
-        "UPDATE metric_snapshots SET captured_at='2026-09-22T00:00:00Z' WHERE id=?",
+        "UPDATE radar_observations SET captured_at='2026-09-22T00:00:00Z' WHERE id=?",
         (ids["slow-big"][0],),
     )
     conn.execute(
-        "UPDATE metric_snapshots SET captured_at='2026-09-22T10:00:00Z' WHERE id=?",
+        "UPDATE radar_observations SET captured_at='2026-09-22T10:00:00Z' WHERE id=?",
         (ids["slow-big"][1],),
     )
     conn.execute(
-        "UPDATE metric_snapshots SET captured_at='2026-09-22T00:00:00Z' WHERE id=?",
+        "UPDATE radar_observations SET captured_at='2026-09-22T00:00:00Z' WHERE id=?",
         (ids["fast-small"][0],),
     )
     conn.execute(
-        "UPDATE metric_snapshots SET captured_at='2026-09-22T00:30:00Z' WHERE id=?",
+        "UPDATE radar_observations SET captured_at='2026-09-22T00:30:00Z' WHERE id=?",
         (ids["fast-small"][1],),
     )
     conn.commit()
@@ -316,12 +327,12 @@ def test_content_source_keyword_preserves_first_discovery_provenance():
     observe_scout_rows([second], "fallback", conn)
 
     content_keyword = conn.execute(
-        "SELECT source_keyword FROM content WHERE platform='bilibili' AND content_id='provenance'"
+        "SELECT niche FROM scout_results WHERE platform='bilibili' AND video_id='provenance'"
     ).fetchone()[0]
     run_keywords = [
         row[0]
         for row in conn.execute(
-            "SELECT keyword FROM source_runs WHERE platform='bilibili' ORDER BY id"
+            "SELECT keyword FROM radar_source_runs WHERE platform='bilibili' ORDER BY rowid"
         ).fetchall()
     ]
     assert content_keyword == "first query"

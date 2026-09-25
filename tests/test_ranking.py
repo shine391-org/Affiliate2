@@ -22,6 +22,7 @@ import tempfile
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
@@ -66,16 +67,18 @@ def insert_content(
     publish_time: int | None = 1700000000,
     source_keyword: str = "test",
 ) -> None:
+    upload_date = (
+        datetime.fromtimestamp(publish_time, tz=timezone.utc).replace(tzinfo=None).isoformat(sep=" ")
+        if publish_time is not None else None
+    )
     conn.execute(
-        """INSERT INTO content
-           (platform, content_id, creator_id, creator_name, title,
-            publish_time, source_keyword, first_seen_at, last_seen_at,
-            created_at, updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-        (platform, content_id, creator_id, creator_name, title,
-         publish_time, source_keyword,
-         "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z",
-         "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
+        """INSERT INTO scout_results(
+           id,user_id,platform,video_id,video_url,creator_id,author,title,
+           upload_date,niche,first_seen_at,last_seen_at,created_at,is_downloaded,is_analyzed
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,0)""",
+        (str(uuid4()), "local", platform, content_id, f"{platform}:{content_id}",
+         creator_id, creator_name, title, upload_date, source_keyword,
+         "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
     )
 
 
@@ -90,11 +93,17 @@ def insert_snapshot(
     shares: int | None = None,
     favorites: int | None = None,
 ) -> None:
+    scout_id = conn.execute(
+        """SELECT id FROM scout_results
+        WHERE user_id='local' AND platform=? AND video_id=?""",
+        (platform, content_id),
+    ).fetchone()["id"]
     conn.execute(
-        """INSERT INTO metric_snapshots
-           (platform, content_id, captured_at, views, likes, comments, shares, favorites)
-           VALUES (?,?,?,?,?,?,?,?)""",
-        (platform, content_id, captured_at, views, likes, comments, shares, favorites),
+        """INSERT INTO radar_observations
+           (id,scout_result_id,captured_at,views,likes,comments,shares,favorites,created_at)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        (str(uuid4()), scout_id, captured_at, views, likes, comments, shares, favorites,
+         datetime.now(timezone.utc).isoformat()),
     )
 
 

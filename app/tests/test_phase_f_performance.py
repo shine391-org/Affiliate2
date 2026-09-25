@@ -8,6 +8,7 @@ import httpx
 
 from backend.database import AsyncSessionLocal, init_db
 from backend.models.generated_video import GeneratedVideo
+from backend.models.phase_g import PublicationRecord
 from backend.models.video_metrics import VideoMetrics
 from backend.services import performance_tracker as pt
 
@@ -22,6 +23,7 @@ def run(body):
             ids = (await db.execute(select(GeneratedVideo.id).where(GeneratedVideo.user_id == _UID))).scalars().all()
             if ids:
                 await db.execute(delete(VideoMetrics).where(VideoMetrics.generated_video_id.in_(ids)))
+                await db.execute(delete(PublicationRecord).where(PublicationRecord.generated_video_id.in_(ids)))
             await db.execute(delete(GeneratedVideo).where(GeneratedVideo.user_id == _UID))
             await db.commit()
         try:
@@ -31,6 +33,7 @@ def run(body):
                 ids = (await db.execute(select(GeneratedVideo.id).where(GeneratedVideo.user_id == _UID))).scalars().all()
                 if ids:
                     await db.execute(delete(VideoMetrics).where(VideoMetrics.generated_video_id.in_(ids)))
+                await db.execute(delete(PublicationRecord).where(PublicationRecord.generated_video_id.in_(ids)))
                 await db.execute(delete(GeneratedVideo).where(GeneratedVideo.user_id == _UID))
                 await db.commit()
     asyncio.run(wrapped())
@@ -95,6 +98,16 @@ def test_overview_is_platform_scoped_and_preserves_unmeasured():
         first = await video(title="Winner")
         other = await video(title="Unmeasured", youtube_video_id="yt-other",
                             uploaded_platforms_json='["youtube", "youtube"]')
+        published_at = datetime(2026, 9, 24, 8, 30, 0)
+        async with AsyncSessionLocal() as db:
+            db.add(PublicationRecord(
+                generated_video_id=first,
+                platform="youtube",
+                status="PUBLISHED",
+                mapping_status="mapped",
+                published_at=published_at,
+            ))
+            await db.commit()
         await pt._save_metrics(first, "youtube", {"views": 120, "likes": 12})
         summary = await pt.get_performance_overview(_UID)
         assert summary["published_posts"] == 2
@@ -102,6 +115,7 @@ def test_overview_is_platform_scoped_and_preserves_unmeasured():
         assert summary["by_platform"]["youtube"]["views"] == 120
         posts = {post["generated_video_id"]: post for post in summary["posts"]}
         assert posts[first]["latest_metrics"]["likes"] == 12
+        assert posts[first]["published_at"] == published_at.isoformat()
         assert posts[first]["latest_metrics"]["engagement_rate"] is None
         assert posts[other]["latest_metrics"] is None
         assert posts[other]["state"] == "INSUFFICIENT_DATA"

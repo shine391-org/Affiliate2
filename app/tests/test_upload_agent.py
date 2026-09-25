@@ -22,8 +22,11 @@ Provider clients are stubbed — the real ones have their own suite
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from datetime import datetime
+from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
@@ -32,6 +35,7 @@ from backend.agents.uploader import UploadAgent
 from backend.core.crypto import encrypt
 from backend.core.exceptions import UploadAuthError
 from backend.database import AsyncSessionLocal, init_db
+from backend.config import settings
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -41,11 +45,26 @@ def _schema():
 
 async def _make_video(**kw):
     from backend.models.generated_video import GeneratedVideo
+    requested_path = kw.pop("video_path", "__default__")
+    if requested_path == "__default__":
+        settings.TMP_DIR.mkdir(parents=True, exist_ok=True)
+        path = settings.TMP_DIR / f"upload-test-{uuid4()}.mp4"
+        path.write_bytes(b"approved-video-bytes")
+        requested_path = str(path)
+    approved_at = kw.pop("publish_approved_at", datetime.utcnow())
+    approval_hash = None
+    artifact_hash = None
+    if requested_path and Path(requested_path).is_file():
+        artifact_hash = hashlib.sha256(Path(requested_path).read_bytes()).hexdigest()
+        if approved_at:
+            approval_hash = artifact_hash
     async with AsyncSessionLocal() as db:
         v = GeneratedVideo(
             user_id="local", title="A video", status="ready",
-            video_path=kw.pop("video_path", "/tmp/v.mp4"),
-            publish_approved_at=kw.pop("publish_approved_at", datetime.utcnow()),
+            video_path=requested_path,
+            artifact_sha256=artifact_hash,
+            publish_approved_at=approved_at,
+            publish_approval_artifact_sha256=approval_hash,
             **kw)
         db.add(v)
         await db.commit()
@@ -82,6 +101,15 @@ async def _video_row(vid):
     async with AsyncSessionLocal() as db:
         return (await db.execute(
             select(GeneratedVideo).where(GeneratedVideo.id == vid))).scalar_one()
+
+
+async def _publication_rows(vid):
+    from backend.models.phase_g import PublicationRecord
+    async with AsyncSessionLocal() as db:
+        return (await db.execute(
+            select(PublicationRecord).where(PublicationRecord.generated_video_id == vid)
+            .order_by(PublicationRecord.created_at)
+        )).scalars().all()
 
 
 @pytest.fixture()
@@ -178,6 +206,19 @@ class TestPreconditions:
         assert row.status == "failed" and "path is missing" in row.error_message
         assert "youtube" not in providers["calls"]
 
+    def test_changed_artifact_invalidates_the_exact_human_approval(self, ws, providers):
+        async def run():
+            vid = await _make_video()
+            video = await _video_row(vid)
+            Path(video.video_path).write_bytes(b"changed-after-approval")
+            jid = await _job()
+            await UploadAgent().run(jid, vid, ["youtube"])
+            return await _job_row(jid)
+        row = asyncio.run(run())
+        assert row.status == "failed"
+        assert "changed since approval" in row.error_message.lower()
+        assert "youtube" not in providers["calls"]
+
     def test_a_single_platform_string_is_normalized_before_upload(self, ws, providers):
         async def run():
             await _make_settings(
@@ -203,9 +244,9 @@ class TestSuccessfulUploads:
                 youtube_tags_json=json.dumps(["a", "b"]))
             jid = await _job()
             await UploadAgent().run(jid, vid, ["youtube"])
-            return await _job_row(jid), await _video_row(vid)
+            return await _job_row(jid), await _video_row(vid), await _publication_rows(vid)
 
-        job, video = asyncio.run(run())
+        job, video, publications = asyncio.run(run())
         assert job.status == "success"
         call = providers["calls"]["youtube"]
         assert call["title"] == "Catchy title"
@@ -214,6 +255,11 @@ class TestSuccessfulUploads:
         assert video.youtube_video_id == "yt1"
         assert json.loads(video.uploaded_platforms_json) == ["youtube"]
         assert video.status == "uploaded"
+        assert len(publications) == 1
+        assert publications[0].status == "PUBLISHED"
+        assert publications[0].public_content_id == "yt1"
+        assert publications[0].provider_transaction_id is None
+        assert publications[0].external_url == "https://youtu.be/yt1"
         assert any(m.get("type") == "upload_complete" and m.get("platform") == "youtube"
                    for m in ws["sent"])
 
@@ -235,13 +281,16 @@ class TestSuccessfulUploads:
             vid = await _make_video(tiktok_title="tok title")
             jid = await _job()
             await UploadAgent().run(jid, vid, ["tiktok"])
-            return await _video_row(vid)
-        video = asyncio.run(run())
+            return await _video_row(vid), await _publication_rows(vid)
+        video, publications = asyncio.run(run())
         call = providers["calls"]["tiktok"]
         assert call["access_token"] == "TOK" and call["cookie_sessionid"] == ""
         assert call["privacy"] == "SELF_ONLY"
         assert call["title"] == "tok title"
         assert video.tiktok_publish_id == "tt1"
+        assert len(publications) == 1
+        assert publications[0].provider_transaction_id == "tt1"
+        assert publications[0].public_content_id is None
 
     def test_tiktok_falls_back_to_the_session_cookie(self, ws, providers):
         async def run():
@@ -330,10 +379,14 @@ class TestPartialFailure:
             await _make_settings(
                 youtube_credentials_json_encrypted=encrypt('{"token":"t"}'))
             jid = await _job()
-            await UploadAgent().run(jid, await _make_video(), ["youtube"])
-            return await _job_row(jid)
-        job = asyncio.run(run())
+            vid = await _make_video()
+            await UploadAgent().run(jid, vid, ["youtube"])
+            return await _job_row(jid), await _publication_rows(vid)
+        job, publications = asyncio.run(run())
         assert job.status == "failed" and "boom" in job.error_message
+        assert len(publications) == 1
+        assert publications[0].status == "FAILED"
+        assert "boom" in publications[0].error_message
 
     def test_an_unknown_platform_is_reported_not_ignored(self, ws, providers):
         async def run():

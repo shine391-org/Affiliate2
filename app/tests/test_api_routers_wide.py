@@ -13,6 +13,7 @@ hermetic: no yt-dlp, no Whisper, no ffmpeg, no messaging sockets, no AI calls.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 import tempfile
 from pathlib import Path
@@ -70,7 +71,8 @@ def seeded():
             settings.youtube_credentials_json_encrypted = "stored-test-token"
             db.add_all([gv, dv, sr, ch])
             await db.commit()
-            ids.update(video=gv.id, downloaded=dv.id, scout=sr.id, channel=ch.id)
+            ids.update(video=gv.id, downloaded=dv.id, scout=sr.id, channel=ch.id,
+                       video_path=str(gen_path))
         await engine.dispose()
         return ids
     return asyncio.run(_seed())
@@ -184,6 +186,9 @@ class TestVideos:
         )
         assert approved.status_code == 200
         assert approved.json()["publish_approved"] is True
+        assert approved.json()["publish_approval_artifact_sha256"] == hashlib.sha256(
+            Path(seeded["video_path"]).read_bytes()
+        ).hexdigest()
         detail = client.get(f"/api/videos/{seeded['video']}").json()
         assert detail["publish_approved"] is True
         assert detail["publish_approved_at"]
@@ -255,6 +260,7 @@ class TestVideos:
         )
         assert revoked.status_code == 200
         assert revoked.json()["publish_approved"] is False
+        assert revoked.json()["publish_approval_artifact_sha256"] is None
         assert client.post(
             f"/api/videos/{seeded['video']}/upload",
             json={"platforms": ["youtube"]},

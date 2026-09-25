@@ -161,7 +161,8 @@ class TestContentDedupe:
         mem_conn.commit()
 
         count = mem_conn.execute(
-            "SELECT COUNT(*) FROM content WHERE platform='douyin' AND content_id='TESTID001'"
+            """SELECT COUNT(*) FROM scout_results
+            WHERE user_id='local' AND platform='douyin' AND video_id='TESTID001'"""
         ).fetchone()[0]
         assert count == 1
 
@@ -179,7 +180,7 @@ class TestContentDedupe:
         upsert_content(mem_conn, c2)
         mem_conn.commit()
         count = mem_conn.execute(
-            "SELECT COUNT(*) FROM content WHERE content_id='SHARED001'"
+            "SELECT COUNT(*) FROM scout_results WHERE video_id='SHARED001'"
         ).fetchone()[0]
         assert count == 2
 
@@ -206,7 +207,9 @@ class TestSnapshotAppend:
         mem_conn.commit()
 
         count = mem_conn.execute(
-            "SELECT COUNT(*) FROM metric_snapshots WHERE content_id='SNAP001'"
+            """SELECT COUNT(*) FROM radar_observations ro
+            JOIN scout_results sr ON sr.id=ro.scout_result_id
+            WHERE sr.video_id='SNAP001'"""
         ).fetchone()[0]
         assert count == 2
 
@@ -248,7 +251,9 @@ class TestNullMetrics:
         mem_conn.commit()
 
         row = mem_conn.execute(
-            "SELECT views, likes, comments FROM metric_snapshots WHERE content_id='NULLDB'"
+            """SELECT ro.views, ro.likes, ro.comments FROM radar_observations ro
+            JOIN scout_results sr ON sr.id=ro.scout_result_id
+            WHERE sr.video_id='NULLDB'"""
         ).fetchone()
         assert row["views"] is None
         assert row["likes"] == 100
@@ -282,7 +287,7 @@ class TestSourceRunStatus:
         ingest_module.ingest(result)
 
         row = mem_conn.execute(
-            "SELECT status, records_new FROM source_runs ORDER BY id DESC LIMIT 1"
+            "SELECT status, records_new FROM radar_source_runs ORDER BY rowid DESC LIMIT 1"
         ).fetchone()
         assert row["status"] == "SUCCESS"
         assert row["records_new"] == 3
@@ -298,7 +303,7 @@ class TestSourceRunStatus:
         ingest_module.ingest(result)
 
         row = mem_conn.execute(
-            "SELECT status, error FROM source_runs ORDER BY id DESC LIMIT 1"
+            "SELECT status, error FROM radar_source_runs ORDER BY rowid DESC LIMIT 1"
         ).fetchone()
         assert row["status"] == "ERROR"
         assert "Some error" in row["error"]
