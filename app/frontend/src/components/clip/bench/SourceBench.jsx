@@ -54,19 +54,19 @@ import useAppStore from "../../../store/appStore"
    review and no cap.
 */
 
-const CAPTION_OPTIONS = [{ value: "none", label: "Off" }, ...CAPTION_STYLES]
+const CAPTION_OPTIONS = [{ value: "none", label: "Tắt" }, ...CAPTION_STYLES]
 const EMOJI_OPTIONS = [
-  { v: "none", label: "Off" }, { v: "minimal", label: "Minimal" },
-  { v: "moderate", label: "Moderate" }, { v: "heavy", label: "Heavy" },
+  { v: "none", label: "Tắt" }, { v: "minimal", label: "Ít" },
+  { v: "moderate", label: "Vừa" }, { v: "heavy", label: "Nhiều" },
 ]
 const WHISPER_QUALITIES = [
-  { v: "fast", label: "Fast (base)" },
-  { v: "balanced", label: "Balanced (small)" },
-  { v: "accurate", label: "Accurate (medium)" },
-  { v: "best", label: "Best (large-v3)" },
+  { v: "fast", label: "Nhanh (base)" },
+  { v: "balanced", label: "Cân bằng (small)" },
+  { v: "accurate", label: "Chính xác (medium)" },
+  { v: "best", label: "Tốt nhất (large-v3)" },
 ]
 const PLATFORMS = [
-  { v: "", label: "Any platform" },
+  { v: "", label: "Mọi nền tảng" },
   { v: "tiktok", label: "TikTok" },
   { v: "youtube_shorts", label: "YouTube Shorts" },
   { v: "reels", label: "Instagram Reels" },
@@ -74,11 +74,11 @@ const PLATFORMS = [
   { v: "twitter", label: "Twitter / X" },
 ]
 const GENRES = [
-  { v: "", label: "Auto-detect genre" },
-  { v: "podcast", label: "Podcast" }, { v: "interview", label: "Interview" },
+  { v: "", label: "Tự nhận diện thể loại" },
+  { v: "podcast", label: "Podcast" }, { v: "interview", label: "Phỏng vấn" },
   { v: "qa", label: "Q&A / AMA" }, { v: "vlog", label: "Vlog" },
-  { v: "tutorial", label: "Tutorial" }, { v: "gaming", label: "Gaming" },
-  { v: "reaction", label: "Reaction" }, { v: "lecture", label: "Lecture" },
+  { v: "tutorial", label: "Hướng dẫn" }, { v: "gaming", label: "Gaming" },
+  { v: "reaction", label: "Phản ứng" }, { v: "lecture", label: "Bài giảng" },
 ]
 
 const SHORTCUTS = [
@@ -264,11 +264,11 @@ export default function SourceBench({
 
   const addAtPlayhead = useCallback(() => {
     if (R.atCap) {
-      showSnackbar(`The bench holds ${MAX_RANGES} ranges — cut or remove some first`, "warning")
+      showSnackbar(`Bàn cắt chứa tối đa ${MAX_RANGES} đoạn — hãy cắt hoặc xóa bớt trước`, "warning")
       return
     }
     if (!R.addAt(playhead)) {
-      showSnackbar("No free space here — move the playhead, or drag on the strip", "warning")
+      showSnackbar("Không còn khoảng trống ở đây — hãy di chuyển vị trí phát hoặc kéo trên dải phim", "warning")
     }
   }, [R, playhead, showSnackbar])
 
@@ -385,9 +385,9 @@ export default function SourceBench({
       if (settings.force_retranscribe) body.force_retranscribe = true
       const { data } = await http.post(`/api/downloaded/${sourceId}/suggest-clips`, body)
       setSuggestJobId(data.job_id)
-      showSnackbar("Reading the video for its strongest moments…", "info")
+      showSnackbar("Đang đọc video để tìm những khoảnh khắc mạnh nhất…", "info")
     } catch (e) {
-      showSnackbar(e.response?.data?.detail || "Could not start the search", "error")
+      showSnackbar(e.response?.data?.detail || "Không thể bắt đầu tìm kiếm", "error")
     }
   }
 
@@ -451,7 +451,7 @@ export default function SourceBench({
   const askAi = (
     <>
       <Tooltip title={atCap
-        ? `The bench holds ${MAX_RANGES} ranges — cut or remove some first`
+        ? `Bàn cắt chứa tối đa ${MAX_RANGES} đoạn — hãy cắt hoặc xóa bớt trước`
         : "Let the AI read the transcript and propose the strongest moments"}>
         <span>
           <Button
@@ -476,42 +476,42 @@ export default function SourceBench({
           <Typography variant="caption" sx={{ color: "text.secondary" }}>
             The AI reads the transcript and proposes the strongest moments.
             They arrive as blocks you can drag, retime or delete —{" "}
-            <strong>nothing is cut</strong> until you press Cut.
+            <strong>chưa cắt gì</strong> cho đến khi bạn bấm Cắt.
           </Typography>
           <Stack direction="row" spacing={1.25}>
             <TextField
-              label="How many" type="number" size="small" sx={{ flex: 1 }}
+              label="Số lượng" type="number" size="small" sx={{ flex: 1 }}
               value={ai.max_clips}
               slotProps={{ htmlInput: { min: 1, max: MAX_RANGES } }}
               onChange={(e) => setAi((p) => ({ ...p, max_clips: e.target.value }))}
             />
             <TextField
-              label="Min (s)" type="number" size="small" sx={{ flex: 1 }}
+              label="Tối thiểu (giây)" type="number" size="small" sx={{ flex: 1 }}
               value={ai.min_duration}
               slotProps={{ htmlInput: { min: 10, max: 120 } }}
               onChange={(e) => setAi((p) => ({ ...p, min_duration: e.target.value }))}
             />
             <TextField
-              label="Max (s)" type="number" size="small" sx={{ flex: 1 }}
+              label="Tối đa (giây)" type="number" size="small" sx={{ flex: 1 }}
               value={ai.max_duration}
               slotProps={{ htmlInput: { min: 15, max: 180 } }}
               onChange={(e) => setAi((p) => ({ ...p, max_duration: e.target.value }))}
             />
           </Stack>
           <TextField
-            label="Find specific moments" size="small" fullWidth
-            placeholder={'e.g. "every joke that landed"'}
+            label="Tìm khoảnh khắc cụ thể" size="small" fullWidth
+            placeholder={'ví dụ: "mọi câu đùa ăn điểm"'}
             value={ai.user_query}
             slotProps={{ htmlInput: { maxLength: 500 } }}
             onChange={(e) => setAi((p) => ({ ...p, user_query: e.target.value }))}
           />
           <Stack direction="row" spacing={1.25}>
-            <TextField select label="Target platform" size="small" sx={{ flex: 1 }}
+            <TextField select label="Nền tảng đích" size="small" sx={{ flex: 1 }}
               value={ai.target_platform}
               onChange={(e) => setAi((p) => ({ ...p, target_platform: e.target.value }))}>
               {PLATFORMS.map((o) => <MenuItem key={o.v} value={o.v}>{o.label}</MenuItem>)}
             </TextField>
-            <TextField select label="Content genre" size="small" sx={{ flex: 1 }}
+            <TextField select label="Thể loại nội dung" size="small" sx={{ flex: 1 }}
               value={ai.genre}
               onChange={(e) => setAi((p) => ({ ...p, genre: e.target.value }))}>
               {GENRES.map((o) => <MenuItem key={o.v} value={o.v}>{o.label}</MenuItem>)}
@@ -569,7 +569,7 @@ export default function SourceBench({
       <Stack direction="row" alignItems="center" spacing={1} sx={{ flexShrink: 0 }}>
         <ContentCutIcon sx={{ fontSize: 17, color: "primary.main" }} />
         <Typography variant="subtitle2" sx={{ fontWeight: 700, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {source.title || "Untitled"}
+          {source.title || "Chưa đặt tên"}
         </Typography>
         <Typography variant="caption" sx={{ color: "text.secondary", flexShrink: 0 }}>
           {formatTime(duration)}
@@ -582,7 +582,7 @@ export default function SourceBench({
           : "This video has no transcript, so there are no sentence boundaries to snap to"}>
           <span>
             <IconButton size="small" disabled={!segments.length}
-              aria-label={snapEnabled ? "Snapping to sentences is on" : "Snapping to sentences is off"}
+              aria-label={snapEnabled ? "Bám theo câu đang bật" : "Bám theo câu đang tắt"}
               aria-pressed={snapEnabled && segments.length > 0}
               onClick={() => setSnapEnabled((v) => !v)}
               sx={{ color: snapEnabled && segments.length ? "success.main" : "text.disabled" }}>
@@ -590,8 +590,8 @@ export default function SourceBench({
             </IconButton>
           </span>
         </Tooltip>
-        <Tooltip title="Keyboard shortcuts">
-          <IconButton size="small" aria-label="Keyboard shortcuts"
+        <Tooltip title="Phím tắt">
+          <IconButton size="small" aria-label="Phím tắt"
             onClick={(e) => setHelpAnchor(e.currentTarget)} sx={{ color: "text.secondary" }}>
             <KeyboardIcon sx={{ fontSize: 17 }} />
           </IconButton>
@@ -713,7 +713,7 @@ export default function SourceBench({
           : "Playback runs through the whole source, ignoring the selection"}>
           <Chip
             size="small"
-            label={scoped ? "Selection only" : "Whole video"}
+            label={scoped ? "Chỉ vùng chọn" : "Toàn bộ video"}
             color={scoped ? "primary" : "default"}
             variant={scoped ? "filled" : "outlined"}
             onClick={() => setScoped((v) => !v)}
@@ -749,12 +749,12 @@ export default function SourceBench({
           onRangeChange={R.update}
           onRangeCommit={R.settle}
           onRangeAdd={(a, b) => {
-            if (atCap) { showSnackbar(`The bench holds ${MAX_RANGES} ranges — cut or remove some first`, "warning"); return }
+            if (atCap) { showSnackbar(`Bàn cắt chứa tối đa ${MAX_RANGES} đoạn — hãy cắt hoặc xóa bớt trước`, "warning"); return }
             if (R.add(a, b) == null) {
               // add() refused: the span was clamped away by a pending cut,
               // or is shorter than the 1s floor. Say so — a drag that lands
               // nothing with no word reads as a broken timeline.
-              showSnackbar("No room there — that stretch is under a pending cut or shorter than 1s", "info")
+              showSnackbar("Không còn chỗ ở đó — đoạn này đang nằm trong vùng chờ cắt hoặc ngắn hơn 1 giây", "info")
             }
           }}
           onRangeRemove={R.remove}
@@ -766,9 +766,9 @@ export default function SourceBench({
           </Typography>
           <Box sx={{ flex: 1 }} />
           {segments.length > 0 && (
-            <LegendDot color="success.main" label="speech" />
+            <LegendDot color="success.main" label="lời nói" />
           )}
-          {ghosts.length > 0 && <LegendDot color="text.disabled" label="already cut" />}
+          {ghosts.length > 0 && <LegendDot color="text.disabled" label="đã cắt" />}
         </Stack>
       </Box>
 
@@ -776,7 +776,7 @@ export default function SourceBench({
       <Divider sx={{ flexShrink: 0 }} />
       <Stack direction="row" spacing={1.25} alignItems="center" flexWrap="wrap" useFlexGap sx={{ flexShrink: 0 }}>
         <TextField
-          select size="small" label="Captions" sx={{ width: 132 }}
+          select size="small" label="Phụ đề" sx={{ width: 132 }}
           value={settings.caption_style}
           onChange={(e) => onSettings({ caption_style: e.target.value })}
         >
@@ -791,17 +791,17 @@ export default function SourceBench({
             {EMOJI_OPTIONS.map((o) => <MenuItem key={o.v} value={o.v}>{o.label}</MenuItem>)}
           </TextField>
         )}
-        <Tooltip title="Convert a landscape source to 9:16 with a blurred fill">
+        <Tooltip title="Đổi nguồn ngang sang 9:16 với nền mờ">
           <Chip
-            label="Vertical 9:16" size="small"
+            label="Dọc 9:16" size="small"
             color={settings.force_vertical ? "primary" : "default"}
             variant={settings.force_vertical ? "filled" : "outlined"}
             onClick={() => onSettings({ force_vertical: !settings.force_vertical })}
           />
         </Tooltip>
-        <Tooltip title="Trim silent gaps and filler words INSIDE each cut — your in/out points don't move">
+        <Tooltip title="Cắt khoảng lặng và từ đệm BÊN TRONG mỗi đoạn — điểm vào/ra không thay đổi">
           <Chip
-            label="Trim silence" size="small"
+            label="Cắt im lặng" size="small"
             color={settings.remove_silence ? "primary" : "default"}
             variant={settings.remove_silence ? "filled" : "outlined"}
             onClick={() => onSettings({ remove_silence: !settings.remove_silence })}
@@ -828,7 +828,7 @@ export default function SourceBench({
         >
           <Stack spacing={1.25} sx={{ p: 2, width: 300 }}>
             <TextField
-              select size="small" fullWidth label="Whisper quality"
+              select size="small" fullWidth label="Chất lượng Whisper"
               value={settings.whisper_quality}
               onChange={(e) => onSettings({ whisper_quality: e.target.value })}
             >
@@ -895,7 +895,7 @@ function PasteRangesDialog({ open, onClose, duration, room, onAdd }) {
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
       <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-        <ContentPasteIcon color="primary" /> Paste timestamps
+        <ContentPasteIcon color="primary" /> Dán mốc thời gian
       </DialogTitle>
       <DialogContent>
         <Typography variant="caption" sx={{ color: "text.secondary", display: "block", mb: 1.5 }}>
@@ -924,7 +924,7 @@ function PasteRangesDialog({ open, onClose, duration, room, onAdd }) {
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
-        <Button onClick={onClose}>Cancel</Button>
+        <Button onClick={onClose}>Hủy</Button>
         <Button variant="contained" disabled={willAdd === 0}
           onClick={() => onAdd(ranges.slice(0, willAdd))}>
           Add {willAdd || ""} to timeline

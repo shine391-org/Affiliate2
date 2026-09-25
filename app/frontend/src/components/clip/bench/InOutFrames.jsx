@@ -143,25 +143,25 @@ function FramePane({
         }}>
           {stampOf(time)}
         </Typography>
-        <Tooltip title="Back one frame">
+        <Tooltip title="Lùi một khung hình">
           <span>
-            <IconButton size="small" disabled={disabled} aria-label={`${label} back one frame`}
+            <IconButton size="small" disabled={disabled} aria-label={`${label} lùi một khung hình`}
               onClick={() => onNudge(-FRAME_STEP)} sx={{ p: 0.15 }}>
               <ChevronLeftIcon sx={{ fontSize: 15 }} />
             </IconButton>
           </span>
         </Tooltip>
-        <Tooltip title={`Snap ${label} to the playhead`}>
+        <Tooltip title={`Đặt ${label} theo vị trí phát`}>
           <span>
-            <IconButton size="small" disabled={disabled} aria-label={`Snap ${label} to the playhead`}
+            <IconButton size="small" disabled={disabled} aria-label={`Đặt ${label} theo vị trí phát`}
               onClick={onSetToPlayhead} sx={{ p: 0.15 }}>
               <MyLocationIcon sx={{ fontSize: 13 }} />
             </IconButton>
           </span>
         </Tooltip>
-        <Tooltip title="Forward one frame">
+        <Tooltip title="Tiến một khung hình">
           <span>
-            <IconButton size="small" disabled={disabled} aria-label={`${label} forward one frame`}
+            <IconButton size="small" disabled={disabled} aria-label={`${label} tiến một khung hình`}
               onClick={() => onNudge(FRAME_STEP)} sx={{ p: 0.15 }}>
               <ChevronRightIcon sx={{ fontSize: 15 }} />
             </IconButton>
