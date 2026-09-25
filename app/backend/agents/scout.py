@@ -275,7 +275,7 @@ class ScoutAgent:
         # Radar must never discard already-collected Scout results.
         try:
             from backend.affiliate.radar.service import observe_and_enrich_scout_rows
-            await asyncio.to_thread(observe_and_enrich_scout_rows, all_results, niche)
+            await asyncio.to_thread(\n                observe_and_enrich_scout_rows, all_results, niche, job_id=job_id\n            )
         except Exception as radar_err:  # noqa: BLE001
             logger.warning("Radar observation/enrichment skipped (non-fatal): %s", radar_err)
 
@@ -779,21 +779,25 @@ class ScoutAgent:
                 key = (r["video_id"], r["platform"])
                 if key in existing_by_key:
                     sr = existing_by_key[key]
-                    fill_if_missing = {
-                        "job_id": job_id,
-                        "embed_url": r.get("embed_url"),
-                        "author_url": r.get("author_url"),
-                        "creator_id": r.get("creator_id"),
-                        "thumbnail_url": r.get("thumbnail_url"),
-                        "duration_seconds": r.get("duration_seconds"),
-                    }
-                    for field, value in fill_if_missing.items():
-                        if value is not None and getattr(sr, field, None) in (None, ""):
-                            setattr(sr, field, value)
-
-                    # Current projections may refresh; immutable repeated metric
-                    # evidence stays append-only in RadarObservation.
+                    # ScoutResult is the current projection. Refresh fields that
+                    # belong to the latest fetch while immutable repeated metric
+                    # evidence remains append-only in RadarObservation.
+                    sr.job_id = job_id
                     for field in (
+                        "video_url",
+                        "embed_url",
+                        "title",
+                        "description",
+                        "author",
+                        "author_url",
+                        "creator_id",
+                        "thumbnail_url",
+                        "duration_seconds",
+                        "upload_date",
+                        "views",
+                        "likes",
+                        "comments",
+                        "shares",
                         "virality_score",
                         "views_per_hour",
                         "outlier_score",
