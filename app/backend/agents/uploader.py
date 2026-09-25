@@ -45,6 +45,18 @@ class UploadAgent:
             await update_job_status(job_id, "failed", error_message="Video file path is missing")
             return
 
+        # Canonical Phase-F gate. This lives inside the orchestrator as well as
+        # the HTTP endpoint so Planner/Messaging/internal calls cannot bypass
+        # the same explicit human approval simply by dispatching run_upload
+        # directly.
+        if not video.publish_approved_at:
+            await update_job_status(
+                job_id,
+                "failed",
+                error_message="Video must be explicitly approved for publishing first.",
+            )
+            return
+
         # Load user settings
         async with AsyncSessionLocal() as db:
             result = await db.execute(
