@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime
 
 import pytest
 
@@ -76,6 +77,22 @@ async def _job_count(job_type: str) -> int:
     async with AsyncSessionLocal() as db:
         return (await db.execute(
             select(func.count(Job.id)).where(Job.job_type == job_type))).scalar_one()
+
+
+async def _generated_video(*, approved: bool) -> str:
+    from backend.database import AsyncSessionLocal
+    from backend.models.generated_video import GeneratedVideo
+    async with AsyncSessionLocal() as db:
+        row = GeneratedVideo(
+            user_id="local",
+            title="Publish candidate",
+            status="ready",
+            video_path="/tmp/planner-publish.mp4",
+            publish_approved_at=datetime.utcnow() if approved else None,
+        )
+        db.add(row)
+        await db.commit()
+        return row.id
 
 
 # ── quick replies ───────────────────────────────────────────────────────────
@@ -233,13 +250,29 @@ class TestDispatch:
         self._run({"type": "start_generate"})
         assert asyncio.run(_job_count("generate")) == before
 
-    def test_start_upload_creates_a_job(self, bus):
-        """The uploader is this project's own feature — its planner action
-        has to keep working."""
+    def test_start_upload_creates_a_job_only_after_explicit_approval(self, bus):
+        """Planner/messaging may publish only an already approved GeneratedVideo."""
+        video_id = asyncio.run(_generated_video(approved=True))
         before = asyncio.run(_job_count("upload"))
-        self._run({"type": "start_upload", "generated_video_id": "gv1",
+        self._run({"type": "start_upload", "generated_video_id": video_id,
                    "platforms": ["youtube", "tiktok"]})
         assert asyncio.run(_job_count("upload")) == before + 1
+
+    def test_start_upload_without_approval_creates_nothing(self, bus):
+        video_id = asyncio.run(_generated_video(approved=False))
+        before = asyncio.run(_job_count("upload"))
+        self._run({"type": "start_upload", "generated_video_id": video_id,
+                   "platforms": ["youtube"]})
+        assert asyncio.run(_job_count("upload")) == before
+        warnings = [m for m in bus["sent"] if m.get("type") == "constraint_warning"]
+        assert warnings and warnings[-1]["constraint"] == "publish_approval"
+
+    def test_start_upload_for_missing_video_creates_nothing(self, bus):
+        before = asyncio.run(_job_count("upload"))
+        self._run({"type": "start_upload", "generated_video_id": "no-such-video"})
+        assert asyncio.run(_job_count("upload")) == before
+        warnings = [m for m in bus["sent"] if m.get("type") == "constraint_warning"]
+        assert warnings and warnings[-1]["constraint"] == "publish_video_missing"
 
     def test_start_upload_without_a_video_creates_nothing(self, bus):
         before = asyncio.run(_job_count("upload"))
