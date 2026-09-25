@@ -11,10 +11,10 @@ import ToolRunner from "../../components/tools/ToolRunner"
 import useDocumentTitle from "../../hooks/useDocumentTitle"
 
 const POSITIONS = [
-  { value: "top-left", label: "Top Left" },
-  { value: "top-right", label: "Top Right" },
-  { value: "bottom-left", label: "Bottom Left" },
-  { value: "bottom-right", label: "Bottom Right" },
+  { value: "top-left", label: "Trên trái" },
+  { value: "top-right", label: "Trên phải" },
+  { value: "bottom-left", label: "Dưới trái" },
+  { value: "bottom-right", label: "Dưới phải" },
 ]
 
 export default function ToolWatermark() {
@@ -37,8 +37,8 @@ export default function ToolWatermark() {
 
   return (
     <ToolRunner
-      title="Add Watermark"
-      description="Brand every export with your logo"
+      title="Thêm watermark"
+      description="Gắn logo lên mọi bản xuất"
       icon={<BrandingWatermarkOutlinedIcon fontSize="large" />}
       endpoint="/api/tools/watermark"
       extraFiles={{ logo }}

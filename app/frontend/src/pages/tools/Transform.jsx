@@ -8,14 +8,14 @@ import ToolRunner from "../../components/tools/ToolRunner"
 import useDocumentTitle from "../../hooks/useDocumentTitle"
 
 const OPS = [
-  { v: "flip_h", label: "Flip ◀▶" },
-  { v: "flip_v", label: "Flip ▲▼" },
-  { v: "rotate_cw", label: "Rotate ⟳" },
-  { v: "rotate_ccw", label: "Rotate ⟲" },
-  { v: "rotate_180", label: "Rotate 180°" },
-  { v: "loop", label: "Loop" },
-  { v: "volume", label: "Volume" },
-  { v: "mute", label: "Remove audio" },
+  { v: "flip_h", label: "Lật ngang ◀▶" },
+  { v: "flip_v", label: "Lật dọc ▲▼" },
+  { v: "rotate_cw", label: "Xoay ⟳" },
+  { v: "rotate_ccw", label: "Xoay ⟲" },
+  { v: "rotate_180", label: "Xoay 180°" },
+  { v: "loop", label: "Lặp" },
+  { v: "volume", label: "Âm lượng" },
+  { v: "mute", label: "Xóa âm thanh" },
 ]
 
 // Ops that can be deep-linked with ?op=… — the Tools hub lists "Remove Audio"
@@ -51,15 +51,15 @@ export default function ToolTransform() {
 
   return (
     <ToolRunner
-      title="Transform"
-      description="Quick edits — flip, rotate, loop, change volume, or strip the audio"
+      title="Biến đổi"
+      description="Chỉnh nhanh — lật, xoay, lặp, đổi âm lượng hoặc xóa âm thanh"
       icon={<TransformIcon fontSize="large" />}
       endpoint="/api/tools/transform"
       fieldBuilder={() => ({ operation, amount })}
     >
       <Stack spacing={2}>
         <Box>
-          <Typography variant="caption" sx={{ fontWeight: 600, display: "block", mb: 1 }}>Operation</Typography>
+          <Typography variant="caption" sx={{ fontWeight: 600, display: "block", mb: 1 }}>Thao tác</Typography>
           <ToggleButtonGroup
             exclusive size="small" value={operation}
             onChange={(_e, v) => v && setOperation(v)}
@@ -80,7 +80,7 @@ export default function ToolTransform() {
 
         {operation === "volume" && (
           <Box>
-            <Typography variant="caption" sx={{ fontWeight: 600, display: "block", mb: 1 }}>Volume</Typography>
+            <Typography variant="caption" sx={{ fontWeight: 600, display: "block", mb: 1 }}>Âm lượng</Typography>
             <ToggleButtonGroup exclusive size="small" value={volume} onChange={(_e, v) => v !== null && setVolume(v)}>
               {VOL_PRESETS.map((p) => <ToggleButton key={p.v} value={p.v} sx={{ textTransform: "none" }}>{p.label}</ToggleButton>)}
             </ToggleButtonGroup>

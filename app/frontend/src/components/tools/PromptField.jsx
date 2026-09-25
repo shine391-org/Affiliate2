@@ -60,7 +60,7 @@ export default function PromptField({
         emit(data.enhanced)
       }
     } catch (e) {
-      const msg = e?.response?.data?.detail || e.message || "Enhance failed"
+      const msg = e?.response?.data?.detail || e.message || "Cải thiện prompt thất bại"
       showSnackbar?.(msg, "error")
     } finally {
       setLoading(false)
@@ -99,7 +99,7 @@ export default function PromptField({
           }}
         >
           {prevValue !== null && (
-            <Tooltip title="Undo enhance">
+            <Tooltip title="Hoàn tác cải thiện">
               <Button
                 size="small"
                 onClick={undo}
@@ -115,7 +115,7 @@ export default function PromptField({
               </Button>
             </Tooltip>
           )}
-          <Tooltip title={value?.trim() ? "Rewrite this into a stronger prompt" : "Generate a starting prompt"}>
+          <Tooltip title={value?.trim() ? "Viết lại thành prompt tốt hơn" : "Tạo prompt ban đầu"}>
             <span>
               <Button
                 size="small"

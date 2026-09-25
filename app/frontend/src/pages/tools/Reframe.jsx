@@ -7,8 +7,8 @@ export default function ToolReframe() {
   useDocumentTitle("Reframe to Vertical")
   return (
     <ToolRunner
-      title="Reframe to Vertical"
-      description="Convert 16:9 landscape to 9:16 with face-tracking"
+      title="Đổi khung dọc"
+      description="Đổi video ngang 16:9 sang dọc 9:16 với bám khuôn mặt"
       icon={<AspectRatioOutlinedIcon fontSize="large" />}
       endpoint="/api/tools/reframe"
     >
