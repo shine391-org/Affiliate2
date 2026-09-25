@@ -31,8 +31,8 @@ function PlatformCard({ name, connected, connectLabel, onConnect, onPublish, bus
           </Button>
         )}
         <Button variant="contained" startIcon={<CloudUploadOutlinedIcon />}
-          disabled={!connected || busy} onClick={onPublish}>
-          Publish
+          disabled={!connected || busy || published} onClick={onPublish}>
+          {published ? "Published" : "Publish"}
         </Button>
       </Stack>
     </Paper>
@@ -53,7 +53,9 @@ export default function Publish() {
   const selectedId = params.get("video") || ""
   const requestedTarget = params.get("target") || ""
   const selected = useMemo(
-    () => videos.find((video) => video.id === selectedId) || videos[0] || null,
+    () => selectedId
+      ? (videos.find((video) => video.id === selectedId) || null)
+      : (videos[0] || null),
     [videos, selectedId],
   )
 
@@ -68,13 +70,36 @@ export default function Publish() {
         http.get("/api/videos", { params: { limit: 100 } }),
         http.get("/api/settings"),
       ])
-      const eligible = (videoRes.data?.videos || []).filter((video) =>
+      let eligible = (videoRes.data?.videos || []).filter((video) =>
         ["ready", "uploaded"].includes(video.status) && video.video_path
       )
-      setVideos(eligible)
       setSettings(settingsRes.data || {})
       const requested = selectedId
-      if ((!requested || !eligible.some((video) => video.id === requested)) && eligible[0]) {
+
+      // Library can deep-link any GeneratedVideo, including one older than the
+      // first 100 rows. Never substitute another asset for an explicit ID on an
+      // irreversible Publish screen; resolve that exact row or show an error.
+      if (requested && !eligible.some((video) => video.id === requested)) {
+        try {
+          const { data: requestedVideo } = await http.get(`/api/videos/${requested}`)
+          const publishable = ["ready", "uploaded"].includes(requestedVideo?.status) && requestedVideo?.video_path
+          if (!publishable) {
+            setVideos(eligible)
+            setError("That video is not a finished publishable output.")
+            return
+          }
+          eligible = [requestedVideo, ...eligible]
+        } catch (e) {
+          setVideos(eligible)
+          setError(e.response?.status === 404
+            ? "That requested video no longer exists."
+            : (e.response?.data?.detail || "Could not load the requested video."))
+          return
+        }
+      }
+
+      setVideos(eligible)
+      if (!requested && eligible[0]) {
         setParams((prev) => {
           const next = new URLSearchParams(prev)
           next.set("video", eligible[0].id)
