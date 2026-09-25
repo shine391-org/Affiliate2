@@ -451,7 +451,7 @@ export default function Library() {
             </Button>
             <Button size="small" variant="outlined" onClick={openActivity}
               startIcon={<BoltRoundedIcon sx={{ fontSize: 17 }} />}>
-              Activity
+              Hoạt động
               {(runningCount > 0 || recentFailures.length > 0) && (
                 <Box component="span" sx={{
                   ml: 0.7, px: 0.6, borderRadius: "999px", fontSize: "0.68rem", fontWeight: 700,
@@ -672,7 +672,7 @@ export default function Library() {
               deleteSelected,
               { confirmLabel: `Xóa ${selected.size}` },
             )}>
-            Delete
+            Xóa
           </Button>
           <IconButton size="small" onClick={() => setSelected(new Map())} aria-label="Bỏ chọn tất cả">
             <CloseRoundedIcon sx={{ fontSize: 16 }} />
@@ -687,16 +687,16 @@ export default function Library() {
         slotProps={{ paper: { sx: { minWidth: 190 } } }}>
         <MenuItem sx={{ fontSize: "0.84rem" }}
           onClick={() => { const it = moreMenu.item; setMoreMenu(null); openItem(it) }}>
-          Open details
+          Mở chi tiết
         </MenuItem>
         <MenuItem sx={{ fontSize: "0.84rem" }}
           component="a" href={moreMenu?.item?.stream_url} download
           onClick={() => setMoreMenu(null)}>
-          Save a copy
+          Lưu bản sao
         </MenuItem>
         <MenuItem sx={{ fontSize: "0.84rem", color: "error.main" }}
           onClick={() => { const it = moreMenu.item; setMoreMenu(null); confirmDeleteOne(it) }}>
-          Delete
+          Xóa
         </MenuItem>
       </Menu>
 
