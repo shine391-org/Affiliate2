@@ -3,6 +3,7 @@
 """REST endpoints for generated videos."""
 import json
 import logging
+from datetime import datetime
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
@@ -137,6 +138,8 @@ async def list_videos(
                 "youtube_video_id": v.youtube_video_id,
                 "tiktok_publish_id": v.tiktok_publish_id,
                 "uploaded_platforms": _safe_json(v.uploaded_platforms_json, []),
+                "publish_approved_at": v.publish_approved_at.isoformat() if v.publish_approved_at else None,
+                "publish_approved": bool(v.publish_approved_at),
                 "source_type": v.source_type,
                 "source_downloaded_video_id": v.source_downloaded_video_id,
                 "clip_start_seconds": v.clip_start_seconds,
@@ -187,6 +190,8 @@ async def get_video(video_id: str, db: AsyncSession = Depends(get_db)):
         "youtube_video_id": v.youtube_video_id,
         "tiktok_publish_id": v.tiktok_publish_id,
         "uploaded_platforms": _safe_json(v.uploaded_platforms_json, []),
+        "publish_approved_at": v.publish_approved_at.isoformat() if v.publish_approved_at else None,
+        "publish_approved": bool(v.publish_approved_at),
         "estimated_cost_usd": v.estimated_cost_usd,
         "video_path_landscape": v.video_path_landscape,
         "has_landscape": bool(v.video_path_landscape),
@@ -231,6 +236,43 @@ async def generate_video(body: dict = None):
     return {"job_id": job.id}
 
 
+@router.post("/videos/{video_id}/publish-approval")
+async def set_publish_approval(video_id: str, body: dict = None, db: AsyncSession = Depends(get_db)):
+    """Explicit human gate for Phase-F publishing.
+
+    Approval never starts an upload. It only records that the operator reviewed
+    this exact GeneratedVideo and allows a later /upload action to run.
+    """
+    body = body or {}
+    approved = bool(body.get("approved"))
+    result = await db.execute(
+        select(GeneratedVideo).where(GeneratedVideo.id == video_id)
+    )
+    video = result.scalar_one_or_none()
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    if approved:
+        if video.status not in ("ready", "uploaded"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Video status is '{video.status}', must be 'ready' or 'uploaded' before approval",
+            )
+        if not video.video_path or not Path(video.video_path).is_file():
+            raise HTTPException(status_code=400, detail="Video file not found on disk")
+        video.publish_approved_at = datetime.utcnow()
+    else:
+        video.publish_approved_at = None
+    await db.commit()
+    await db.refresh(video)
+    return {
+        "id": video.id,
+        "publish_approved": bool(video.publish_approved_at),
+        "publish_approved_at": (
+            video.publish_approved_at.isoformat() if video.publish_approved_at else None
+        ),
+    }
+
+
 @router.post("/videos/{video_id}/upload")
 async def upload_video(video_id: str, body: dict, db: AsyncSession = Depends(get_db)):
     """Trigger upload of a generated video to specified platforms."""
@@ -240,10 +282,27 @@ async def upload_video(video_id: str, body: dict, db: AsyncSession = Depends(get
     video = result.scalar_one_or_none()
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
-    if video.status not in ("ready", "failed"):
-        raise HTTPException(status_code=400, detail=f"Video status is '{video.status}', must be 'ready' or 'failed'")
+    if video.status not in ("ready", "uploaded", "failed"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Video status is '{video.status}', must be 'ready', 'uploaded', or 'failed'",
+        )
+    if not video.publish_approved_at:
+        raise HTTPException(
+            status_code=403,
+            detail="Video must be explicitly approved for publishing first.",
+        )
 
     platforms = body.get("platforms", ["youtube"])
+    if not isinstance(platforms, list) or not platforms:
+        raise HTTPException(status_code=400, detail="At least one publish platform is required.")
+    allowed_platforms = {"youtube", "tiktok", "instagram"}
+    unknown = sorted({str(p) for p in platforms} - allowed_platforms)
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported publish platform(s): {', '.join(unknown)}",
+        )
     user_id = video.user_id or "local"
 
     from backend.agents.job_helper import create_job
