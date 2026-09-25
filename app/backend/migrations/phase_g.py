@@ -35,8 +35,7 @@ _PHASE_G_COLUMNS: dict[str, tuple[tuple[str, str], ...]] = {
         ("first_seen_at", "DATETIME"),
         ("last_seen_at", "DATETIME"),
     ),
-    "downloaded_videos": (
-        ("source_sha256", "VARCHAR(64)"),
+    "radar_observations": (\n        ("job_id", "VARCHAR(36)"),\n    ),\n    "downloaded_videos": (\n        ("source_sha256", "VARCHAR(64)"),
         ("intelligence_source", "VARCHAR(50)"),
     ),
     "generated_videos": (
