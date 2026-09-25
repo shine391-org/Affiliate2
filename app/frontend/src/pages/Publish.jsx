@@ -68,7 +68,7 @@ export default function Publish() {
         http.get("/api/settings"),
       ])
       const eligible = (videoRes.data?.videos || []).filter((video) =>
-        ["ready", "uploaded", "failed"].includes(video.status) && video.video_path
+        ["ready", "uploaded"].includes(video.status) && video.video_path
       )
       setVideos(eligible)
       setSettings(settingsRes.data || {})
