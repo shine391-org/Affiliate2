@@ -754,34 +754,56 @@ class ScoutAgent:
         twice); the DISPLAY should still show every result the user
         actually paid to scout. (Bug fix 2026-05-12.)
 
-        DB row stays as the original scout's snapshot — we do NOT
-        update existing rows with the fresh stats. Treating each
-        scout as immutable evidence keeps the data analytic-friendly;
-        a future explicit "refresh stats" action can update in-place.
+        ScoutResult is now the canonical source identity/current projection.
+        Immutable repeated metrics live in RadarObservation. If Radar created the
+        identity earlier in this same run, enrich that row with the full Scout
+        metadata and score instead of treating it as a fully-populated duplicate.
         """
         logger.debug("SCOUT saving %d results to DB (niche=%r)", len(results), niche)
         display_rows: list[dict] = []
         new_count = 0
         async with AsyncSessionLocal() as db:
-            # Load existing rows as a key → id map. We need the id (not
-            # just the existence) so duplicates can still show up in the
-            # UI with a stable, clickable id (download, inspect, etc.).
+            # Load canonical identity rows, not just ids. Radar observation runs
+            # before this save and may have created a minimal identity in the same
+            # request; enrich that row rather than silently losing the full Scout
+            # metadata/score.
             existing_result = await db.execute(
-                select(ScoutResult.id, ScoutResult.video_id, ScoutResult.platform)
-                .where(ScoutResult.user_id == user_id)
+                select(ScoutResult).where(ScoutResult.user_id == user_id)
             )
-            existing_id_by_key: dict[tuple[str, str], str] = {
-                (row[1], row[2]): row[0]
-                for row in existing_result.fetchall()
+            existing_by_key: dict[tuple[str, str], ScoutResult] = {
+                (row.video_id, row.platform): row
+                for row in existing_result.scalars().all()
             }
 
             for r in results:
                 key = (r["video_id"], r["platform"])
-                if key in existing_id_by_key:
-                    # Duplicate — reuse the existing DB row's id. Don't
-                    # write the DB row again. UI still gets a full card
-                    # with the FRESH stats from this scout.
-                    existing_id = existing_id_by_key[key]
+                if key in existing_by_key:
+                    sr = existing_by_key[key]
+                    fill_if_missing = {
+                        "job_id": job_id,
+                        "embed_url": r.get("embed_url"),
+                        "author_url": r.get("author_url"),
+                        "creator_id": r.get("creator_id"),
+                        "thumbnail_url": r.get("thumbnail_url"),
+                        "duration_seconds": r.get("duration_seconds"),
+                    }
+                    for field, value in fill_if_missing.items():
+                        if value is not None and getattr(sr, field, None) in (None, ""):
+                            setattr(sr, field, value)
+
+                    # Current projections may refresh; immutable repeated metric
+                    # evidence stays append-only in RadarObservation.
+                    for field in (
+                        "virality_score",
+                        "views_per_hour",
+                        "outlier_score",
+                        "subscriber_count",
+                        "channel_avg_views",
+                    ):
+                        value = r.get(field)
+                        if value is not None:
+                            setattr(sr, field, value)
+                    existing_id = sr.id
                 else:
                     # Net-new — insert and remember the new id.
                     sr = ScoutResult(
@@ -795,6 +817,7 @@ class ScoutAgent:
                         description=r.get("description"),
                         author=r.get("author"),
                         author_url=r.get("author_url"),
+                        creator_id=r.get("creator_id"),
                         thumbnail_url=r.get("thumbnail_url"),
                         views=r.get("views", 0),
                         likes=r.get("likes", 0),
@@ -811,7 +834,7 @@ class ScoutAgent:
                     )
                     db.add(sr)
                     await db.flush()
-                    existing_id_by_key[key] = sr.id
+                    existing_by_key[key] = sr
                     existing_id = sr.id
                     new_count += 1
 

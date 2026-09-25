@@ -54,8 +54,91 @@ async def get_db() -> AsyncSession:
             await session.close()
 
 
+
+async def _run_phase_g_data_migration_if_needed() -> None:
+    """Migrate retired Radar/overlay data before canonical runtime starts.
+
+    The legacy DB is read-only to the migrator. Before the first real cutover we
+    take SQLite-consistent backups of both databases. A failed migration aborts
+    startup instead of silently launching against a canonical DB that is missing
+    historical review/publication/performance state.
+    """
+    import asyncio
+    import os
+    import sqlite3
+    from datetime import datetime
+    from pathlib import Path
+
+    from backend.config import DATA_DIR
+
+    legacy = DATA_DIR / "data" / "radar.db"
+    canonical = DATA_DIR / "viralmint.db"
+    if not legacy.is_file():
+        return
+
+    def _completed() -> bool:
+        if not canonical.is_file():
+            return False
+        conn = sqlite3.connect(
+            f"file:{canonical.resolve().as_posix()}?mode=ro", uri=True, timeout=10
+        )
+        try:
+            table = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
+            ).fetchone()
+            if not table:
+                return False
+            row = conn.execute(
+                "SELECT status FROM schema_migrations WHERE version='G006_RECONCILE'"
+            ).fetchone()
+            return bool(row and row[0] == "completed")
+        finally:
+            conn.close()
+
+    if await asyncio.to_thread(_completed):
+        return
+
+    project_root = Path(os.getenv("CONTENT_ENGINE_ROOT") or DATA_DIR).resolve()
+
+    def _backup_sqlite(source: Path, destination: Path) -> None:
+        if not source.is_file():
+            return
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        src = sqlite3.connect(
+            f"file:{source.resolve().as_posix()}?mode=ro", uri=True, timeout=30
+        )
+        dst = sqlite3.connect(destination)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+            src.close()
+
+    def _migrate() -> None:
+        stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+        backup_dir = DATA_DIR / ".runtime" / "phase-g-backups" / stamp
+        _backup_sqlite(canonical, backup_dir / "viralmint.db")
+        _backup_sqlite(legacy, backup_dir / "radar.db")
+
+        from backend.migrations.phase_g import PhaseGMigrator
+
+        report = PhaseGMigrator(canonical, legacy, project_root).run()
+        if report.get("status") != "completed":
+            raise RuntimeError(f"Phase G migration did not complete: {report}")
+
+    logger.info("Phase G legacy data detected; running one-time canonical migration")
+    try:
+        await asyncio.to_thread(_migrate)
+    except Exception:
+        logger.exception(
+            "Phase G migration failed; refusing to start with split persistence"
+        )
+        raise
+
 async def init_db():
     """Create all tables. Called once at startup from run.py."""
+    await _run_phase_g_data_migration_if_needed()
+
     # Import all models so Base knows about them
     from backend.models import (  # noqa: F401
         user_settings, user_behavior, feature_flag,

@@ -17,8 +17,13 @@ import threading
 import webbrowser
 from pathlib import Path
 
-# Ensure we're running from project root
+# Keep every supported launcher on the same repo-root data contract. Historically
+# this entrypoint chdir'd into app/ before backend.config was imported, which
+# silently created app/viralmint.db while scripts/run.ps1 used ../viralmint.db.
 ROOT = Path(__file__).parent
+REPO_ROOT = ROOT.parent.resolve()
+os.environ.setdefault("VIRALMINT_DATA_DIR", str(REPO_ROOT))
+os.environ.setdefault("CONTENT_ENGINE_ROOT", str(REPO_ROOT))
 os.chdir(ROOT)
 sys.path.insert(0, str(ROOT))
 
@@ -31,7 +36,8 @@ def check_python_version():
     print(f"✅ Python {sys.version.split()[0]}")
 
 def check_env_file():
-    env_path = ROOT / ".env"
+    data_root = Path(os.environ["VIRALMINT_DATA_DIR"])
+    env_path = data_root / ".env"
     if not env_path.exists():
         example = ROOT / ".env.example"
         if example.exists():
@@ -41,8 +47,9 @@ def check_env_file():
             print("⚠️  No .env file found. Create one from .env.example")
 
 def ensure_storage_dirs():
+    storage_root = Path(os.environ["VIRALMINT_DATA_DIR"]) / "storage"
     for d in ["videos", "audio", "generated", "thumbnails", "tmp"]:
-        (ROOT / "storage" / d).mkdir(parents=True, exist_ok=True)
+        (storage_root / d).mkdir(parents=True, exist_ok=True)
     print("✅ Storage directories ready")
 
 def check_imagemagick():

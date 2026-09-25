@@ -56,32 +56,48 @@ def _print_result(result) -> None:
 def _print_stats() -> None:
     from radar.db import get_conn
     conn = get_conn()
-    content_count = conn.execute("SELECT COUNT(*) FROM content").fetchone()[0]
-    snap_count = conn.execute("SELECT COUNT(*) FROM metric_snapshots").fetchone()[0]
-    run_count = conn.execute("SELECT COUNT(*) FROM source_runs").fetchone()[0]
+    try:
+        content_count = conn.execute(
+            "SELECT COUNT(*) FROM scout_results WHERE user_id='local'"
+        ).fetchone()[0]
+        snap_count = conn.execute(
+            "SELECT COUNT(*) FROM radar_observations"
+        ).fetchone()[0]
+        run_count = conn.execute(
+            "SELECT COUNT(*) FROM radar_source_runs"
+        ).fetchone()[0]
 
-    by_platform = conn.execute(
-        "SELECT platform, COUNT(*) FROM content GROUP BY platform"
-    ).fetchall()
+        by_platform = conn.execute(
+            """SELECT platform, COUNT(*) FROM scout_results
+               WHERE user_id='local' GROUP BY platform ORDER BY platform"""
+        ).fetchall()
 
-    print()
-    print("=== Radar DB Stats ===")
-    print(f"  content rows  : {content_count}")
-    print(f"  snapshots     : {snap_count}")
-    print(f"  source runs   : {run_count}")
-    print()
-    for row in by_platform:
-        print(f"  [{row[0]}] {row[1]} content rows")
+        print()
+        print("=== Radar DB Stats ===")
+        print(f"  content rows  : {content_count}")
+        print(f"  snapshots     : {snap_count}")
+        print(f"  source runs   : {run_count}")
+        print()
+        for row in by_platform:
+            print(f"  [{row[0]}] {row[1]} content rows")
 
-    recent_runs = conn.execute(
-        """SELECT platform, keyword, status, records_new, records_updated, finished_at
-           FROM source_runs ORDER BY id DESC LIMIT 5"""
-    ).fetchall()
-    print()
-    print("  Recent runs:")
-    for r in recent_runs:
-        print(f"    {r['finished_at'] or '(running)'} | {r['platform']:8} | {r['keyword'][:20]:20} | {r['status']} | +{r['records_new']} ~{r['records_updated']}")
-    print()
+        recent_runs = conn.execute(
+            """SELECT platform, keyword, status, records_new, records_updated, finished_at
+               FROM radar_source_runs
+               ORDER BY COALESCE(finished_at, started_at) DESC, rowid DESC
+               LIMIT 5"""
+        ).fetchall()
+        print()
+        print("  Recent runs:")
+        for r in recent_runs:
+            print(
+                f"    {r['finished_at'] or '(running)'} | {r['platform']:8} | "
+                f"{r['keyword'][:20]:20} | {r['status']} | "
+                f"+{r['records_new'] or 0} ~{r['records_updated'] or 0}"
+            )
+        print()
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -153,9 +169,10 @@ def cmd_creators(args) -> int:
 
     conn = get_conn()
     rows = conn.execute(
-        """SELECT creator_id, creator_name, COUNT(*) as cnt
-           FROM content
-           WHERE platform = 'bilibili' AND creator_id IS NOT NULL AND creator_id != ''
+        """SELECT creator_id, MAX(author) AS creator_name, COUNT(*) AS cnt
+           FROM scout_results
+           WHERE user_id='local' AND platform='bilibili'
+             AND creator_id IS NOT NULL AND creator_id != ''
            GROUP BY creator_id
            ORDER BY cnt DESC, creator_id
            LIMIT ?""",
