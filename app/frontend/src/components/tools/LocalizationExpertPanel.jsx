@@ -61,7 +61,7 @@ function SegmentEditor({ segment, onSave, busy }) {
       </Typography>
       <Typography variant="body2">{segment.source_text}</Typography>
       <TextField
-        label="Target speech"
+        label="Lời thoại đích"
         size="small"
         multiline
         minRows={2}
@@ -69,15 +69,15 @@ function SegmentEditor({ segment, onSave, busy }) {
         onChange={(e) => setText(e.target.value)}
       />
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
-        <TextField label="Start ms" size="small" type="number" value={start} onChange={(e) => setStart(e.target.value)} />
-        <TextField label="End ms" size="small" type="number" value={end} onChange={(e) => setEnd(e.target.value)} />
+        <TextField label="Bắt đầu (ms)" size="small" type="number" value={start} onChange={(e) => setStart(e.target.value)} />
+        <TextField label="Kết thúc (ms)" size="small" type="number" value={end} onChange={(e) => setEnd(e.target.value)} />
       </Stack>
       <TextField
-        label="Voice override"
+        label="Ghi đè giọng đọc"
         size="small"
         value={voice}
         onChange={(e) => setVoice(e.target.value)}
-        placeholder="optional provider voice id"
+        placeholder="ID giọng của nhà cung cấp (tùy chọn)"
       />
       <Button
         size="small"
@@ -134,14 +134,14 @@ export default function LocalizationExpertPanel({ jobId }) {
     setBusy(true)
     try {
       await http.post("/api/localization/jobs/" + jobId + "/rerun", { from_stage: stage })
-      showSnackbar("Rerunning from " + (STAGE_LABELS[stage] || stage), "info")
+      showSnackbar("Đang chạy lại từ " + (STAGE_LABELS[stage] || stage), "info")
       const status = await pollUntilTerminal()
       showSnackbar(
         status === "success" ? "Localization rerun complete" : "Rerun ended: " + status,
         status === "success" ? "success" : "warning",
       )
     } catch (err) {
-      showSnackbar(err.response?.data?.detail || "Rerun failed", "error")
+      showSnackbar(err.response?.data?.detail || "Chạy lại thất bại", "error")
     } finally {
       setBusy(false)
     }
@@ -152,15 +152,15 @@ export default function LocalizationExpertPanel({ jobId }) {
     try {
       await http.post("/api/localization/jobs/" + jobId + "/override", { segments: [change] })
       if (detail?.translation_review_pending) {
-        showSnackbar("Translation saved. Review the remaining lines, then continue to dubbing.", "success")
+        showSnackbar("Đã lưu bản dịch. Hãy duyệt các dòng còn lại rồi tiếp tục lồng tiếng.", "success")
         await load()
       } else {
         await http.post("/api/localization/jobs/" + jobId + "/rerun", { from_stage: "dubbing" })
-        showSnackbar("Override saved; rerunning dubbing downstream", "info")
+        showSnackbar("Đã lưu ghi đè; đang chạy lại phần lồng tiếng phía sau", "info")
         await pollUntilTerminal()
       }
     } catch (err) {
-      showSnackbar(err.response?.data?.detail || "Override failed", "error")
+      showSnackbar(err.response?.data?.detail || "Ghi đè thất bại", "error")
     } finally {
       setBusy(false)
     }
@@ -170,10 +170,10 @@ export default function LocalizationExpertPanel({ jobId }) {
     setBusy(true)
     try {
       await http.post("/api/localization/jobs/" + jobId + "/continue-after-translation")
-      showSnackbar("Translation approved; continuing HQ dubbing from C7", "info")
+      showSnackbar("Đã duyệt bản dịch; tiếp tục lồng tiếng HQ từ C7", "info")
       await pollUntilTerminal()
     } catch (err) {
-      showSnackbar(err.response?.data?.detail || "Could not continue dubbing", "error")
+      showSnackbar(err.response?.data?.detail || "Không thể tiếp tục lồng tiếng", "error")
     } finally {
       setBusy(false)
     }
@@ -183,10 +183,10 @@ export default function LocalizationExpertPanel({ jobId }) {
     setBusy(true)
     try {
       await http.post("/api/localization/jobs/" + jobId + "/chunks/" + chunkId + "/regenerate")
-      showSnackbar("Regenerating chunk " + chunkId, "info")
+      showSnackbar("Đang tạo lại đoạn " + chunkId, "info")
       await pollUntilTerminal()
     } catch (err) {
-      showSnackbar(err.response?.data?.detail || "Chunk regeneration failed", "error")
+      showSnackbar(err.response?.data?.detail || "Tạo lại đoạn thất bại", "error")
     } finally {
       setBusy(false)
     }
@@ -224,9 +224,9 @@ export default function LocalizationExpertPanel({ jobId }) {
       )}
 
       <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-        <Typography variant="subtitle2" sx={{ flex: 1 }}>Localization Expert</Typography>
+        <Typography variant="subtitle2" sx={{ flex: 1 }}>Chỉnh bản địa hóa nâng cao</Typography>
         {qc?.status && <Chip size="small" color={qcColor(qc.status)} label={"QC " + qc.status} />}
-        <Button size="small" startIcon={<RefreshOutlinedIcon />} onClick={load} disabled={busy}>Refresh</Button>
+        <Button size="small" startIcon={<RefreshOutlinedIcon />} onClick={load} disabled={busy}>Làm mới</Button>
       </Stack>
 
       {qc && ((qc.failures?.length || 0) > 0 || (qc.warnings?.length || 0) > 0) && (
@@ -239,7 +239,7 @@ export default function LocalizationExpertPanel({ jobId }) {
       )}
 
       <Box>
-        <Typography variant="caption" color="text.secondary">Stages</Typography>
+        <Typography variant="caption" color="text.secondary">Các bước</Typography>
         <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 0.75 }}>
           {stageEntries.map(([name, record]) => (
             <Chip
@@ -263,27 +263,27 @@ export default function LocalizationExpertPanel({ jobId }) {
 
       <Divider />
 
-      <Typography variant="subtitle2">Dubbing chunks</Typography>
+      <Typography variant="subtitle2">Các đoạn lồng tiếng</Typography>
       {reviewPending ? (
-        <Typography variant="caption" color="text.secondary">Dubbing has not started yet — approve the C6 translation first.</Typography>
+        <Typography variant="caption" color="text.secondary">Chưa bắt đầu lồng tiếng — hãy duyệt bản dịch C6 trước.</Typography>
       ) : chunks.length === 0 ? (
-        <Typography variant="caption" color="text.secondary">No dubbing chunks for this run.</Typography>
+        <Typography variant="caption" color="text.secondary">Không có đoạn lồng tiếng cho lần chạy này.</Typography>
       ) : chunks.map((chunk) => (
         <Stack key={chunk.id} direction="row" spacing={1} alignItems="center">
           <Box sx={{ flex: 1, minWidth: 0 }}>
-            <Typography variant="body2" sx={{ fontWeight: 600 }}>{"Chunk " + chunk.id}</Typography>
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>{"Đoạn " + chunk.id}</Typography>
             <Typography variant="caption" color="text.secondary">
               {chunk.start_ms + "–" + chunk.end_ms + " ms · speed " + Number(chunk.speed_factor || 1).toFixed(2) + "×" +
                 (chunk.speaker_id ? " · " + chunk.speaker_id : "")}
             </Typography>
           </Box>
-          <Button size="small" onClick={() => regenerateChunk(chunk.id)} disabled={busy}>Regenerate</Button>
+          <Button size="small" onClick={() => regenerateChunk(chunk.id)} disabled={busy}>Tạo lại</Button>
         </Stack>
       ))}
 
       <Divider />
 
-      <Typography variant="subtitle2">Segments</Typography>
+      <Typography variant="subtitle2">Các đoạn</Typography>
       {transcript.map((segment) => (
         <Accordion key={segment.id} disableGutters elevation={0} sx={{ border: 1, borderColor: "divider", borderRadius: "8px !important" }}>
           <AccordionSummary expandIcon={<ExpandMoreOutlinedIcon />}>

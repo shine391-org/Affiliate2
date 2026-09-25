@@ -8,8 +8,8 @@ export default function ToolRemoveSilence() {
   useDocumentTitle("Silence Remover")
   return (
     <ToolRunner
-      title="Silence Remover"
-      description="Auto-cut pauses, fillers, and dead air"
+      title="Cắt khoảng lặng"
+      description="Tự cắt khoảng nghỉ, từ đệm và đoạn im lặng"
       icon={<FastRewindOutlinedIcon fontSize="large" />}
       endpoint="/api/tools/remove-silence"
       acceptExts={MEDIA_ACCEPT}

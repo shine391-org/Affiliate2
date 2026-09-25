@@ -94,7 +94,7 @@ function AutoPreview({ jobId }) {
   return (
     <Stack alignItems="center" spacing={1.5} sx={{ py: 6, px: 2 }}>
       <CheckCircleOutlinedIcon sx={{ fontSize: 48, color: "success.main" }} />
-      <Typography variant="body1" sx={{ fontWeight: 600 }}>Your file is ready</Typography>
+      <Typography variant="body1" sx={{ fontWeight: 600 }}>Tệp đã sẵn sàng</Typography>
       <Typography variant="caption" sx={{ color: "text.secondary", textAlign: "center" }}>
         Download it below, or run the tool again with new settings.
       </Typography>
@@ -127,7 +127,7 @@ export default function ToolRunner({
                        //   `/api/tools/download/{jobId}` URL. Used to switch
                        //   to ?bundle=true when variations > 1 so one click
                        //   downloads a ZIP of all outputs.
-  downloadLabel = "Download",  // optional override for the button label
+  downloadLabel = "Tải xuống",  // optional override for the button label
   // Optional human-readable reason the Process button is disabled, shown as
   // a tooltip on hover. Only surfaces when canSubmit is false (a missing
   // file/script reports its own message).
@@ -315,7 +315,7 @@ export default function ToolRunner({
       startJob(data.job_id, toolJobTypeFor(endpoint), "Starting...")
       setJobId(data.job_id)
     } catch (e) {
-      const msg = e?.response?.data?.detail || e.message || "Upload failed"
+      const msg = e?.response?.data?.detail || e.message || "Tải lên thất bại"
       setError(msg)
       showSnackbar?.(msg, "error")
     }
@@ -581,7 +581,7 @@ export default function ToolRunner({
 
           {/* Failed */}
           {jobFailed && (
-            <Alert severity="error" action={<Button size="small" onClick={reset}>Try again</Button>}>
+            <Alert severity="error" action={<Button size="small" onClick={reset}>Thử lại</Button>}>
               {job?.step || terminal?.step || "Job failed"}
             </Alert>
           )}
@@ -623,15 +623,15 @@ export default function ToolRunner({
           >
             <CheckCircleOutlinedIcon sx={{ color: "success.main" }} />
             <Typography variant="subtitle1" sx={{ flex: 1, fontWeight: 700, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {title} — ready
+              {title} — sẵn sàng
             </Typography>
-            <Tooltip title="Minimize to edge">
-              <IconButton size="small" onClick={() => setRailCollapsed(true)} aria-label="Minimize result">
+            <Tooltip title="Thu gọn sang cạnh">
+              <IconButton size="small" onClick={() => setRailCollapsed(true)} aria-label="Thu gọn kết quả">
                 <ChevronRightIcon fontSize="small" />
               </IconButton>
             </Tooltip>
-            <Tooltip title="Close">
-              <IconButton size="small" onClick={() => setResultOpen(false)} aria-label="Close result">
+            <Tooltip title="Đóng">
+              <IconButton size="small" onClick={() => setResultOpen(false)} aria-label="Đóng kết quả">
                 <CloseIcon fontSize="small" />
               </IconButton>
             </Tooltip>
@@ -648,7 +648,7 @@ export default function ToolRunner({
 
           {/* Footer actions */}
           <Stack direction="row" spacing={1} sx={{ p: 2, borderTop: 1, borderColor: "divider", flexShrink: 0 }}>
-            <Button fullWidth variant="outlined" onClick={reset}>Run again</Button>
+            <Button fullWidth variant="outlined" onClick={reset}>Chạy lại</Button>
             <Button
               fullWidth
               variant="contained"
@@ -666,10 +666,10 @@ export default function ToolRunner({
       {/* Collapsed edge tab — persistent handle on the right edge. Vertical
           "Result ready" label; click to expand the rail back open. */}
       {resultOpen && jobSuccess && railCollapsed && (
-        <Tooltip title="Show generated result" placement="left">
+        <Tooltip title="Hiện kết quả đã tạo" placement="left">
           <ButtonBase
             onClick={() => setRailCollapsed(false)}
-            aria-label="Show generated result"
+            aria-label="Hiện kết quả đã tạo"
             sx={(t) => ({
               position: "fixed",
               right: 0,

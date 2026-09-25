@@ -28,7 +28,7 @@ import { GlassPanel } from "../../utils/glassFx"
 const MAX_URLS = 20
 
 const QUALITIES = [
-  { id: "best", label: "Best" },
+  { id: "best", label: "Tốt nhất" },
   { id: "2160p", label: "4K" },
   { id: "1440p", label: "1440p" },
   { id: "1080p", label: "1080p" },
@@ -138,10 +138,10 @@ export default function VideoDownload() {
       // If it dropped everything we asked for, say so rather than letting the
       // user assume the toggles did something.
       if (Object.keys(options).length && !Object.keys(data.options || {}).length) {
-        showSnackbar("Downloading with default settings — the options weren't accepted.", "warning")
+        showSnackbar("Đang tải với cài đặt mặc định — các tùy chọn đã chọn không được chấp nhận.", "warning")
       }
     } catch (e) {
-      showSnackbar(e?.response?.data?.detail || "Couldn't start the download", "error")
+      showSnackbar(e?.response?.data?.detail || "Không thể bắt đầu tải xuống", "error")
       setSubmitting(false)
       return
     }
@@ -199,7 +199,7 @@ export default function VideoDownload() {
     <Box>
       <PageHero
         icon={<DownloadForOfflineOutlinedIcon />}
-        title="Video Download"
+        title="Tải video"
         subtitle="Paste a link — download from YouTube, TikTok, Douyin, Bilibili, X and other yt-dlp sources. Login-gated sites reuse your configured browser session."
         backTo="/utilities"
         actions={
@@ -224,22 +224,22 @@ export default function VideoDownload() {
                 maxRows={10}
                 value={raw}
                 onChange={(e) => setRaw(e.target.value)}
-                placeholder={"https://www.youtube.com/watch?v=...\nhttps://www.tiktok.com/@user/video/...\n\nOne per line — up to 20 at once."}
+                placeholder={"https://www.youtube.com/watch?v=...\nhttps://www.tiktok.com/@user/video/...\n\nMỗi dòng một liên kết — tối đa 20 liên kết/lần."}
                 disabled={busy}
               />
               <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: "wrap", rowGap: 1 }}>
                 {valid.length > 0 && (
                   <Chip size="small" color="primary" variant="outlined"
-                        label={`${valid.length} link${valid.length > 1 ? "s" : ""}`} />
+                        label={`${valid.length} liên kết`} />
                 )}
                 {invalid.length > 0 && (
                   <Chip size="small" color="warning" variant="outlined"
                         icon={<WarningAmberIcon />}
-                        label={`${invalid.length} not a valid http(s) link — will be skipped`} />
+                        label={`${invalid.length} liên kết http(s) không hợp lệ — sẽ bỏ qua`} />
                 )}
                 {overCap && (
                   <Chip size="small" color="warning" variant="outlined"
-                        label={`Only the first ${MAX_URLS} will download`} />
+                        label={`Chỉ tải ${MAX_URLS} liên kết đầu tiên`} />
                 )}
               </Stack>
             </Box>
@@ -248,7 +248,7 @@ export default function VideoDownload() {
 
             {/* ── Quality ───────────────────────────────────────────── */}
             <Box>
-              <Typography variant="subtitle2" sx={{ mb: 1 }}>Quality</Typography>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>Chất lượng</Typography>
               <ToggleButtonGroup
                 exclusive
                 size="small"
@@ -286,19 +286,19 @@ export default function VideoDownload() {
                   so a screen reader (and anything driving the page by
                   accessible name) sees three unlabelled comboboxes. */}
               <FormControl size="small" sx={{ minWidth: 150 }} disabled={busy}>
-                <InputLabel id="vd-subs-label">Subtitles</InputLabel>
-                <Select labelId="vd-subs-label" label="Subtitles" value={subtitles}
+                <InputLabel id="vd-subs-label">Phụ đề</InputLabel>
+                <Select labelId="vd-subs-label" label="Phụ đề" value={subtitles}
                         onChange={(e) => setSubtitles(e.target.value)}>
-                  <MenuItem value="off">None</MenuItem>
-                  <MenuItem value="embed">Embed in video</MenuItem>
-                  <MenuItem value="file">Separate .srt file</MenuItem>
+                  <MenuItem value="off">Không</MenuItem>
+                  <MenuItem value="embed">Nhúng vào video</MenuItem>
+                  <MenuItem value="file">Tệp .srt riêng</MenuItem>
                 </Select>
               </FormControl>
 
               <FormControl size="small" sx={{ minWidth: 140 }}
                            disabled={busy || subtitles === "off"}>
-                <InputLabel id="vd-lang-label">Language</InputLabel>
-                <Select labelId="vd-lang-label" label="Language" value={subLang}
+                <InputLabel id="vd-lang-label">Ngôn ngữ</InputLabel>
+                <Select labelId="vd-lang-label" label="Ngôn ngữ" value={subLang}
                         onChange={(e) => setSubLang(e.target.value)}>
                   {SUB_LANGS.map(([code, name]) => (
                     <MenuItem key={code} value={code}>{name}</MenuItem>
@@ -307,8 +307,8 @@ export default function VideoDownload() {
               </FormControl>
 
               <FormControl size="small" sx={{ minWidth: 120 }} disabled={busy}>
-                <InputLabel id="vd-format-label">Format</InputLabel>
-                <Select labelId="vd-format-label" label="Format" value={container}
+                <InputLabel id="vd-format-label">Định dạng</InputLabel>
+                <Select labelId="vd-format-label" label="Định dạng" value={container}
                         onChange={(e) => setContainer(e.target.value)}>
                   <MenuItem value="mp4">MP4</MenuItem>
                   <MenuItem value="mkv">MKV</MenuItem>
@@ -326,13 +326,13 @@ export default function VideoDownload() {
               <FormControlLabel
                 control={<Checkbox size="small" checked={thumbnail} disabled={busy}
                                    onChange={(e) => setThumbnail(e.target.checked)} />}
-                label={<Typography variant="body2">Embed cover art</Typography>}
+                label={<Typography variant="body2">Nhúng ảnh bìa</Typography>}
               />
               <Tooltip title="Adds title/artist tags and chapter markers to the file">
                 <FormControlLabel
                   control={<Checkbox size="small" checked={metadata} disabled={busy}
                                      onChange={(e) => setMetadata(e.target.checked)} />}
-                  label={<Typography variant="body2">Metadata + chapters</Typography>}
+                  label={<Typography variant="body2">Metadata + chương</Typography>}
                 />
               </Tooltip>
             </Stack>

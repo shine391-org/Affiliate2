@@ -30,8 +30,8 @@ export default function ToolSpeed() {
 
   return (
     <ToolRunner
-      title="Speed up / Slow down"
-      description="Adjust video playback speed from 0.25× to 4× with optional pitch preservation"
+      title="Tăng / giảm tốc"
+      description="Điều chỉnh tốc độ phát video từ 0.25× đến 4×, có thể giữ cao độ giọng"
       icon={<SpeedOutlinedIcon fontSize="large" />}
       endpoint="/api/tools/speed"
       processLabel="Apply speed"
@@ -94,7 +94,7 @@ export default function ToolSpeed() {
               <Typography variant="caption" sx={{ color: "text.secondary" }}>
                 {keepPitch
                   ? "Voices stay natural even at higher speeds (recommended)"
-                  : "Audio plays at the new speed — chipmunk effect at >1×, slowed-down deep voice at <1×"}
+                  : "Âm thanh chạy theo tốc độ mới — nhanh hơn sẽ cao giọng, chậm hơn sẽ trầm giọng"}
               </Typography>
             </Box>
           }
