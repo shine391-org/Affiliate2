@@ -133,7 +133,7 @@ export default function VideoDownload() {
       setJobId(data.job_id)
       // The batch endpoint doesn't emit job_started, so seed the store here —
       // that's what feeds the progress bar and the global active-jobs banner.
-      startJob(data.job_id, "download", "Starting download…")
+      startJob(data.job_id, "download", "Đang bắt đầu tải xuống…")
       // The server echoes the options it ACTUALLY applied after validation.
       // If it dropped everything we asked for, say so rather than letting the
       // user assume the toggles did something.
@@ -351,8 +351,8 @@ export default function VideoDownload() {
                 {busy
                   ? "Downloading…"
                   : submitCount > 1
-                    ? `Download ${submitCount} videos`
-                    : "Download"}
+                    ? `Tải ${submitCount} video`
+                    : "Tải xuống"}
               </Button>
             </Stack>
 
@@ -430,7 +430,7 @@ export default function VideoDownload() {
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ mt: 2 }}>
           <Button size="small" variant="outlined" startIcon={<VideoLibraryOutlinedIcon />}
                   onClick={() => navigate("/library")}>
-            Library
+            Thư viện
           </Button>
         </Stack>
       </Box>

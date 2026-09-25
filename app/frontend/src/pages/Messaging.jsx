@@ -449,7 +449,7 @@ export default function Messaging() {
               Messaging
             </Typography>
             <Typography variant="caption" sx={{ color: "text.secondary" }}>
-              Connect a messaging app to control ViralMint from your phone and receive job notifications
+              Kết nối ứng dụng nhắn tin để điều khiển ViralMint từ điện thoại và nhận thông báo tác vụ
             </Typography>
           </Box>
         </Stack>
@@ -472,7 +472,7 @@ export default function Messaging() {
             <Box sx={{ flex: 1 }}>
               <Typography variant="h6" sx={{ fontWeight: 600 }}>Telegram</Typography>
               <Typography variant="caption" color="text.secondary">
-                Two-way chat with your ViralMint planner and job notifications
+                Trò chuyện hai chiều với trợ lý ViralMint và nhận thông báo tác vụ
               </Typography>
             </Box>
             {statusChip()}
@@ -483,7 +483,7 @@ export default function Messaging() {
           {tgState === STATE.CONNECTED && (
             <Stack spacing={2}>
               <Alert severity="success" variant="outlined">
-                Connected to{" "}
+                Đã kết nối với{" "}
                 {tgInfo.bot_url ? (
                   <Link href={tgInfo.bot_url} target="_blank" rel="noreferrer" sx={{ fontWeight: 600 }}>
                     @{tgInfo.bot_username}
@@ -539,7 +539,7 @@ export default function Messaging() {
           {(tgState === STATE.DISCONNECTED || tgState === STATE.CONNECTING) && (
             <Stack spacing={2}>
               <Typography variant="body2" color="text.secondary">
-                Create a bot via{" "}
+                Tạo bot qua{" "}
                 <Link href="https://t.me/BotFather" target="_blank" rel="noreferrer">@BotFather</Link>
                 {" "}trên Telegram (gửi <code>/newbot</code>), rồi dán token bot bên dưới.
               </Typography>
@@ -561,7 +561,7 @@ export default function Messaging() {
                   disabled={saving || !botToken.trim()}
                   startIcon={saving ? <CircularProgress size={16} color="inherit" /> : null}
                 >
-                  {saving ? "Connecting…" : "Connect"}
+                  {saving ? "Đang kết nối…" : "Kết nối"}
                 </Button>
               </Box>
             </Stack>
@@ -579,7 +579,7 @@ export default function Messaging() {
             <Box sx={{ flex: 1 }}>
               <Typography variant="h6" sx={{ fontWeight: 600 }}>WhatsApp</Typography>
               <Typography variant="caption" color="text.secondary">
-                Two-way chat + notifications via QR-scan device pairing
+                Trò chuyện hai chiều + thông báo qua ghép nối thiết bị bằng mã QR
               </Typography>
             </Box>
             {waStatusChip()}
@@ -591,10 +591,10 @@ export default function Messaging() {
             <Alert severity="warning" variant="outlined">
               Hỗ trợ WhatsApp cần gói Python <code>neonize</code>, đi kèm một
               thư viện native. Cài các phụ thuộc bằng <code>pip install -r requirements.txt</code>,
-              then restart the app.
+              rồi khởi động lại ứng dụng.
               {waInfo.error && (
                 <Typography variant="caption" display="block" sx={{ mt: 1, opacity: 0.8 }}>
-                  Details: {waInfo.error}
+                  Chi tiết: {waInfo.error}
                 </Typography>
               )}
             </Alert>
@@ -603,8 +603,8 @@ export default function Messaging() {
           {waState === WA_STATE.CONNECTED && (
             <Stack spacing={2}>
               <Alert severity="success" variant="outlined">
-                WhatsApp paired. Message yourself on WhatsApp to chat with the planner — job
-                notifications will arrive in the same thread.
+                WhatsApp đã ghép nối. Nhắn tin cho chính bạn trên WhatsApp để trò chuyện với trợ lý — thông báo
+                tác vụ sẽ đến trong cùng cuộc hội thoại.
               </Alert>
               <Stack direction="row" spacing={1.5}>
                 <Button
@@ -631,8 +631,8 @@ export default function Messaging() {
           {(waState === WA_STATE.DISCONNECTED || waState === WA_STATE.PAIRING) && (
             <Stack spacing={2}>
               <Typography variant="body2" color="text.secondary">
-                Get scout, download, and upload alerts on WhatsApp — and chat with ViralMint
-                straight from your phone. Pairs in seconds, just like WhatsApp Web.
+                Nhận cảnh báo Scout, tải xuống và tải lên trên WhatsApp — đồng thời trò chuyện với ViralMint
+                ngay từ điện thoại. Ghép nối nhanh tương tự WhatsApp Web.
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 Bấm Kết nối để tạo mã QR, sau đó mở WhatsApp → Cài đặt → Thiết bị liên kết
@@ -652,7 +652,7 @@ export default function Messaging() {
                 >
                   {waState === WA_STATE.PAIRING
                     ? "Đang chờ quét…"
-                    : waSaving ? "Generating QR…" : "Connect WhatsApp"}
+                    : waSaving ? "Đang tạo QR…" : "Kết nối WhatsApp"}
                 </Button>
               </Box>
             </Stack>
@@ -670,7 +670,7 @@ export default function Messaging() {
             <Box sx={{ flex: 1 }}>
               <Typography variant="h6" sx={{ fontWeight: 600 }}>Discord</Typography>
               <Typography variant="caption" color="text.secondary">
-                DM your bot to chat with the planner and get job notifications
+                Nhắn riêng cho bot để trò chuyện với trợ lý và nhận thông báo tác vụ
               </Typography>
             </Box>
             {dcStatusChip()}
@@ -684,7 +684,7 @@ export default function Messaging() {
               các phụ thuộc bằng <code>pip install -r requirements.txt</code>, rồi khởi động lại ứng dụng.
               {dcInfo.error && (
                 <Typography variant="caption" display="block" sx={{ mt: 1, opacity: 0.8 }}>
-                  Details: {dcInfo.error}
+                  Chi tiết: {dcInfo.error}
                 </Typography>
               )}
             </Alert>
@@ -693,8 +693,8 @@ export default function Messaging() {
           {dcState === DC_STATE.CONNECTED && (
             <Stack spacing={2}>
               <Alert severity="success" variant="outlined">
-                Connected as <strong>{dcInfo.bot_username}</strong>. DM your bot on Discord to
-                chat with the planner — notifications arrive in the same thread.
+                Đã kết nối dưới tên <strong>{dcInfo.bot_username}</strong>. Nhắn riêng cho bot trên Discord để
+                trò chuyện với trợ lý — thông báo sẽ đến trong cùng cuộc hội thoại.
               </Alert>
               <Stack direction="row" spacing={1.5}>
                 <Button
@@ -721,17 +721,17 @@ export default function Messaging() {
           {dcState === DC_STATE.AWAITING_DM && (
             <Stack spacing={2}>
               <Alert severity="info" variant="outlined">
-                Bot online as <strong>{dcInfo.bot_username}</strong>.
+                Bot đang online dưới tên <strong>{dcInfo.bot_username}</strong>.
                 {dcInfo.bot_invite_url && (
                   <>
                     {" "}
                     <Link href={dcInfo.bot_invite_url} target="_blank" rel="noreferrer" sx={{ fontWeight: 600 }}>
                       Invite it to a server
                     </Link>
-                    {" "}if you haven't yet, then
+                    {" "}nếu bạn chưa làm, sau đó
                   </>
                 )}
-                {" "}DM the bot from any Discord client to activate notifications.
+                {" "}nhắn riêng cho bot từ bất kỳ ứng dụng Discord nào để bật thông báo.
               </Alert>
               <Stack direction="row" spacing={1.5}>
                 <Button variant="outlined" onClick={fetchStatus}>Làm mới trạng thái</Button>
@@ -745,12 +745,12 @@ export default function Messaging() {
           {(dcState === DC_STATE.DISCONNECTED || dcState === DC_STATE.CONNECTING) && (
             <Stack spacing={2}>
               <Typography variant="body2" color="text.secondary">
-                Create a bot at{" "}
+                Tạo bot tại{" "}
                 <Link href="https://discord.com/developers/applications" target="_blank" rel="noreferrer">
                   discord.com/developers/applications
                 </Link>
                 {" "}— bấm <strong>New Application</strong> → <strong>Bot</strong> → sao chép token rồi dán bên dưới.
-                DMs work without any privileged intents.
+                Tin nhắn riêng hoạt động mà không cần privileged intents.
               </Typography>
               <TextField
                 label="Token bot"
@@ -771,7 +771,7 @@ export default function Messaging() {
                   startIcon={dcSaving ? <CircularProgress size={16} color="inherit" /> : null}
                   sx={{ bgcolor: "#5865F2", "&:hover": { bgcolor: "#4752C4" } }}
                 >
-                  {dcSaving ? "Connecting…" : "Connect"}
+                  {dcSaving ? "Đang kết nối…" : "Kết nối"}
                 </Button>
               </Box>
             </Stack>
@@ -803,7 +803,7 @@ export default function Messaging() {
               các phụ thuộc bằng <code>pip install -r requirements.txt</code>, rồi khởi động lại ứng dụng.
               {slInfo.error && (
                 <Typography variant="caption" display="block" sx={{ mt: 1, opacity: 0.8 }}>
-                  Details: {slInfo.error}
+                  Chi tiết: {slInfo.error}
                 </Typography>
               )}
             </Alert>
@@ -812,8 +812,8 @@ export default function Messaging() {
           {slState === SL_STATE.CONNECTED && (
             <Stack spacing={2}>
               <Alert severity="success" variant="outlined">
-                Connected to <strong>{slInfo.team_name || "your Slack workspace"}</strong>. DM
-                your bot in Slack to chat with the planner — notifications arrive in the same thread.
+                Đã kết nối với <strong>{slInfo.team_name || "workspace Slack của bạn"}</strong>. Nhắn riêng
+                cho bot trên Slack để trò chuyện với trợ lý — thông báo sẽ đến trong cùng cuộc hội thoại.
               </Alert>
               <Stack direction="row" spacing={1.5}>
                 <Button
@@ -893,7 +893,7 @@ export default function Messaging() {
                   startIcon={slSaving ? <CircularProgress size={16} color="inherit" /> : null}
                   sx={{ bgcolor: "#611F69", "&:hover": { bgcolor: "#4A154B" } }}
                 >
-                  {slSaving ? "Connecting…" : "Connect"}
+                  {slSaving ? "Đang kết nối…" : "Kết nối"}
                 </Button>
               </Box>
             </Stack>
