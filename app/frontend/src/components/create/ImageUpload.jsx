@@ -102,7 +102,7 @@ export default function ImageUpload({ label, value, onChange, onRemove }) {
             component="label"
             disabled={uploading}
           >
-            {uploading ? "Uploading..." : "Upload"}
+            {uploading ? "Đang tải lên..." : "Tải lên"}
             <input type="file" hidden accept="image/*" onChange={handleFile} />
           </Button>
           <Button size="small" variant="outlined" startIcon={<LinkIcon />} onClick={() => setUrlMode(true)}>

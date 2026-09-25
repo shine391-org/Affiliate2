@@ -25,7 +25,7 @@ export default function ContentCalendarCard({ calendar }) {
       <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1.5 }}>
         <CalendarTodayIcon fontSize="small" color="primary" />
         <Typography variant="subtitle2" fontWeight={700}>
-          Content Calendar ({calendar.length} days)
+          Lịch nội dung ({calendar.length} ngày)
         </Typography>
       </Box>
 
@@ -79,7 +79,7 @@ function formatDate(dateStr) {
   if (!dateStr) return ""
   try {
     const d = new Date(dateStr + "T00:00:00")
-    return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
+    return d.toLocaleDateString("vi-VN", { weekday: "short", month: "short", day: "numeric" })
   } catch {
     return dateStr
   }

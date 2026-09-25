@@ -129,7 +129,7 @@ export default function ChatMessage({ role, content }) {
             textTransform: "uppercase",
           }}
         >
-          {isUser ? "You" : isSystem ? "System" : "ViralMint"}
+          {isUser ? "Bạn" : isSystem ? "Hệ thống" : "ViralMint"}
         </Typography>
 
         <Box
