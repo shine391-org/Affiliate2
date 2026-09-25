@@ -3,6 +3,7 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 
 const publish = readFileSync(new URL("./pages/Publish.jsx", import.meta.url), "utf8")
+const library = readFileSync(new URL("./pages/Library.jsx", import.meta.url), "utf8")
 
 test("Publish is a native GeneratedVideo workspace, not the legacy candidate overlay", () => {
   assert.ok(publish.includes('http.get("/api/videos"'))
@@ -28,4 +29,10 @@ test("native Publish reuses existing upload account ownership", () => {
 test("transitional platforms are stated honestly instead of faked", () => {
   assert.ok(publish.includes("Facebook/Instagram and legacy overlay publication history"))
   assert.ok(publish.includes("stay transitional"))
+})
+
+test("Library hands irreversible publish actions to the canonical Publish owner", () => {
+  assert.ok(library.includes('navigate(`/publish?${query.toString()}`)'))
+  assert.ok(!library.includes('http.post(`/api/videos/${videoId}/upload`'))
+  assert.ok(!library.includes("Confirm upload to"))
 })
