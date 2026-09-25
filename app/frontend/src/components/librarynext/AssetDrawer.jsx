@@ -85,7 +85,7 @@ export default function AssetDrawer({
   const facts = useMemo(() => {
     if (!item) return []
     const rows = [
-      ["Kind", MEDIA[item.media]?.label],
+      ["Loại", MEDIA[item.media]?.label],
       ["Origin", ORIGINS[item.origin]?.hint],
       ["Made by", item.producer],
       ["Added", fmtDayLong(item.created_at)],
@@ -115,11 +115,11 @@ export default function AssetDrawer({
     }
     try {
       await endpoints[item.source]()
-      showSnackbar("Deleted", "info")
+      showSnackbar("Đã xóa", "info")
       onDeleted?.(item)
       onClose?.()
     } catch (e) {
-      showSnackbar(e.response?.data?.detail || "Could not delete that item", "error")
+      showSnackbar(e.response?.data?.detail || "Không thể xóa mục này", "error")
     }
   }
 
@@ -177,7 +177,7 @@ export default function AssetDrawer({
                   {` · ${fmtDayLong(item.created_at)}`}
                 </Typography>
               </Box>
-              <IconButton size="small" onClick={onClose} aria-label="Close">
+              <IconButton size="small" onClick={onClose} aria-label="Đóng">
                 <CloseRoundedIcon fontSize="small" />
               </IconButton>
             </Stack>
@@ -243,8 +243,8 @@ export default function AssetDrawer({
                   fontWeight: 600, px: 1.5,
                 },
               }}>
-              <Tab label="Details" />
-              <Tab label={`Lineage${hasLineage ? ` (${ancestors.length + derivatives.length})` : ""}`} />
+              <Tab label="Chi tiết" />
+              <Tab label={`Nguồn gốc${hasLineage ? ` (${ancestors.length + derivatives.length})` : ""}`} />
             </Tabs>
             <Divider />
           </Box>
@@ -336,7 +336,7 @@ export default function AssetDrawer({
                 )}
                 {ancestors.length > 0 && (
                   <>
-                    <SectionLabel>Made from</SectionLabel>
+                    <SectionLabel>Được tạo từ</SectionLabel>
                     {ancestors.map((a) => (
                       <LineageRow key={a.key} item={a}
                         icon={<NorthEastRoundedIcon sx={{ fontSize: 14 }} />} onOpen={onOpen} />
@@ -345,7 +345,7 @@ export default function AssetDrawer({
                 )}
                 {derivatives.length > 0 && (
                   <>
-                    <SectionLabel>Used to make</SectionLabel>
+                    <SectionLabel>Được dùng để tạo</SectionLabel>
                     {derivatives.map((c) => (
                       <LineageRow key={c.key} item={c}
                         icon={<SubdirectoryArrowRightRoundedIcon sx={{ fontSize: 14 }} />} onOpen={onOpen} />
@@ -367,9 +367,9 @@ export default function AssetDrawer({
                 sx={{ flex: 1 }} href={item.stream_url} download>
                 Save a copy
               </Button>
-              <Tooltip title="Delete">
+              <Tooltip title="Xóa">
                 <Button variant="outlined" size="small" color="error" sx={{ minWidth: 0, px: 1.25 }}
-                  aria-label="Delete" onClick={handleDelete}>
+                  aria-label="Xóa" onClick={handleDelete}>
                   <DeleteOutlineRoundedIcon fontSize="small" />
                 </Button>
               </Tooltip>

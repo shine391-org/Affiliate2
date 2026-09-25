@@ -43,7 +43,7 @@ function ArticleCard({ article, onSave, onGenerate }) {
       {/* Header row */}
       <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mb: 0.5 }}>
         <Chip
-          label={article.source_domain || "Unknown"}
+          label={article.source_domain || "Không xác định"}
           size="small" variant="outlined"
           sx={{ fontSize: "0.6rem", height: 18, textTransform: "lowercase" }}
         />
@@ -60,7 +60,7 @@ function ArticleCard({ article, onSave, onGenerate }) {
         )}
         <Box sx={{ flex: 1 }} />
         {article.url && (
-          <Tooltip title="Open article" arrow>
+          <Tooltip title="Mở bài viết" arrow>
             <IconButton size="small" onClick={() => window.open(article.url, "_blank", "noopener")}
               sx={{ p: 0.25, color: "text.secondary" }}>
               <OpenInNewIcon sx={{ fontSize: "0.85rem" }} />
@@ -126,7 +126,7 @@ function ArticleCard({ article, onSave, onGenerate }) {
           )}
           {a.suggested_title && (
             <Typography variant="caption" sx={{ color: "text.secondary", fontSize: "0.65rem" }}>
-              Suggested title: <strong>{a.suggested_title}</strong>
+              Tiêu đề gợi ý: <strong>{a.suggested_title}</strong>
             </Typography>
           )}
           {a.suggested_hashtags && a.suggested_hashtags.length > 0 && (
@@ -170,7 +170,7 @@ export default function NewsResultsCard({ results, query }) {
   const handleSave = async (articleId) => {
     try {
       await http.post("/api/news/save", { article_ids: [articleId] })
-      showSnackbar("Article saved to Library!", "success")
+      showSnackbar("Đã lưu bài viết vào Thư viện!", "success")
     } catch (err) {
       showSnackbar(err.response?.data?.detail || err.message, "error")
     }
@@ -180,7 +180,7 @@ export default function NewsResultsCard({ results, query }) {
     // Save to library first, then user can generate from Videos page
     try {
       await http.post("/api/news/save", { article_ids: [articleId] })
-      showSnackbar("Article saved to Library — open Library to generate video", "success")
+      showSnackbar("Đã lưu bài viết vào Thư viện — mở Thư viện để tạo video", "success")
     } catch (err) {
       showSnackbar(err.response?.data?.detail || err.message, "error")
     }
@@ -191,7 +191,7 @@ export default function NewsResultsCard({ results, query }) {
     try {
       const ids = results.map(r => r.id)
       await http.post("/api/news/save", { article_ids: ids })
-      showSnackbar(`${ids.length} articles saved to Library!`, "success")
+      showSnackbar(`Đã lưu ${ids.length} bài viết vào Thư viện!`, "success")
     } catch (err) {
       showSnackbar(err.response?.data?.detail || err.message, "error")
     } finally {

@@ -55,7 +55,7 @@ export default function ScoutResultsCard({ results, platform, jobId }) {
     setDownloading(true)
     try {
       const { data } = await http.post("/api/scout/download", { scout_result_ids: [...selectedIds] })
-      showSnackbar(`Downloading ${data.count} videos...`, "success")
+      showSnackbar(`Đang tải ${data.count} video...`, "success")
       setSelectedIds(new Set())
     } catch (err) {
       showSnackbar(err.response?.data?.detail || err.message, "error")
@@ -138,7 +138,7 @@ export default function ScoutResultsCard({ results, platform, jobId }) {
                       sx={{ objectFit: "cover" }} />
                   ) : (
                     <Box sx={{ height: 110, bgcolor: "action.hover", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      <Typography variant="caption" sx={{ color: "text.disabled" }}>No thumbnail</Typography>
+                      <Typography variant="caption" sx={{ color: "text.disabled" }}>Không có ảnh thu nhỏ</Typography>
                     </Box>
                   )}
                   <CardContent sx={{ p: 1, "&:last-child": { pb: 1 } }}>

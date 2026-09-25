@@ -43,7 +43,7 @@ export default function JobProgressCard({ jobId, jobType, message }) {
           fontWeight: 600, fontSize: "0.75rem",
           color: isSuccess ? "success.main" : isFailed ? "error.main" : "text.secondary",
         }}>
-          {isSuccess ? `${label} complete` : isFailed ? `${label} failed` : `${label}...`}
+          {isSuccess ? `${label} hoàn tất` : isFailed ? `${label} thất bại` : `${label}...`}
         </Typography>
         {isRunning && percent > 0 && (
           <Typography variant="caption" sx={{ fontSize: "0.65rem", color: "text.disabled" }}>
