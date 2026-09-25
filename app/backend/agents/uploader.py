@@ -90,6 +90,52 @@ def disconnected_destinations(settings: UserSettings | None, platforms: list[str
     )]
 
 
+def _publication_metadata(
+    video: GeneratedVideo,
+    platform: str,
+    user_settings: UserSettings | None,
+) -> tuple[str | None, str | None, str | None]:
+    """Return the exact title/caption/privacy semantics sent to a provider."""
+    if platform == "youtube":
+        return (
+            video.youtube_title or video.title or "Untitled",
+            video.youtube_description or "",
+            None,
+        )
+    if platform == "tiktok":
+        title = video.tiktok_title or video.title or "Untitled"
+        privacy = (
+            user_settings.tiktok_default_privacy
+            if user_settings and user_settings.tiktok_default_privacy
+            else "PUBLIC_TO_EVERYONE"
+        )
+        return title, title, privacy
+    if platform == "instagram":
+        caption = video.tiktok_title or video.title or ""
+        return video.title, caption, None
+    raise ValueError(f"Unsupported publish platform(s): {platform}")
+
+
+def _publication_result_fields(platform: str, result: dict | None) -> tuple[str | None, str | None, str | None, str | None]:
+    result = result or {}
+    provider_transaction_id = None
+    public_content_id = None
+    identifier_kind = None
+    external_url = None
+    if platform == "youtube":
+        public_content_id = result.get("video_id")
+        identifier_kind = "public_video_id" if public_content_id else None
+        external_url = result.get("url")
+    elif platform == "tiktok":
+        provider_transaction_id = result.get("publish_id")
+        identifier_kind = "upload_transaction_id" if provider_transaction_id else None
+    elif platform == "instagram":
+        public_content_id = result.get("media_id")
+        identifier_kind = "public_media_id" if public_content_id else None
+        external_url = result.get("permalink")
+    return provider_transaction_id, public_content_id, identifier_kind, external_url
+
+
 class UploadAgent:
     async def run(
         self,
@@ -173,53 +219,56 @@ class UploadAgent:
             try:
                 if platform == "youtube":
                     result = await self._upload_youtube(video, user_settings)
-                    uploaded.append("youtube")
-                    await self._mark_platform_uploaded(
-                        generated_video_id, "youtube",
-                        id_field="youtube_video_id", id_value=result.get("video_id"),
+                    await self._finalize_successful_publication(
+                        publication_id,
+                        generated_video_id,
+                        "youtube",
+                        id_field="youtube_video_id",
+                        id_value=result.get("video_id"),
+                        result=result,
                     )
+                    uploaded.append("youtube")
                     await ws_manager.send({
                         "type": "upload_complete",
                         "platform": "youtube",
                         "url": result.get("url", ""),
                         "video_id": result.get("video_id"),
                     }, user_id)
-                    await self._finish_publication_record(
-                        publication_id, platform, "PUBLISHED", result=result
-                    )
 
                 elif platform == "tiktok":
                     result = await self._upload_tiktok(video, user_settings)
-                    uploaded.append("tiktok")
-                    await self._mark_platform_uploaded(
-                        generated_video_id, "tiktok",
-                        id_field="tiktok_publish_id", id_value=result.get("publish_id"),
+                    await self._finalize_successful_publication(
+                        publication_id,
+                        generated_video_id,
+                        "tiktok",
+                        id_field="tiktok_publish_id",
+                        id_value=result.get("publish_id"),
+                        result=result,
                     )
+                    uploaded.append("tiktok")
                     await ws_manager.send({
                         "type": "upload_complete",
                         "platform": "tiktok",
                         "publish_id": result.get("publish_id"),
                     }, user_id)
-                    await self._finish_publication_record(
-                        publication_id, platform, "PUBLISHED", result=result
-                    )
 
                 elif platform == "instagram":
                     result = await self._upload_instagram(video, user_settings)
-                    uploaded.append("instagram")
-                    await self._mark_platform_uploaded(
-                        generated_video_id, "instagram",
-                        id_field="instagram_media_id", id_value=result.get("media_id"),
+                    await self._finalize_successful_publication(
+                        publication_id,
+                        generated_video_id,
+                        "instagram",
+                        id_field="instagram_media_id",
+                        id_value=result.get("media_id"),
+                        result=result,
                     )
+                    uploaded.append("instagram")
                     await ws_manager.send({
                         "type": "upload_complete",
                         "platform": "instagram",
                         "url": result.get("permalink", ""),
                         "media_id": result.get("media_id"),
                     }, user_id)
-                    await self._finish_publication_record(
-                        publication_id, platform, "PUBLISHED", result=result
-                    )
 
                 else:
                     logger.warning(f"Unknown upload platform: {platform}")
@@ -283,6 +332,48 @@ class UploadAgent:
             v.status = "uploaded"
             await db.commit()
 
+    async def _finalize_successful_publication(
+        self,
+        record_id: str,
+        video_id: str,
+        platform: str,
+        *,
+        id_field: str,
+        id_value: str | None,
+        result: dict,
+    ) -> None:
+        """Atomically persist the local projection and publication history."""
+        provider_transaction_id, public_content_id, identifier_kind, external_url = (
+            _publication_result_fields(platform, result)
+        )
+        async with AsyncSessionLocal() as db:
+            video = await db.get(GeneratedVideo, video_id)
+            record = await db.get(PublicationRecord, record_id)
+            if not video:
+                raise RuntimeError(f"Generated video {video_id} vanished during upload")
+            if not record:
+                raise RuntimeError(f"Publication record {record_id} vanished during upload")
+
+            if id_field and id_value:
+                setattr(video, id_field, id_value)
+            existing = safe_json_loads(video.uploaded_platforms_json, [], logger)
+            if not isinstance(existing, list):
+                existing = []
+            if platform not in existing:
+                existing.append(platform)
+            video.uploaded_platforms_json = json.dumps(existing)
+            video.status = "uploaded"
+
+            record.status = "PUBLISHED"
+            record.provider_transaction_id = provider_transaction_id
+            record.public_content_id = public_content_id
+            record.identifier_kind = identifier_kind
+            record.external_url = external_url
+            record.error_message = None
+            record.updated_at = datetime.utcnow()
+            record.published_at = datetime.utcnow()
+            await db.commit()
+
     async def _create_publication_record(
         self,
         video: GeneratedVideo,
@@ -290,12 +381,7 @@ class UploadAgent:
         platform: str,
         user_settings: UserSettings | None,
     ) -> str:
-        title = video.youtube_title if platform == "youtube" else video.tiktok_title
-        caption = video.youtube_description if platform == "youtube" else video.tiktok_description
-        privacy = (
-            getattr(user_settings, "tiktok_default_privacy", None)
-            if platform == "tiktok" else None
-        )
+        title, caption, privacy = _publication_metadata(video, platform, user_settings)
         record = PublicationRecord(
             generated_video_id=video.id,
             platform=platform,
@@ -322,22 +408,9 @@ class UploadAgent:
         result: dict | None = None,
         error_message: str | None = None,
     ) -> None:
-        result = result or {}
-        provider_transaction_id = None
-        public_content_id = None
-        identifier_kind = None
-        external_url = None
-        if platform == "youtube":
-            public_content_id = result.get("video_id")
-            identifier_kind = "public_video_id" if public_content_id else None
-            external_url = result.get("url")
-        elif platform == "tiktok":
-            provider_transaction_id = result.get("publish_id")
-            identifier_kind = "upload_transaction_id" if provider_transaction_id else None
-        elif platform == "instagram":
-            public_content_id = result.get("media_id")
-            identifier_kind = "public_media_id" if public_content_id else None
-            external_url = result.get("permalink")
+        provider_transaction_id, public_content_id, identifier_kind, external_url = (
+            _publication_result_fields(platform, result)
+        )
         async with AsyncSessionLocal() as db:
             record = await db.get(PublicationRecord, record_id)
             if not record:
@@ -367,10 +440,11 @@ class UploadAgent:
 
         tags = safe_json_loads(video.youtube_tags_json, [], logger)
 
+        title, description, _ = _publication_metadata(video, "youtube", user_settings)
         return await upload_to_youtube(
             video_path=video.video_path,
-            title=video.youtube_title or video.title or "Untitled",
-            description=video.youtube_description or "",
+            title=title,
+            description=description,
             tags=tags,
             credentials_json=credentials_json,
         )
@@ -388,7 +462,7 @@ class UploadAgent:
 
         from backend.services.instagram_uploader import upload_to_instagram
 
-        caption = video.tiktok_title or video.title or ""  # Reuse TikTok caption style
+        _, caption, _ = _publication_metadata(video, "instagram", user_settings)
 
         return await upload_to_instagram(
             video_path=video.video_path,
@@ -416,13 +490,11 @@ class UploadAgent:
 
         from backend.services.tiktok_uploader import upload_to_tiktok
 
-        privacy = "PUBLIC_TO_EVERYONE"
-        if user_settings and user_settings.tiktok_default_privacy:
-            privacy = user_settings.tiktok_default_privacy
+        title, _, privacy = _publication_metadata(video, "tiktok", user_settings)
 
         return await upload_to_tiktok(
             video_path=video.video_path,
-            title=video.tiktok_title or video.title or "Untitled",
+            title=title,
             access_token=access_token,
             privacy=privacy,
             cookie_sessionid=cookie_sessionid,
