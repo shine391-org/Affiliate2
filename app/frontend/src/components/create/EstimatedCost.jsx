@@ -11,10 +11,10 @@ export default function EstimatedCost({ ttsProvider, script }) {
   return (
     <Alert severity={total === 0 ? "success" : "info"} sx={{ mt: 1.5 }}>
       <Typography variant="body2" sx={{ fontWeight: 600 }}>
-        Estimated cost: {total === 0 ? "Free" : `~$${total.toFixed(2)}`}
+        Chi phí ước tính: {total === 0 ? "Miễn phí" : `~$${total.toFixed(2)}`}
       </Typography>
       <Typography variant="caption" sx={{ color: "text.secondary", display: "block" }}>
-        Voice: {ttsCost === 0 ? "Free (Edge TTS)" : `~$${ttsCost.toFixed(2)}`} · Video: Free (Pexels stock)
+        Giọng đọc: {ttsCost === 0 ? "Miễn phí (Edge TTS)" : `~$${ttsCost.toFixed(2)}`} · Video: Miễn phí (Pexels stock)
       </Typography>
       {estVideoSeconds > 0 && (
         <Typography variant="caption" sx={{ color: "text.secondary", display: "block", mt: 0.25 }}>
