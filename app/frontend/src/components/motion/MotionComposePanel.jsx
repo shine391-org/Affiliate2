@@ -55,7 +55,7 @@ export default function MotionComposePanel({ aspect, setAspect, onComposed, onNe
           pollRef.current = null
           if (data.status === "success") {
             setComposed(true)
-            showSnackbar("Composition đã sẵn sàng — studio đang tải lại nội dung.", "success")
+            showSnackbar("Bố cục đã sẵn sàng — studio đang tải lại nội dung.", "success")
             onComposed?.()
           }
           return
@@ -91,7 +91,7 @@ export default function MotionComposePanel({ aspect, setAspect, onComposed, onNe
     try {
       const { data } = await http.post("/api/generate/motion/studio/assets", form)
       setStaged((s) => [...s, data])
-      showSnackbar(`${file.name} đã được chuẩn bị — sẽ được đưa vào composition tiếp theo.`, "success")
+      showSnackbar(`${file.name} đã được chuẩn bị — sẽ được đưa vào bố cục tiếp theo.`, "success")
     } catch (err) {
       showSnackbar(err?.response?.data?.detail || "Không thể chuẩn bị tệp này", "error")
     }
@@ -107,15 +107,15 @@ export default function MotionComposePanel({ aspect, setAspect, onComposed, onNe
       <Stack direction="row" alignItems="center" spacing={1}
         sx={{ px: 2, py: 1.25, borderBottom: "1px solid", borderColor: "divider" }}>
         <AutoAwesomeIcon sx={{ fontSize: 18, color: "primary.main" }} />
-        <Typography variant="subtitle2" sx={{ fontWeight: 700, flexGrow: 1 }}>AI Compose</Typography>
-        <IconButton size="small" onClick={onClose} aria-label="Đóng AI Compose">
+        <Typography variant="subtitle2" sx={{ fontWeight: 700, flexGrow: 1 }}>Dựng bằng AI</Typography>
+        <IconButton size="small" onClick={onClose} aria-label="Đóng Dựng bằng AI">
           <CloseIcon sx={{ fontSize: 18 }} />
         </IconButton>
       </Stack>
 
       <Box sx={{ flex: 1, minHeight: 0, overflow: "auto", p: 2 }}>
         <Typography variant="caption" sx={{ display: "block", color: "text.secondary", mb: 1.5 }}>
-          Mô tả video. Mô hình AI đã cấu hình sẽ viết composition và
+          Mô tả video. Mô hình AI đã cấu hình sẽ tạo bố cục và
           studio sẽ mở nó — sau đó có thể chỉnh thủ công.
         </Typography>
 

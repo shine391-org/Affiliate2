@@ -1103,7 +1103,7 @@ export default function ClipStudio({ workflow = "manual" }) {
                         value={editDraft.youtube_tags} onChange={e => setEditDraft(p => ({ ...p, youtube_tags: e.target.value }))} />
                       <Divider />
                       <Typography variant="overline" sx={{ color: "text.secondary" }}>TikTok</Typography>
-                      <TextField label="Caption" size="small" fullWidth
+                      <TextField label="Chú thích TikTok" size="small" fullWidth
                         value={editDraft.tiktok_title} onChange={e => setEditDraft(p => ({ ...p, tiktok_title: e.target.value }))} />
                     </Stack>
                   ) : (
