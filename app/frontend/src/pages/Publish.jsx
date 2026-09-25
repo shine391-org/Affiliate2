@@ -137,17 +137,12 @@ export default function Publish() {
     }
   }
 
-  const connect = async (route) => {
+  const connect = (route) => {
     setError("")
-    try {
-      const { data } = await http.get(route)
-      if (data?.error) throw new Error(data.error)
-      const url = data?.url || data?.authorization_url
-      if (!url) throw new Error("Authorization URL was not returned.")
-      window.open(url, "_blank", "noopener,noreferrer")
-    } catch (e) {
-      setError(e.response?.data?.detail || e.message || "Could not start account connection.")
-    }
+    // These native auth endpoints intentionally return HTTP redirects to the
+    // provider. Let the browser follow them in a popup; fetching them as JSON
+    // would turn the provider redirect into a CORS/error path.
+    window.open(route, "_blank", "noopener,noreferrer")
   }
 
   const pollJob = (jobId) => {
