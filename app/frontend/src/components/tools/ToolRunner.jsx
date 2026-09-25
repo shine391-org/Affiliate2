@@ -96,7 +96,7 @@ function AutoPreview({ jobId }) {
       <CheckCircleOutlinedIcon sx={{ fontSize: 48, color: "success.main" }} />
       <Typography variant="body1" sx={{ fontWeight: 600 }}>Tệp đã sẵn sàng</Typography>
       <Typography variant="caption" sx={{ color: "text.secondary", textAlign: "center" }}>
-        Download it below, or run the tool again with new settings.
+        Tải xuống bên dưới hoặc chạy lại công cụ với cài đặt mới.
       </Typography>
     </Stack>
   )
@@ -334,7 +334,7 @@ export default function ToolRunner({
   const submitBlockedReason = !submitDisabled
     ? ""
     : missingPrimaryInput
-      ? "Select a video file first"
+      ? "Hãy chọn tệp video trước"
       : disabledReason
 
   // ⌘/Ctrl+Enter runs the tool from anywhere in the page (incl. while a
@@ -582,7 +582,7 @@ export default function ToolRunner({
           {/* Failed */}
           {jobFailed && (
             <Alert severity="error" action={<Button size="small" onClick={reset}>Thử lại</Button>}>
-              {job?.step || terminal?.step || "Job failed"}
+              {job?.step || terminal?.step || "Tác vụ thất bại"}
             </Alert>
           )}
         </Box>

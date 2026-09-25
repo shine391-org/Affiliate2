@@ -197,7 +197,7 @@ export default function LocalizationProfilesSection({ settings }) {
     <Stack spacing={2}>
       <Alert severity="info" variant="outlined">
         Connections and credentials live in Settings. This profile stores reusable production defaults only:
-        C6 translation, C7 timing rewrite, ASR, voice/timing, audio/render and QC policy.
+        Chính sách cho dịch C6, viết lại nhịp C7, ASR, giọng/nhịp, âm thanh/kết xuất và QC.
       </Alert>
 
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>

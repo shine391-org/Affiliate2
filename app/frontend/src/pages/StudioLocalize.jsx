@@ -110,7 +110,7 @@ export default function StudioLocalize({ source, sourcesLoading }) {
       })
       showSnackbar("Đã bắt đầu tác vụ bản địa hóa từ nguồn đã chọn trong Thư viện", "success")
     } catch (error) {
-      showSnackbar(error.response?.data?.detail || "Could not start localization", "error")
+      showSnackbar(error.response?.data?.detail || "Không thể bắt đầu bản địa hóa", "error")
     } finally {
       setStarting(false)
     }
