@@ -275,7 +275,9 @@ class ScoutAgent:
         # Radar must never discard already-collected Scout results.
         try:
             from backend.affiliate.radar.service import observe_and_enrich_scout_rows
-            await asyncio.to_thread(\n                observe_and_enrich_scout_rows, all_results, niche, job_id=job_id\n            )
+            await asyncio.to_thread(
+                observe_and_enrich_scout_rows, all_results, niche, job_id=job_id
+            )
         except Exception as radar_err:  # noqa: BLE001
             logger.warning("Radar observation/enrichment skipped (non-fatal): %s", radar_err)
 
