@@ -266,6 +266,8 @@ class TestDispatch:
         assert asyncio.run(_job_count("upload")) == before
         warnings = [m for m in bus["sent"] if m.get("type") == "constraint_warning"]
         assert warnings and warnings[-1]["constraint"] == "publish_approval"
+        followups = [m for m in bus["sent"] if m.get("type") == "assistant_message"]
+        assert followups and "didn't publish" in followups[-1]["content"]
 
     def test_start_upload_for_missing_video_creates_nothing(self, bus):
         before = asyncio.run(_job_count("upload"))
