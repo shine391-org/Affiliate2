@@ -247,7 +247,7 @@ export default function Messaging() {
     setTesting(true)
     try {
       await http.post("/api/messaging/telegram/test")
-      showSnackbar("Test message sent — check Telegram", "success")
+      showSnackbar("Đã gửi tin nhắn thử — kiểm tra Telegram", "success")
     } catch (e) {
       showSnackbar(e.response?.data?.detail || "Test failed — did you send /start to the bot?", "error")
     } finally {
@@ -286,7 +286,7 @@ export default function Messaging() {
     setWaTesting(true)
     try {
       await http.post("/api/messaging/whatsapp/test")
-      showSnackbar("Test message sent — check WhatsApp", "success")
+      showSnackbar("Đã gửi tin nhắn thử — kiểm tra WhatsApp", "success")
     } catch (e) {
       showSnackbar(e.response?.data?.detail || "Test failed — is WhatsApp paired?", "error")
     } finally {
@@ -338,7 +338,7 @@ export default function Messaging() {
     setDcTesting(true)
     try {
       await http.post("/api/messaging/discord/test")
-      showSnackbar("Test message sent — check Discord", "success")
+      showSnackbar("Đã gửi tin nhắn thử — kiểm tra Discord", "success")
     } catch (e) {
       showSnackbar(e.response?.data?.detail || "Test failed — DM your bot first", "error")
     } finally {
@@ -394,7 +394,7 @@ export default function Messaging() {
     setSlTesting(true)
     try {
       await http.post("/api/messaging/slack/test")
-      showSnackbar("Test message sent — check Slack", "success")
+      showSnackbar("Đã gửi tin nhắn thử — kiểm tra Slack", "success")
     } catch (e) {
       showSnackbar(e.response?.data?.detail || "Test failed — DM your bot first", "error")
     } finally {
@@ -403,33 +403,33 @@ export default function Messaging() {
   }
 
   const statusChip = () => {
-    if (tgState === STATE.CONNECTED) return <Chip icon={<CheckCircleIcon />} label="Connected" color="success" size="small" />
-    if (tgState === STATE.AWAITING_START) return <Chip label="Awaiting /start" color="warning" size="small" />
-    if (tgState === STATE.CONNECTING) return <Chip label="Connecting…" size="small" />
-    return <Chip label="Not connected" size="small" />
+    if (tgState === STATE.CONNECTED) return <Chip icon={<CheckCircleIcon />} label="Đã kết nối" color="success" size="small" />
+    if (tgState === STATE.AWAITING_START) return <Chip label="Chờ /start" color="warning" size="small" />
+    if (tgState === STATE.CONNECTING) return <Chip label="Đang kết nối…" size="small" />
+    return <Chip label="Chưa kết nối" size="small" />
   }
 
   const waStatusChip = () => {
-    if (waState === WA_STATE.CONNECTED) return <Chip icon={<CheckCircleIcon />} label="Connected" color="success" size="small" />
-    if (waState === WA_STATE.PAIRING) return <Chip label="Scan QR code" color="warning" size="small" />
-    if (waState === WA_STATE.UNAVAILABLE) return <Chip label="Unavailable" size="small" />
-    return <Chip label="Not connected" size="small" />
+    if (waState === WA_STATE.CONNECTED) return <Chip icon={<CheckCircleIcon />} label="Đã kết nối" color="success" size="small" />
+    if (waState === WA_STATE.PAIRING) return <Chip label="Quét mã QR" color="warning" size="small" />
+    if (waState === WA_STATE.UNAVAILABLE) return <Chip label="Không khả dụng" size="small" />
+    return <Chip label="Chưa kết nối" size="small" />
   }
 
   const dcStatusChip = () => {
-    if (dcState === DC_STATE.CONNECTED) return <Chip icon={<CheckCircleIcon />} label="Connected" color="success" size="small" />
-    if (dcState === DC_STATE.AWAITING_DM) return <Chip label="DM your bot" color="warning" size="small" />
-    if (dcState === DC_STATE.CONNECTING) return <Chip label="Connecting…" size="small" />
-    if (dcState === DC_STATE.UNAVAILABLE) return <Chip label="Unavailable" size="small" />
-    return <Chip label="Not connected" size="small" />
+    if (dcState === DC_STATE.CONNECTED) return <Chip icon={<CheckCircleIcon />} label="Đã kết nối" color="success" size="small" />
+    if (dcState === DC_STATE.AWAITING_DM) return <Chip label="Nhắn bot của bạn" color="warning" size="small" />
+    if (dcState === DC_STATE.CONNECTING) return <Chip label="Đang kết nối…" size="small" />
+    if (dcState === DC_STATE.UNAVAILABLE) return <Chip label="Không khả dụng" size="small" />
+    return <Chip label="Chưa kết nối" size="small" />
   }
 
   const slStatusChip = () => {
-    if (slState === SL_STATE.CONNECTED) return <Chip icon={<CheckCircleIcon />} label="Connected" color="success" size="small" />
-    if (slState === SL_STATE.AWAITING_DM) return <Chip label="DM your bot" color="warning" size="small" />
-    if (slState === SL_STATE.CONNECTING) return <Chip label="Connecting…" size="small" />
-    if (slState === SL_STATE.UNAVAILABLE) return <Chip label="Unavailable" size="small" />
-    return <Chip label="Not connected" size="small" />
+    if (slState === SL_STATE.CONNECTED) return <Chip icon={<CheckCircleIcon />} label="Đã kết nối" color="success" size="small" />
+    if (slState === SL_STATE.AWAITING_DM) return <Chip label="Nhắn bot của bạn" color="warning" size="small" />
+    if (slState === SL_STATE.CONNECTING) return <Chip label="Đang kết nối…" size="small" />
+    if (slState === SL_STATE.UNAVAILABLE) return <Chip label="Không khả dụng" size="small" />
+    return <Chip label="Chưa kết nối" size="small" />
   }
 
   return (
@@ -491,7 +491,7 @@ export default function Messaging() {
                 ) : (
                   <strong>@{tgInfo.bot_username}</strong>
                 )}
-                . Send any message to your bot to chat with the planner.
+                . Gửi bất kỳ tin nhắn nào cho bot để trò chuyện với planner.
               </Alert>
               <Stack direction="row" spacing={1.5}>
                 <Button
@@ -525,10 +525,10 @@ export default function Messaging() {
                 ) : (
                   <strong>your bot</strong>
                 )}
-                {" "}in Telegram and send <code>/start</code> to activate notifications.
+                {" "}trên Telegram và gửi <code>/start</code> để bật thông báo.
               </Alert>
               <Stack direction="row" spacing={1.5}>
-                <Button variant="outlined" onClick={fetchStatus}>Refresh status</Button>
+                <Button variant="outlined" onClick={fetchStatus}>Làm mới trạng thái</Button>
                 <Button variant="outlined" color="error" startIcon={<LogoutIcon />} onClick={handleDisconnect}>
                   Cancel
                 </Button>
@@ -544,7 +544,7 @@ export default function Messaging() {
                 {" "}on Telegram (send <code>/newbot</code>), then paste the bot token below.
               </Typography>
               <TextField
-                label="Bot token"
+                label="Token bot"
                 type="password"
                 fullWidth
                 size="small"
@@ -589,7 +589,7 @@ export default function Messaging() {
 
           {waState === WA_STATE.UNAVAILABLE && (
             <Alert severity="warning" variant="outlined">
-              WhatsApp support requires the <code>neonize</code> Python package, which ships a
+              Hỗ trợ WhatsApp cần gói Python <code>neonize</code>, which ships a
               native library. Install dependencies with <code>pip install -r requirements.txt</code>,
               then restart the app.
               {waInfo.error && (
@@ -734,7 +734,7 @@ export default function Messaging() {
                 {" "}DM the bot from any Discord client to activate notifications.
               </Alert>
               <Stack direction="row" spacing={1.5}>
-                <Button variant="outlined" onClick={fetchStatus}>Refresh status</Button>
+                <Button variant="outlined" onClick={fetchStatus}>Làm mới trạng thái</Button>
                 <Button variant="outlined" color="error" startIcon={<LogoutIcon />} onClick={handleDCDisconnect}>
                   Cancel
                 </Button>
@@ -753,7 +753,7 @@ export default function Messaging() {
                 DMs work without any privileged intents.
               </Typography>
               <TextField
-                label="Bot token"
+                label="Token bot"
                 type="password"
                 fullWidth
                 size="small"
@@ -844,7 +844,7 @@ export default function Messaging() {
                 DM your bot (search its name in the sidebar) to activate notifications.
               </Alert>
               <Stack direction="row" spacing={1.5}>
-                <Button variant="outlined" onClick={fetchStatus}>Refresh status</Button>
+                <Button variant="outlined" onClick={fetchStatus}>Làm mới trạng thái</Button>
                 <Button variant="outlined" color="error" startIcon={<LogoutIcon />} onClick={handleSLDisconnect}>
                   Cancel
                 </Button>

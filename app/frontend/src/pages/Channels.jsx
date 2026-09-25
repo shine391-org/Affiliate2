@@ -126,16 +126,16 @@ function ConnectForm({ platform, onConnected }) {
         <LiveTvIcon sx={{ fontSize: 52, color: "primary.main", mb: 1, opacity: 0.8 }} />
       )}
       <Typography variant="h6" sx={{ fontWeight: 700, mb: 0.5 }}>
-        Connect a {label} Channel
+        Kết nối kênh {label}
       </Typography>
       <Typography variant="body2" sx={{ color: "text.secondary", mb: 2.5, maxWidth: 480, mx: "auto" }}>
-        Search for any {label} channel by name{isYT ? "" : " or @handle"} to view analytics and download videos
+        Tìm kênh {label} theo tên{isYT ? "" : " or @handle"} để xem phân tích và tải video
       </Typography>
 
       <Stack direction="row" spacing={1} sx={{ maxWidth: 480, mx: "auto", mb: 2 }}>
         <TextField
           fullWidth size="small"
-          placeholder={isYT ? "Search by channel name..." : "Search by @handle or name..."}
+          placeholder={isYT ? "Tìm theo tên kênh..." : "Tìm theo @handle hoặc tên..."}
           value={query} onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleSearch()}
           disabled={searching || loading}
@@ -172,7 +172,7 @@ function ConnectForm({ platform, onConnected }) {
                 </Stack>
               </Box>
               {loading ? <CircularProgress size={20} /> : (
-                <Tooltip title="Select this channel">
+                <Tooltip title="Chọn kênh này">
                   <CheckCircleIcon sx={{ color: "primary.main", fontSize: 24 }} />
                 </Tooltip>
               )}
@@ -186,7 +186,7 @@ function ConnectForm({ platform, onConnected }) {
       )}
 
       <Divider sx={{ my: 2, maxWidth: 480, mx: "auto" }}>
-        <Chip label="or" size="small" />
+        <Chip label="hoặc" size="small" />
       </Divider>
 
       {!showUrlInput ? (
@@ -273,7 +273,7 @@ function VideoCard({ video, platform, onAnalyze, onDownload }) {
           overflow: "hidden", textOverflow: "ellipsis",
           display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
         }}>
-          {video.title || "Untitled"}
+          {video.title || "Chưa đặt tên"}
         </Typography>
         <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, flexWrap: "wrap" }}>
           <Typography variant="caption" sx={{ color: "text.secondary" }}>
@@ -303,13 +303,13 @@ function VideoCard({ video, platform, onAnalyze, onDownload }) {
             Download & Analyze
           </Button>
           <Box sx={{ flex: 1 }} />
-          <Tooltip title="Analyze this video" arrow>
+          <Tooltip title="Phân tích video này" arrow>
             <IconButton size="small" onClick={(e) => { e.stopPropagation(); onAnalyze(video) }}
               sx={{ p: 0.5, color: "text.secondary", "&:hover": { color: "primary.main" } }}>
               <TravelExploreIcon sx={{ fontSize: "1.1rem" }} />
             </IconButton>
           </Tooltip>
-          <Tooltip title={`Open on ${isYT ? "YouTube" : "TikTok"}`} arrow>
+          <Tooltip title={`Mở trên ${isYT ? "YouTube" : "TikTok"}`} arrow>
             <IconButton size="small"
               onClick={(e) => { e.stopPropagation(); window.open(video.url, "_blank", "noopener") }}
               sx={{ p: 0.5, color: "text.secondary", "&:hover": { color: "primary.main" } }}>

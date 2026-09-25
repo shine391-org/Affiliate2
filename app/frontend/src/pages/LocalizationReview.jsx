@@ -95,9 +95,9 @@ export default function LocalizationReview() {
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <PageHero
         icon={<FactCheckOutlinedIcon sx={{ fontSize: 22 }} />}
-        title="Review"
+        title="Duyệt"
         subtitle="One exception workspace. Current live items come from the canonical localization QC queue."
-        actions={<Button variant="outlined" startIcon={<RefreshOutlinedIcon />} onClick={load}>Refresh</Button>}
+        actions={<Button variant="outlined" startIcon={<RefreshOutlinedIcon />} onClick={load}>Làm mới</Button>}
       />
       <Box sx={{ px: { xs: 1.5, md: 2.5 }, py: 1.25, borderBottom: 1, borderColor: "divider", overflowX: "auto", flexShrink: 0 }}>
         <ToggleButtonGroup exclusive value={filter} onChange={changeFilter} size="small" sx={{ "& .MuiToggleButton-root": { textTransform: "none", whiteSpace: "nowrap" } }}>
