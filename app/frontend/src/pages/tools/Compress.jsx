@@ -13,19 +13,19 @@ import useDocumentTitle from "../../hooks/useDocumentTitle"
 // The backend is the authority (it validates the Literal); these carry the
 // human wording and the target height used for the "already smaller" hint.
 const RESOLUTIONS = [
-  { value: "original", label: "Original — keep source size", height: 0 },
+  { value: "original", label: "Gốc — giữ kích thước nguồn", height: 0 },
   { value: "1280x720", label: "HD — 720p", height: 720 },
   { value: "854x480", label: "SD — 480p", height: 480 },
-  { value: "640x360", label: "Low — 360p", height: 360 },
-  { value: "426x240", label: "Tiny — 240p", height: 240 },
+  { value: "640x360", label: "Thấp — 360p", height: 360 },
+  { value: "426x240", label: "Rất thấp — 240p", height: 240 },
 ]
 
 const LEVELS = [
-  { value: "maximum", label: "Maximum — smallest file" },
-  { value: "high", label: "High — good balance" },
-  { value: "medium", label: "Medium — better quality" },
-  { value: "low", label: "Low — high quality" },
-  { value: "minimal", label: "Minimal — best quality" },
+  { value: "maximum", label: "Tối đa — tệp nhỏ nhất" },
+  { value: "high", label: "Cao — cân bằng tốt" },
+  { value: "medium", label: "Trung bình — chất lượng tốt hơn" },
+  { value: "low", label: "Thấp — chất lượng cao" },
+  { value: "minimal", label: "Tối thiểu — chất lượng tốt nhất" },
 ]
 
 // What the two dials will actually do to THIS file. Reads the real source
@@ -54,11 +54,11 @@ function OutcomePreview({ resolution, level }) {
   return (
     <Stack spacing={0.5}>
       <Typography variant="caption" sx={{ color: "text.secondary" }}>
-        <strong>Source</strong> {srcW} × {srcH} → <strong>output</strong> {outW} × {outH}
+        <strong>Nguồn</strong> {srcW} × {srcH} → <strong>đầu ra</strong> {outW} × {outH}
       </Typography>
       {wouldUpscale && (
         <Typography variant="caption" sx={{ color: "warning.main" }}>
-          This video is already smaller than {target.label.split("—")[1]?.trim() || resolution}.
+          Video này đã nhỏ hơn {target.label.split("—")[1]?.trim() || resolution}.
           It'll keep its size — scaling up would only make the file bigger.
         </Typography>
       )}
@@ -80,12 +80,12 @@ export default function ToolCompress() {
 
   return (
     <ToolRunner
-      title="Compress Video"
-      description="Shrink a video for email, chat apps, or an upload limit — without re-cutting it."
+      title="Nén video"
+      description="Giảm dung lượng video cho email, ứng dụng chat hoặc giới hạn tải lên — không cần cắt lại."
       icon={<CompressOutlinedIcon fontSize="large" />}
       endpoint="/api/tools/compress"
       processLabel="Compress"
-      downloadLabel="Download compressed"
+      downloadLabel="Tải bản đã nén"
       fieldBuilder={() => ({ resolution, level })}
       costNote={
         <Typography variant="caption" sx={{ color: "text.secondary" }}>
@@ -99,10 +99,10 @@ export default function ToolCompress() {
     >
       <Stack spacing={2}>
         <FormControl size="small" fullWidth>
-          <InputLabel>Resolution</InputLabel>
+          <InputLabel>Độ phân giải</InputLabel>
           <Select
             value={resolution}
-            label="Resolution"
+            label="Độ phân giải"
             onChange={(e) => setResolution(e.target.value)}
           >
             {RESOLUTIONS.map((r) => (
@@ -112,10 +112,10 @@ export default function ToolCompress() {
         </FormControl>
 
         <FormControl size="small" fullWidth>
-          <InputLabel>Compression level</InputLabel>
+          <InputLabel>Mức nén</InputLabel>
           <Select
             value={level}
-            label="Compression level"
+            label="Mức nén"
             onChange={(e) => setLevel(e.target.value)}
           >
             {LEVELS.map((l) => (

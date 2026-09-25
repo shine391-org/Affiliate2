@@ -35,13 +35,13 @@ export default function ToolHookAnalysis() {
       const res = await http.get(`/api/jobs/${jobId}`)
       const out = res.data?.output_json
       if (!out) {
-        showSnackbar("Hook analysis returned no result", "warning")
+        showSnackbar("Phân tích hook không trả về kết quả", "warning")
         return
       }
       const parsed = typeof out === "string" ? JSON.parse(out) : out
       setResult(parsed)
     } catch (e) {
-      showSnackbar(`Couldn't load hook result: ${e.message}`, "error")
+      showSnackbar(`Không thể tải kết quả hook: ${e.message}`, "error")
     }
   }
 
@@ -58,7 +58,7 @@ export default function ToolHookAnalysis() {
       // Use the browser's Web Speech API for client-side TTS — no roundtrip,
       // no cost. Falls back to a snackbar if the browser doesn't support it.
       if (!("speechSynthesis" in window)) {
-        showSnackbar("Your browser doesn't support speech synthesis. Copy the text instead.", "info")
+        showSnackbar("Trình duyệt không hỗ trợ đọc văn bản. Hãy sao chép nội dung thay thế.", "info")
         return
       }
       stopPreview()
@@ -77,9 +77,9 @@ export default function ToolHookAnalysis() {
   const copyAlternative = async (text) => {
     try {
       await navigator.clipboard.writeText(text)
-      showSnackbar("Copied to clipboard", "success")
+      showSnackbar("Đã sao chép vào bộ nhớ tạm", "success")
     } catch {
-      showSnackbar("Couldn't copy — select the text manually", "warning")
+      showSnackbar("Không thể sao chép — hãy chọn văn bản thủ công", "warning")
     }
   }
 
@@ -89,8 +89,8 @@ export default function ToolHookAnalysis() {
 
   return (
     <ToolRunner
-      title="Hook Detector"
-      description="Score the first 10 seconds of any video and get stronger opening alternatives"
+      title="Phân tích hook"
+      description="Chấm 10 giây đầu video và gợi ý cách mở đầu mạnh hơn"
       icon={<LightbulbOutlinedIcon fontSize="large" />}
       endpoint="/api/tools/hook-analysis"
       processLabel="Analyze hook"
@@ -139,7 +139,7 @@ export default function ToolHookAnalysis() {
                   </Typography>
                 ))}
                 {(!result.strengths || result.strengths.length === 0) && (
-                  <Typography variant="caption" sx={{ color: "text.disabled" }}>None identified</Typography>
+                  <Typography variant="caption" sx={{ color: "text.disabled" }}>Không phát hiện mục nào</Typography>
                 )}
               </Stack>
             </GlassPanel>
@@ -155,7 +155,7 @@ export default function ToolHookAnalysis() {
                   </Typography>
                 ))}
                 {(!result.weaknesses || result.weaknesses.length === 0) && (
-                  <Typography variant="caption" sx={{ color: "text.disabled" }}>None identified</Typography>
+                  <Typography variant="caption" sx={{ color: "text.disabled" }}>Không phát hiện mục nào</Typography>
                 )}
               </Stack>
             </GlassPanel>
@@ -180,7 +180,7 @@ export default function ToolHookAnalysis() {
                       {i + 1}. "{alt}"
                     </Typography>
                   </Box>
-                  <Tooltip title={previewVoice === i ? "Stop" : "Preview with browser TTS"} arrow>
+                  <Tooltip title={previewVoice === i ? "Dừng" : "Nghe thử bằng TTS trình duyệt"} arrow>
                     <IconButton
                       size="small"
                       onClick={() => previewAlternative(i, alt)}
@@ -193,7 +193,7 @@ export default function ToolHookAnalysis() {
                           : <VolumeUpOutlinedIcon sx={{ fontSize: 18 }} />}
                     </IconButton>
                   </Tooltip>
-                  <Tooltip title="Copy to clipboard" arrow>
+                  <Tooltip title="Sao chép" arrow>
                     <IconButton
                       size="small"
                       onClick={() => copyAlternative(alt)}

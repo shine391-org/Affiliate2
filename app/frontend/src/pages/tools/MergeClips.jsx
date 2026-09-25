@@ -26,10 +26,10 @@ const MAX_MB = 1000
 const ACCEPT = ".mp4,.mov,.mkv,.webm,.m4v"
 
 const ASPECT_OPTIONS = [
-  { id: "auto",  label: "Auto",      sub: "match first clip" },
-  { id: "9:16",  label: "Vertical",  sub: "TikTok / Shorts" },
-  { id: "16:9",  label: "Landscape", sub: "YouTube" },
-  { id: "1:1",   label: "Square",    sub: "Instagram" },
+  { id: "auto",  label: "Tự động",      sub: "khớp clip đầu tiên" },
+  { id: "9:16",  label: "Dọc",  sub: "TikTok / Shorts" },
+  { id: "16:9",  label: "Ngang", sub: "YouTube" },
+  { id: "1:1",   label: "Vuông",    sub: "Instagram" },
 ]
 
 // Card visual constants — kept in one place so the empty-state placeholder
@@ -405,8 +405,8 @@ export default function ToolMergeClips() {
             </Typography>
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
               {[
-                { id: "none", label: "Hard cut", sub: "Instant — fastest" },
-                { id: "crossfade", label: "Crossfade", sub: "Short dissolve" },
+                { id: "none", label: "Cắt thẳng", sub: "Tức thì — nhanh nhất" },
+                { id: "crossfade", label: "Chuyển mờ", sub: "Hòa trộn ngắn" },
               ].map((opt) => (
                 <Chip
                   key={opt.id}
@@ -472,7 +472,7 @@ export default function ToolMergeClips() {
                 >
                   Download
                 </Button>
-                <Button size="small" onClick={reset}>Merge more</Button>
+                <Button size="small" onClick={reset}>Ghép thêm</Button>
               </Stack>
             }>
               Done. Your merged video is ready.
@@ -481,7 +481,7 @@ export default function ToolMergeClips() {
 
           {/* Failed */}
           {jobFailed && (
-            <Alert severity="error" action={<Button size="small" onClick={reset}>Try again</Button>}>
+            <Alert severity="error" action={<Button size="small" onClick={reset}>Thử lại</Button>}>
               {job?.step || terminal?.step || "Job failed"}
             </Alert>
           )}

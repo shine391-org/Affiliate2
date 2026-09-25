@@ -8,8 +8,8 @@ export default function ToolAudioEnhance() {
   useDocumentTitle("Enhance Audio")
   return (
     <ToolRunner
-      title="Enhance Audio"
-      description="Denoise hiss, normalize loudness, polish speech"
+      title="Cải thiện âm thanh"
+      description="Khử nhiễu, cân bằng âm lượng và làm sạch giọng nói"
       icon={<GraphicEqOutlinedIcon fontSize="large" />}
       endpoint="/api/tools/audio-enhance"
       acceptExts={MEDIA_ACCEPT}

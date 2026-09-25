@@ -5,15 +5,15 @@ import ToolRunner from "../../components/tools/ToolRunner"
 import useDocumentTitle from "../../hooks/useDocumentTitle"
 
 const STYLES = [
-  { v: "waves", label: "Waveform" },
-  { v: "bars", label: "Musical bars" },
-  { v: "spectrum", label: "Spectrum" },
+  { v: "waves", label: "Dạng sóng" },
+  { v: "bars", label: "Cột nhạc" },
+  { v: "spectrum", label: "Phổ" },
 ]
 const PALETTES = [
   { v: "sunset", label: "Sunset", c: "#FFD93D", bg: "#1A0E2E" },
-  { v: "ocean", label: "Ocean", c: "#4FC3F7", bg: "#081428" },
+  { v: "ocean", label: "Đại dương", c: "#4FC3F7", bg: "#081428" },
   { v: "neon", label: "Neon", c: "#FF2ED1", bg: "#0A0A1E" },
-  { v: "mono", label: "Mono", c: "#FFFFFF", bg: "#111111" },
+  { v: "mono", label: "Đơn sắc", c: "#FFFFFF", bg: "#111111" },
 ]
 const ASPECTS = ["9:16", "1:1", "16:9"]
 
@@ -25,8 +25,8 @@ export default function ToolMusicVisualizer() {
 
   return (
     <ToolRunner
-      title="Music Visualizer"
-      description="Turn an audio file into an animated visualizer video synced to the sound"
+      title="Trực quan hóa nhạc"
+      description="Biến tệp âm thanh thành video trực quan hóa chuyển động đồng bộ với nhạc"
       icon={<GraphicEqIcon fontSize="large" />}
       endpoint="/api/tools/music-visualizer"
       acceptExts=".mp3,.wav,.m4a,.aac,.ogg,.flac"
@@ -34,7 +34,7 @@ export default function ToolMusicVisualizer() {
     >
       <Stack spacing={2}>
         <Box>
-          <Typography variant="caption" sx={{ fontWeight: 600, display: "block", mb: 1 }}>Style</Typography>
+          <Typography variant="caption" sx={{ fontWeight: 600, display: "block", mb: 1 }}>Kiểu</Typography>
           <ToggleButtonGroup exclusive size="small" value={style} onChange={(_e, v) => v && setStyle(v)}>
             {STYLES.map((s) => <ToggleButton key={s.v} value={s.v} sx={{ textTransform: "none" }}>{s.label}</ToggleButton>)}
           </ToggleButtonGroup>
@@ -42,7 +42,7 @@ export default function ToolMusicVisualizer() {
 
         <Box>
           <Typography variant="caption" sx={{ fontWeight: 600, display: "block", mb: 1 }}>
-            Palette {style !== "waves" && <Typography component="span" variant="caption" sx={{ color: "text.secondary" }}>(applies to Waveform)</Typography>}
+            Bảng màu {style !== "waves" && <Typography component="span" variant="caption" sx={{ color: "text.secondary" }}>(áp dụng cho dạng sóng)</Typography>}
           </Typography>
           <ToggleButtonGroup exclusive size="small" value={palette} onChange={(_e, v) => v && setPalette(v)}>
             {PALETTES.map((p) => (
@@ -55,7 +55,7 @@ export default function ToolMusicVisualizer() {
         </Box>
 
         <Box>
-          <Typography variant="caption" sx={{ fontWeight: 600, display: "block", mb: 1 }}>Aspect ratio</Typography>
+          <Typography variant="caption" sx={{ fontWeight: 600, display: "block", mb: 1 }}>Tỷ lệ khung hình</Typography>
           <ToggleButtonGroup exclusive size="small" value={aspect} onChange={(_e, v) => v && setAspect(v)}>
             {ASPECTS.map((a) => <ToggleButton key={a} value={a}>{a}</ToggleButton>)}
           </ToggleButtonGroup>
