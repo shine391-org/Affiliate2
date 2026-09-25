@@ -19,6 +19,33 @@ from backend.core.exceptions import UploadAuthError, safe_json_loads
 logger = logging.getLogger(__name__)
 
 
+ALLOWED_PUBLISH_PLATFORMS = {"youtube", "tiktok", "instagram"}
+
+
+def normalize_publish_platforms(platforms) -> list[str]:
+    """Return a canonical, validated publish-platform list.
+
+    HTTP, Planner/Messaging and direct UploadAgent callers all pass through the
+    same contract so an LLM-shaped string cannot be iterated character by
+    character and unsupported destinations never reach provider code.
+    """
+    if isinstance(platforms, str):
+        platforms = [platforms]
+    if not isinstance(platforms, (list, tuple)) or not platforms:
+        raise ValueError("At least one publish platform is required.")
+
+    normalized = []
+    for platform in platforms:
+        if not isinstance(platform, str) or not platform.strip():
+            raise ValueError("Publish platforms must be non-empty strings.")
+        name = platform.strip().lower()
+        if name not in ALLOWED_PUBLISH_PLATFORMS:
+            raise ValueError(f"Unsupported publish platform(s): {name}")
+        if name not in normalized:
+            normalized.append(name)
+    return normalized
+
+
 class UploadAgent:
     async def run(
         self,
@@ -29,6 +56,12 @@ class UploadAgent:
     ):
         """Upload a generated video to specified platforms."""
         await update_job_status(job_id, "running", progress_pct=0, current_step="Preparing upload...")
+
+        try:
+            platforms = normalize_publish_platforms(platforms)
+        except ValueError as exc:
+            await update_job_status(job_id, "failed", error_message=str(exc))
+            return
 
         # Load video
         async with AsyncSessionLocal() as db:
