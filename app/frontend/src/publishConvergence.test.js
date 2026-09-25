@@ -36,3 +36,15 @@ test("Library hands irreversible publish actions to the canonical Publish owner"
   assert.ok(!library.includes('http.post(`/api/videos/${videoId}/upload`'))
   assert.ok(!library.includes("Confirm upload to"))
 })
+
+
+test("Publish preserves an explicit Library deep-link instead of substituting a recent video", () => {
+  assert.ok(publish.includes('http.get(\`/api/videos/\${requested}\`)'))
+  assert.ok(publish.includes("Never substitute another asset for an explicit ID"))
+  assert.ok(!publish.includes("(!requested || !eligible.some"))
+})
+
+test("an already-published destination cannot be accidentally published twice", () => {
+  assert.ok(publish.includes("disabled={!connected || busy || published}"))
+  assert.ok(publish.includes('{published ? "Published" : "Publish"}'))
+})
