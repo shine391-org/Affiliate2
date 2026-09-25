@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime
 
 import pytest
 from sqlalchemy import select
@@ -43,7 +44,9 @@ async def _make_video(**kw):
     async with AsyncSessionLocal() as db:
         v = GeneratedVideo(
             user_id="local", title="A video", status="ready",
-            video_path=kw.pop("video_path", "/tmp/v.mp4"), **kw)
+            video_path=kw.pop("video_path", "/tmp/v.mp4"),
+            publish_approved_at=kw.pop("publish_approved_at", datetime.utcnow()),
+            **kw)
         db.add(v)
         await db.commit()
         return v.id
@@ -145,6 +148,17 @@ def providers(monkeypatch):
 # ── preconditions ───────────────────────────────────────────────────────────
 
 class TestPreconditions:
+    def test_an_unapproved_video_cannot_bypass_the_gate_through_the_agent(self, ws, providers):
+        async def run():
+            vid = await _make_video(publish_approved_at=None)
+            jid = await _job()
+            await UploadAgent().run(jid, vid, ["youtube"])
+            return await _job_row(jid)
+        row = asyncio.run(run())
+        assert row.status == "failed"
+        assert "approved" in row.error_message.lower()
+        assert "youtube" not in providers["calls"]
+
     def test_a_missing_video_fails_the_job_with_a_reason(self, ws, providers):
         async def run():
             jid = await _job()
