@@ -260,13 +260,24 @@ revisited.
 
 ## Phase F — Review / Publish / Performance native migration
 
-Status: **NEXT**
+Status: **F1 NATIVE PUBLISH OWNER WIRED — LOCAL QA PENDING 🚧**
 
-- move remaining overlay pages/API into canonical app
-- reuse app upload/auth/metrics plumbing
-- preserve publish approval gate and publication lineage
-- keep Affiliate2 performance intelligence
-- delete overlay sync only after parity
+See `docs/PHASE_F_CONVERGENCE.md`.
+
+F1:
+- `GeneratedVideo.id` is the canonical publish output identity;
+- explicit `publish_approved_at` is the human gate;
+- approval and platform publish remain separate actions;
+- `/publish` is now a real native workspace, not a shell;
+- existing `UploadAgent` + UserSettings OAuth/upload credentials remain canonical;
+- native YouTube/TikTok publishing is surfaced first;
+- old candidate/remake overlay Publish remains compatibility-only until parity cleanup.
+
+Next:
+- F2 converge Performance onto native `VideoMetrics` / `performance_tracker`;
+- F3 wire MessagingManager to meaningful review/publish/performance events;
+- F4 verify the end-to-end affiliate loop;
+- delete overlay sync only after parity.
 
 ## Phase G — DB convergence + cleanup
 
