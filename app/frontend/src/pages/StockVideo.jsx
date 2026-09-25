@@ -300,7 +300,7 @@ export default function StockVideo() {
 
             <TextField
               size="small" fullWidth
-              placeholder="Optional: tell the AI the angle, tone, or audience…"
+              placeholder="Tùy chọn: mô tả góc nội dung, giọng điệu hoặc đối tượng cho AI…"
               value={scriptInstructions}
               onChange={(e) => setScriptInstructions(e.target.value)}
               sx={{ mb: 1 }}
@@ -311,7 +311,7 @@ export default function StockVideo() {
                 multiline fullWidth
                 value={script}
                 onChange={(e) => setScript(e.target.value)}
-                placeholder="Write your script here, or hit “AI script” to draft one…"
+                placeholder="Viết kịch bản tại đây hoặc bấm “Kịch bản AI” để tạo bản nháp…"
                 sx={{
                   height: "100%",
                   "& .MuiOutlinedInput-root": { height: "100%", alignItems: "flex-start", fontSize: "0.9rem" },
@@ -324,7 +324,7 @@ export default function StockVideo() {
                   bgcolor: "rgba(0,0,0,0.25)", display: "flex", alignItems: "center", justifyContent: "center",
                   pointerEvents: "none",
                 }}>
-                  <Chip label="Writing your script…" color="primary" />
+                  <Chip label="Đang viết kịch bản…" color="primary" />
                 </Box>
               </Fade>
             </Box>

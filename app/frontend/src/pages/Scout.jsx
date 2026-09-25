@@ -47,7 +47,7 @@ export default function Scout() {
       setResults(data.results || [])
       setTotal(data.total || 0)
     } catch {
-      showSnackbar("Could not load scout results", "error")
+      showSnackbar("Không thể tải kết quả theo dõi", "error")
     } finally {
       setLoading(false)
     }
@@ -60,7 +60,7 @@ export default function Scout() {
       <PageHero
         icon={<TravelExploreIcon sx={{ fontSize: 22 }} />}
         title="Khám phá / Theo dõi"
-        subtitle="Trending videos worth borrowing from — leads, not files"
+        subtitle="Video đang lên đáng tham khảo — đây là lead, không phải tệp"
         accentColor="#0097a7"
         actions={
           <Stack direction="row" spacing={1}>

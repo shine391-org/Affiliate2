@@ -268,7 +268,7 @@ export default function Library() {
       setDrawerItem(data.item)
       setDrawerLineage({ ancestors: data.ancestors || [], children: data.children || [] })
     } catch {
-      showSnackbar("That item is no longer in your library", "info")
+      showSnackbar("Mục này không còn trong Thư viện", "info")
     }
   }, [items, openItem, showSnackbar])
 
@@ -328,7 +328,7 @@ export default function Library() {
       await del(item)
       removeLocal(item.key)
       refresh()  // facet counts and pageCount come from the server
-      showSnackbar("Deleted", "success")
+      showSnackbar("Đã xóa", "success")
     } catch (e) {
       showSnackbar(e.response?.data?.detail || "Could not delete that item", "error")
     }
@@ -404,7 +404,7 @@ export default function Library() {
   const cancelJob = async (jobId) => {
     try {
       await http.delete(`/api/jobs/${jobId}`)
-      showSnackbar("Job cancelled", "info")
+      showSnackbar("Đã hủy tác vụ", "info")
     } catch (e) {
       showSnackbar(e.response?.data?.detail || "Could not cancel that job", "error")
     }
@@ -506,7 +506,7 @@ export default function Library() {
               <br />
               Scout results are deliberately not here — a lead is not a file you own, so it has its
               own page. Jobs split in two: work in flight appears as a tile in the grid where it will
-              land, and nhật ký đầy đủ nằm trong <strong>Hoạt động</strong> (top right), reachable from
+              và nhật ký đầy đủ nằm trong <strong>Hoạt động</strong> (góc trên bên phải), có thể mở từ
               every page instead of only this one.
             </Typography>
             <IconButton size="small" onClick={() => setShowWhy(false)} aria-label="Đóng hướng dẫn">
