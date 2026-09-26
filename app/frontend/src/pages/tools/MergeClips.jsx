@@ -204,10 +204,10 @@ export default function ToolMergeClips() {
         headers: { "Content-Type": "multipart/form-data" },
         timeout: 300000,
       })
-      startJob(data.job_id, toolJobTypeFor("/api/tools/merge-clips"), "Starting...")
+      startJob(data.job_id, toolJobTypeFor("/api/tools/merge-clips"), "Đang bắt đầu…")
       setJobId(data.job_id)
     } catch (e) {
-      const msg = e?.response?.data?.detail || e.message || "Upload failed"
+      const msg = e?.response?.data?.detail || e.message || "Tải lên thất bại"
       setError(msg)
       showSnackbar?.(msg, "error")
     }
@@ -475,14 +475,14 @@ export default function ToolMergeClips() {
                 <Button size="small" onClick={reset}>Ghép thêm</Button>
               </Stack>
             }>
-              Done. Your merged video is ready.
+              Hoàn tất. Video đã ghép sẵn sàng.
             </Alert>
           )}
 
           {/* Failed */}
           {jobFailed && (
             <Alert severity="error" action={<Button size="small" onClick={reset}>Thử lại</Button>}>
-              {job?.step || terminal?.step || "Job failed"}
+              {job?.step || terminal?.step || "Tác vụ thất bại"}
             </Alert>
           )}
         </Box>
