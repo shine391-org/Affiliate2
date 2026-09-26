@@ -90,6 +90,8 @@ class SettingsUpdate(BaseModel):
     # Send empty string to clear a stored key.
     youtube_api_key: Optional[str] = None
     huggingface_token: Optional[str] = None
+    meta_page_access_token: Optional[str] = None
+    meta_page_id: Optional[str] = None
 
     # Canonical yt-dlp browser session. Cookies are never copied into this
     # request/model; only the local browser/profile selector is persisted.
