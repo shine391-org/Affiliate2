@@ -265,6 +265,26 @@ async def upload_video(video_id: str, body: dict, db: AsyncSession = Depends(get
             if value is not None
         }
 
+    for meta_platform in ("facebook", "instagram"):
+        if meta_platform not in platforms:
+            continue
+        raw_meta = raw_publish_options.get(meta_platform) or {}
+        if not isinstance(raw_meta, dict):
+            raise HTTPException(
+                status_code=400,
+                detail=f"publish_options.{meta_platform} must be an object",
+            )
+        title = raw_meta.get("title")
+        caption = raw_meta.get("caption")
+        if title is not None and not isinstance(title, str):
+            raise HTTPException(status_code=400, detail=f"{meta_platform} title must be text")
+        if caption is not None and not isinstance(caption, str):
+            raise HTTPException(status_code=400, detail=f"{meta_platform} caption must be text")
+        publish_options[meta_platform] = {
+            "title": (title or "")[:150],
+            "caption": (caption or "")[:5000],
+        }
+
     async with _publish_queue_lock:
         video = await db.get(GeneratedVideo, video_id)
         if not video:
