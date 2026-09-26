@@ -9,7 +9,7 @@ import useAppStore from "../../store/appStore"
 const PROVIDERS = {
   edge_tts: { label: "Edge TTS" },
   openai_tts: { label: "OpenAI TTS", needsKey: true, defaultModel: "tts-1" },
-  openai_compatible_tts: { label: "OpenAI-compatible TTS", base: true, defaultModel: "tts-1" },
+  openai_compatible_tts: { label: "TTS tùy chỉnh tương thích OpenAI", base: true, defaultModel: "tts-1" },
   azure_tts: { label: "Azure Speech", needsKey: true, region: true },
   elevenlabs: { label: "ElevenLabs", needsKey: true, base: true, defaultModel: "eleven_multilingual_v2" },
   gpt_sovits: { label: "GPT-SoVITS (clone giọng cục bộ)", base: true, defaultBase: "http://127.0.0.1:9880" },
@@ -89,10 +89,24 @@ export default function TTSProviderSection({ settings, updateSettings }) {
   return (
     <Stack spacing={2}>
       <Alert severity="info" variant="outlined">
-        HQ localization generates TTS at natural speed, measures the real audio,
-        then fits it in the dubbing engine. Speaker-specific voices and reference
-        audio are controlled by Localization Profiles and Expert mode.
+        <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>
+          Đây chỉ là kết nối TTS dùng chung
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          Provider / API key / Base URL / model / giọng mặc định nằm ở đây. AI dịch C6 và AI viết lại C7 nằm trong Kết nối AI + Hồ sơ bản địa hóa. Audio ducking, giữ nhạc nền, render và QC là lớp khác — không phải TTS.
+        </Typography>
       </Alert>
+
+      <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+        <Typography variant="caption" color="text.secondary">Luồng cấu hình:</Typography>
+        <Typography variant="caption"><strong>1. AI dịch C6</strong></Typography>
+        <Typography variant="caption">→</Typography>
+        <Typography variant="caption"><strong>2. AI viết lại C7</strong></Typography>
+        <Typography variant="caption">→</Typography>
+        <Typography variant="caption"><strong>3. TTS tạo giọng</strong></Typography>
+        <Typography variant="caption">→</Typography>
+        <Typography variant="caption"><strong>4. Audio / render / QC</strong></Typography>
+      </Stack>
 
       <FormControl size="small" fullWidth>
         <InputLabel>Nhà cung cấp TTS</InputLabel>
