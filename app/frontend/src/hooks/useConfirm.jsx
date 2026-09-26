@@ -31,7 +31,7 @@ export default function useConfirm() {
     title: "",
     message: "",
     onConfirm: null,
-    confirmLabel: "Delete",
+    confirmLabel: "Xóa",
     confirmColor: "error",
   })
 
@@ -45,7 +45,7 @@ export default function useConfirm() {
       title,
       message,
       onConfirm,
-      confirmLabel: opts.confirmLabel ?? "Delete",
+      confirmLabel: opts.confirmLabel ?? "Xóa",
       confirmColor: opts.confirmColor ?? "error",
     })
   }, [])
@@ -57,7 +57,7 @@ export default function useConfirm() {
       <DialogTitle>{state.title}</DialogTitle>
       <DialogContent><Typography>{state.message}</Typography></DialogContent>
       <DialogActions>
-        <Button onClick={close}>Cancel</Button>
+        <Button onClick={close}>Hủy</Button>
         <Button
           color={state.confirmColor}
           variant="contained"
