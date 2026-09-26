@@ -374,9 +374,20 @@ export default function VideoDownload() {
                 severity="success"
                 icon={<CheckCircleOutlinedIcon />}
                 action={
-                  <Button size="small" onClick={() => navigate("/library")}>
-                    Mở Thư viện
-                  </Button>
+                  <Stack direction="row" spacing={0.75}>
+                    {receipts?.[0]?.id && (
+                      <Button
+                        size="small"
+                        variant="contained"
+                        onClick={() => navigate(`/studio/localize?source=${encodeURIComponent(receipts[0].id)}`)}
+                      >
+                        Bản địa hóa ngay
+                      </Button>
+                    )}
+                    <Button size="small" onClick={() => navigate("/library")}>
+                      Mở Thư viện
+                    </Button>
+                  </Stack>
                 }
               >
                 {localizeUiMessage(finalStep || terminal?.step || "Tải xuống hoàn tất.")}
