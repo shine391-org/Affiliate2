@@ -17,13 +17,20 @@ const PROVIDERS = {
   anthropic: { label: "Anthropic (Claude)", keyRequired: true, placeholder: "sk-ant-..." },
   openai: { label: "OpenAI (GPT)", keyRequired: true, placeholder: "sk-..." },
   openrouter: { label: "OpenRouter", keyRequired: true, placeholder: "sk-or-..." },
+  gemini: {
+    label: "Google Gemini (AI Studio)",
+    keyRequired: true,
+    placeholder: "AIza...",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
+    defaultModel: "gemini-3.8-flash",
+  },
   ollama: { label: "Ollama (local)", baseUrl: "http://localhost:11434/v1" },
   lmstudio: { label: "LM Studio (local)", baseUrl: "http://localhost:1234/v1" },
   vllm: { label: "vLLM (local)", baseUrl: "http://localhost:8000/v1" },
   compatible: { label: "Tùy chỉnh tương thích OpenAI" },
 }
 
-const isCompatible = (provider) => ["ollama", "lmstudio", "vllm", "compatible"].includes(provider)
+const isCompatible = (provider) => ["gemini", "ollama", "lmstudio", "vllm", "compatible"].includes(provider)
 const savedReady = (settings) => {
   const provider = settings?.ai_provider || "openai"
   const meta = PROVIDERS[provider] || PROVIDERS.openai
@@ -72,7 +79,7 @@ export default function AIProviderSection({ settings, updateSettings }) {
   }, [settings?.ai_provider, settings?.ai_model, settings?.ai_base_url, settings?.ai_api_key_set])
 
   const meta = PROVIDERS[provider] || PROVIDERS.compatible
-  const defaultModel = registry[provider]?.default_model || ""
+  const defaultModel = registry[provider]?.default_model || meta.defaultModel || ""
   const effectiveModel = model || defaultModel
   const suggestions = useMemo(
     () => [...new Set([...(registry[provider]?.models || []), ...discovered])],
@@ -226,7 +233,7 @@ export default function AIProviderSection({ settings, updateSettings }) {
           <Button variant="contained" startIcon={<EditIcon />} onClick={() => setEditing(true)} disabled={saving}>Cập nhật</Button>
           {keyIsSet && (
             <Button variant="outlined" color="error" startIcon={<DeleteIcon />} onClick={() => setConfirmRemove(true)} disabled={saving}>
-              Remove key
+              Xóa khóa
             </Button>
           )}
         </Stack>
@@ -246,7 +253,7 @@ export default function AIProviderSection({ settings, updateSettings }) {
     <Stack spacing={2}>
       {effectiveRuntimeCard}
       <Typography variant="body2" color="text.secondary">
-        Use a cloud provider or a local OpenAI-compatible server. Model IDs are editable; the registry is only a suggestion list.
+        Chọn cloud provider hoặc endpoint tương thích OpenAI chạy local. Gemini dùng endpoint OpenAI-compatible chính thức của Google; không có runtime riêng thứ hai.
       </Typography>
 
       <FormControl size="small" fullWidth>
@@ -306,15 +313,15 @@ export default function AIProviderSection({ settings, updateSettings }) {
 
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
         <Button variant="outlined" onClick={handleDiscover} disabled={saving || probing || provider === "anthropic"}>
-          {probing ? "Checking…" : "Discover models"}
+          {probing ? "Đang kiểm tra…" : "Dò tìm mô hình"}
         </Button>
         <Button variant="outlined" onClick={handleTest} disabled={saving || probing}>
-          Test connection
+          Kiểm tra kết nối
         </Button>
         <Box sx={{ flex: 1 }} />
         {connected && <Button variant="text" onClick={() => setEditing(false)} disabled={saving || probing}>Hủy</Button>}
         <Button variant="contained" startIcon={<SaveIcon />} onClick={handleSave} disabled={saving || probing}>
-          {saving ? "Saving…" : "Save"}
+          {saving ? "Đang lưu…" : "Lưu"}
         </Button>
       </Stack>
     </Stack>
