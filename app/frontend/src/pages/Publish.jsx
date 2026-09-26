@@ -263,10 +263,18 @@ export default function Publish() {
 
     setError("")
     try {
-      const patch = platform === "youtube"
-        ? { youtube_title: title.trim(), youtube_description: caption.trim() }
-        : { tiktok_title: title.trim(), tiktok_description: caption.trim() }
-      await http.patch(`/api/videos/${selected.id}`, patch)
+      if (platform === "youtube") {
+        await http.patch(`/api/videos/${selected.id}`, {
+          youtube_title: title.trim(),
+          youtube_description: caption.trim(),
+        })
+      } else if (platform === "tiktok") {
+        await http.patch(`/api/videos/${selected.id}`, {
+          tiktok_title: title.trim(),
+          tiktok_description: caption.trim(),
+        })
+      }
+
       const publishOptions = platform === "tiktok"
         ? {
             tiktok: {
@@ -276,7 +284,9 @@ export default function Publish() {
               disable_stitch: Boolean(tiktokDisableStitch || tiktokCreator?.stitch_disabled),
             },
           }
-        : {}
+        : ["facebook", "instagram"].includes(platform)
+          ? { [platform]: { title: title.trim(), caption: caption.trim() } }
+          : {}
       const { data } = await http.post(`/api/videos/${selected.id}/upload`, {
         platforms: [platform],
         publish_options: publishOptions,
