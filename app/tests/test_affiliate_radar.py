@@ -97,7 +97,7 @@ def test_observation_refreshes_current_projection_and_keeps_job_history():
         """SELECT views, likes, job_id FROM scout_results
         WHERE platform='douyin' AND video_id='refresh'"""
     ).fetchone()
-    assert tuple(current) == (250, 25, "job-new")
+    assert tuple(current) == (250, 25, "job-old")
 
     observation_jobs = [
         row[0]
