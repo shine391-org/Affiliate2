@@ -6,7 +6,7 @@ const JOB_COLORS = {
 }
 
 const JOB_LABELS = {
-  scout: "Scouting", download: "Downloading", generate: "Generating", upload: "Uploading",
+  scout: "Đang quét", download: "Đang tải xuống", generate: "Đang tạo", upload: "Đang tải lên",
 }
 
 // "tool:merge_clips" → "Merge clips". The raw job type read as a debug string
@@ -16,7 +16,7 @@ function humanizeJobType(jobType) {
   const t = String(jobType || "")
   if (JOB_LABELS[t]) return JOB_LABELS[t]
   const bare = t.replace(/^tool:/, "").replace(/[-_]+/g, " ").trim()
-  if (!bare) return "Job"
+  if (!bare) return "Tác vụ"
   return bare.charAt(0).toUpperCase() + bare.slice(1)
 }
 
