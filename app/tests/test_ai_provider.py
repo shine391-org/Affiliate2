@@ -180,6 +180,40 @@ def test_make_compatible_client_requires_base_url():
         make_ai_client("compatible", model="x")
 
 
+def test_gemini_preset_uses_official_compatible_endpoint_and_byok_key():
+    s = SimpleNamespace(
+        ai_provider="gemini",
+        ai_api_key_encrypted=encrypt("AIza-test"),
+        ai_model="gemini-3.8-flash",
+        ai_base_url=None,
+    )
+    provider, key, model, base_url = _resolve_user_provider_and_key(s)
+    assert provider == AIProvider.COMPATIBLE
+    assert key == "AIza-test"
+    assert model == "gemini-3.8-flash"
+    assert base_url == "https://generativelanguage.googleapis.com/v1beta/openai"
+
+
+def test_make_gemini_client_requires_key_but_reuses_compatible_runtime():
+    with pytest.raises(AIKeyMissingError, match="Gemini API key"):
+        make_ai_client("gemini", model="gemini-3.8-flash")
+
+    client = make_ai_client(
+        "gemini",
+        api_key="AIza-test",
+        model="gemini-3.8-flash",
+    )
+    assert client.provider == AIProvider.COMPATIBLE
+    assert client.api_key == "AIza-test"
+    assert client.model == "gemini-3.8-flash"
+    assert client.base_url == "https://generativelanguage.googleapis.com/v1beta/openai"
+
+
+def test_openrouter_attribution_uses_affiliate2_not_donor_brand():
+    assert "Affiliate2" in ap._OPENROUTER_HEADERS["X-Title"]
+    assert "ViralMint" not in str(ap._OPENROUTER_HEADERS)
+
+
 def test_local_preset_never_reuses_stored_cloud_secret():
     s = SimpleNamespace(
         ai_provider="ollama",
