@@ -246,8 +246,9 @@ async def _upload_via_api(
                 )
 
         raise UploadError(
-            "TikTok accepted the upload but publication was not confirmed before "
-            "the local timeout. Check TikTok before retrying to avoid a duplicate post."
+            "TikTok publish timed out without provider confirmation. TikTok may "
+            "still be processing the post; check TikTok before retrying to avoid "
+            "a duplicate post."
         )
 
 
