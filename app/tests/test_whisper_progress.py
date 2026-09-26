@@ -51,7 +51,7 @@ class _FakeModel:
 def fake_whisper(monkeypatch, tmp_path):
     audio = tmp_path / "a.wav"
     audio.write_bytes(b"\x00" * 2048)
-    monkeypatch.setattr(WhisperService, "load", classmethod(lambda cls, q="balanced": _FakeModel()))
+    monkeypatch.setattr(WhisperService, "load", classmethod(lambda cls, q="balanced", model_name=None: _FakeModel()))
 
     async def _has_audio(p):
         return True
@@ -70,7 +70,7 @@ async def test_on_progress_streams_fractions(fake_whisper, monkeypatch):
     import backend.services.whisper_service as W
     monkeypatch.setattr(W, "_PROGRESS_EMIT_INTERVAL", 0.0)
     monkeypatch.setattr(WhisperService, "load",
-                        classmethod(lambda cls, q="balanced": _FakeModel(n_segments=5)))
+                        classmethod(lambda cls, q="balanced", model_name=None: _FakeModel(n_segments=5)))
     fractions = []
 
     result = await whisper_service.transcribe(
@@ -132,7 +132,7 @@ async def test_concurrent_transcriptions_serialize(fake_whisper, monkeypatch):
             return gen(), info
 
     monkeypatch.setattr(WhisperService, "load",
-                        classmethod(lambda cls, q="balanced": _TrackedModel()))
+                        classmethod(lambda cls, q="balanced", model_name=None: _TrackedModel()))
 
     await asyncio.gather(
         whisper_service.transcribe(str(fake_whisper)),
@@ -171,7 +171,7 @@ async def test_short_audio_bypasses_the_gate(fake_whisper, monkeypatch):
             return gen(), info
 
     monkeypatch.setattr(WhisperService, "load",
-                        classmethod(lambda cls, q="balanced": _BlockingModel()))
+                        classmethod(lambda cls, q="balanced", model_name=None: _BlockingModel()))
 
     async def _watchdog():
         # Release the decoders once both are in flight (or time out the test).
@@ -209,7 +209,7 @@ async def test_none_segment_end_does_not_regress_progress(fake_whisper, monkeypa
             return gen(), info
 
     monkeypatch.setattr(WhisperService, "load",
-                        classmethod(lambda cls, q="balanced": _NoneEndModel()))
+                        classmethod(lambda cls, q="balanced", model_name=None: _NoneEndModel()))
     fractions = []
     await whisper_service.transcribe(str(fake_whisper), on_progress=fractions.append)
     assert fractions == sorted(fractions), "no backwards progress"
