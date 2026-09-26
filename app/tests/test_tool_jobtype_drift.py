@@ -60,7 +60,9 @@ def _backend_route_job_types() -> dict[str, set[str]]:
             continue
         for sub in ast.walk(node):
             if (isinstance(sub, ast.Call)
-                    and getattr(sub.func, "id", "") == "create_job"
+                    and getattr(sub.func, "id", "") in {
+                        "create_job", "create_or_reuse_active_job"
+                    }
                     and sub.args
                     and isinstance(sub.args[0], ast.Constant)
                     and isinstance(sub.args[0].value, str)):
@@ -121,7 +123,9 @@ def test_every_tool_page_endpoint_resolves_to_the_real_job_type():
         slug = endpoint.split("/api/tools/")[1]
         actual = routes.get("/" + slug)
         if not actual:
-            mismatches.append(f"{endpoint}: no create_job(...) found on its handler")
+            mismatches.append(
+                f"{endpoint}: no supported job factory found on its handler"
+            )
             continue
         resolved = _tool_job_type_for(slug, overrides)
         if resolved not in actual:
