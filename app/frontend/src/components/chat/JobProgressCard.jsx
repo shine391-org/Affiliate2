@@ -1,23 +1,9 @@
 import { Box, Typography, LinearProgress, Stack } from "@mui/material"
 import useAppStore from "../../store/appStore"
+import { jobTypeLabel } from "../videos/constants"
 
 const JOB_COLORS = {
   scout: "primary", download: "info", generate: "warning", upload: "success",
-}
-
-const JOB_LABELS = {
-  scout: "Đang quét", download: "Đang tải xuống", generate: "Đang tạo", upload: "Đang tải lên",
-}
-
-// "tool:merge_clips" → "Merge clips". The raw job type read as a debug string
-// on the progress card ("tool:gif complete"); named types keep their
-// hand-tuned label above.
-function humanizeJobType(jobType) {
-  const t = String(jobType || "")
-  if (JOB_LABELS[t]) return JOB_LABELS[t]
-  const bare = t.replace(/^tool:/, "").replace(/[-_]+/g, " ").trim()
-  if (!bare) return "Tác vụ"
-  return bare.charAt(0).toUpperCase() + bare.slice(1)
 }
 
 export default function JobProgressCard({ jobId, jobType, message }) {
@@ -31,7 +17,7 @@ export default function JobProgressCard({ jobId, jobType, message }) {
   const step = job.step || message || ""
 
   const color = JOB_COLORS[jobType] || "primary"
-  const label = humanizeJobType(jobType)
+  const label = jobTypeLabel(jobType)
   const isRunning = status === "running"
   const isSuccess = status === "success"
   const isFailed = status === "failed"
