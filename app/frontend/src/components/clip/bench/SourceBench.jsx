@@ -900,7 +900,7 @@ function PasteRangesDialog({ open, onClose, duration, room, onAdd }) {
       <DialogContent>
         <Typography variant="caption" sx={{ color: "text.secondary", display: "block", mb: 1.5 }}>
           One range per line, or separated by commas. <code>0:42-1:05</code>,{" "}
-          <code>2:10 → 2:38</code>, <code>1:02:00 to 1:02:30</code> all work.
+          <code>2:10 → 2:38</code>, <code>1:02:00 đến 1:02:30</code> đều dùng được.
         </Typography>
         <TextField
           autoFocus multiline minRows={5} maxRows={12} fullWidth size="small"
