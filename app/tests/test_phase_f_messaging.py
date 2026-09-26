@@ -75,6 +75,16 @@ async def action_reply(action, monkeypatch):
     return "\n".join(replies)
 
 
+def test_planner_rejects_non_object_and_unknown_actions_without_side_effects(monkeypatch):
+    async def go():
+        malformed = await action_reply([], monkeypatch)
+        assert "không hợp lệ" in malformed.lower()
+        unknown = await action_reply({"type": "click_arbitrary_ui"}, monkeypatch)
+        assert "không có action backend" in unknown.lower()
+        assert "không có thao tác nào được thực hiện" in unknown.lower()
+    asyncio.run(go())
+
+
 def test_generated_asset_queries_are_exact_and_missing_is_explicit(monkeypatch):
     async def go():
         a = await asset("Alpha")
