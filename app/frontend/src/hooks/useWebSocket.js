@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react"
 import { ws } from "../api/websocket"
 import http from "../api/http"
 import useAppStore from "../store/appStore"
+import { localizeUiMessage } from "../utils/localizeUiMessage"
 
 export default function useWebSocket() {
   const {
@@ -48,7 +49,7 @@ export default function useWebSocket() {
         // Restore active jobs from API on reconnect
         allJobs.forEach(j => {
           if (!useAppStore.getState().activeJobs[j.id]) {
-            const msg = j.current_step || j.title || j.job_type
+            const msg = localizeUiMessage(j.current_step || j.title || j.job_type)
             // Parse input_json to preserve job metadata (e.g. type: "clip_extraction")
             let inputData = null
             try { inputData = j.input_json ? JSON.parse(j.input_json) : null } catch {}
@@ -136,7 +137,7 @@ export default function useWebSocket() {
         endStream()
         setStreaming(false)
         clearStreamingText()
-        addMessage({ role: "system", content: `Error: ${msg.error}` })
+        addMessage({ role: "system", content: `Lỗi: ${localizeUiMessage(msg.error)}` })
       }),
 
       ws.on("smart_suggestions", () => {
@@ -173,16 +174,16 @@ export default function useWebSocket() {
       }),
 
       ws.on("job_started", (msg) => {
-        startJob(msg.job_id, msg.job_type, msg.message, { inputData: msg.input_data || null })
+        startJob(msg.job_id, msg.job_type, localizeUiMessage(msg.message), { inputData: msg.input_data || null })
         addMessage({
           role: "rich",
           type: "job_progress",
-          data: { jobId: msg.job_id, jobType: msg.job_type, message: msg.message },
+          data: { jobId: msg.job_id, jobType: msg.job_type, message: localizeUiMessage(msg.message) },
         })
       }),
 
       ws.on("job_progress", (msg) => {
-        updateJobProgress(msg.job_id, msg.percent, msg.step)
+        updateJobProgress(msg.job_id, msg.percent, localizeUiMessage(msg.step))
       }),
 
       ws.on("job_complete", (msg) => {
@@ -200,12 +201,12 @@ export default function useWebSocket() {
           let text
           if (jobType === "news_scout") {
             text = total > 0
-              ? `News research complete — found **${total}** article${total !== 1 ? "s" : ""}.`
-              : "News research complete — no articles scored high enough. Try a different or more specific query."
+              ? `Nghiên cứu tin tức hoàn tất — tìm thấy **${total}** bài viết.`
+              : "Nghiên cứu tin tức hoàn tất — chưa có bài viết đủ điểm. Hãy thử truy vấn khác hoặc cụ thể hơn."
           } else {
             text = newCount !== undefined && newCount < total
-              ? `Scout complete — found **${total}** videos (${newCount} new, ${total - newCount} previously scouted).`
-              : `Scout complete — found **${total}** trending videos.`
+              ? `Quét hoàn tất — tìm thấy **${total}** video (${newCount} mới, ${total - newCount} đã quét trước đó).`
+              : `Quét hoàn tất — tìm thấy **${total}** video đang thịnh hành.`
           }
           addMessage({ role: "system", content: text })
         } else if (result.video) {
@@ -221,7 +222,7 @@ export default function useWebSocket() {
             data: { videos: result.insights },
           })
         } else {
-          addMessage({ role: "system", content: "Job complete!" })
+          addMessage({ role: "system", content: "Tác vụ hoàn tất!" })
         }
       }),
 
@@ -229,9 +230,9 @@ export default function useWebSocket() {
         failJob(msg.job_id, msg.error)
         addMessage({
           role: "system",
-          content: `Job failed: ${msg.error || "Unknown error"}`,
+          content: `Tác vụ thất bại: ${localizeUiMessage(msg.error || "Lỗi không xác định")}`,
         })
-        showSnackbar(msg.error || "A job failed — check chat for details", "error")
+        showSnackbar(localizeUiMessage(msg.error || "Một tác vụ thất bại — hãy xem chi tiết trong trò chuyện"), "error")
       }),
 
       ws.on("channel_analysis", (msg) => {
@@ -269,7 +270,7 @@ export default function useWebSocket() {
       ws.on("news_saved", (msg) => {
         addMessage({
           role: "system",
-          content: msg.message || `${msg.count} article(s) saved to Library.`,
+          content: localizeUiMessage(msg.message) || `${msg.count} bài viết đã lưu vào Thư viện.`,
         })
       }),
 
@@ -289,11 +290,11 @@ export default function useWebSocket() {
       ws.on("constraint_warning", (msg) => {
         addMessage({
           role: "system",
-          content: `${msg.message}`,
+          content: `${localizeUiMessage(msg.message)}`,
           severity: msg.severity,
           wizardId: msg.wizard_id,
         })
-        showSnackbar(msg.message, msg.severity === "error" ? "error" : "warning")
+        showSnackbar(localizeUiMessage(msg.message), msg.severity === "error" ? "error" : "warning")
       }),
 
       ws.on("morning_digest", (msg) => {
