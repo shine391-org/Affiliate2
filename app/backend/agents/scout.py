@@ -789,7 +789,8 @@ class ScoutAgent:
                     # ScoutResult is the current projection. Refresh fields that
                     # belong to the latest fetch while immutable repeated metric
                     # evidence remains append-only in RadarObservation.
-                    sr.job_id = job_id
+                    if not sr.job_id:
+                        sr.job_id = job_id
                     for field in (
                         "video_url",
                         "embed_url",
