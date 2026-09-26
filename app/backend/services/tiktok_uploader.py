@@ -15,7 +15,7 @@ from pathlib import Path
 import httpx
 
 from backend.config import settings
-from backend.core.exceptions import UploadError, UploadAuthError
+from backend.core.exceptions import UploadError, UploadAuthError, UploadOutcomeUncertainError
 
 logger = logging.getLogger(__name__)
 
@@ -245,7 +245,7 @@ async def _upload_via_api(
                     f"TikTok publish failed: {status_data.get('fail_reason') or 'Unknown'}"
                 )
 
-        raise UploadError(
+        raise UploadOutcomeUncertainError(
             "TikTok publish timed out without provider confirmation. TikTok may "
             "still be processing the post; check TikTok before retrying to avoid "
             "a duplicate post."
