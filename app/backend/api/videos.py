@@ -234,7 +234,7 @@ async def upload_video(video_id: str, body: dict, db: AsyncSession = Depends(get
         raise HTTPException(status_code=400, detail="Publish request must be an object")
     from backend.agents.uploader import (
         normalize_publish_platforms, published_destinations, disconnected_destinations,
-        approved_artifact_error,
+        approved_artifact_error, uncertain_publication_destinations,
     )
     from backend.agents.job_helper import create_job
     from backend.core.task_runner import run_upload as task_upload, dispatch
@@ -266,6 +266,13 @@ async def upload_video(video_id: str, body: dict, db: AsyncSession = Depends(get
         if duplicates:
             raise HTTPException(status_code=409,
                                 detail="Already published to: " + ", ".join(sorted(duplicates)))
+        uncertain = set(platforms) & await uncertain_publication_destinations(video_id)
+        if uncertain:
+            raise HTTPException(status_code=409, detail=(
+                "Publish outcome requires review before retrying: "
+                + ", ".join(sorted(uncertain))
+                + ". The provider may already have accepted this upload."
+            ))
         user_id = video.user_id or "local"
         settings = (await db.execute(select(UserSettings).where(
             UserSettings.user_id == user_id))).scalar_one_or_none()
