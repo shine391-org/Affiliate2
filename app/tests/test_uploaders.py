@@ -340,6 +340,10 @@ class TestTikTokUpload:
         assert out["publish_id"] == "pub_1"
         assert out["privacy_level"] == "PUBLIC_TO_EVERYONE"
         assert out["creator_username"] == "tester"
+        urls = [url for url, _ in c.posts]
+        assert urls[0].endswith("/post/publish/creator_info/query/")
+        assert urls[1].endswith("/post/publish/video/init/")
+        assert all("/inbox/video/init/" not in url for url in urls)
 
     async def test_the_whole_file_is_uploaded_in_content_range_chunks(
             self, tmp_path, monkeypatch):
