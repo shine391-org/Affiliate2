@@ -23,7 +23,7 @@ planner = PlannerAgent()
 intelligence = UserIntelligence()
 
 
-@router.get("/chat/capabilities")
+@router.get("/api/chat/capabilities")
 async def chat_capabilities():
     """User-facing, non-secret disclosure of what Chat can actually execute."""
     return PLANNER_CAPABILITIES
