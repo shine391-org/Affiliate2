@@ -85,6 +85,9 @@ export default function StudioLocalize({ source, sourcesLoading }) {
   const segments = detail?.transcript?.segments || []
   const chunks = detail?.chunks || []
   const qc = detail?.qc
+  const activeLocalization = Boolean(jobId) && (
+    !detail || ["pending", "running"].includes(detail?.job_status)
+  )
 
   const setStep = (value) => setParams((previous) => {
     const next = new URLSearchParams(previous)
@@ -110,7 +113,12 @@ export default function StudioLocalize({ source, sourcesLoading }) {
         next.set("step", "source")
         return next
       })
-      showSnackbar("Đã bắt đầu tác vụ bản địa hóa từ nguồn đã chọn trong Thư viện", "success")
+      showSnackbar(
+        data.reused
+          ? "Tác vụ giống hệt đang chạy — đã mở tác vụ hiện tại thay vì tạo bản sao."
+          : "Đã bắt đầu tác vụ bản địa hóa từ nguồn đã chọn trong Thư viện",
+        data.reused ? "info" : "success",
+      )
     } catch (error) {
       showSnackbar(error.response?.data?.detail || "Không thể bắt đầu bản địa hóa", "error")
     } finally {
@@ -144,7 +152,9 @@ export default function StudioLocalize({ source, sourcesLoading }) {
           {selectedProfile && <Alert severity="info" variant="outlined">C6 <strong>{selectedProfile.translation_model || "mặc định kết nối"}</strong> · C7 <strong>{selectedProfile.rewrite_model || "mặc định kết nối"}</strong>. Đây là hai mô hình độc lập.</Alert>}
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
             <Button variant="outlined" onClick={() => navigate("/settings?section=localization")}>Quản lý hồ sơ</Button>
-            <Button variant="contained" onClick={start} disabled={!source || !profileId || starting}>{starting ? "Đang bắt đầu…" : "Bắt đầu bản địa hóa"}</Button>
+            <Button variant="contained" onClick={start} disabled={!source || !profileId || starting || activeLocalization}>
+              {starting ? "Đang bắt đầu…" : activeLocalization ? "Tác vụ này đang xử lý…" : "Bắt đầu bản địa hóa"}
+            </Button>
           </Stack>
         </Stack>
       </Paper>
