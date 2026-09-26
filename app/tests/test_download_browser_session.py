@@ -106,7 +106,7 @@ def test_legacy_plaintext_cookie_exports_are_removed(monkeypatch, tmp_path):
     assert not newer.exists()
 
 
-async def _fake_resolved_douyin(url: str):
+async def _fake_resolved_douyin(url: str, cdp_url: str | None = None):
     from backend.services.douyin_media_resolver import ResolvedDouyinMedia
     return ResolvedDouyinMedia(
         url="https://v3-web.douyinvod.com/video.mp4?sig=abc",
