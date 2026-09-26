@@ -1,6 +1,7 @@
 import { Box, Typography, LinearProgress, Stack } from "@mui/material"
 import useAppStore from "../../store/appStore"
 import { jobTypeLabel } from "../videos/constants"
+import { localizeUiMessage } from "../../utils/localizeUiMessage"
 
 const JOB_COLORS = {
   scout: "primary", download: "info", generate: "warning", upload: "success",
@@ -14,7 +15,7 @@ export default function JobProgressCard({ jobId, jobType, message }) {
 
   const status = job.status || "running"
   const percent = job.percent || 0
-  const step = job.step || message || ""
+  const step = localizeUiMessage(job.step || message || "")
 
   const color = JOB_COLORS[jobType] || "primary"
   const label = jobTypeLabel(jobType)
