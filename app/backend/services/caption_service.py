@@ -1029,7 +1029,8 @@ async def burn_captions(
     method = reframe_method
     if target_aspect and target_aspect != "source":
         from backend.services.ffmpeg_service import (
-            ASPECT_DIMS, _probe_dimensions, pick_reframe_method,
+            ASPECT_DIMS, _probe_dimensions, labeled_reframe_filters,
+            pick_reframe_method,
         )
         target_dims = ASPECT_DIMS[target_aspect]
         if method == "auto":
@@ -1052,27 +1053,16 @@ async def burn_captions(
 
         if target_dims:
             target_w, target_h = target_dims
-            if method == "blur_fill":
-                filters.append(f"{current}split[original][bg]")
-                filters.append(
-                    f"[bg]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,"
-                    f"crop={target_w}:{target_h},boxblur=20:5[blurred]"
+            filters.extend(
+                labeled_reframe_filters(
+                    current,
+                    target_w,
+                    target_h,
+                    method,
+                    output_label="framed",
+                    prefix="caption_reframe",
                 )
-                filters.append(
-                    f"[original]scale={target_w}:{target_h}:"
-                    f"force_original_aspect_ratio=decrease[scaled]"
-                )
-                filters.append("[blurred][scaled]overlay=(W-w)/2:(H-h)/2[framed]")
-            elif method == "crop":
-                filters.append(
-                    f"{current}scale={target_w}:{target_h}:force_original_aspect_ratio=increase,"
-                    f"crop={target_w}:{target_h}[framed]"
-                )
-            else:
-                filters.append(
-                    f"{current}scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,"
-                    f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:black[framed]"
-                )
+            )
             current = "[framed]"
 
         filters.append(f"{current}ass='{escaped_ass}'[vout]")
