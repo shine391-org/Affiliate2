@@ -224,9 +224,15 @@ async def _upload_via_api(
                     status_resp.status_code,
                 )
                 continue
-            code, _ = _api_error(status_resp, "TikTok post status failed")
+            code, status_error = _api_error(
+                status_resp, "TikTok post status failed"
+            )
             if status_resp.status_code != 200 or (code and code != "ok"):
-                _raise_api_error(status_resp, "TikTok post status failed")
+                raise UploadOutcomeUncertainError(
+                    "TikTok accepted the upload, but the final status endpoint "
+                    f"could not confirm the result ({code or status_resp.status_code}): "
+                    f"{status_error}. Check TikTok before retrying."
+                )
 
             status_data = status_resp.json().get("data", {})
             status = status_data.get("status")
