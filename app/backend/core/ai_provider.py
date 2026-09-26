@@ -39,6 +39,9 @@ COMPATIBLE_PRESETS = {
     "ollama": "http://localhost:11434/v1",
     "lmstudio": "http://localhost:1234/v1",
     "vllm": "http://localhost:8000/v1",
+    # Google documents an OpenAI-compatible Gemini endpoint. This is a UI
+    # preset over the same compatible runtime, not a second provider engine.
+    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai/",
 }
 
 
@@ -61,8 +64,8 @@ PROVIDER_DEFAULTS = {
 # leaderboard at openrouter.ai/rankings. Harmless to send; helps us
 # track how much OSS-variant traffic flows through the gateway.
 _OPENROUTER_HEADERS = {
-    "HTTP-Referer": "https://github.com/openclaw-easy/ViralMint",
-    "X-Title": "ViralMint (OSS)",
+    "HTTP-Referer": "https://github.com/shine391-org/Affiliate2",
+    "X-Title": "Affiliate2",
 }
 
 
@@ -239,6 +242,8 @@ def make_ai_client(
             raise ValueError("Base URL is required for an OpenAI-compatible provider.")
         if not (model or "").strip():
             raise ValueError("Model ID is required for an OpenAI-compatible provider.")
+        if name == "gemini" and not (api_key or "").strip():
+            raise AIKeyMissingError("Google Gemini API key is required.")
         return AIClient(
             provider=AIProvider.COMPATIBLE,
             api_key=(api_key or "local"),
@@ -270,8 +275,16 @@ def _resolve_user_provider_and_key(user_settings) -> tuple[Optional[AIProvider],
         return None, None, None, None
 
     if provider_str in COMPATIBLE_PRESETS:
-        # Local presets must never inherit a stale cloud BYOK secret when the
-        # user switches providers. OpenAI SDK accepts a dummy local key.
+        # Local presets use a dummy key. Gemini is cloud-hosted and must keep
+        # its own BYOK secret while still sharing the compatible transport.
+        if provider_str == "gemini":
+            api_key = decrypt_safe(encrypted_key) if encrypted_key else ""
+            return (
+                AIProvider.COMPATIBLE,
+                api_key or None,
+                model or None,
+                compatible_base_url(provider_str, base_url),
+            )
         return (
             AIProvider.COMPATIBLE,
             "local",
