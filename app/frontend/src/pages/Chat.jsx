@@ -94,7 +94,7 @@ function ActiveJobsPanel() {
   return (
     <Box sx={{ px: 1.5, pb: 1 }}>
       <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 600, fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: 0.5 }}>
-        Active Jobs
+        Tác vụ đang chạy
       </Typography>
       <Stack spacing={0.5} sx={{ mt: 0.5 }}>
         {jobList.map((job) => {
@@ -157,8 +157,8 @@ const STARTER_SUGGESTIONS = [
   {
     icon: <SensorsIcon sx={{ fontSize: 28, color: "primary.main" }} />,
     title: "Phân tích kênh",
-    description: "Dán URL kênh YouTube hoặc TikTok để phân tích đầy đủ",
-    message: "Analyze a YouTube channel for me",
+    description: "Dán URL kênh YouTube, TikTok hoặc Douyin để phân tích bằng connector hỗ trợ",
+    message: "Phân tích một kênh YouTube cho tôi",
   },
   {
     icon: <AnalyticsIcon sx={{ fontSize: 28, color: "primary.main" }} />,
@@ -176,7 +176,7 @@ const STARTER_SUGGESTIONS = [
     icon: <NewspaperIcon sx={{ fontSize: 28, color: "primary.main" }} />,
     title: "Quét tin đang lên",
     description: "Tìm bài viết nóng và tạo video bình luận",
-    message: "Scout trending news",
+    message: "Quét tin đang thịnh hành",
   },
 ]
 
