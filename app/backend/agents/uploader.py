@@ -366,6 +366,7 @@ class UploadAgent:
                     publication_id,
                     platform,
                     "OUTCOME_UNKNOWN",
+                    result=e.provider_result,
                     error_message=str(e),
                 )
             except Exception as e:
