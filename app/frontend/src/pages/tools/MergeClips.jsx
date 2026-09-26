@@ -99,7 +99,7 @@ export default function ToolMergeClips() {
       }
       const ext = "." + (f.name.split(".").pop() || "").toLowerCase()
       if (!ACCEPT.split(",").includes(ext)) {
-        setError(`"${f.name}" is not a supported video format.`)
+        setError(`"${f.name}" không phải định dạng video được hỗ trợ.`)
         continue
       }
       valid.push({
