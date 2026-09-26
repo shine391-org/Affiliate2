@@ -7,7 +7,7 @@ import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline"
 import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline"
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline"
 import CancelIcon from "@mui/icons-material/Close"
-import { JOB_TYPE_LABEL, JOB_STATUS_COLOR } from "./constants"
+import { JOB_STATUS_COLOR, jobTypeLabel } from "./constants"
 
 const JOB_STATUS_LABEL = { running: "Đang chạy", pending: "Đang chờ", success: "Hoàn tất", failed: "Thất bại", cancelled: "Đã hủy" }
 
@@ -88,7 +88,7 @@ export default function JobHistoryTab({ jobs, jobTotal, onDelete, onBulkDelete, 
                 <WorkIcon sx={{ fontSize: 18, color: "info.main" }} />}
               <Box sx={{ flex: 1, minWidth: 0 }}>
                 <Stack direction="row" spacing={1} alignItems="center">
-                  <Chip label={JOB_TYPE_LABEL[j.job_type] || j.job_type} size="small" variant="outlined" sx={{ height: 20, fontSize: "0.65rem" }} />
+                  <Chip label={jobTypeLabel(j.job_type)} size="small" variant="outlined" sx={{ height: 20, fontSize: "0.65rem" }} />
                   <Chip label={JOB_STATUS_LABEL[j.status] || j.status} size="small" color={JOB_STATUS_COLOR[j.status] || "default"} sx={{ height: 20, fontSize: "0.65rem" }} />
                   {j.title && <Typography variant="body2" sx={{ fontWeight: 500, flex: 1 }} noWrap>{j.title}</Typography>}
                 </Stack>
