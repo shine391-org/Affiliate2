@@ -199,14 +199,14 @@ function JobRow({ job, onToast, onOpenResult, onCancel, onDelete }) {
         {job.state === "running" && (
           <Button size="small" sx={{ minWidth: 0, fontSize: "0.7rem" }}
             onClick={() => onCancel?.(job.id)}>
-            Cancel
+            Hủy
           </Button>
         )}
         {job.state === "failed" && (
           <Button size="small" startIcon={<ReplayRoundedIcon sx={{ fontSize: 15 }} />}
             sx={{ fontSize: "0.7rem" }}
             onClick={() => onToast?.("Mở công cụ đã tạo tác vụ để chạy lại")}>
-            Retry
+            Thử lại
           </Button>
         )}
         {job.state === "done" && job.result_key && (
