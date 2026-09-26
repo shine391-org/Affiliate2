@@ -23,7 +23,7 @@ import AspectRatioIcon from "@mui/icons-material/AspectRatio"
 import WarningAmberIcon from "@mui/icons-material/WarningAmber"
 import MovieCreationIcon from "@mui/icons-material/MovieCreation"
 import SearchIcon from "@mui/icons-material/Search"
-import Làm mớiIcon from "@mui/icons-material/Làm mới"
+import RefreshIcon from "@mui/icons-material/Refresh"
 import SortIcon from "@mui/icons-material/Sort"
 import CloseIcon from "@mui/icons-material/Close"
 import CheckCircleIcon from "@mui/icons-material/CheckCircle"
@@ -789,7 +789,7 @@ export default function ClipStudio({ workflow = "manual" }) {
           {/* Làm mới */}
           <Tooltip title="Làm mới nguồn & clip">
             <Button size="small" variant="outlined" onClick={() => { setLoading(true); fetchData() }}
-              startIcon={<Làm mớiIcon fontSize="small" />}
+              startIcon={<RefreshIcon fontSize="small" />}
               sx={{ textTransform: "none" }}>
               Làm mới
             </Button>
