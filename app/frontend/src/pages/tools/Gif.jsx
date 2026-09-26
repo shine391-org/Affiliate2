@@ -23,7 +23,7 @@ export default function ToolGif() {
       description="Chuyển clip thành GIF động với bảng màu tối ưu"
       icon={<GifOutlinedIcon fontSize="large" />}
       endpoint="/api/tools/gif"
-      processLabel="Make GIF"
+      processLabel="Tạo GIF"
       downloadLabel="Tải GIF"
       fieldBuilder={() => ({
         fps, width,
