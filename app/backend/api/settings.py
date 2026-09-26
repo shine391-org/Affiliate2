@@ -42,6 +42,7 @@ class SettingsResponse(BaseModel):
     # Service API keys (BYOK) — booleans only, never the plaintext key
     youtube_api_key_set: bool = False
     huggingface_token_set: bool = False
+    meta_page_access_token_set: bool = False
 
     # OAuth / browser-session status
     download_cookie_browser: str = "auto"
@@ -51,6 +52,11 @@ class SettingsResponse(BaseModel):
     youtube_connected: bool = False
     tiktok_upload_connected: bool = False
     tiktok_legacy_cookie_present: bool = False
+    facebook_page_connected: bool = False
+    meta_page_id: Optional[str] = None
+    meta_page_name: Optional[str] = None
+    instagram_connected: bool = False
+    instagram_user_id: Optional[str] = None
 
     # Preferences
     preferred_voice_id: str = "21m00Tcm4TlvDq8ikWAM"
@@ -130,6 +136,7 @@ async def get_settings():
         ai_api_key_set=bool(s.ai_api_key_encrypted),
         youtube_api_key_set=bool(s.youtube_api_key_encrypted),
         huggingface_token_set=bool(s.huggingface_token_encrypted),
+        meta_page_access_token_set=bool(getattr(s, "meta_page_access_token_encrypted", None)),
         download_cookie_browser=normalize_download_browser(s.download_cookie_browser),
         download_cookie_profile=normalize_download_profile(s.download_cookie_profile),
         douyin_cdp_url=normalize_douyin_cdp_url(getattr(s, "douyin_cdp_url", None)),
@@ -140,6 +147,17 @@ async def get_settings():
         # must not make Direct Post look ready.
         tiktok_upload_connected=bool(s.tiktok_upload_token_encrypted),
         tiktok_legacy_cookie_present=bool(s.tiktok_cookie_encrypted),
+        facebook_page_connected=bool(
+            getattr(s, "meta_page_access_token_encrypted", None)
+            and getattr(s, "meta_page_id", None)
+        ),
+        meta_page_id=getattr(s, "meta_page_id", None),
+        meta_page_name=getattr(s, "meta_page_name", None),
+        instagram_connected=bool(
+            getattr(s, "meta_page_access_token_encrypted", None)
+            and getattr(s, "instagram_user_id", None)
+        ),
+        instagram_user_id=getattr(s, "instagram_user_id", None),
         preferred_voice_id=s.preferred_voice_id or "21m00Tcm4TlvDq8ikWAM",
         tts_provider=s.tts_provider or "edge_tts",
         preferred_tts_voice=s.preferred_tts_voice,
@@ -191,6 +209,18 @@ async def update_settings(update: SettingsUpdate):
             s.youtube_api_key_encrypted = encrypt(update.youtube_api_key) if update.youtube_api_key else None
         if update.huggingface_token is not None:
             s.huggingface_token_encrypted = encrypt(update.huggingface_token) if update.huggingface_token else None
+        if update.meta_page_access_token is not None:
+            s.meta_page_access_token_encrypted = (
+                encrypt(update.meta_page_access_token)
+                if update.meta_page_access_token else None
+            )
+            if not update.meta_page_access_token:
+                s.meta_page_name = None
+                s.instagram_user_id = None
+        if update.meta_page_id is not None:
+            s.meta_page_id = update.meta_page_id.strip() or None
+            s.meta_page_name = None
+            s.instagram_user_id = None
 
         if update.download_cookie_browser is not None:
             try:
@@ -547,6 +577,60 @@ async def tiktok_upload_callback(code: str = Query(...), state: str = Query(None
     except Exception as e:
         logger.error(f"TikTok OAuth callback failed: {e}")
         return RedirectResponse(f"/?tiktok_error={str(e)[:200]}")
+
+
+class MetaPublishProbeRequest(BaseModel):
+    access_token: Optional[str] = None
+    page_id: Optional[str] = None
+
+
+@router.post("/settings/meta/test")
+async def test_meta_publish(body: MetaPublishProbeRequest):
+    """Validate a Meta Page token and discover its linked Instagram account."""
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(UserSettings).where(UserSettings.user_id == "local")
+        )
+        row = result.scalar_one_or_none()
+
+    token = (body.access_token or "").strip()
+    if not token and row and getattr(row, "meta_page_access_token_encrypted", None):
+        token = decrypt_safe(row.meta_page_access_token_encrypted) or ""
+    page_id = (body.page_id or "").strip() or (
+        getattr(row, "meta_page_id", None) if row else None
+    )
+    if not token:
+        raise HTTPException(status_code=400, detail="Meta Page access token is required.")
+    if not page_id:
+        raise HTTPException(status_code=400, detail="Facebook Page ID is required.")
+
+    from backend.services.meta_uploader import inspect_meta_page
+    try:
+        info = await inspect_meta_page(page_id=page_id, access_token=token)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Meta connection failed: {str(exc)[:300]}",
+        ) from exc
+
+    # Persist only verified identity metadata; plaintext token is persisted only
+    # when the caller explicitly supplied it in this request.
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(UserSettings).where(UserSettings.user_id == "local")
+        )
+        target = result.scalar_one_or_none()
+        if not target:
+            target = UserSettings(user_id="local")
+            db.add(target)
+        if body.access_token is not None:
+            target.meta_page_access_token_encrypted = encrypt(token)
+        target.meta_page_id = str(info["page_id"])
+        target.meta_page_name = info.get("page_name") or None
+        target.instagram_user_id = info.get("instagram_user_id") or None
+        await db.commit()
+
+    return info
 
 
 class DownloadSessionProbeRequest(BaseModel):
