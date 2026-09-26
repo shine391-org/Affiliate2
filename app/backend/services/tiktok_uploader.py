@@ -202,28 +202,35 @@ async def _upload_via_api(
                     )
                 logger.info("TikTok upload chunk %d/%d", chunk_idx + 1, total_chunks)
 
-        # Processing time is not guaranteed. Keep the bounded synchronous poll
-        # used by the existing job flow; timeout is reported as uncertain/fail
-        # rather than pretending the provider confirmed publication.
+        # Once every byte has been accepted, any transport/parsing/status
+        # ambiguity is potentially side-effectful: TikTok may still finish the
+        # post. Keep polling through transient errors, but never downgrade the
+        # final result to ordinary FAILED or discard the provider publish_id.
+        last_status_error = ""
         for _ in range(60):  # up to ~2 minutes
             await asyncio.sleep(2)
-            status_resp = await client.post(
-                f"{TIKTOK_API}{_STATUS}",
-                headers={
-                    "Authorization": f"Bearer {access_token}",
-                    "Content-Type": "application/json; charset=UTF-8",
-                },
-                json={"publish_id": publish_id},
-            )
-            # A transient provider 5xx while polling does not tell us the
-            # post failed; retry within the same bounded window. Auth/contract
-            # errors still fail immediately.
+            try:
+                status_resp = await client.post(
+                    f"{TIKTOK_API}{_STATUS}",
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "Content-Type": "application/json; charset=UTF-8",
+                    },
+                    json={"publish_id": publish_id},
+                )
+            except Exception as exc:
+                last_status_error = f"transport error: {exc}"
+                logger.warning("TikTok status poll transport error; retrying: %s", exc)
+                continue
+
             if status_resp.status_code >= 500:
+                last_status_error = f"HTTP {status_resp.status_code}"
                 logger.warning(
                     "TikTok status poll returned HTTP %s; retrying",
                     status_resp.status_code,
                 )
                 continue
+
             code, status_error = _api_error(
                 status_resp, "TikTok post status failed"
             )
@@ -231,10 +238,21 @@ async def _upload_via_api(
                 raise UploadOutcomeUncertainError(
                     "TikTok accepted the upload, but the final status endpoint "
                     f"could not confirm the result ({code or status_resp.status_code}): "
-                    f"{status_error}. Check TikTok before retrying."
+                    f"{status_error}. Check TikTok before retrying.",
+                    provider_result={"publish_id": publish_id},
                 )
 
-            status_data = status_resp.json().get("data", {})
+            try:
+                status_data = status_resp.json().get("data", {})
+            except Exception as exc:
+                last_status_error = f"malformed status response: {exc}"
+                logger.warning("TikTok status response was not valid JSON; retrying")
+                continue
+
+            if not isinstance(status_data, dict):
+                last_status_error = "status response data was not an object"
+                continue
+
             status = status_data.get("status")
             if status == "PUBLISH_COMPLETE":
                 public_ids = status_data.get("publicaly_available_post_id") or []
@@ -251,10 +269,12 @@ async def _upload_via_api(
                     f"TikTok publish failed: {status_data.get('fail_reason') or 'Unknown'}"
                 )
 
+        suffix = f" Last status error: {last_status_error}." if last_status_error else ""
         raise UploadOutcomeUncertainError(
             "TikTok publish timed out without provider confirmation. TikTok may "
             "still be processing the post; check TikTok before retrying to avoid "
-            "a duplicate post."
+            f"a duplicate post.{suffix}",
+            provider_result={"publish_id": publish_id},
         )
 
 
