@@ -10,8 +10,9 @@ const useAppStore = create((set, get) => ({
 
   setSessions: (sessions) => set({ sessions }),
   setActiveSessionId: (id) => {
-    if (id) sessionStorage.setItem("vm_active_session", id)
-    else sessionStorage.removeItem("vm_active_session")
+    if (id) sessionStorage.setItem("affiliate2_active_session", id)
+    else sessionStorage.removeItem("affiliate2_active_session")
+    sessionStorage.removeItem("vm_active_session")
     set({ activeSessionId: id })
   },
 
