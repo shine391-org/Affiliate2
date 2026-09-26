@@ -112,7 +112,7 @@ export default function ToolMetadata() {
       description="Tạo metadata SEO cho video, bản chép lời hoặc chủ đề"
       icon={<LabelOutlinedIcon fontSize="large" />}
       endpoint="/api/tools/metadata"
-      processLabel="Generate"
+      processLabel="Tạo metadata"
       downloadLabel="Tải JSON"
       hideFileInput={mode !== "file"}
       canSubmit={canSubmit}
