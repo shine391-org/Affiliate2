@@ -49,7 +49,7 @@ async def inspect_meta_page(*, page_id: str, access_token: str) -> dict:
     if not page_id or not access_token:
         raise UploadAuthError("Meta Page ID and Page access token are required.")
 
-    fields = "id,name,instagram_business_account"
+    fields = "id,name,instagram_business_account,connected_instagram_account"
     async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
         response = await client.get(
             f"{GRAPH_API_BASE}/{page_id}",
@@ -58,7 +58,7 @@ async def inspect_meta_page(*, page_id: str, access_token: str) -> dict:
     if response.status_code != 200:
         _raise_graph_error(response, "Meta Page verification")
     payload = response.json()
-    ig = payload.get("instagram_business_account") or {}
+    ig = payload.get("instagram_business_account") or payload.get("connected_instagram_account") or {}
     return {
         "ok": True,
         "page_id": str(payload.get("id") or page_id),
@@ -80,15 +80,24 @@ async def _upload_binary(
         "Authorization": f"OAuth {access_token}",
         "offset": "0",
         "file_size": str(size),
+        "Content-Length": str(size),
         "Content-Type": "application/octet-stream",
     }
-    async with httpx.AsyncClient(timeout=None, follow_redirects=True) as client:
+
+    async def _chunks():
         with file_path.open("rb") as handle:
-            response = await client.post(
-                upload_url,
-                headers=headers,
-                content=handle,
-            )
+            while True:
+                chunk = await asyncio.to_thread(handle.read, 4 * 1024 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+
+    async with httpx.AsyncClient(timeout=None, follow_redirects=True) as client:
+        response = await client.post(
+            upload_url,
+            headers=headers,
+            content=_chunks(),
+        )
     if response.status_code not in {200, 201}:
         _raise_graph_error(response, "Meta binary upload")
 
