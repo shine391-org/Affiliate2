@@ -23,6 +23,7 @@ from backend.services.download_browser_session import (
     SUPPORTED_DOWNLOAD_BROWSERS,
     normalize_download_browser,
     normalize_download_profile,
+    normalize_douyin_cdp_url,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ class SettingsResponse(BaseModel):
     # OAuth / browser-session status
     download_cookie_browser: str = "auto"
     download_cookie_profile: Optional[str] = None
+    douyin_cdp_url: str = "http://127.0.0.1:9222"
     youtube_channel_title: Optional[str] = None
     youtube_connected: bool = False
     tiktok_upload_connected: bool = False
@@ -87,6 +89,7 @@ class SettingsUpdate(BaseModel):
     # request/model; only the local browser/profile selector is persisted.
     download_cookie_browser: Optional[str] = None
     download_cookie_profile: Optional[str] = None
+    douyin_cdp_url: Optional[str] = None
 
     # Preferences
     preferred_voice_id: Optional[str] = None
@@ -129,6 +132,7 @@ async def get_settings():
         huggingface_token_set=bool(s.huggingface_token_encrypted),
         download_cookie_browser=normalize_download_browser(s.download_cookie_browser),
         download_cookie_profile=normalize_download_profile(s.download_cookie_profile),
+        douyin_cdp_url=normalize_douyin_cdp_url(getattr(s, "douyin_cdp_url", None)),
         youtube_channel_title=s.youtube_channel_title,
         youtube_connected=bool(s.youtube_credentials_json_encrypted),
         # Canonical Publish is connected only when the official OAuth token is
@@ -198,6 +202,11 @@ async def update_settings(update: SettingsUpdate):
                 )
         if update.download_cookie_profile is not None:
             s.download_cookie_profile = normalize_download_profile(update.download_cookie_profile)
+        if update.douyin_cdp_url is not None:
+            try:
+                s.douyin_cdp_url = normalize_douyin_cdp_url(update.douyin_cdp_url)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         # Preference fields
         if update.preferred_voice_id is not None:
@@ -530,6 +539,82 @@ async def tiktok_upload_callback(code: str = Query(...), state: str = Query(None
 class DownloadSessionProbeRequest(BaseModel):
     browser: Optional[str] = None
     profile: Optional[str] = None
+
+
+class DownloadSessionHealthRequest(BaseModel):
+    browser: Optional[str] = None
+    profile: Optional[str] = None
+    douyin_cdp_url: Optional[str] = None
+
+
+@router.post("/settings/download-session/health")
+async def download_session_health(body: DownloadSessionHealthRequest):
+    """Report cookie readability and authenticated Douyin CDP readiness separately."""
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(UserSettings).where(UserSettings.user_id == "local")
+        )
+        row = result.scalar_one_or_none()
+
+    try:
+        browser = normalize_download_browser(
+            body.browser if body.browser is not None
+            else getattr(row, "download_cookie_browser", None)
+        )
+        profile = normalize_download_profile(
+            body.profile if body.browser is not None
+            else getattr(row, "download_cookie_profile", None)
+        )
+        cdp_url = normalize_douyin_cdp_url(
+            body.douyin_cdp_url if body.douyin_cdp_url is not None
+            else getattr(row, "douyin_cdp_url", None)
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    from backend.services.ytdlp_service import probe_browser_session
+    cookie = await probe_browser_session(browser, profile)
+
+    cdp = {
+        "url": cdp_url,
+        "connected": False,
+        "authenticated": False,
+        "error": None,
+    }
+    try:
+        from backend.services.douyin_browser_session import open_douyin_cdp_session
+        async with open_douyin_cdp_session(
+            cdp_url,
+            connect_timeout_ms=4_000,
+            navigation_timeout_ms=8_000,
+        ) as session:
+            cdp.update({
+                "connected": True,
+                "authenticated": True,
+                "cookie_count": len(session.cookie_dict),
+                "has_ms_token": bool(session.ms_token),
+                "user_agent": session.user_agent[:160] if session.user_agent else "",
+            })
+    except PermissionError as exc:
+        message = str(exc)
+        cdp["connected"] = "Cannot connect to Douyin CDP" not in message
+        cdp["error"] = message[:500]
+    except Exception as exc:
+        cdp["error"] = f"{type(exc).__name__}: {str(exc)[:400]}"
+
+    return {
+        "browser": browser,
+        "profile": profile,
+        "cookie": cookie,
+        "douyin_cdp": cdp,
+        "douyin_ready": bool(
+            (cookie.get("ok") and int(cookie.get("douyin_cookie_count") or 0) > 0)
+            or cdp["authenticated"]
+        ),
+        "tiktok_ready": bool(
+            cookie.get("ok") and int(cookie.get("tiktok_cookie_count") or 0) > 0
+        ),
+    }
 
 
 @router.post("/settings/download-session/test")
