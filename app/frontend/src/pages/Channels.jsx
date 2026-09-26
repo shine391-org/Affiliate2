@@ -439,9 +439,9 @@ function ChannelDetail({ channel, onBack }) {
         })
 
         const stats = [
-          { label: "Total Views", value: formatCount(totalViews) },
-          { label: "Avg Views", value: formatCount(avgViews) },
-          { label: "Median Views", value: formatCount(medianViews) },
+          { label: "Tổng lượt xem", value: formatCount(totalViews) },
+          { label: "Lượt xem TB", value: formatCount(avgViews) },
+          { label: "Trung vị lượt xem", value: formatCount(medianViews) },
           { label: "Engagement", value: `${engagementRate}%` },
           { label: "30 ngày qua", value: `${recentVideos.length} video` },
           { label: "Video nổi bật", value: formatCount(topPerformer?.view_count || 0) + " lượt xem" },
