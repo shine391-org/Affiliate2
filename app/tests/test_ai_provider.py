@@ -180,6 +180,40 @@ def test_make_compatible_client_requires_base_url():
         make_ai_client("compatible", model="x")
 
 
+def test_gemini_preset_uses_official_compatible_endpoint_and_byok_key():
+    s = SimpleNamespace(
+        ai_provider="gemini",
+        ai_api_key_encrypted=encrypt("AIza-test"),
+        ai_model="gemini-3.8-flash",
+        ai_base_url=None,
+    )
+    provider, key, model, base_url = _resolve_user_provider_and_key(s)
+    assert provider == AIProvider.COMPATIBLE
+    assert key == "AIza-test"
+    assert model == "gemini-3.8-flash"
+    assert base_url == "https://generativelanguage.googleapis.com/v1beta/openai"
+
+
+def test_make_gemini_client_requires_key_but_reuses_compatible_runtime():
+    with pytest.raises(AIKeyMissingError, match="Gemini API key"):
+        make_ai_client("gemini", model="gemini-3.8-flash")
+
+    client = make_ai_client(
+        "gemini",
+        api_key="AIza-test",
+        model="gemini-3.8-flash",
+    )
+    assert client.provider == AIProvider.COMPATIBLE
+    assert client.api_key == "AIza-test"
+    assert client.model == "gemini-3.8-flash"
+    assert client.base_url == "https://generativelanguage.googleapis.com/v1beta/openai"
+
+
+def test_openrouter_attribution_uses_affiliate2_not_donor_brand():
+    assert "Affiliate2" in ap._OPENROUTER_HEADERS["X-Title"]
+    assert "ViralMint" not in str(ap._OPENROUTER_HEADERS)
+
+
 def test_local_preset_never_reuses_stored_cloud_secret():
     s = SimpleNamespace(
         ai_provider="ollama",
@@ -192,6 +226,23 @@ def test_local_preset_never_reuses_stored_cloud_secret():
     assert key == "local"
     assert model == "qwen3:8b"
     assert base_url == "http://localhost:11434/v1"
+
+
+def test_env_named_gemini_uses_gemini_key_and_compatible_runtime():
+    with patch.multiple(
+        ap.settings,
+        AI_PROVIDER="gemini",
+        AI_MODEL="gemini-3.8-flash",
+        GEMINI_API_KEY="AIza-env",
+        ANTHROPIC_API_KEY="",
+        OPENAI_API_KEY="",
+        OPENROUTER_API_KEY="",
+    ):
+        c = get_ai_client(None)
+    assert c.provider == AIProvider.COMPATIBLE
+    assert c.api_key == "AIza-env"
+    assert c.model == "gemini-3.8-flash"
+    assert c.base_url == "https://generativelanguage.googleapis.com/v1beta/openai"
 
 
 def test_env_compatible_local_can_run_without_api_key():

@@ -196,8 +196,12 @@ export default function LocalizationProfilesSection({ settings }) {
   return (
     <Stack spacing={2}>
       <Alert severity="info" variant="outlined">
-        Kết nối và thông tin xác thực nằm trong Cài đặt. Hồ sơ này chỉ lưu các mặc định sản xuất có thể dùng lại:
-        Chính sách cho dịch C6, viết lại nhịp C7, ASR, giọng/nhịp, âm thanh/kết xuất và QC.
+        <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>
+          Hồ sơ bản địa hóa ghép 4 lớp độc lập
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          C6 = AI dịch nội dung · C7 = AI viết lại cho vừa thời lượng · TTS = tạo giọng đọc · Audio/Render/QC = xử lý và kiểm tra đầu ra. API key/endpoint dùng chung vẫn thuộc Kết nối AI hoặc TTS; hồ sơ này chỉ lưu override và chính sách sản xuất.
+        </Typography>
       </Alert>
 
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
@@ -307,8 +311,8 @@ export default function LocalizationProfilesSection({ settings }) {
       <Accordion disableGutters>
         <AccordionSummary expandIcon={<ExpandMoreOutlinedIcon />}>
           <Box>
-            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Giọng đọc & Nhịp (C7)</Typography>
-            <Typography variant="caption" color="text.secondary">Mô hình viết lại độc lập, giọng mặc định và chính sách nhịp</Typography>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Viết lại thời lượng (C7) & TTS</Typography>
+            <Typography variant="caption" color="text.secondary">C7 quyết định câu chữ/độ dài; TTS là bước sau, chỉ tạo audio từ câu đã chốt</Typography>
           </Box>
         </AccordionSummary>
         <AccordionDetails>
@@ -340,9 +344,9 @@ export default function LocalizationProfilesSection({ settings }) {
             />
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
               <FormControl size="small" fullWidth>
-                <InputLabel>Nhà cung cấp TTS</InputLabel>
-                <Select value={draft.tts_provider || ""} label="Nhà cung cấp TTS" onChange={(e) => patch("tts_provider", e.target.value || null)}>
-                  <MenuItem value=""><em>Kế thừa kết nối TTS</em></MenuItem>
+                <InputLabel>Ghi đè TTS cho hồ sơ</InputLabel>
+                <Select value={draft.tts_provider || ""} label="Ghi đè TTS cho hồ sơ" onChange={(e) => patch("tts_provider", e.target.value || null)}>
+                  <MenuItem value=""><em>Kế thừa kết nối TTS dùng chung</em></MenuItem>
                   {["edge_tts", "openai_tts", "openai_compatible_tts", "azure_tts", "elevenlabs", "gpt_sovits"].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
                 </Select>
               </FormControl>
@@ -488,8 +492,8 @@ export default function LocalizationProfilesSection({ settings }) {
       <Accordion disableGutters>
         <AccordionSummary expandIcon={<ExpandMoreOutlinedIcon />}>
           <Box>
-            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Âm thanh / Kết xuất / QC</Typography>
-            <Typography variant="caption" color="text.secondary">Mặc định đầu ra, không phải thông tin xác thực nhà cung cấp</Typography>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Audio treatment / Kết xuất / QC</Typography>
+            <Typography variant="caption" color="text.secondary">Xử lý sau TTS: nền/ducking, render và kiểm tra chất lượng; không đổi provider hay giọng đọc</Typography>
           </Box>
         </AccordionSummary>
         <AccordionDetails>

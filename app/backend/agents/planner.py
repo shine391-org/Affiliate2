@@ -22,20 +22,81 @@ from backend.config import settings
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are ViralMint — the most capable AI content strategy assistant.
-You are proactive, resourceful, and speak like a sharp colleague who always has the next move ready.
-You have memory across sessions and know what the user was working on before.
+PLANNER_ACTION_TYPES = frozenset({
+    "start_scout",
+    "analyze_channel",
+    "download_channel_videos",
+    "download_url",
+    "start_wizard",
+    "start_download",
+    "start_generate",
+    "start_upload",
+    "show_scout_results",
+    "show_downloaded",
+    "show_videos",
+    "show_video",
+    "show_publish_status",
+    "show_performance",
+    "show_youtube_performance",
+    "show_outperforming_videos",
+    "show_latest_performance_snapshot",
+    "show_job_status",
+    "content_calendar",
+    "start_news_scout",
+    "analyze_url",
+    "save_news_to_library",
+})
 
-## Your Full Capabilities
+PLANNER_CAPABILITIES = {
+    "surface": "Affiliate2 action agent",
+    "can": [
+        {
+            "id": "discover",
+            "label": "Quét & nghiên cứu",
+            "detail": "Scout video/news và đọc dữ liệu kênh qua các connector Affiliate2 hỗ trợ.",
+        },
+        {
+            "id": "acquire",
+            "label": "Tải & phân tích",
+            "detail": "Khởi chạy downloader, transcription và analyzer đã tích hợp trong ứng dụng.",
+        },
+        {
+            "id": "create",
+            "label": "Tạo nội dung",
+            "detail": "Khởi chạy pipeline tạo video từ asset trong Library.",
+        },
+        {
+            "id": "inspect",
+            "label": "Đọc trạng thái",
+            "detail": "Đọc Library, video, job, publish status và performance từ dữ liệu canonical.",
+        },
+        {
+            "id": "publish",
+            "label": "Khởi chạy publish đã duyệt",
+            "detail": "Chỉ khởi chạy publish cho GeneratedVideo đã được người dùng phê duyệt rõ ràng.",
+        },
+    ],
+    "cannot": [
+        "Không phải computer-use agent: không tự bấm chuột hoặc điều khiển mọi màn hình trong ứng dụng.",
+        "Không tự phê duyệt hoặc bỏ qua gate publish của người dùng.",
+        "Không có action backend thì chỉ có thể trả lời/giải thích, không giả vờ đã thực hiện.",
+    ],
+}
 
-You can do ANYTHING related to video content strategy:
+SYSTEM_PROMPT = """You are the Affiliate2 AI action assistant.
+You are proactive, resourceful, concise, and operate only through capabilities exposed by Affiliate2.
+You have conversation context and application state supplied by the backend.
 
-1. **Scout** — Find trending videos across ANY platform. YouTube, TikTok, Douyin, and Bilibili have dedicated/native search paths. Other supported platforms may use yt-dlp dynamic search. Never describe a YouTube cross-post search as native Bilibili discovery.
-2. **Download ANY video from ANY platform** — 1000+ sites supported via yt-dlp. You NEVER refuse a download request. If a user gives you a URL, you download it — period.
-3. **Transcribe & Analyze** — Extract transcripts, hooks, structure, tone, viral factors from any downloaded video
-4. **Generate original videos** — Script → AI voice → AI visuals → captions → finished MP4
-5. **Publish** — Send an already human-approved GeneratedVideo to YouTube/TikTok. Approval is a separate gate and never happens automatically.
-6. **Direct URL operations** — User pastes a URL? Download it. Analyze it. No questions asked. NEVER say "I don't support that platform". You support ALL platforms.
+## Your Actual Capabilities
+
+1. **Scout** — Search supported discovery providers, including native/dedicated paths where configured. Never claim a platform is native when it is a fallback/cross-post source.
+2. **Download** — Start the application's downloader for URLs supported by the configured download stack. Report provider/auth/rate-limit failures honestly.
+3. **Transcribe & Analyze** — Run the app's transcription/analyzer workflows on downloaded assets.
+4. **Generate original videos** — Start the existing generation pipeline from Library assets.
+5. **Inspect canonical state** — Read jobs, Library/generated videos, publish state and performance through explicit backend actions.
+6. **Publish** — Start publish only for an already human-approved GeneratedVideo and only to configured/supported destinations. Approval is a separate gate and never happens automatically.
+
+You are NOT a generic computer-use agent. You cannot click arbitrary UI controls, operate unrelated desktop apps, bypass approval/authentication, or claim an action happened when no backend action exists.
 
 ## CRITICAL Behavior Rules
 
@@ -100,10 +161,10 @@ Before sending your response, verify: "Did I include an <action> block?" If the 
 - If unsure whether the user wants a new action, ASK — don't guess and trigger one.
 
 ### Handle URLs Intelligently
-- If the user shares a **single video URL** from ANY platform, use `download_url` to download and analyze it immediately. We support 1000+ sites.
+- If the user shares a **single video URL**, use `download_url` and let the downloader report whether that URL/provider is supported and authenticated.
 - If the user shares a **channel or playlist URL** (/@username, /channel/, /playlist?), use `analyze_channel` first to show a lightweight overview. Do NOT download all videos immediately.
 - After showing channel analysis, suggest: "Want me to download the top 5 and do a deep analysis?"
-- **NEVER say "I don't support this platform" or "I can't download from X".** We use yt-dlp which supports virtually every video platform. Just use `download_url` with whatever URL the user gives you.
+- Do not guess support. Start the canonical downloader for a concrete URL and report its real result; never invent a successful download.
 
 ### Be Proactive
 - ALWAYS suggest the next logical step. Never leave the user hanging.
@@ -150,7 +211,7 @@ Output these JSON blocks at the END of your response to trigger actions:
 <action>{{"type": "download_channel_videos", "url": "https://youtube.com/@ChannelName", "max_videos": 5}}</action>
 <action>{{"type": "start_download", "scout_result_ids": ["id1", "id2"]}}</action>
 <action>{{"type": "start_generate", "downloaded_video_id": "uuid"}}</action>
-<action>{{"type": "start_upload", "generated_video_id": "uuid", "platforms": ["youtube", "tiktok"]}}</action>
+<action>{{"type": "start_upload", "generated_video_id": "uuid", "platforms": ["youtube", "tiktok", "facebook", "instagram"]}}</action>
 Use `start_upload` only for a GeneratedVideo that the user has already explicitly approved in Publish. Never infer approval from "looks good", generation success, or a prior upload.
 <action>{{"type": "start_wizard", "wizard_id": "youtube_auth"}}</action>
 <action>{{"type": "show_scout_results"}}</action>
@@ -201,7 +262,7 @@ PROACTIVE news behavior:
 - `analyze_channel` — User shares a channel/playlist URL (/@, /channel/, /c/, /playlist) and wants to understand it. ALWAYS use this first for channel URLs. Never jump straight to downloading an entire channel.
 - `download_url` — User shares a SINGLE video URL (youtube.com/watch?v=xxx) and wants to download/analyze it.
 - `download_channel_videos` — User has ALREADY seen the channel analysis summary and explicitly asks to download videos from that channel. Only use AFTER analyze_channel.
-- `start_scout` — User wants to search by niche/topic across platforms. You can use ANY platform name in the platforms list — the system handles it dynamically. Never refuse a platform.
+- `start_scout` — User wants to search by niche/topic across platforms. Use only platform/provider names the Affiliate2 scout registry supports; if a requested provider is unavailable, report that state instead of inventing coverage.
 - `start_download` — Download specific scout results by ID.
 - `show_downloaded` — User asks about their downloaded/analyzed videos. Shows the list inline in chat with generate buttons.
 - `show_videos` — User asks about generated assets. Return the canonical recent GeneratedVideo list in chat.
@@ -477,7 +538,7 @@ class PlannerAgent:
             ai = get_ai_client(user_settings)
         except Exception:
             welcome = (
-                "Welcome to ViralMint!\n\n"
+                "Affiliate2 AI chưa có nhà cung cấp AI hoạt động.\n\n"
                 "To get started, set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in your `.env` file, "
                 "or configure your provider and key in **Settings**."
             )
@@ -798,10 +859,13 @@ class PlannerAgent:
 
     async def _dispatch_action(self, action: dict, user_settings, user_id: str):
         if not isinstance(action, dict):
-            await self._followup("Invalid action: expected an object.")
+            logger.warning("Ignoring non-object planner action: %r", action)
             return
         action_type = action.get("type")
         logger.info("DISPATCH action=%s | user=%s | payload=%s", action_type, user_id, json.dumps(action, ensure_ascii=False)[:200])
+        if action_type not in PLANNER_ACTION_TYPES:
+            logger.warning("Ignoring unsupported planner action type: %r", action_type)
+            return
         if action_type in FACTUAL_ACTIONS:
             await self._show_native_fact(action_type, action, user_id)
             return

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react"
 import {
-  Box, Typography, Button, Stack, CircularProgress, LinearProgress,
-  List, ListItemButton, ListItemText, IconButton,
+  Alert, Box, Button, Chip, CircularProgress, LinearProgress,
+  List, ListItemButton, ListItemText, IconButton, Stack, Typography,
   Divider, Dialog, DialogTitle, DialogContent, DialogActions,
 } from "@mui/material"
 import AddIcon from "@mui/icons-material/Add"
@@ -94,7 +94,7 @@ function ActiveJobsPanel() {
   return (
     <Box sx={{ px: 1.5, pb: 1 }}>
       <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 600, fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: 0.5 }}>
-        Active Jobs
+        Tác vụ đang chạy
       </Typography>
       <Stack spacing={0.5} sx={{ mt: 0.5 }}>
         {jobList.map((job) => {
@@ -157,8 +157,8 @@ const STARTER_SUGGESTIONS = [
   {
     icon: <SensorsIcon sx={{ fontSize: 28, color: "primary.main" }} />,
     title: "Phân tích kênh",
-    description: "Dán URL kênh YouTube hoặc TikTok để phân tích đầy đủ",
-    message: "Analyze a YouTube channel for me",
+    description: "Dán URL kênh YouTube, TikTok hoặc Douyin để phân tích bằng connector hỗ trợ",
+    message: "Phân tích một kênh YouTube cho tôi",
   },
   {
     icon: <AnalyticsIcon sx={{ fontSize: 28, color: "primary.main" }} />,
@@ -176,7 +176,7 @@ const STARTER_SUGGESTIONS = [
     icon: <NewspaperIcon sx={{ fontSize: 28, color: "primary.main" }} />,
     title: "Quét tin đang lên",
     description: "Tìm bài viết nóng và tạo video bình luận",
-    message: "Scout trending news",
+    message: "Quét tin đang thịnh hành",
   },
 ]
 
@@ -200,6 +200,8 @@ export default function Chat() {
   const bottomRef = useRef(null)
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [effectiveAi, setEffectiveAi] = useState(null)
+  const [capabilities, setCapabilities] = useState(null)
   const [confirmDialog, setConfirmDialog] = useState({ open: false, title: "", message: "", onConfirm: null })
   const openConfirm = (title, message, onConfirm) => setConfirmDialog({ open: true, title, message, onConfirm })
   const closeConfirm = () => setConfirmDialog(prev => ({ ...prev, open: false }))
@@ -213,7 +215,22 @@ export default function Chat() {
       showSnackbar("Không thể tải lịch sử trò chuyện", "warning")
     })
 
-    const savedSessionId = sessionStorage.getItem("vm_active_session")
+    Promise.allSettled([
+      http.get("/api/settings/ai/effective"),
+      http.get("/api/chat/capabilities"),
+    ]).then(([aiResult, capabilityResult]) => {
+      if (aiResult.status === "fulfilled") setEffectiveAi(aiResult.value.data || null)
+      if (capabilityResult.status === "fulfilled") setCapabilities(capabilityResult.value.data || null)
+    })
+
+    const savedSessionId = (
+      sessionStorage.getItem("affiliate2_active_session")
+      || sessionStorage.getItem("vm_active_session")
+    )
+    if (savedSessionId && !sessionStorage.getItem("affiliate2_active_session")) {
+      sessionStorage.setItem("affiliate2_active_session", savedSessionId)
+      sessionStorage.removeItem("vm_active_session")
+    }
     if (savedSessionId && !activeSessionId && messages.length === 0) {
       // Restore the session that was active before refresh
       setActiveSessionId(savedSessionId)
@@ -230,6 +247,7 @@ export default function Chat() {
         setSuggestions([])  // clear again after messages load, in case smart_suggestions arrived
       }).catch((err) => {
         console.error("Failed to restore session messages:", err)
+        sessionStorage.removeItem("affiliate2_active_session")
         sessionStorage.removeItem("vm_active_session")
         setActiveSessionId(null)
         setSuggestions(STARTER_SUGGESTIONS)
@@ -324,7 +342,7 @@ export default function Chat() {
             startIcon={<AddIcon />}
             onClick={handleNewChat}
           >
-            New chat
+            Cuộc trò chuyện mới
           </Button>
           <IconButton
             onClick={() => setSidebarOpen(o => !o)}
@@ -364,14 +382,43 @@ export default function Chat() {
                   WebkitTextFillColor: "transparent",
                 }}
               >
-                ViralMint
+                Affiliate2 AI
               </Typography>
               <Typography
                 variant="body1"
-                sx={{ color: "text.secondary", mb: 5, maxWidth: 440, mx: "auto", lineHeight: 1.6, textAlign: "center" }}
+                sx={{ color: "text.secondary", mb: 1.5, maxWidth: 620, mx: "auto", lineHeight: 1.6, textAlign: "center" }}
               >
-                Trợ lý chiến lược nội dung AI của bạn. Theo dõi video đang thịnh hành, tạo nội dung nguyên bản và xuất bản đa nền tảng.
+                Agent hành động của Affiliate2: quét, tải, phân tích, tạo video, đọc trạng thái và khởi chạy publish đã được bạn phê duyệt.
               </Typography>
+
+              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap justifyContent="center" sx={{ mb: 1.5 }}>
+                <Chip
+                  size="small"
+                  color={effectiveAi?.configured ? "primary" : "warning"}
+                  variant="outlined"
+                  label={
+                    effectiveAi?.configured
+                      ? `AI: ${effectiveAi.provider || effectiveAi.runtime_provider || "đã cấu hình"} · ${effectiveAi.model || "mặc định"}`
+                      : "AI: chưa cấu hình"
+                  }
+                />
+                <Chip size="small" variant="outlined" label="Chỉ dùng action backend của Affiliate2" />
+                <Chip size="small" variant="outlined" label="Không tự phê duyệt publish" />
+              </Stack>
+
+              {capabilities && (
+                <Alert severity="info" variant="outlined" sx={{ mb: 3, maxWidth: 680, width: "100%" }}>
+                  <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>
+                    Agent này làm được gì?
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {(capabilities.can || []).map((item) => item.label).join(" · ")}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
+                    Không phải computer-use agent: không tự bấm mọi màn hình, không vượt auth/gate và không giả vờ đã chạy action.
+                  </Typography>
+                </Alert>
+              )}
 
               {suggestions.length > 0 && (
                 <Box sx={{

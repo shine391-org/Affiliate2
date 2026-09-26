@@ -14,13 +14,19 @@ from backend.models.chat_session import ChatSession, ChatMessage as ChatMessageM
 from backend.core.ws_manager import ws_manager
 from backend.core.chat_history import CHAT_SESSION
 from backend.core.user_intelligence import UserIntelligence
-from backend.agents.planner import PlannerAgent
+from backend.agents.planner import PlannerAgent, PLANNER_CAPABILITIES
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 planner = PlannerAgent()
 intelligence = UserIntelligence()
+
+
+@router.get("/api/chat/capabilities")
+async def chat_capabilities():
+    """User-facing, non-secret disclosure of what Chat can actually execute."""
+    return PLANNER_CAPABILITIES
 
 
 async def _persist_message(session_id: str, role: str, content: str = None,

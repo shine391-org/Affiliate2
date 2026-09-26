@@ -39,6 +39,9 @@ COMPATIBLE_PRESETS = {
     "ollama": "http://localhost:11434/v1",
     "lmstudio": "http://localhost:1234/v1",
     "vllm": "http://localhost:8000/v1",
+    # Google documents an OpenAI-compatible Gemini endpoint. This is a UI
+    # preset over the same compatible runtime, not a second provider engine.
+    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai/",
 }
 
 
@@ -61,8 +64,8 @@ PROVIDER_DEFAULTS = {
 # leaderboard at openrouter.ai/rankings. Harmless to send; helps us
 # track how much OSS-variant traffic flows through the gateway.
 _OPENROUTER_HEADERS = {
-    "HTTP-Referer": "https://github.com/openclaw-easy/ViralMint",
-    "X-Title": "ViralMint (OSS)",
+    "HTTP-Referer": "https://github.com/shine391-org/Affiliate2",
+    "X-Title": "Affiliate2",
 }
 
 
@@ -239,6 +242,8 @@ def make_ai_client(
             raise ValueError("Base URL is required for an OpenAI-compatible provider.")
         if not (model or "").strip():
             raise ValueError("Model ID is required for an OpenAI-compatible provider.")
+        if name == "gemini" and not (api_key or "").strip():
+            raise AIKeyMissingError("Google Gemini API key is required.")
         return AIClient(
             provider=AIProvider.COMPATIBLE,
             api_key=(api_key or "local"),
@@ -270,8 +275,16 @@ def _resolve_user_provider_and_key(user_settings) -> tuple[Optional[AIProvider],
         return None, None, None, None
 
     if provider_str in COMPATIBLE_PRESETS:
-        # Local presets must never inherit a stale cloud BYOK secret when the
-        # user switches providers. OpenAI SDK accepts a dummy local key.
+        # Local presets use a dummy key. Gemini is cloud-hosted and must keep
+        # its own BYOK secret while still sharing the compatible transport.
+        if provider_str == "gemini":
+            api_key = decrypt_safe(encrypted_key) if encrypted_key else ""
+            return (
+                AIProvider.COMPATIBLE,
+                api_key or None,
+                model or None,
+                compatible_base_url(provider_str, base_url),
+            )
         return (
             AIProvider.COMPATIBLE,
             "local",
@@ -328,6 +341,25 @@ def describe_effective_ai(user_settings=None) -> dict:
         getattr(settings, "AI_PROVIDER", "")
         or os.getenv("AI_PROVIDER", "")
     ).lower().strip()
+    if configured_provider == "gemini":
+        api_key = (
+            getattr(settings, "GEMINI_API_KEY", "")
+            or os.getenv("GEMINI_API_KEY", "")
+        ).strip()
+        model = (
+            getattr(user_settings, "ai_model", None) if user_settings else None
+        ) or (
+            getattr(settings, "AI_MODEL", "")
+            or os.getenv("AI_MODEL", "")
+        ).strip() or "gemini-3.8-flash"
+        return {
+            "configured": bool(api_key),
+            "source": "environment",
+            "provider": "gemini",
+            "runtime_provider": "compatible",
+            "model": model,
+            "base_url": compatible_base_url("gemini"),
+        }
     if configured_provider == "compatible":
         base_url = (
             getattr(settings, "AI_BASE_URL", "")
@@ -406,6 +438,25 @@ def get_ai_client(user_settings=None, **_kwargs) -> AIClient:
 
     # 2. Check AI_PROVIDER from env/settings
     configured_provider = (getattr(settings, "AI_PROVIDER", "") or os.getenv("AI_PROVIDER", "")).lower().strip()
+    if configured_provider == "gemini":
+        api_key = (
+            getattr(settings, "GEMINI_API_KEY", "")
+            or os.getenv("GEMINI_API_KEY", "")
+        ).strip()
+        if not api_key:
+            raise AIKeyMissingError("GEMINI_API_KEY is required when AI_PROVIDER=gemini.")
+        model = (
+            user_model
+            or getattr(settings, "AI_MODEL", "")
+            or os.getenv("AI_MODEL", "")
+            or "gemini-3.8-flash"
+        ).strip()
+        return make_ai_client(
+            "gemini",
+            api_key=api_key,
+            model=model,
+            base_url=compatible_base_url("gemini"),
+        )
     if configured_provider == AIProvider.COMPATIBLE or configured_provider == "compatible":
         api_key = (
             getattr(settings, "AI_API_KEY", "")
