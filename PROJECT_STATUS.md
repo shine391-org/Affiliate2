@@ -1,6 +1,6 @@
 # PROJECT_STATUS.md
 
-## Overall status: PHASE D SMART CUT QA PENDING — PHASE F F1 ACTIVE
+## Overall status: PHASE G MERGED TO MASTER — FINAL CLOSEOUT HARDENING
 
 Phase A and Phase B are complete and merged to `master`.
 
@@ -97,7 +97,7 @@ Candidate Intelligence now routes through canonical application services for:
 
 The old `src/radar/intel/media.py`, `transcribe.py`, and `ai_analyze.py` are compatibility adapters only. Their duplicate platform downloader, standalone faster-whisper model owner, and direct OpenAI-compatible HTTP client have been removed.
 
-The Radar CLI/report/cache contract remains intact during this transition. Local QA at `8e15807` passed focused Candidate Intelligence, legacy Intel, Analyzer, AI provider, Radar enrichment, cache reuse, real canonical ASR, real Gemma/LM Studio AI, failure isolation, and canonical ownership checks. DB convergence remains Phase G.
+The Radar CLI/report/cache contract remains intact. Local QA at `8e15807` passed focused Candidate Intelligence, legacy Intel, Analyzer, AI provider, Radar enrichment, cache reuse, real canonical ASR, real Gemma/LM Studio AI, failure isolation, and canonical ownership checks. Database convergence was completed by Phase G and merged to `master`.
 
 ### Post-C12 source ownership cleanup
 - Legacy Radar Douyin scanning now adapts the canonical app-native CDP provider.
@@ -207,12 +207,32 @@ F1 currently surfaces native TikTok + YouTube account/upload ownership. Facebook
 and old overlay publication history remain transitional and are not faked into
 the new UI.
 
-F2 `/performance` now reads native post-scoped `VideoMetrics` for exact
+F2 `/performance` reads native post-scoped `VideoMetrics` for exact
 `GeneratedVideo.id` destinations. Missing provider fields stay unknown, manual
 entry is available, and explicit YouTube sync uses the configured Settings key.
-The older overlay metrics remain compatibility-only pending live provider and
-result-parity QA; no unsupported TikTok public-ID lookup is invented.
+Phase G migrated historical publication/performance state into canonical tables
+and removed legacy overlay runtime ownership; no unsupported TikTok public-ID
+lookup is invented.
 
-Next: **F3 Messaging event integration**, then F4 end-to-end QA.
+Phase F's remaining convergence/QA work was closed by the Phase G canonical
+cutover rather than extended into another product phase.
 
 See `docs/PHASE_F_CONVERGENCE.md`.
+
+
+---
+
+## Phase G — Database Convergence and Legacy Cleanup
+
+**COMPLETE — MERGED TO `master` at `059c1325b337455bfb878b47ea40c7777875dd3e`.**
+
+Phase G is the final project convergence phase. It established one canonical
+SQLite owner for Radar, review, publication and performance history; removed
+legacy overlay runtime ownership; preserved historical relationships through a
+versioned migration; and kept legacy databases/media read-only or retained for
+forensic/user data safety.
+
+The current closeout branch fixes review findings on top of that merged endpoint
+(data-loss prevention, Scout observation/job history, atomic publication state,
+metric lineage, LAN CSRF, CI wiring and stale status documentation). This is
+hardening of Phase G/master, not a Phase H.

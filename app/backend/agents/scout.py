@@ -275,7 +275,9 @@ class ScoutAgent:
         # Radar must never discard already-collected Scout results.
         try:
             from backend.affiliate.radar.service import observe_and_enrich_scout_rows
-            await asyncio.to_thread(observe_and_enrich_scout_rows, all_results, niche)
+            await asyncio.to_thread(
+                observe_and_enrich_scout_rows, all_results, niche, job_id=job_id
+            )
         except Exception as radar_err:  # noqa: BLE001
             logger.warning("Radar observation/enrichment skipped (non-fatal): %s", radar_err)
 
@@ -345,16 +347,21 @@ class ScoutAgent:
         else:
             step_msg = f"Found {total_count} results ({new_count} new)"
 
+        job_result = {
+            "total_results": total_count,
+            "new_results": new_count,
+            "scout_result_ids": [row["id"] for row in results_to_send],
+        }
         await update_job_status(
             job_id, "success",
             progress_pct=100,
             current_step=step_msg,
-            output_data={"total_results": total_count, "new_results": new_count},
+            output_data=job_result,
         )
         await ws_manager.send({
             "type": "job_complete",
             "job_id": job_id,
-            "result": {"total_results": total_count, "new_results": new_count},
+            "result": job_result,
         }, user_id)
 
     async def _scout_platform(self, platform: str, niche: str, user_settings, user_id: str = "local") -> list[dict]:
@@ -779,21 +786,26 @@ class ScoutAgent:
                 key = (r["video_id"], r["platform"])
                 if key in existing_by_key:
                     sr = existing_by_key[key]
-                    fill_if_missing = {
-                        "job_id": job_id,
-                        "embed_url": r.get("embed_url"),
-                        "author_url": r.get("author_url"),
-                        "creator_id": r.get("creator_id"),
-                        "thumbnail_url": r.get("thumbnail_url"),
-                        "duration_seconds": r.get("duration_seconds"),
-                    }
-                    for field, value in fill_if_missing.items():
-                        if value is not None and getattr(sr, field, None) in (None, ""):
-                            setattr(sr, field, value)
-
-                    # Current projections may refresh; immutable repeated metric
-                    # evidence stays append-only in RadarObservation.
+                    # ScoutResult is the current projection. Refresh fields that
+                    # belong to the latest fetch while immutable repeated metric
+                    # evidence remains append-only in RadarObservation.
+                    if not sr.job_id:
+                        sr.job_id = job_id
                     for field in (
+                        "video_url",
+                        "embed_url",
+                        "title",
+                        "description",
+                        "author",
+                        "author_url",
+                        "creator_id",
+                        "thumbnail_url",
+                        "duration_seconds",
+                        "upload_date",
+                        "views",
+                        "likes",
+                        "comments",
+                        "shares",
                         "virality_score",
                         "views_per_hour",
                         "outlier_score",

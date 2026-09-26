@@ -228,10 +228,14 @@ class TestCollectSubtitles:
 
 
 class TestFormatFallbackChain:
-    def test_chain_has_three_layers(self):
-        # 720p-merged → any-quality-merged → single best stream.
-        assert len(ys.FORMAT_FALLBACK_CHAIN) == 3
+    def test_chain_keeps_the_resilience_ladder(self):
+        # Native best pair → single best → bounded 1080p → bounded 720p.
+        # The bounded rungs are deliberate fallbacks for providers whose
+        # nominal "best" selection is unavailable or blocked.
+        assert len(ys.FORMAT_FALLBACK_CHAIN) == 4
         assert all(isinstance(f, str) for f in ys.FORMAT_FALLBACK_CHAIN)
+        assert "height<=1080" in ys.FORMAT_FALLBACK_CHAIN[-2]
+        assert "height<=720" in ys.FORMAT_FALLBACK_CHAIN[-1]
 
 
 # ── _find_actual_video_file ────────────────────────────────────────────────

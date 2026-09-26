@@ -181,6 +181,7 @@ async def init_db():
         await _add_column_if_missing(conn, "scout_results", "creator_id", "VARCHAR(200)", existing=_cols)
         await _add_column_if_missing(conn, "scout_results", "first_seen_at", "DATETIME", existing=_cols)
         await _add_column_if_missing(conn, "scout_results", "last_seen_at", "DATETIME", existing=_cols)
+        await _add_column_if_missing(conn, "radar_observations", "job_id", "VARCHAR(36)", existing=_cols)
         await _add_column_if_missing(conn, "video_metrics", "publication_record_id", "VARCHAR(36)", existing=_cols)
         await _add_column_if_missing(conn, "video_metrics", "legacy_metric_id", "INTEGER", existing=_cols)
         await _add_column_if_missing(conn, "video_metrics", "source", "VARCHAR(30)", existing=_cols)

@@ -27,7 +27,7 @@
  * Library — the exact bug the rewrite exists to fix.
  */
 
-import { toDate } from "../../utils/format"
+import { toDate } from "../../utils/format.js"
 
 // ── The origin axis ─────────────────────────────────────────────────────────
 // Colour is reserved for provenance ONLY — media type is carried by glyph and

@@ -263,6 +263,28 @@ class TestSuccessfulUploads:
         assert any(m.get("type") == "upload_complete" and m.get("platform") == "youtube"
                    for m in ws["sent"])
 
+    def test_notification_failure_does_not_corrupt_published_state(
+            self, ws, providers, monkeypatch):
+        async def fail_notification(*args, **kwargs):
+            raise RuntimeError("websocket unavailable")
+
+        async def run():
+            from backend.core.ws_manager import ws_manager
+            monkeypatch.setattr(ws_manager, "send", fail_notification)
+            await _make_settings(
+                youtube_credentials_json_encrypted=encrypt('{"token":"t"}'))
+            vid = await _make_video()
+            jid = await _job()
+            await UploadAgent().run(jid, vid, ["youtube"])
+            return await _job_row(jid), await _video_row(vid), await _publication_rows(vid)
+
+        job, video, publications = asyncio.run(run())
+        assert job.status == "success"
+        assert json.loads(video.uploaded_platforms_json) == ["youtube"]
+        assert len(publications) == 1
+        assert publications[0].status == "PUBLISHED"
+        assert publications[0].public_content_id == "yt1"
+
     def test_a_video_without_drafted_metadata_falls_back_to_its_title(
             self, ws, providers):
         async def run():
@@ -311,12 +333,15 @@ class TestSuccessfulUploads:
             vid = await _make_video(tiktok_title="short caption")
             jid = await _job()
             await UploadAgent().run(jid, vid, ["instagram"])
-            return await _video_row(vid)
-        video = asyncio.run(run())
+            return await _video_row(vid), await _publication_rows(vid)
+        video, publications = asyncio.run(run())
         call = providers["calls"]["instagram"]
         assert call["caption"] == "short caption"
         assert call["access_token"] == "IGT" and call["ig_user_id"] == "ig_user_1"
         assert video.instagram_media_id == "ig1"
+        assert len(publications) == 1
+        assert publications[0].status == "PUBLISHED"
+        assert publications[0].caption == call["caption"]
 
     def test_uploading_to_every_platform_at_once(self, ws, providers):
         async def run():
@@ -476,6 +501,37 @@ class TestAuthFailures:
 
 
 class TestPersistence:
+    def test_provider_success_with_local_commit_failure_is_not_safe_to_retry(
+            self, ws, providers, monkeypatch):
+        async def fail_finalize(*args, **kwargs):
+            raise RuntimeError("local commit failed")
+
+        async def run():
+            await _make_settings(
+                youtube_credentials_json_encrypted=encrypt('{"token":"t"}'))
+            vid = await _make_video()
+            jid = await _job()
+            monkeypatch.setattr(
+                UploadAgent, "_finalize_successful_publication", fail_finalize
+            )
+            await UploadAgent().run(jid, vid, ["youtube"])
+            job = await _job_row(jid)
+            video = await _video_row(vid)
+            publications = await _publication_rows(vid)
+            from backend.agents.uploader import uncertain_publication_destinations
+            uncertain = await uncertain_publication_destinations(vid)
+            return job, video, publications, uncertain
+
+        job, video, publications, uncertain = asyncio.run(run())
+        assert job.status == "failed"
+        assert "provider upload succeeded" in job.error_message.lower()
+        assert json.loads(video.uploaded_platforms_json or "[]") == []
+        assert len(publications) == 1
+        assert publications[0].status == "PERSISTENCE_ERROR"
+        assert publications[0].public_content_id == "yt1"
+        assert publications[0].published_at is not None
+        assert "youtube" in uncertain
+
     def test_marking_a_vanished_video_is_survivable(self, ws, providers):
         """The row can be deleted while an upload is in flight."""
         async def run():

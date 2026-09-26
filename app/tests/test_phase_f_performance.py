@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import httpx
+from sqlalchemy import select
 
 from backend.database import AsyncSessionLocal, init_db
 from backend.models.generated_video import GeneratedVideo
@@ -100,15 +101,24 @@ def test_overview_is_platform_scoped_and_preserves_unmeasured():
                             uploaded_platforms_json='["youtube", "youtube"]')
         published_at = datetime(2026, 9, 24, 8, 30, 0)
         async with AsyncSessionLocal() as db:
-            db.add(PublicationRecord(
+            publication = PublicationRecord(
                 generated_video_id=first,
                 platform="youtube",
                 status="PUBLISHED",
                 mapping_status="mapped",
                 published_at=published_at,
-            ))
+            )
+            db.add(publication)
             await db.commit()
+            publication_id = publication.id
         await pt._save_metrics(first, "youtube", {"views": 120, "likes": 12})
+        async with AsyncSessionLocal() as db:
+            metric = (await db.execute(select(VideoMetrics).where(
+                VideoMetrics.generated_video_id == first,
+                VideoMetrics.platform == "youtube",
+            ))).scalar_one()
+            assert metric.publication_record_id == publication_id
+            assert metric.source == "manual"
         summary = await pt.get_performance_overview(_UID)
         assert summary["published_posts"] == 2
         assert summary["posts_with_metrics"] == 1

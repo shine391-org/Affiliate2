@@ -145,12 +145,8 @@ if __name__ == "__main__":
     check_imagemagick()
     check_node()
 
-    # Run DB migrations (create tables)
-    from backend.database import init_db
-    import asyncio
-    asyncio.run(init_db())
-    print("✅ Database ready")
-
+    # FastAPI lifespan owns database initialization. Running init_db() here
+    # as well made python run.py execute migrations/zombie sweeps twice.
     build_frontend()
 
     port = int(os.getenv("PORT", "16888"))

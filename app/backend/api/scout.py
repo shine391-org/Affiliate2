@@ -2,14 +2,17 @@
 # Copyright (c) 2025-2026 ViralMint Contributors
 """REST /api/scout — start scouting + retrieve results."""
 import asyncio
+import json
 import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from backend.database import AsyncSessionLocal
 from backend.models.scout_result import ScoutResult
+from backend.models.phase_g import RadarObservation
+from backend.models.job import Job
 from backend.agents.job_helper import create_job
 
 logger = logging.getLogger(__name__)
@@ -43,8 +46,35 @@ async def get_scout_results(
             .where(ScoutResult.user_id == "local")
             .order_by(ScoutResult.created_at.desc())
         )
+        job_filter = None
         if job_id:
-            query = query.where(ScoutResult.job_id == job_id)
+            job = await db.get(Job, job_id)
+            result_ids: list[str] = []
+            if job and job.output_json:
+                try:
+                    output = json.loads(job.output_json)
+                except (TypeError, ValueError):
+                    output = {}
+                if isinstance(output, dict) and isinstance(output.get("scout_result_ids"), list):
+                    result_ids = [
+                        value for value in output["scout_result_ids"]
+                        if isinstance(value, str) and value
+                    ]
+            if result_ids:
+                job_filter = ScoutResult.id.in_(result_ids)
+            else:
+                # Compatibility for in-flight/pre-closeout jobs. Current identity
+                # metadata covers non-Radar platforms; immutable observations
+                # preserve older membership for Radar-supported sources.
+                job_filter = or_(
+                    ScoutResult.job_id == job_id,
+                    ScoutResult.id.in_(
+                        select(RadarObservation.scout_result_id).where(
+                            RadarObservation.job_id == job_id
+                        )
+                    ),
+                )
+            query = query.where(job_filter)
         query = query.offset(offset).limit(limit)
 
         result = await db.execute(query)
@@ -53,8 +83,8 @@ async def get_scout_results(
         # Count total
         from sqlalchemy import func
         count_query = select(func.count(ScoutResult.id)).where(ScoutResult.user_id == "local")
-        if job_id:
-            count_query = count_query.where(ScoutResult.job_id == job_id)
+        if job_filter is not None:
+            count_query = count_query.where(job_filter)
         total = (await db.execute(count_query)).scalar()
 
     payload = [
