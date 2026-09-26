@@ -201,6 +201,7 @@ async def init_db():
         await _add_column_if_missing(conn, "user_settings", "huggingface_token_encrypted", "TEXT", existing=_cols)
         await _add_column_if_missing(conn, "user_settings", "download_cookie_browser", "VARCHAR(20)", existing=_cols)
         await _add_column_if_missing(conn, "user_settings", "download_cookie_profile", "VARCHAR(200)", existing=_cols)
+        await _add_column_if_missing(conn, "user_settings", "douyin_cdp_url", "VARCHAR(500)", existing=_cols)
 
     # Drift sentinel — compare every model's columns against the live DB
     # schema and log a loud warning for any column the model declares but
