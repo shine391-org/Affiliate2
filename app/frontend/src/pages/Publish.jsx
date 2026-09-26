@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useSearchParams } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import {
   Alert, Box, Button, Checkbox, Chip, CircularProgress, Divider, FormControl,
   FormControlLabel, InputLabel, LinearProgress, MenuItem, Paper, Select, Stack,
@@ -47,6 +47,7 @@ export default function Publish() {
   useDocumentTitle("Xuất bản")
   const showSnackbar = useAppStore((s) => s.showSnackbar)
   const [params, setParams] = useSearchParams()
+  const navigate = useNavigate()
   const [videos, setVideos] = useState([])
   const [settings, setSettings] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -253,7 +254,11 @@ export default function Publish() {
     }
     const targetLabel = platform === "youtube"
       ? "YouTube"
-      : `TikTok (${tiktokPrivacy})`
+      : platform === "tiktok"
+        ? `TikTok (${tiktokPrivacy})`
+        : platform === "instagram"
+          ? "Instagram Reels"
+          : "Facebook Page Reels"
     if (!window.confirm(`Xuất bản video đã duyệt này lên ${targetLabel} ngay bây giờ?`)) return
 
     setError("")
@@ -507,10 +512,37 @@ export default function Publish() {
                   published={uploaded.has("youtube")}
                   hint="Dùng uploader YouTube hiện có và kết nối tài khoản đã mã hóa trong Cài đặt."
                 />
+                <PlatformCard
+                  name="Facebook Page"
+                  connected={Boolean(settings?.facebook_page_connected)}
+                  connectLabel="Mở Cài đặt Meta"
+                  onConnect={() => navigate("/settings?section=services")}
+                  onPublish={() => publish("facebook")}
+                  busy={Boolean(active) || !selected.publish_approved}
+                  published={uploaded.has("facebook")}
+                  hint="Đăng Reel trực tiếp lên Facebook Page đã xác minh. Không hỗ trợ profile cá nhân."
+                >
+                  {settings?.meta_page_name && (
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+                      Page: <strong>{settings.meta_page_name}</strong>
+                    </Typography>
+                  )}
+                </PlatformCard>
+                <PlatformCard
+                  name="Instagram"
+                  connected={Boolean(settings?.instagram_connected)}
+                  connectLabel="Mở Cài đặt Meta"
+                  onConnect={() => navigate("/settings?section=services")}
+                  onPublish={() => publish("instagram")}
+                  busy={Boolean(active) || !selected.publish_approved}
+                  published={uploaded.has("instagram")}
+                  hint="Đăng Reel lên Instagram Professional (Business/Creator) liên kết với Facebook Page."
+                />
               </Box>
 
               <Alert severity="info" variant="outlined">
-                Lịch sử xuất bản Facebook/Instagram và overlay cũ không được giả lập vào trang này. Chúng vẫn ở trạng thái chuyển tiếp cho đến khi adapter gốc được chuyển đổi.
+                Facebook chỉ hỗ trợ Page; Instagram chỉ hỗ trợ tài khoản Professional liên kết Page.
+                Cả hai dùng Meta Page access token đã xác minh trong Cài đặt và upload file trực tiếp lên Meta.
               </Alert>
             </Stack>
           )}
