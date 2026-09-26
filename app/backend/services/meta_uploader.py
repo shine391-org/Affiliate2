@@ -221,7 +221,7 @@ async def upload_instagram_reel(
         if not container_id:
             raise UploadError("Instagram did not return a media container ID.")
         if not upload_uri:
-            upload_uri = f"{RUPLOAD_BASE}/{container_id}"
+            upload_uri = f"{RUPLOAD_BASE}/{GRAPH_API_VERSION}/{container_id}"
 
     await _upload_binary(
         upload_uri,
