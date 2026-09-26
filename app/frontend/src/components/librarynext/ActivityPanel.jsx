@@ -74,7 +74,7 @@ export default function ActivityPanel({
         <Box sx={{ flex: 1 }}>
           <Typography sx={{ fontSize: "1rem", fontWeight: 700, letterSpacing: "-0.02em" }}>Hoạt động</Typography>
           <Typography sx={{ fontSize: "0.72rem", color: "text.secondary" }}>
-            {allRunning.length} running · {allFailed.length} failed · {allDone.length} finished
+            {allRunning.length} đang chạy · {allFailed.length} thất bại · {allDone.length} hoàn tất
           </Typography>
         </Box>
         <IconButton size="small" onClick={onClose} aria-label="Đóng">
@@ -88,7 +88,7 @@ export default function ActivityPanel({
             more={allFailed.length - failed.length}
             onShowAll={() => setShowAll((s) => ({ ...s, failed: true }))}
             onClear={() => onClearSection?.(allFailed.map((j) => j.id), "failed")}
-            clearLabel={`Clear ${allFailed.length}`}>
+            clearLabel={`Xóa ${allFailed.length}`}>
             {failed.map((j) => (
               <JobRow key={j.id} job={j} onToast={onToast} onCancel={onCancel} onDelete={onDelete} />
             ))}
@@ -108,7 +108,7 @@ export default function ActivityPanel({
           <Section label="Gần đây" more={allDone.length - done.length}
             onShowAll={() => setShowAll((s) => ({ ...s, done: true }))}
             onClear={() => onClearSection?.(allDone.map((j) => j.id), "finished")}
-            clearLabel={`Clear ${allDone.length}`}>
+            clearLabel={`Xóa ${allDone.length}`}>
             {done.map((j) => (
               <JobRow key={j.id} job={j} onToast={onToast} onOpenResult={onOpenResult}
                 onDelete={onDelete} />
@@ -117,14 +117,14 @@ export default function ActivityPanel({
         )}
         {jobs.length === 0 && (
           <Typography sx={{ fontSize: "0.84rem", color: "text.secondary" }}>
-            Nothing has run yet. Renders you start anywhere in the app show up here.
+            Chưa có tác vụ nào chạy. Mọi tác vụ kết xuất bạn bắt đầu trong ứng dụng sẽ xuất hiện tại đây.
           </Typography>
         )}
         {/* The store holds one fetch window, not the whole table — say so, or
             the header counts above read as totals they are not. */}
         {total > jobs.length && (
           <Typography sx={{ fontSize: "0.72rem", color: "text.disabled" }}>
-            Showing the latest {jobs.length} of {total} runs.
+            Đang hiển thị {jobs.length} tác vụ mới nhất trong tổng số {total}.
           </Typography>
         )}
       </Box>
@@ -161,7 +161,7 @@ function Section({ label, tone, more = 0, onShowAll, onClear, clearLabel, childr
           color: "text.disabled", cursor: onShowAll ? "pointer" : "default",
           "&:hover": onShowAll ? { color: "text.primary" } : undefined,
         }}>
-          Show {more} more
+          Hiện thêm {more}
         </Typography>
       )}
     </Box>
@@ -192,8 +192,8 @@ function JobRow({ job, onToast, onOpenResult, onCancel, onDelete }) {
           <Typography sx={{ fontSize: "0.68rem", color: "text.secondary" }}>
             {job.where} · {fmtDay(job.at)}
             {job.state === "running" && job.percent != null && ` · ${job.percent}%`}
-            {job.state === "done" && elapsed(job) && ` · done in ${elapsed(job)}`}
-            {job.state === "cancelled" && " · Cancelled"}
+            {job.state === "done" && elapsed(job) && ` · hoàn tất trong ${elapsed(job)}`}
+            {job.state === "cancelled" && " · Đã hủy"}
           </Typography>
         </Box>
         {job.state === "running" && (
@@ -205,7 +205,7 @@ function JobRow({ job, onToast, onOpenResult, onCancel, onDelete }) {
         {job.state === "failed" && (
           <Button size="small" startIcon={<ReplayRoundedIcon sx={{ fontSize: 15 }} />}
             sx={{ fontSize: "0.7rem" }}
-            onClick={() => onToast?.("Open the tool that started it to run it again")}>
+            onClick={() => onToast?.("Mở công cụ đã tạo tác vụ để chạy lại")}>
             Retry
           </Button>
         )}
