@@ -26,9 +26,12 @@ test("native Publish reuses existing upload account ownership", () => {
   assert.ok(publish.includes("settings?.tiktok_upload_connected"))
 })
 
-test("transitional platforms are stated honestly instead of faked", () => {
-  assert.ok(publish.includes("Lịch sử xuất bản Facebook/Instagram và overlay cũ"))
-  assert.ok(publish.includes("Chúng vẫn ở trạng thái chuyển tiếp"))
+test("Meta publishing is explicit about supported account scope", () => {
+  assert.ok(publish.includes('name="Facebook Page"'))
+  assert.ok(publish.includes('name="Instagram"'))
+  assert.ok(publish.includes("Không hỗ trợ profile cá nhân"))
+  assert.ok(publish.includes("Instagram Professional"))
+  assert.ok(!publish.includes("Lịch sử xuất bản Facebook/Instagram và overlay cũ"))
 })
 
 test("Library hands irreversible publish actions to the canonical Publish owner", () => {
