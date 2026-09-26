@@ -272,7 +272,7 @@ export default function ToolVoiceover() {
               options={voices}
               value={selectedVoice}
               loading={voicesLoading}
-              loadingText="Loading voices…"
+              loadingText="Đang tải danh sách giọng…"
               noOptionsText={voicesError ?? "No voices match"}
               onChange={(_e, newVoice) => {
                 if (newVoice) setVoiceId(newVoice.voice_id)
