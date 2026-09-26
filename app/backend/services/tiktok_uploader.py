@@ -126,7 +126,14 @@ async def _upload_via_api(
 ) -> dict:
     """Direct Post using TikTok's Content Posting API."""
     file_size = video_path.stat().st_size
-    total_chunks = max(1, math.ceil(file_size / CHUNK_SIZE))
+    if file_size <= 0:
+        raise UploadError("TikTok video file is empty")
+    # TikTok's media-transfer contract defines total_chunk_count as floor(
+    # video_size / chunk_size). The final chunk absorbs trailing bytes and may
+    # therefore be larger than chunk_size. For a one-chunk file, advertise the
+    # whole file as chunk_size.
+    chunk_size = min(CHUNK_SIZE, file_size)
+    total_chunks = max(1, file_size // chunk_size)
 
     async with httpx.AsyncClient(timeout=120) as client:
         # TikTok requires current creator capabilities to drive privacy and
@@ -164,7 +171,7 @@ async def _upload_via_api(
                 "source_info": {
                     "source": "FILE_UPLOAD",
                     "video_size": file_size,
-                    "chunk_size": CHUNK_SIZE,
+                    "chunk_size": chunk_size,
                     "total_chunk_count": total_chunks,
                 },
             },
@@ -181,10 +188,19 @@ async def _upload_via_api(
 
         with open(video_path, "rb") as handle:
             for chunk_idx in range(total_chunks):
-                chunk_data = handle.read(CHUNK_SIZE)
+                # The final chunk takes all remaining bytes, as required by
+                # TikTok when video_size is not an exact multiple.
+                read_size = (
+                    chunk_size
+                    if chunk_idx < total_chunks - 1
+                    else file_size - (chunk_idx * chunk_size)
+                )
+                chunk_data = handle.read(read_size)
                 if not chunk_data:
-                    break
-                start = chunk_idx * CHUNK_SIZE
+                    raise UploadError(
+                        f"TikTok source ended early at chunk {chunk_idx + 1}"
+                    )
+                start = chunk_idx * chunk_size
                 end = start + len(chunk_data) - 1
                 chunk_resp = await client.put(
                     upload_url,
