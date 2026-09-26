@@ -23,7 +23,7 @@ from backend.core.exceptions import UploadAuthError, UploadOutcomeUncertainError
 logger = logging.getLogger(__name__)
 
 
-ALLOWED_PUBLISH_PLATFORMS = {"youtube", "tiktok", "instagram"}
+ALLOWED_PUBLISH_PLATFORMS = {"youtube", "tiktok", "instagram", "facebook"}
 
 
 def file_sha256(path: str | Path) -> str:
@@ -85,7 +85,8 @@ def disconnected_destinations(settings: UserSettings | None, platforms: list[str
         # Canonical Publish requires provider-verifiable OAuth Direct Post.
         # A legacy session cookie is deliberately not considered connected.
         "tiktok": ("tiktok_upload_token_encrypted",),
-        "instagram": ("instagram_access_token_encrypted",),
+        "instagram": ("meta_page_access_token_encrypted",),
+        "facebook": ("meta_page_access_token_encrypted", "meta_page_id"),
     }
     return [p for p in platforms if not settings or not any(
         getattr(settings, field, None) for field in fields[p]
@@ -133,8 +134,8 @@ def _publication_metadata(
             )
         )
         return title, title, privacy
-    if platform == "instagram":
-        caption = video.tiktok_title or video.title or ""
+    if platform in {"instagram", "facebook"}:
+        caption = video.tiktok_description or video.youtube_description or video.tiktok_title or video.title or ""
         return video.title, caption, None
     raise ValueError(f"Unsupported publish platform(s): {platform}")
 
@@ -160,9 +161,14 @@ def _publication_result_fields(platform: str, result: dict | None) -> tuple[str 
         if public_content_id:
             external_url = f"https://www.tiktok.com/video/{public_content_id}"
     elif platform == "instagram":
+        provider_transaction_id = result.get("container_id")
         public_content_id = result.get("media_id")
         identifier_kind = "public_media_id" if public_content_id else None
         external_url = result.get("permalink")
+    elif platform == "facebook":
+        public_content_id = result.get("video_id")
+        identifier_kind = "public_video_id" if public_content_id else None
+        external_url = result.get("url")
     return provider_transaction_id, public_content_id, identifier_kind, external_url
 
 
@@ -336,6 +342,25 @@ class UploadAgent:
                         "platform": "instagram",
                         "url": result.get("permalink", ""),
                         "media_id": result.get("media_id"),
+                    }, user_id)
+
+                elif platform == "facebook":
+                    result = await self._upload_facebook(video, user_settings)
+                    provider_result = result
+                    await self._finalize_successful_publication(
+                        publication_id,
+                        generated_video_id,
+                        "facebook",
+                        id_field="",
+                        id_value=result.get("video_id"),
+                        result=result,
+                    )
+                    uploaded.append("facebook")
+                    await self._send_upload_complete({
+                        "type": "upload_complete",
+                        "platform": "facebook",
+                        "url": result.get("url", ""),
+                        "video_id": result.get("video_id"),
                     }, user_id)
 
                 else:
@@ -560,26 +585,54 @@ class UploadAgent:
             credentials_json=credentials_json,
         )
 
-    async def _upload_instagram(self, video: GeneratedVideo, user_settings) -> dict:
-        """Upload to Instagram Reels via Graph API."""
-        if not user_settings or not user_settings.instagram_access_token_encrypted:
-            raise UploadAuthError("Instagram not connected. Connect your Instagram account in Settings.")
-
+    @staticmethod
+    def _meta_publish_credentials(user_settings) -> tuple[str, str]:
+        if not user_settings or not getattr(user_settings, "meta_page_access_token_encrypted", None):
+            raise UploadAuthError(
+                "Meta publish is not connected. Add a verified Facebook Page access token in Settings."
+            )
         try:
-            access_token = decrypt(user_settings.instagram_access_token_encrypted)
-        except DecryptionError:
-            raise UploadAuthError("Instagram credentials corrupted — please reconnect Instagram in Settings.")
-        ig_user_id = user_settings.instagram_user_id or ""
+            access_token = decrypt(user_settings.meta_page_access_token_encrypted)
+        except DecryptionError as exc:
+            raise UploadAuthError(
+                "Meta publish credentials are corrupted — reconnect in Settings."
+            ) from exc
+        page_id = str(getattr(user_settings, "meta_page_id", None) or "")
+        return access_token, page_id
 
-        from backend.services.instagram_uploader import upload_to_instagram
+    async def _upload_instagram(self, video: GeneratedVideo, user_settings) -> dict:
+        """Upload to a linked Instagram Professional account via Meta Graph API."""
+        access_token, _ = self._meta_publish_credentials(user_settings)
+        ig_user_id = str(getattr(user_settings, "instagram_user_id", None) or "")
+        if not ig_user_id:
+            raise UploadAuthError(
+                "No linked Instagram Professional account was verified for this Facebook Page."
+            )
+
+        from backend.services.meta_uploader import upload_instagram_reel
 
         _, caption, _ = _publication_metadata(video, "instagram", user_settings)
-
-        return await upload_to_instagram(
+        return await upload_instagram_reel(
             video_path=video.video_path,
-            caption=caption,
+            caption=caption or "",
             access_token=access_token,
             ig_user_id=ig_user_id,
+        )
+
+    async def _upload_facebook(self, video: GeneratedVideo, user_settings) -> dict:
+        """Upload to the verified Facebook Page via the Reels Publishing API."""
+        access_token, page_id = self._meta_publish_credentials(user_settings)
+        if not page_id:
+            raise UploadAuthError("Facebook Page ID is missing from Meta Publish settings.")
+
+        from backend.services.meta_uploader import upload_facebook_reel
+
+        _, description, _ = _publication_metadata(video, "facebook", user_settings)
+        return await upload_facebook_reel(
+            video_path=video.video_path,
+            description=description or "",
+            page_id=page_id,
+            access_token=access_token,
         )
 
     async def _upload_tiktok(
