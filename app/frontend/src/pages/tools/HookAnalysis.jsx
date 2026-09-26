@@ -93,7 +93,7 @@ export default function ToolHookAnalysis() {
       description="Chấm 10 giây đầu video và gợi ý cách mở đầu mạnh hơn"
       icon={<LightbulbOutlinedIcon fontSize="large" />}
       endpoint="/api/tools/hook-analysis"
-      processLabel="Analyze hook"
+      processLabel="Phân tích hook"
       onJobComplete={fetchResult}
       resultPreview={() => result ? (
         <Stack spacing={2}>
@@ -116,9 +116,9 @@ export default function ToolHookAnalysis() {
                   Hook Score / 10
                 </Typography>
                 <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.25 }}>
-                  {result.score >= 8 ? "Strong opener — keep it" :
-                    result.score >= 6 ? "Decent — see weaknesses for upgrades" :
-                    result.score >= 4 ? "Average — alternatives below should help" :
+                  {result.score >= 8 ? "Mở đầu mạnh — nên giữ" :
+                    result.score >= 6 ? "Khá ổn — xem điểm yếu để cải thiện" :
+                    result.score >= 4 ? "Trung bình — các phương án bên dưới sẽ hữu ích" :
                     "Yếu — nên cân nhắc viết lại hoàn toàn bằng các phương án thay thế"}
                 </Typography>
               </Box>
