@@ -242,7 +242,7 @@ def observe_scout_rows(
                     video_url=COALESCE(?,video_url), creator_id=COALESCE(?,creator_id),
                     author=COALESCE(?,author), title=COALESCE(?,title),
                     description=COALESCE(?,description), upload_date=COALESCE(?,upload_date),
-                    views=?, likes=?, comments=?, shares=?, job_id=COALESCE(?,job_id),
+                    views=?, likes=?, comments=?, shares=?, job_id=COALESCE(job_id,?),
                     last_seen_at=?
                     WHERE id=?""",
                     (
