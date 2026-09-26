@@ -530,6 +530,35 @@ class TestAuthFailures:
 
 
 class TestPersistence:
+    def test_uncertain_provider_outcome_is_persisted_and_blocks_retry(
+            self, ws, providers):
+        from backend.core.exceptions import UploadOutcomeUncertainError
+        providers["outcomes"]["tiktok"] = UploadOutcomeUncertainError(
+            "provider accepted bytes but final status timed out"
+        )
+
+        async def run():
+            await _make_settings(
+                tiktok_upload_token_encrypted=encrypt("TOK"),
+                tiktok_default_privacy="SELF_ONLY",
+            )
+            vid = await _make_video()
+            jid = await _job()
+            await UploadAgent().run(jid, vid, ["tiktok"])
+            job = await _job_row(jid)
+            publications = await _publication_rows(vid)
+            from backend.agents.uploader import uncertain_publication_destinations
+            uncertain = await uncertain_publication_destinations(vid)
+            return job, publications, uncertain
+
+        job, publications, uncertain = asyncio.run(run())
+        assert job.status == "failed"
+        assert "outcome is unknown" in (job.error_message or "").lower()
+        assert len(publications) == 1
+        assert publications[0].status == "OUTCOME_UNKNOWN"
+        assert publications[0].published_at is None
+        assert "tiktok" in uncertain
+
     def test_provider_success_with_local_commit_failure_is_not_safe_to_retry(
             self, ws, providers, monkeypatch):
         async def fail_finalize(*args, **kwargs):
