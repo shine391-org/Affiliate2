@@ -14,6 +14,7 @@ import WarningAmberIcon from "@mui/icons-material/WarningAmber"
 import http from "../../api/http"
 import useAppStore from "../../store/appStore"
 import useDocumentTitle from "../../hooks/useDocumentTitle"
+import { localizeUiMessage } from "../../utils/localizeUiMessage"
 import PageHero from "../../components/PageHero"
 import { GlassPanel } from "../../utils/glassFx"
 
@@ -363,7 +364,7 @@ export default function VideoDownload() {
                   value={job?.percent || 0}
                 />
                 <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: "block" }}>
-                  {job?.step || "Đang bắt đầu…"}
+                  {localizeUiMessage(job?.step || "Đang bắt đầu…")}
                 </Typography>
               </Box>
             )}
@@ -378,7 +379,7 @@ export default function VideoDownload() {
                   </Button>
                 }
               >
-                {finalStep || terminal?.step || "Tải xuống hoàn tất."}
+                {localizeUiMessage(finalStep || terminal?.step || "Tải xuống hoàn tất.")}
               </Alert>
             )}
 
@@ -421,7 +422,7 @@ export default function VideoDownload() {
             )}
             {failed && (
               <Alert severity="error">
-                {terminal?.step || "Tải xuống thất bại."}
+                {localizeUiMessage(terminal?.step || "Tải xuống thất bại.")}
               </Alert>
             )}
           </Stack>
