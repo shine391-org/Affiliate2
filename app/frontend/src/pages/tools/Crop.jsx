@@ -172,7 +172,7 @@ export default function ToolCrop() {
       description="Kéo vùng chọn trên khung hình và chỉ giữ phần đó."
       icon={<CropOutlinedIcon fontSize="large" />}
       endpoint="/api/tools/crop"
-      processLabel="Crop"
+      processLabel="Cắt khung"
       downloadLabel="Tải bản đã cắt"
       canSubmit={!!box}
       disabledReason={box ? "" : "Drag a crop box over the frame"}
