@@ -23,6 +23,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import http from "../api/http"
 import useAppStore from "../store/appStore"
+import { localizeUiMessage } from "../utils/localizeUiMessage"
 
 export const PAGE_SIZES = [24, 48, 96]
 export const DEFAULT_PAGE_SIZE = 48
@@ -99,7 +100,7 @@ export default function useLibraryIndex({
       setError(null)
     } catch (e) {
       if (reqId !== reqIdRef.current) return
-      const msg = e.response?.data?.detail || "Could not load your library"
+      const msg = localizeUiMessage(e.response?.data?.detail || "Không thể tải Thư viện")
       setError(msg)
       showSnackbar(msg, "error")
     } finally {
@@ -126,7 +127,7 @@ export default function useLibraryIndex({
       setMatchedKeys(new Set(data.matched_keys || []))
     } catch (e) {
       if (reqId !== famReqIdRef.current) return
-      showSnackbar(e.response?.data?.detail || "Could not group your library", "error")
+      showSnackbar(localizeUiMessage(e.response?.data?.detail || "Không thể nhóm nội dung trong Thư viện"), "error")
     } finally {
       if (reqId === famReqIdRef.current) setFamiliesLoading(false)
     }
