@@ -66,7 +66,7 @@ function OutcomePreview({ resolution, level }) {
         {level === "maximum"
           ? "Maximum squeezes hardest — expect visible softening on detailed footage."
           : level === "minimal"
-            ? "Minimal barely touches quality, so the saving is modest."
+            ? "Mức Tối giản gần như không ảnh hưởng chất lượng nên dung lượng giảm không nhiều."
             : "Quality holds up well at this level for most footage."}
       </Typography>
     </Stack>
