@@ -50,16 +50,20 @@ export default function DownloadSessionSection({ settings, updateSettings }) {
     setTesting(true)
     setProbe(null)
     try {
-      const { data } = await http.post("/api/settings/download-session/test", {
+      const { data } = await http.post("/api/settings/download-session/health", {
         browser,
         profile,
+        douyin_cdp_url: cdpUrl,
       })
       setProbe(data)
-      if (data.ok) {
-        showSnackbar(`Đọc được phiên trình duyệt qua ${data.resolved_browser || browser}`, "success")
+      if (data.douyin_ready || data.tiktok_ready) {
+        showSnackbar(
+          `Douyin ${data.douyin_ready ? "READY" : "chưa sẵn sàng"} · TikTok ${data.tiktok_ready ? "READY" : "chưa sẵn sàng"}`,
+          data.douyin_ready ? "success" : "warning",
+        )
       } else {
         showSnackbar(
-          data.error || "Browser cookie store is not readable",
+          data.douyin_cdp?.error || data.cookie?.error || "Chưa có phiên đăng nhập dùng được",
           "warning",
         )
       }
@@ -72,7 +76,9 @@ export default function DownloadSessionSection({ settings, updateSettings }) {
     }
   }
 
-  const byteDanceCookies = (probe?.douyin_cookie_count || 0) + (probe?.tiktok_cookie_count || 0)
+  const cookieProbe = probe?.cookie || null
+  const cdpProbe = probe?.douyin_cdp || null
+  const byteDanceCookies = (cookieProbe?.douyin_cookie_count || 0) + (cookieProbe?.tiktok_cookie_count || 0)
 
   return (
     <Box sx={{ p: 2, border: 1, borderColor: "divider", borderRadius: 2, mb: 2 }}>
