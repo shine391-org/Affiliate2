@@ -79,18 +79,22 @@ def published_destinations(video: GeneratedVideo) -> set[str]:
 
 
 def disconnected_destinations(settings: UserSettings | None, platforms: list[str]) -> list[str]:
-    """Cheap pre-queue check; UploadAgent still validates/decrypts at execution."""
+    """Cheap pre-queue check; every required field must be present."""
     fields = {
         "youtube": ("youtube_credentials_json_encrypted",),
         # Canonical Publish requires provider-verifiable OAuth Direct Post.
         # A legacy session cookie is deliberately not considered connected.
         "tiktok": ("tiktok_upload_token_encrypted",),
-        "instagram": ("meta_page_access_token_encrypted",),
+        "instagram": ("meta_page_access_token_encrypted", "instagram_user_id"),
         "facebook": ("meta_page_access_token_encrypted", "meta_page_id"),
     }
-    return [p for p in platforms if not settings or not any(
-        getattr(settings, field, None) for field in fields[p]
-    )]
+    return [
+        platform
+        for platform in platforms
+        if not settings or not all(
+            getattr(settings, field, None) for field in fields[platform]
+        )
+    ]
 
 
 async def uncertain_publication_destinations(video_id: str) -> set[str]:
