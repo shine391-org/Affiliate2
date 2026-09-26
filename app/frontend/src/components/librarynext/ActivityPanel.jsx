@@ -30,6 +30,7 @@ import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded"
 import NorthEastRoundedIcon from "@mui/icons-material/NorthEastRounded"
 import { fmtDay } from "./assetModel"
 import { formatDuration } from "../../utils/format"
+import { localizeUiMessage } from "../../utils/localizeUiMessage"
 
 // Elapsed wall-clock between a job's start and end — "2m 14s" / "45s". Both
 // timestamps come from the same source, so a naive-UTC pair still subtracts
@@ -236,13 +237,13 @@ function JobRow({ job, onToast, onOpenResult, onCancel, onDelete }) {
               and losing it turned a 10-minute render into a mute bar. */}
           {job.step && (
             <Typography noWrap sx={{ mt: 0.5, fontSize: "0.68rem", color: "text.secondary" }}>
-              {job.step}
+              {localizeUiMessage(job.step)}
             </Typography>
           )}
         </>
       )}
       {job.state === "failed" && job.error && (
-        <ExpandableError message={job.error} />
+        <ExpandableError message={localizeUiMessage(job.error)} />
       )}
     </Box>
   )
