@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.core.exceptions import UploadAuthError, UploadError
+from backend.core.exceptions import UploadAuthError, UploadError, UploadOutcomeUncertainError
 
 
 @pytest.fixture()
@@ -393,6 +393,15 @@ class TestTikTokUpload:
         c = _TTClient(chunk=_R(status=500))
         monkeypatch.setattr(TT.httpx, "AsyncClient", c)
         with pytest.raises(UploadError, match="chunk upload failed"):
+            await TT.upload_to_tiktok(str(video), "t", access_token="TOK")
+
+    async def test_post_upload_status_contract_error_is_uncertain(self, video, monkeypatch):
+        from backend.services import tiktok_uploader as TT
+        c = _TTClient(statuses=[
+            _R(status=401, payload={"error": {"code": "access_token_invalid", "message": "expired"}})
+        ])
+        monkeypatch.setattr(TT.httpx, "AsyncClient", c)
+        with pytest.raises(UploadOutcomeUncertainError, match="Check TikTok before retrying"):
             await TT.upload_to_tiktok(str(video), "t", access_token="TOK")
 
     async def test_a_publish_failure_surfaces_tiktoks_reason(self, video, monkeypatch):
