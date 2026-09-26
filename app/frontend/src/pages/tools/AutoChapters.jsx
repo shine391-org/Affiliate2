@@ -82,7 +82,7 @@ export default function ToolAutoChapters() {
       description="AI tự tạo mốc chương YouTube từ video dài"
       icon={<FormatListNumberedIcon fontSize="large" />}
       endpoint="/api/tools/auto-chapters"
-      processLabel="Generate Chapters"
+      processLabel="Tạo chương"
       downloadLabel="Tải .txt"
       fieldBuilder={() => ({ target_count: targetCount })}
       resultPreview={(jobId) => <ResultPreview jobId={jobId} />}
