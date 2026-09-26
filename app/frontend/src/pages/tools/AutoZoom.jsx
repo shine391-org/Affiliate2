@@ -26,7 +26,7 @@ export default function ToolAutoZoom() {
       description="Tự zoom nhẹ theo lời nói để video có nhịp hơn"
       icon={<ZoomInMapOutlinedIcon fontSize="large" />}
       endpoint="/api/tools/auto-zoom"
-      processLabel="Add zoom pulses"
+      processLabel="Thêm nhịp zoom"
       fieldBuilder={() => ({ zoom_factor: zoom, words_per_group: wordsPerGroup })}
     >
       <Stack spacing={2.5}>
