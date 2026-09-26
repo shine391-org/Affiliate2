@@ -85,9 +85,8 @@ export default function StudioLocalize({ source, sourcesLoading }) {
   const segments = detail?.transcript?.segments || []
   const chunks = detail?.chunks || []
   const qc = detail?.qc
-  const activeLocalization = Boolean(jobId) && (
-    !detail || ["pending", "running"].includes(detail?.job_status)
-  )
+  const activeLocalization = Boolean(jobId)
+    && ["pending", "running"].includes(detail?.job_status)
 
   const setStep = (value) => setParams((previous) => {
     const next = new URLSearchParams(previous)
