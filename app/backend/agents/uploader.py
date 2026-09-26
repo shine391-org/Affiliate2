@@ -139,8 +139,16 @@ def _publication_metadata(
         )
         return title, title, privacy
     if platform in {"instagram", "facebook"}:
-        caption = video.tiktok_description or video.youtube_description or video.tiktok_title or video.title or ""
-        return video.title, caption, None
+        platform_options = platform_options if isinstance(platform_options, dict) else {}
+        title = str(platform_options.get("title") or video.title or "")
+        caption = str(
+            platform_options.get("caption")
+            or video.youtube_description
+            or video.tiktok_description
+            or video.title
+            or ""
+        )
+        return title, caption, None
     raise ValueError(f"Unsupported publish platform(s): {platform}")
 
 
@@ -330,7 +338,9 @@ class UploadAgent:
                     }, user_id)
 
                 elif platform == "instagram":
-                    result = await self._upload_instagram(video, user_settings)
+                    result = await self._upload_instagram(
+                        video, user_settings, platform_options
+                    )
                     provider_result = result
                     await self._finalize_successful_publication(
                         publication_id,
@@ -349,7 +359,9 @@ class UploadAgent:
                     }, user_id)
 
                 elif platform == "facebook":
-                    result = await self._upload_facebook(video, user_settings)
+                    result = await self._upload_facebook(
+                        video, user_settings, platform_options
+                    )
                     provider_result = result
                     await self._finalize_successful_publication(
                         publication_id,
@@ -604,7 +616,12 @@ class UploadAgent:
         page_id = str(getattr(user_settings, "meta_page_id", None) or "")
         return access_token, page_id
 
-    async def _upload_instagram(self, video: GeneratedVideo, user_settings) -> dict:
+    async def _upload_instagram(
+        self,
+        video: GeneratedVideo,
+        user_settings,
+        platform_options: dict | None = None,
+    ) -> dict:
         """Upload to a linked Instagram Professional account via Meta Graph API."""
         access_token, _ = self._meta_publish_credentials(user_settings)
         ig_user_id = str(getattr(user_settings, "instagram_user_id", None) or "")
@@ -615,7 +632,9 @@ class UploadAgent:
 
         from backend.services.meta_uploader import upload_instagram_reel
 
-        _, caption, _ = _publication_metadata(video, "instagram", user_settings)
+        _, caption, _ = _publication_metadata(
+            video, "instagram", user_settings, platform_options
+        )
         return await upload_instagram_reel(
             video_path=video.video_path,
             caption=caption or "",
@@ -623,7 +642,12 @@ class UploadAgent:
             ig_user_id=ig_user_id,
         )
 
-    async def _upload_facebook(self, video: GeneratedVideo, user_settings) -> dict:
+    async def _upload_facebook(
+        self,
+        video: GeneratedVideo,
+        user_settings,
+        platform_options: dict | None = None,
+    ) -> dict:
         """Upload to the verified Facebook Page via the Reels Publishing API."""
         access_token, page_id = self._meta_publish_credentials(user_settings)
         if not page_id:
@@ -631,7 +655,9 @@ class UploadAgent:
 
         from backend.services.meta_uploader import upload_facebook_reel
 
-        _, description, _ = _publication_metadata(video, "facebook", user_settings)
+        _, description, _ = _publication_metadata(
+            video, "facebook", user_settings, platform_options
+        )
         return await upload_facebook_reel(
             video_path=video.video_path,
             description=description or "",
