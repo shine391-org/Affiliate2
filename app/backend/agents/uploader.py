@@ -90,6 +90,22 @@ def disconnected_destinations(settings: UserSettings | None, platforms: list[str
     )]
 
 
+async def uncertain_publication_destinations(video_id: str) -> set[str]:
+    """Destinations whose provider outcome may already have side effects.
+
+    A stale PUBLISHING row can mean the process died after the provider accepted
+    the upload. PERSISTENCE_ERROR explicitly means provider success was observed
+    but canonical local state could not be committed. Neither is safe to retry
+    automatically because that can duplicate a public post.
+    """
+    async with AsyncSessionLocal() as db:
+        rows = (await db.execute(select(PublicationRecord.platform).where(
+            PublicationRecord.generated_video_id == video_id,
+            PublicationRecord.status.in_(["PUBLISHING", "PERSISTENCE_ERROR"]),
+        ))).scalars().all()
+    return {str(platform) for platform in rows if platform}
+
+
 def _publication_metadata(
     video: GeneratedVideo,
     platform: str,
@@ -198,6 +214,21 @@ class UploadAgent:
             )
             return
 
+        uncertain = sorted(
+            set(platforms) & await uncertain_publication_destinations(generated_video_id)
+        )
+        if uncertain:
+            await update_job_status(
+                job_id,
+                "failed",
+                error_message=(
+                    "Publish outcome requires review before retrying: "
+                    + ", ".join(uncertain)
+                    + ". The provider may already have accepted this upload."
+                ),
+            )
+            return
+
         # Load user settings
         async with AsyncSessionLocal() as db:
             result = await db.execute(
@@ -216,9 +247,11 @@ class UploadAgent:
             publication_id = await self._create_publication_record(
                 video, job_id, platform, user_settings
             )
+            provider_result = None
             try:
                 if platform == "youtube":
                     result = await self._upload_youtube(video, user_settings)
+                    provider_result = result
                     await self._finalize_successful_publication(
                         publication_id,
                         generated_video_id,
@@ -237,6 +270,7 @@ class UploadAgent:
 
                 elif platform == "tiktok":
                     result = await self._upload_tiktok(video, user_settings)
+                    provider_result = result
                     await self._finalize_successful_publication(
                         publication_id,
                         generated_video_id,
@@ -254,6 +288,7 @@ class UploadAgent:
 
                 elif platform == "instagram":
                     result = await self._upload_instagram(video, user_settings)
+                    provider_result = result
                     await self._finalize_successful_publication(
                         publication_id,
                         generated_video_id,
@@ -288,11 +323,33 @@ class UploadAgent:
                     user_id=user_id,
                 )
             except Exception as e:
-                logger.error(f"Upload failed for {platform}: {e}", exc_info=True)
-                errors.append(f"{platform}: {str(e)}")
-                await self._finish_publication_record(
-                    publication_id, platform, "FAILED", error_message=str(e)
-                )
+                if provider_result is not None:
+                    message = (
+                        f"{platform}: provider upload succeeded but local persistence failed: {e}. "
+                        "Do not retry automatically; verify the provider first."
+                    )
+                    logger.critical(message, exc_info=True)
+                    errors.append(message)
+                    try:
+                        await self._finish_publication_record(
+                            publication_id,
+                            platform,
+                            "PERSISTENCE_ERROR",
+                            result=provider_result,
+                            error_message=str(e),
+                        )
+                    except Exception:
+                        logger.critical(
+                            "Could not persist uncertain publication state for %s",
+                            platform,
+                            exc_info=True,
+                        )
+                else:
+                    logger.error(f"Upload failed for {platform}: {e}", exc_info=True)
+                    errors.append(f"{platform}: {str(e)}")
+                    await self._finish_publication_record(
+                        publication_id, platform, "FAILED", error_message=str(e)
+                    )
 
         # Final status
         if uploaded:
@@ -308,7 +365,7 @@ class UploadAgent:
         else:
             await update_job_status(
                 job_id, "failed",
-                error_message=f"Upload failed: {'; '.join(errors)}",
+                error_message=f"Publish did not complete cleanly: {'; '.join(errors)}",
             )
 
     async def _mark_platform_uploaded(
