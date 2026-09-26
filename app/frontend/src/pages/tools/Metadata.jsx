@@ -67,7 +67,7 @@ function ResultPreview({ jobId }) {
           onCopy={copy}
         />
       )}
-      <Field label="Caption TikTok" value={metadata.tiktok_title} onCopy={copy} multiline />
+      <Field label="Chú thích TikTok" value={metadata.tiktok_title} onCopy={copy} multiline />
     </Stack>
   )
 }
