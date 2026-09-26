@@ -480,7 +480,11 @@ class UploadAgent:
             record.external_url = external_url
             record.error_message = error_message
             record.updated_at = datetime.utcnow()
-            record.published_at = datetime.utcnow() if status == "PUBLISHED" else None
+            record.published_at = (
+                datetime.utcnow()
+                if status in {"PUBLISHED", "PERSISTENCE_ERROR"}
+                else None
+            )
             await db.commit()
 
     async def _upload_youtube(self, video: GeneratedVideo, user_settings) -> dict:
