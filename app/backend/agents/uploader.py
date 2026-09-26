@@ -608,7 +608,7 @@ class UploadAgent:
                     "TikTok OAuth before using canonical Publish."
                 )
             raise UploadAuthError(
-                "TikTok OAuth is not connected. Connect TikTok before publishing."
+                "TikTok OAuth is not connected. Reconnect TikTok in Settings before publishing."
             )
 
         from backend.services.tiktok_uploader import upload_to_tiktok
