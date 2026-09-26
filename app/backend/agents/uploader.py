@@ -145,6 +145,7 @@ def _publication_metadata(
             platform_options.get("caption")
             or video.youtube_description
             or video.tiktok_description
+            or video.tiktok_title
             or video.title
             or ""
         )
