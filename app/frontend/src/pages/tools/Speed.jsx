@@ -34,7 +34,7 @@ export default function ToolSpeed() {
       description="Điều chỉnh tốc độ phát video từ 0.25× đến 4×, có thể giữ cao độ giọng"
       icon={<SpeedOutlinedIcon fontSize="large" />}
       endpoint="/api/tools/speed"
-      processLabel="Apply speed"
+      processLabel="Áp dụng tốc độ"
       canSubmit={!isNoOp}
       disabledReason="Pick a speed other than 1×"
       fieldBuilder={() => ({ speed, keep_pitch: keepPitch })}
@@ -93,7 +93,7 @@ export default function ToolSpeed() {
               </Typography>
               <Typography variant="caption" sx={{ color: "text.secondary" }}>
                 {keepPitch
-                  ? "Voices stay natural even at higher speeds (recommended)"
+                  ? "Giọng vẫn tự nhiên ở tốc độ cao hơn (khuyên dùng)"
                   : "Âm thanh chạy theo tốc độ mới — nhanh hơn sẽ cao giọng, chậm hơn sẽ trầm giọng"}
               </Typography>
             </Box>
