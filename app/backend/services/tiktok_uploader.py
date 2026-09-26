@@ -197,7 +197,7 @@ async def _upload_via_api(
                 )
                 if chunk_resp.status_code not in (200, 201, 206):
                     raise UploadError(
-                        f"TikTok video upload failed at chunk {chunk_idx + 1}/"
+                        f"TikTok chunk upload failed at chunk {chunk_idx + 1}/"
                         f"{total_chunks}: HTTP {chunk_resp.status_code}"
                     )
                 logger.info("TikTok upload chunk %d/%d", chunk_idx + 1, total_chunks)
@@ -215,6 +215,15 @@ async def _upload_via_api(
                 },
                 json={"publish_id": publish_id},
             )
+            # A transient provider 5xx while polling does not tell us the
+            # post failed; retry within the same bounded window. Auth/contract
+            # errors still fail immediately.
+            if status_resp.status_code >= 500:
+                logger.warning(
+                    "TikTok status poll returned HTTP %s; retrying",
+                    status_resp.status_code,
+                )
+                continue
             code, _ = _api_error(status_resp, "TikTok post status failed")
             if status_resp.status_code != 200 or (code and code != "ok"):
                 _raise_api_error(status_resp, "TikTok post status failed")
