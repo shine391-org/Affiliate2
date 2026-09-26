@@ -163,7 +163,7 @@ export default function ToolRunner({
   //   resultOpen     — the rail exists at all (false fully dismisses it)
   //   railCollapsed  — true shrinks it to a thin "Result ready" tab pinned
   //                    to the screen edge; click the tab to expand again.
-  // Auto-opens (expanded) on success; the hero keeps a "View result" button
+  // Auto-opens (expanded) on success; the hero keeps a "Xem kết quả" button
   // to bring it back after a full dismiss.
   const [resultOpen, setResultOpen] = useState(false)
   const [railCollapsed, setRailCollapsed] = useState(false)
@@ -355,7 +355,7 @@ export default function ToolRunner({
 
   // Auto-open the result rail (expanded) the moment the job lands. Keyed on
   // the jobSuccess transition only — if the user dismisses it while the job
-  // is still terminal, it stays closed (reopen via the hero "View result"
+  // is still terminal, it stays closed (reopen via the hero "Xem kết quả"
   // button) until a fresh run flips jobSuccess again.
   useEffect(() => {
     if (jobSuccess) { setResultOpen(true); setRailCollapsed(false) }
@@ -401,7 +401,7 @@ export default function ToolRunner({
           // The primary action stays available whenever a job ISN'T running,
           // so the user can immediately generate again (with tweaked inputs)
           // after a result lands — no page refresh needed. When a result
-          // exists but its rail was dismissed, a secondary "View result"
+          // exists but its rail was dismissed, a secondary "Xem kết quả"
           // button reopens it.
           !jobRunning && (
             <Stack direction="row" spacing={1}>
@@ -412,7 +412,7 @@ export default function ToolRunner({
                   onClick={reopenResult}
                   sx={{ flexShrink: 0 }}
                 >
-                  View result
+                  Xem kết quả
                 </Button>
               )}
               {/* Tooltip needs a non-disabled wrapper to receive hover
@@ -523,10 +523,10 @@ export default function ToolRunner({
                 <Stack spacing={1} alignItems="center">
                   <CloudUploadOutlinedIcon sx={{ fontSize: 40, color: "text.secondary" }} />
                   <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                    Drop a video here or click to browse
+                    Thả video vào đây hoặc bấm để chọn tệp
                   </Typography>
                   <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                    {acceptExts.replace(/\./g, "").toUpperCase()} · up to {maxMB} MB
+                    {acceptExts.replace(/\./g, "").toUpperCase()} · tối đa {maxMB} MB
                   </Typography>
                 </Stack>
               )}
