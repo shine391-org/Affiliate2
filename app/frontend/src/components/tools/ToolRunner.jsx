@@ -701,7 +701,7 @@ export default function ToolRunner({
                 letterSpacing: "0.04em",
               }}
             >
-              Result ready
+              Kết quả đã sẵn sàng
             </Typography>
           </ButtonBase>
         </Tooltip>
