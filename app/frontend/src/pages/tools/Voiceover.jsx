@@ -211,7 +211,7 @@ export default function ToolVoiceover() {
       hideFileInput
       extraFiles={{ video }}
       canSubmit={chars > 0 && !overLimit}
-      disabledReason={overLimit ? "Script is over the character limit" : "Enter a script to generate"}
+      disabledReason={overLimit ? "Kịch bản vượt giới hạn ký tự" : "Nhập kịch bản để tạo giọng đọc"}
       fieldBuilder={() => ({
         text,
         provider,
@@ -228,7 +228,7 @@ export default function ToolVoiceover() {
           {!text.trim() && (
             <Box>
               <Typography variant="caption" sx={{ fontWeight: 600, display: "block", mb: 0.75, color: "text.secondary" }}>
-                Start from a template
+                Bắt đầu từ mẫu
               </Typography>
               <Stack direction="row" useFlexGap flexWrap="wrap" sx={{ gap: 0.75 }}>
                 {SCRIPT_STARTERS.map((s) => (
@@ -253,8 +253,8 @@ export default function ToolVoiceover() {
             error={overLimit}
             helperText={
               overLimit
-                ? `Over ${MAX_CHARS.toLocaleString()} char limit — reduce to submit`
-                : `${chars.toLocaleString()} / ${MAX_CHARS.toLocaleString()} chars`
+                ? `Vượt giới hạn ${MAX_CHARS.toLocaleString()} ký tự — hãy rút gọn để tiếp tục`
+                : `${chars.toLocaleString()} / ${MAX_CHARS.toLocaleString()} ký tự`
             }
           />
 
@@ -273,7 +273,7 @@ export default function ToolVoiceover() {
               value={selectedVoice}
               loading={voicesLoading}
               loadingText="Đang tải danh sách giọng…"
-              noOptionsText={voicesError ?? "No voices match"}
+              noOptionsText={voicesError ?? "Không có giọng đọc phù hợp"}
               onChange={(_e, newVoice) => {
                 if (newVoice) setVoiceId(newVoice.voice_id)
               }}
