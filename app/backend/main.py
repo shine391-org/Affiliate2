@@ -281,10 +281,20 @@ def create_app() -> FastAPI:
             return True
         if lan_mode:
             # The built SPA is served from the backend itself. In 0.0.0.0 mode
-            # the public LAN address is dynamic, but a legitimate browser
-            # request still has an Origin netloc equal to the request Host.
+            # the public LAN address is dynamic, but accepting an arbitrary
+            # Origin == Host would permit DNS-rebinding (evil.example resolving
+            # to the LAN machine). Auto-allow only literal local/private IPs;
+            # named hosts/domains must be declared through FRONTEND_URL.
             request_host = request.headers.get("host", "")
-            return parsed.scheme in {"http", "https"} and parsed.netloc == request_host
+            if parsed.scheme not in {"http", "https"} or parsed.netloc != request_host:
+                return False
+            try:
+                from ipaddress import ip_address
+                host = parsed.hostname or ""
+                address = ip_address(host)
+            except ValueError:
+                return host == "localhost"
+            return address.is_private or address.is_loopback or address.is_link_local
         return False
 
     @app.middleware("http")
