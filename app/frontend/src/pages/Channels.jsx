@@ -62,10 +62,11 @@ function ConnectForm({ platform, onConnected }) {
   const [searching, setSearching] = useState(false)
   const [error, setError] = useState("")
   const [results, setResults] = useState(null)
-  const [showUrlInput, setShowUrlInput] = useState(false)
+  const [showUrlInput, setShowUrlInput] = useState(platform === "douyin")
   const [url, setUrl] = useState("")
   const isYT = platform === "youtube"
-  const label = isYT ? "YouTube" : "TikTok"
+  const isDouyin = platform === "douyin"
+  const label = isYT ? "YouTube" : isDouyin ? "Douyin" : "TikTok"
 
   const handleSearch = async () => {
     if (!query.trim()) return
@@ -128,24 +129,28 @@ function ConnectForm({ platform, onConnected }) {
       <Typography variant="h6" sx={{ fontWeight: 700, mb: 0.5 }}>
         Kết nối kênh {label}
       </Typography>
-      <Typography variant="body2" sx={{ color: "text.secondary", mb: 2.5, maxWidth: 480, mx: "auto" }}>
-        Tìm kênh {label} theo tên{isYT ? "" : " or @handle"} để xem phân tích và tải video
+      <Typography variant="body2" sx={{ color: "text.secondary", mb: 2.5, maxWidth: 520, mx: "auto" }}>
+        {isDouyin
+          ? "Douyin dùng connector riêng qua phiên CDP đã đăng nhập. Dán URL hồ sơ creator; không giả lập tìm kiếm tên bằng TikTok hoặc nguồn khác."
+          : `Tìm kênh ${label} theo tên${isYT ? "" : " hoặc @handle"} để xem phân tích và tải video`}
       </Typography>
 
-      <Stack direction="row" spacing={1} sx={{ maxWidth: 480, mx: "auto", mb: 2 }}>
-        <TextField
-          fullWidth size="small"
-          placeholder={isYT ? "Tìm theo tên kênh..." : "Tìm theo @handle hoặc tên..."}
-          value={query} onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-          disabled={searching || loading}
-        />
-        <Button variant="contained" onClick={handleSearch} disabled={searching || !query.trim() || loading}
-          startIcon={searching ? <CircularProgress size={16} /> : <SearchIcon />}
-          sx={{ whiteSpace: "nowrap", minWidth: 100 }}>
-          Search
-        </Button>
-      </Stack>
+      {!isDouyin && (
+        <Stack direction="row" spacing={1} sx={{ maxWidth: 480, mx: "auto", mb: 2 }}>
+          <TextField
+            fullWidth size="small"
+            placeholder={isYT ? "Tìm theo tên kênh..." : "Tìm theo @handle hoặc tên..."}
+            value={query} onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+            disabled={searching || loading}
+          />
+          <Button variant="contained" onClick={handleSearch} disabled={searching || !query.trim() || loading}
+            startIcon={searching ? <CircularProgress size={16} /> : <SearchIcon />}
+            sx={{ whiteSpace: "nowrap", minWidth: 100 }}>
+            Tìm
+          </Button>
+        </Stack>
+      )}
 
       {results && results.length > 0 && (
         <Stack spacing={1} sx={{ maxWidth: 520, mx: "auto", mb: 2 }}>
@@ -185,20 +190,22 @@ function ConnectForm({ platform, onConnected }) {
         <Typography variant="caption" sx={{ color: "error.main", mb: 1.5, display: "block" }}>{error}</Typography>
       )}
 
-      <Divider sx={{ my: 2, maxWidth: 480, mx: "auto" }}>
-        <Chip label="hoặc" size="small" />
-      </Divider>
+      {!isDouyin && (
+        <Divider sx={{ my: 2, maxWidth: 480, mx: "auto" }}>
+          <Chip label="hoặc" size="small" />
+        </Divider>
+      )}
 
       {!showUrlInput ? (
         <Button size="small" variant="text" onClick={() => setShowUrlInput(true)}
           startIcon={<LinkIcon />} sx={{ color: "text.secondary" }}>
-          Connect with channel URL instead
+          Kết nối bằng URL kênh
         </Button>
       ) : (
         <Stack direction="row" spacing={1} sx={{ maxWidth: 480, mx: "auto" }}>
           <TextField
             fullWidth size="small"
-            placeholder={isYT ? "https://youtube.com/@yourchannel" : "https://tiktok.com/@yourprofile"}
+            placeholder={isYT ? "https://youtube.com/@yourchannel" : isDouyin ? "https://www.douyin.com/user/<sec_user_id>" : "https://tiktok.com/@yourprofile"}
             value={url} onChange={(e) => setUrl(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleConnectUrl()}
             disabled={loading}
@@ -206,7 +213,7 @@ function ConnectForm({ platform, onConnected }) {
           <Button variant="outlined" onClick={handleConnectUrl} disabled={loading || !url.trim()}
             startIcon={loading ? <CircularProgress size={16} /> : <LinkIcon />}
             sx={{ whiteSpace: "nowrap", minWidth: 100 }}>
-            Connect
+            Kết nối
           </Button>
         </Stack>
       )}
@@ -218,6 +225,8 @@ function ConnectForm({ platform, onConnected }) {
 
 function VideoCard({ video, platform, onAnalyze, onDownload }) {
   const isYT = platform === "youtube"
+  const isDouyin = platform === "douyin"
+  const platformLabel = isYT ? "YouTube" : isDouyin ? "Douyin" : "TikTok"
   const duration = isYT
     ? parseDuration(video.duration)
     : video.duration > 0
@@ -228,7 +237,9 @@ function VideoCard({ video, platform, onAnalyze, onDownload }) {
   // Build watch URL for opening in browser
   const watchUrl = isYT
     ? `https://www.youtube.com/watch?v=${video.video_id}`
-    : video.url || `https://www.tiktok.com/video/${video.video_id}`
+    : video.url || (isDouyin
+      ? `https://www.douyin.com/video/${video.video_id}`
+      : `https://www.tiktok.com/video/${video.video_id}`)
   const thumbUrl = isYT ? video.thumbnail_url : video.cover_url
 
   return (
@@ -309,7 +320,7 @@ function VideoCard({ video, platform, onAnalyze, onDownload }) {
               <TravelExploreIcon sx={{ fontSize: "1.1rem" }} />
             </IconButton>
           </Tooltip>
-          <Tooltip title={`Mở trên ${isYT ? "YouTube" : "TikTok"}`} arrow>
+          <Tooltip title={`Mở trên ${platformLabel}`} arrow>
             <IconButton size="small"
               onClick={(e) => { e.stopPropagation(); window.open(video.url, "_blank", "noopener") }}
               sx={{ p: 0.5, color: "text.secondary", "&:hover": { color: "primary.main" } }}>
@@ -694,6 +705,7 @@ export default function Channels() {
         <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ minHeight: 42 }}>
           <Tab icon={<YouTubeIcon sx={{ fontSize: 18 }} />} iconPosition="start" label="YouTube" sx={{ textTransform: "none", minHeight: 42, fontSize: "0.9rem" }} />
           <Tab icon={<LiveTvIcon sx={{ fontSize: 18 }} />} iconPosition="start" label="TikTok" sx={{ textTransform: "none", minHeight: 42, fontSize: "0.9rem" }} />
+          <Tab icon={<LiveTvIcon sx={{ fontSize: 18 }} />} iconPosition="start" label="Douyin" sx={{ textTransform: "none", minHeight: 42, fontSize: "0.9rem" }} />
         </Tabs>
       </Box>
 
@@ -701,6 +713,7 @@ export default function Channels() {
       <Box sx={{ flex: 1, overflow: "auto", p: { xs: 2, md: 3 } }}>
         {tab === 0 && <PlatformTab platform="youtube" />}
         {tab === 1 && <PlatformTab platform="tiktok" />}
+        {tab === 2 && <PlatformTab platform="douyin" />}
       </Box>
     </Box>
   )
