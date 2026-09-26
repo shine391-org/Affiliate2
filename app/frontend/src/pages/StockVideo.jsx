@@ -294,7 +294,7 @@ export default function StockVideo() {
               </Button>
               <Box sx={{ flex: 1 }} />
               <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                {script ? `${script.trim().split(/\s+/).filter(Boolean).length} words` : "empty"}
+                {script ? `${script.trim().split(/\s+/).filter(Boolean).length} từ` : "trống"}
               </Typography>
             </Stack>
 
