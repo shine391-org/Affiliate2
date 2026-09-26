@@ -119,7 +119,7 @@ export default function ToolHookAnalysis() {
                   {result.score >= 8 ? "Strong opener — keep it" :
                     result.score >= 6 ? "Decent — see weaknesses for upgrades" :
                     result.score >= 4 ? "Average — alternatives below should help" :
-                    "Weak — consider a complete rewrite using the alternatives"}
+                    "Yếu — nên cân nhắc viết lại hoàn toàn bằng các phương án thay thế"}
                 </Typography>
               </Box>
             </Stack>
