@@ -298,6 +298,86 @@ def _resolve_user_provider_and_key(user_settings) -> tuple[Optional[AIProvider],
     return provider, api_key or None, model or None, base_url or None
 
 
+def describe_effective_ai(user_settings=None) -> dict:
+    """Return non-secret provenance for the AI client get_ai_client would use."""
+    import os
+
+    user_provider, user_key, user_model, user_base_url = _resolve_user_provider_and_key(
+        user_settings
+    )
+    if user_provider and user_key:
+        raw_name = (
+            getattr(user_settings, "ai_provider", None)
+            or user_provider.value
+        )
+        model = (
+            user_model
+            or getattr(user_settings, "ai_model", None)
+            or PROVIDER_DEFAULTS.get(user_provider)
+        )
+        return {
+            "configured": True,
+            "source": "settings",
+            "provider": str(raw_name),
+            "runtime_provider": user_provider.value,
+            "model": model,
+            "base_url": user_base_url,
+        }
+
+    configured_provider = (
+        getattr(settings, "AI_PROVIDER", "")
+        or os.getenv("AI_PROVIDER", "")
+    ).lower().strip()
+    if configured_provider == "compatible":
+        base_url = (
+            getattr(settings, "AI_BASE_URL", "")
+            or os.getenv("AI_BASE_URL", "")
+        ).strip() or None
+        model = (
+            getattr(user_settings, "ai_model", None) if user_settings else None
+        ) or (
+            getattr(settings, "AI_MODEL", "")
+            or os.getenv("AI_MODEL", "")
+        ).strip() or None
+        return {
+            "configured": bool(base_url and model),
+            "source": "environment",
+            "provider": "compatible",
+            "runtime_provider": "compatible",
+            "model": model,
+            "base_url": base_url,
+        }
+
+    env_candidates = [
+        ("anthropic", getattr(settings, "ANTHROPIC_API_KEY", "")),
+        ("openai", getattr(settings, "OPENAI_API_KEY", "")),
+        ("openrouter", getattr(settings, "OPENROUTER_API_KEY", "")),
+    ]
+    for name, key in env_candidates:
+        if key:
+            provider = AIProvider(name)
+            return {
+                "configured": True,
+                "source": "environment",
+                "provider": name,
+                "runtime_provider": name,
+                "model": (
+                    getattr(user_settings, "ai_model", None)
+                    if user_settings else None
+                ) or PROVIDER_DEFAULTS.get(provider),
+                "base_url": None,
+            }
+
+    return {
+        "configured": False,
+        "source": None,
+        "provider": None,
+        "runtime_provider": None,
+        "model": None,
+        "base_url": None,
+    }
+
+
 def get_ai_client(user_settings=None, **_kwargs) -> AIClient:
     """
     Return a configured AI client.
