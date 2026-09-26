@@ -1265,6 +1265,7 @@ async def run_upload(
     generated_video_id: str,
     platforms: list[str],
     user_id: str = "local",
+    publish_options: dict | None = None,
 ):
     logger.info("TASK START upload | job=%s video=%s platforms=%s", job_id[:8], generated_video_id[:8], platforms)
     from backend.agents.uploader import UploadAgent
@@ -1272,6 +1273,7 @@ async def run_upload(
         await UploadAgent().run(
             job_id=job_id, generated_video_id=generated_video_id,
             platforms=platforms, user_id=user_id,
+            publish_options=publish_options,
         )
         logger.info("TASK DONE  upload | job=%s", job_id[:8])
     except Exception as e:
