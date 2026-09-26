@@ -86,6 +86,15 @@ class UploadAuthError(UploadError):
     pass
 
 
+class UploadOutcomeUncertainError(UploadError):
+    """Provider may have accepted a publish but final confirmation is unknown.
+
+    Callers must persist an uncertainty state and block blind automatic retries;
+    otherwise a later retry can create a duplicate public post.
+    """
+    pass
+
+
 # ── AI errors ─────────────────────────────────────────────────────────────────
 class AIProviderError(ViralMintError):
     pass
