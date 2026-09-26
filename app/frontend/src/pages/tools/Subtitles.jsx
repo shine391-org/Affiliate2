@@ -28,7 +28,7 @@ export default function ToolSubtitles() {
       description="Chép lời video thành tệp phụ đề .srt / .vtt hoặc bản chép lời thuần"
       icon={<ClosedCaptionOutlinedIcon fontSize="large" />}
       endpoint="/api/tools/subtitles"
-      processLabel="Transcribe"
+      processLabel="Chép lời"
       downloadLabel={`Tải .${format}`}
       fieldBuilder={() => ({ format })}
     >
