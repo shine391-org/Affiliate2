@@ -48,6 +48,7 @@ class SettingsResponse(BaseModel):
     youtube_channel_title: Optional[str] = None
     youtube_connected: bool = False
     tiktok_upload_connected: bool = False
+    tiktok_legacy_cookie_present: bool = False
 
     # Preferences
     preferred_voice_id: str = "21m00Tcm4TlvDq8ikWAM"
@@ -130,9 +131,11 @@ async def get_settings():
         download_cookie_profile=normalize_download_profile(s.download_cookie_profile),
         youtube_channel_title=s.youtube_channel_title,
         youtube_connected=bool(s.youtube_credentials_json_encrypted),
-        tiktok_upload_connected=bool(
-            s.tiktok_upload_token_encrypted or s.tiktok_cookie_encrypted
-        ),
+        # Canonical Publish is connected only when the official OAuth token is
+        # present. A legacy cookie may still exist for migration visibility but
+        # must not make Direct Post look ready.
+        tiktok_upload_connected=bool(s.tiktok_upload_token_encrypted),
+        tiktok_legacy_cookie_present=bool(s.tiktok_cookie_encrypted),
         preferred_voice_id=s.preferred_voice_id or "21m00Tcm4TlvDq8ikWAM",
         tts_provider=s.tts_provider or "edge_tts",
         preferred_tts_voice=s.preferred_tts_voice,
@@ -452,6 +455,37 @@ async def youtube_callback(code: str = Query(...), state: str = Query(None)):
     except Exception as e:
         logger.error(f"YouTube OAuth callback failed: {e}")
         return RedirectResponse(f"/?youtube_error={str(e)[:200]}")
+
+
+@router.get("/settings/tiktok-creator-info")
+async def tiktok_creator_info():
+    """Return current Direct Post capabilities for the connected TikTok creator."""
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(UserSettings).where(UserSettings.user_id == "local")
+        )
+        s = result.scalar_one_or_none()
+
+    token = (
+        decrypt_safe(s.tiktok_upload_token_encrypted)
+        if s and s.tiktok_upload_token_encrypted
+        else ""
+    )
+    if not token:
+        raise HTTPException(
+            status_code=409,
+            detail="TikTok OAuth is not connected. Reconnect TikTok before publishing.",
+        )
+
+    from backend.core.exceptions import UploadAuthError, UploadError
+    from backend.services.tiktok_uploader import get_tiktok_creator_info
+
+    try:
+        return await get_tiktok_creator_info(token)
+    except UploadAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except UploadError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.get("/settings/tiktok-upload-auth")
