@@ -349,7 +349,7 @@ export default function VideoDownload() {
                 startIcon={<DownloadForOfflineOutlinedIcon />}
               >
                 {busy
-                  ? "Downloading…"
+                  ? "Đang tải xuống…"
                   : submitCount > 1
                     ? `Tải ${submitCount} video`
                     : "Tải xuống"}
