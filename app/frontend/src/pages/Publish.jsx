@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import {
-  Alert, Box, Button, Chip, CircularProgress, Divider, LinearProgress,
-  Paper, Stack, TextField, Typography,
+  Alert, Box, Button, Checkbox, Chip, CircularProgress, Divider, FormControl,
+  FormControlLabel, InputLabel, LinearProgress, MenuItem, Paper, Select, Stack,
+  TextField, Typography,
 } from "@mui/material"
 import CloudUploadOutlinedIcon from "@mui/icons-material/CloudUploadOutlined"
 import DownloadOutlinedIcon from "@mui/icons-material/DownloadOutlined"
@@ -17,7 +18,7 @@ const terminal = (status) => ["success", "failed", "cancelled"].includes(status)
 const STATUS_LABELS = { ready: "Sẵn sàng", uploaded: "Đã tải lên", pending: "Đang chờ", running: "Đang chạy", success: "Hoàn tất", failed: "Thất bại", cancelled: "Đã hủy" }
 const SOURCE_LABELS = { generated: "Đã tạo", smart_video: "Video thông minh", clip_extraction: "Clip", smart_cut: "Cắt thông minh", motion_graphics: "Đồ họa chuyển động" }
 
-function PlatformCard({ name, connected, connectLabel, onConnect, onPublish, busy, published, hint }) {
+function PlatformCard({ name, connected, connectLabel, onConnect, onPublish, busy, published, hint, children }) {
   return (
     <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
       <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
@@ -26,6 +27,7 @@ function PlatformCard({ name, connected, connectLabel, onConnect, onPublish, bus
         {published && <Chip size="small" label="ĐÃ XUẤT BẢN" color="success" variant="outlined" />}
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>{hint}</Typography>
+      {children}
       <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 1.25 }}>
         {!connected && onConnect && (
           <Button variant="outlined" startIcon={<OpenInNewOutlinedIcon />} onClick={onConnect}>
@@ -63,6 +65,13 @@ export default function Publish() {
 
   const [title, setTitle] = useState("")
   const [caption, setCaption] = useState("")
+  const [tiktokCreator, setTikTokCreator] = useState(null)
+  const [tiktokCreatorLoading, setTikTokCreatorLoading] = useState(false)
+  const [tiktokCreatorError, setTikTokCreatorError] = useState("")
+  const [tiktokPrivacy, setTikTokPrivacy] = useState("")
+  const [tiktokDisableComment, setTikTokDisableComment] = useState(false)
+  const [tiktokDisableDuet, setTikTokDisableDuet] = useState(false)
+  const [tiktokDisableStitch, setTikTokDisableStitch] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -122,6 +131,40 @@ export default function Publish() {
     return () => window.removeEventListener("focus", onFocus)
   }, [load])
   useEffect(() => () => { if (pollRef.current) clearTimeout(pollRef.current) }, [])
+
+  useEffect(() => {
+    let alive = true
+    if (!settings?.tiktok_upload_connected) {
+      setTikTokCreator(null)
+      setTikTokCreatorError("")
+      setTikTokPrivacy("")
+      return undefined
+    }
+
+    setTikTokCreatorLoading(true)
+    setTikTokCreatorError("")
+    http.get("/api/settings/tiktok-creator-info")
+      .then(({ data }) => {
+        if (!alive) return
+        const options = data?.privacy_level_options || []
+        const preferred = settings?.tiktok_default_privacy || ""
+        setTikTokCreator(data || null)
+        setTikTokPrivacy(options.includes(preferred) ? preferred : (options[0] || ""))
+        setTikTokDisableComment(Boolean(data?.comment_disabled))
+        setTikTokDisableDuet(Boolean(data?.duet_disabled))
+        setTikTokDisableStitch(Boolean(data?.stitch_disabled))
+      })
+      .catch((e) => {
+        if (!alive) return
+        setTikTokCreator(null)
+        setTikTokCreatorError(
+          e.response?.data?.detail || "Không thể đọc quyền Direct Post của tài khoản TikTok."
+        )
+      })
+      .finally(() => { if (alive) setTikTokCreatorLoading(false) })
+
+    return () => { alive = false }
+  }, [settings?.tiktok_upload_connected, settings?.tiktok_default_privacy])
 
   useEffect(() => {
     if (!selected) {
@@ -203,7 +246,14 @@ export default function Publish() {
       setError("Cần có tiêu đề trước khi xuất bản.")
       return
     }
-    if (!window.confirm(`Xuất bản video đã duyệt này lên ${platform === "youtube" ? "YouTube" : "TikTok"} ngay bây giờ?`)) return
+    if (platform === "tiktok" && (!tiktokCreator || !tiktokPrivacy)) {
+      setError("Chưa đọc được quyền Direct Post/privacy của TikTok. Làm mới hoặc kết nối lại TikTok.")
+      return
+    }
+    const targetLabel = platform === "youtube"
+      ? "YouTube"
+      : `TikTok (${tiktokPrivacy})`
+    if (!window.confirm(`Xuất bản video đã duyệt này lên ${targetLabel} ngay bây giờ?`)) return
 
     setError("")
     try {
@@ -211,7 +261,20 @@ export default function Publish() {
         ? { youtube_title: title.trim(), youtube_description: caption.trim() }
         : { tiktok_title: title.trim(), tiktok_description: caption.trim() }
       await http.patch(`/api/videos/${selected.id}`, patch)
-      const { data } = await http.post(`/api/videos/${selected.id}/upload`, { platforms: [platform] })
+      const publishOptions = platform === "tiktok"
+        ? {
+            tiktok: {
+              privacy_level: tiktokPrivacy,
+              disable_comment: Boolean(tiktokDisableComment || tiktokCreator?.comment_disabled),
+              disable_duet: Boolean(tiktokDisableDuet || tiktokCreator?.duet_disabled),
+              disable_stitch: Boolean(tiktokDisableStitch || tiktokCreator?.stitch_disabled),
+            },
+          }
+        : {}
+      const { data } = await http.post(`/api/videos/${selected.id}/upload`, {
+        platforms: [platform],
+        publish_options: publishOptions,
+      })
       setJob({ id: data.job_id, status: "pending", current_step: "Đã xếp hàng", progress_pct: 0 })
       pollJob(data.job_id)
     } catch (e) {
@@ -346,13 +409,67 @@ export default function Publish() {
                 <PlatformCard
                   name="TikTok"
                   connected={Boolean(settings?.tiktok_upload_connected)}
-                  connectLabel="Kết nối TikTok"
+                  connectLabel="Kết nối TikTok OAuth"
                   onConnect={() => connect("/api/settings/tiktok-upload-auth")}
                   onPublish={() => publish("tiktok")}
-                  busy={Boolean(active) || !selected.publish_approved}
+                  busy={Boolean(active) || !selected.publish_approved || tiktokCreatorLoading || !tiktokCreator || !tiktokPrivacy}
                   published={uploaded.has("tiktok")}
-                  hint="Dùng UploadAgent chuẩn. Ưu tiên OAuth; fallback cookie cũ chỉ phục vụ tải lên và không phụ trách khám phá."
-                />
+                  hint="Direct Post chính thức qua TikTok OAuth. Affiliate2 đọc capability mới nhất của creator trước khi đăng; cookie legacy không được coi là kết nối xuất bản."
+                >
+                  <Stack spacing={1} sx={{ mt: 1.25 }}>
+                    {settings?.tiktok_legacy_cookie_present && !settings?.tiktok_upload_connected && (
+                      <Alert severity="warning" variant="outlined">
+                        Có cookie TikTok cũ nhưng canonical Publish không dùng nó vì không thể xác minh kết quả đăng. Hãy kết nối lại bằng OAuth.
+                      </Alert>
+                    )}
+                    {tiktokCreatorLoading && (
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <CircularProgress size={16} />
+                        <Typography variant="caption" color="text.secondary">Đang đọc quyền Direct Post…</Typography>
+                      </Stack>
+                    )}
+                    {tiktokCreatorError && <Alert severity="warning" variant="outlined">{tiktokCreatorError}</Alert>}
+                    {tiktokCreator && (
+                      <>
+                        <Typography variant="caption" color="text.secondary">
+                          Tài khoản: <strong>{tiktokCreator.creator_nickname || tiktokCreator.creator_username || "TikTok creator"}</strong>
+                          {tiktokCreator.creator_username ? ` (@${tiktokCreator.creator_username})` : ""}
+                        </Typography>
+                        <FormControl size="small" fullWidth>
+                          <InputLabel>Quyền riêng tư TikTok</InputLabel>
+                          <Select
+                            value={tiktokPrivacy}
+                            label="Quyền riêng tư TikTok"
+                            onChange={(e) => setTikTokPrivacy(e.target.value)}
+                          >
+                            {(tiktokCreator.privacy_level_options || []).map((option) => (
+                              <MenuItem key={option} value={option}>{option}</MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                        <Stack direction={{ xs: "column", sm: "row" }} spacing={0.5} useFlexGap flexWrap="wrap">
+                          <FormControlLabel
+                            control={<Checkbox size="small" checked={Boolean(tiktokDisableComment || tiktokCreator.comment_disabled)} onChange={(e) => setTikTokDisableComment(e.target.checked)} disabled={Boolean(tiktokCreator.comment_disabled)} />}
+                            label="Tắt bình luận"
+                          />
+                          <FormControlLabel
+                            control={<Checkbox size="small" checked={Boolean(tiktokDisableDuet || tiktokCreator.duet_disabled)} onChange={(e) => setTikTokDisableDuet(e.target.checked)} disabled={Boolean(tiktokCreator.duet_disabled)} />}
+                            label="Tắt Duet"
+                          />
+                          <FormControlLabel
+                            control={<Checkbox size="small" checked={Boolean(tiktokDisableStitch || tiktokCreator.stitch_disabled)} onChange={(e) => setTikTokDisableStitch(e.target.checked)} disabled={Boolean(tiktokCreator.stitch_disabled)} />}
+                            label="Tắt Stitch"
+                          />
+                        </Stack>
+                        {tiktokCreator.max_video_post_duration_sec && (
+                          <Typography variant="caption" color="text.secondary">
+                            Giới hạn video của creator: {tiktokCreator.max_video_post_duration_sec}s.
+                          </Typography>
+                        )}
+                      </>
+                    )}
+                  </Stack>
+                </PlatformCard>
                 <PlatformCard
                   name="YouTube"
                   connected={Boolean(settings?.youtube_connected)}
