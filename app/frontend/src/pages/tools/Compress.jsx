@@ -64,10 +64,10 @@ function OutcomePreview({ resolution, level }) {
       )}
       <Typography variant="caption" sx={{ color: "text.secondary" }}>
         {level === "maximum"
-          ? "Maximum squeezes hardest — expect visible softening on detailed footage."
+          ? "Mức Tối đa nén mạnh nhất — video nhiều chi tiết có thể mềm hình thấy rõ."
           : level === "minimal"
             ? "Mức Tối giản gần như không ảnh hưởng chất lượng nên dung lượng giảm không nhiều."
-            : "Quality holds up well at this level for most footage."}
+            : "Mức này giữ chất lượng tốt với phần lớn video."}
       </Typography>
     </Stack>
   )
@@ -84,7 +84,7 @@ export default function ToolCompress() {
       description="Giảm dung lượng video cho email, ứng dụng chat hoặc giới hạn tải lên — không cần cắt lại."
       icon={<CompressOutlinedIcon fontSize="large" />}
       endpoint="/api/tools/compress"
-      processLabel="Compress"
+      processLabel="Nén video"
       downloadLabel="Tải bản đã nén"
       fieldBuilder={() => ({ resolution, level })}
       costNote={
@@ -92,7 +92,7 @@ export default function ToolCompress() {
           Runs locally with FFmpeg — the file never leaves your machine.
           Resolution and strength are independent: drop the resolution when the
           video will be watched small, raise the strength when it just needs to
-          fit under a limit. Footage that's already been compressed once won't
+          để đạt giới hạn dung lượng. Video đã từng được nén trước đó sẽ không
           shrink much further.
         </Typography>
       }
