@@ -75,7 +75,15 @@ class UserSettings(Base, TimestampMixin):
     music_genre = Column(String(20), default="lofi")  # lofi|cinematic|upbeat|ambient|corporate
     music_volume_db = Column(Float, default=-14.0)
 
-    # ── Instagram Upload ───────────────────────────────
+    # ── Meta Publish ───────────────────────────────────
+    # Canonical Facebook Login for Business path: one Page access token can
+    # publish a Facebook Page Reel and, when linked, an Instagram Professional
+    # (Business/Creator) Reel. Personal profiles are deliberately unsupported.
+    meta_page_access_token_encrypted = Column(Text, nullable=True)
+    meta_page_id = Column(String(100), nullable=True)
+    meta_page_name = Column(String(300), nullable=True)
+
+    # Legacy Instagram fields kept for migration/backward compatibility.
     instagram_access_token_encrypted = Column(Text, nullable=True)
     instagram_user_id = Column(String(100), nullable=True)
 
