@@ -152,7 +152,7 @@ const STARTER_SUGGESTIONS = [
     icon: <SearchIcon sx={{ fontSize: 28, color: "primary.main" }} />,
     title: "Tìm video đang lên",
     description: "Tìm nội dung viral trên YouTube, TikTok và Douyin",
-    message: "Scout trending videos on YouTube",
+    message: "Quét video đang thịnh hành trên YouTube",
   },
   {
     icon: <SensorsIcon sx={{ fontSize: 28, color: "primary.main" }} />,
