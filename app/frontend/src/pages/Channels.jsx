@@ -164,10 +164,10 @@ function ConnectForm({ platform, onConnected }) {
                 </Typography>
                 <Stack direction="row" spacing={1} sx={{ mt: 0.25 }}>
                   <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                    {formatCount(ch.subscriber_count || ch.follower_count)} {isYT ? "subscribers" : "followers"}
+                    {formatCount(ch.subscriber_count || ch.follower_count)} {isYT ? "người đăng ký" : "người theo dõi"}
                   </Typography>
                   <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                    {formatCount(ch.video_count)} videos
+                    {formatCount(ch.video_count)} video
                   </Typography>
                 </Stack>
               </Box>
@@ -631,12 +631,12 @@ function PlatformTab({ platform }) {
                 <Stack direction="row" spacing={1} sx={{ mt: 0.25 }}>
                   {ch.subscriber_count > 0 && (
                     <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                      {formatCount(ch.subscriber_count)} {isYT ? "subs" : "followers"}
+                      {formatCount(ch.subscriber_count)} {isYT ? "người đăng ký" : "người theo dõi"}
                     </Typography>
                   )}
                   {ch.video_count > 0 && (
                     <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                      {formatCount(ch.video_count)} videos
+                      {formatCount(ch.video_count)} video
                     </Typography>
                   )}
                 </Stack>
