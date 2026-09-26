@@ -15,11 +15,12 @@ import LocalizationBatch from "./LocalizationBatch"
 import { LOCALIZE_STEPS, localizeStepForDetail } from "../studioModel"
 
 const stepIndex = (value) => Math.max(0, LOCALIZE_STEPS.findIndex((item) => item.value === value))
+const STAGE_STATUS_LABELS = { pending: "đang chờ", running: "đang chạy", complete: "hoàn tất", failed: "thất bại", skipped: "đã bỏ qua" }
 const formatMs = (value) => `${(Number(value || 0) / 1000).toFixed(2)}s`
 
 function StageChip({ name, record }) {
   const status = record?.status || "pending"
-  return <Chip size="small" variant="outlined" color={status === "complete" ? "success" : status === "failed" ? "error" : "default"} label={`${name}: ${status}`} />
+  return <Chip size="small" variant="outlined" color={status === "complete" ? "success" : status === "failed" ? "error" : "default"} label={`${name}: ${STAGE_STATUS_LABELS[status] || status}`} />
 }
 
 export default function StudioLocalize({ source, sourcesLoading }) {
