@@ -386,21 +386,53 @@ async def translate_tool(
     if not (target_language or "").strip():
         raise HTTPException(400, "target_language is required")
 
-    from backend.agents.job_helper import create_job
+    from backend.agents.job_helper import create_or_reuse_active_job
     from backend.core.task_runner import dispatch
     from backend.core.tool_runners import run_tool_translate
-    job = await create_job("tool:translate", "local", {
-        "target_language": target_language,
+
+    stripped_source_id = (downloaded_video_id or "").strip()
+    persisted_source_path = (
+        await _downloaded_video_path(stripped_source_id)
+        if stripped_source_id else None
+    )
+    source_signature = (
+        f"downloaded:{stripped_source_id}"
+        if stripped_source_id
+        else f"upload:{getattr(file, 'filename', '')}:{getattr(file, 'size', None)}:{getattr(file, 'content_type', '')}"
+    )
+    request_signature = json.dumps({
+        "source": source_signature,
+        "target_language": target_language.strip().lower(),
         "mode": mode,
-        "voice_id": voice_id if mode == "full_dub" else None,
+        "voice_id": voice_id if mode == "full_dub" else "",
         "caption_style": caption_style,
-        "target_aspect": target_aspect,
-        "profile_id": profile_id,
+        "emoji_style": emoji_style,
+        "target_aspect": target_aspect or "",
+        "profile_id": profile_id or "",
         "review_translation": bool(review_translation),
-        "downloaded_video_id": downloaded_video_id,
-    })
-    in_path = await _resolve_translate_source(
-        file=file, downloaded_video_id=downloaded_video_id, job_id=job.id,
+    }, sort_keys=True, separators=(",", ":"))
+
+    job, reused = await create_or_reuse_active_job(
+        "tool:translate",
+        "local",
+        {
+            "target_language": target_language,
+            "mode": mode,
+            "voice_id": voice_id if mode == "full_dub" else None,
+            "caption_style": caption_style,
+            "emoji_style": emoji_style,
+            "target_aspect": target_aspect,
+            "profile_id": profile_id,
+            "review_translation": bool(review_translation),
+            "downloaded_video_id": stripped_source_id or None,
+        },
+        dedupe_key=request_signature,
+    )
+    if reused:
+        return {"job_id": job.id, "reused": True}
+
+    in_path = persisted_source_path or await _resolve_translate_source(
+        file=file, downloaded_video_id=None, job_id=job.id,
     )
     dispatch(run_tool_translate(
         job.id, in_path, target_language.strip(), mode,
@@ -409,7 +441,7 @@ async def translate_tool(
         profile_id=profile_id,
         review_translation=bool(review_translation),
     ))
-    return {"job_id": job.id}
+    return {"job_id": job.id, "reused": False}
 
 
 @router.post("/hook-analysis")
