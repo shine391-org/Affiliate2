@@ -89,10 +89,12 @@ class UploadAuthError(UploadError):
 class UploadOutcomeUncertainError(UploadError):
     """Provider may have accepted a publish but final confirmation is unknown.
 
-    Callers must persist an uncertainty state and block blind automatic retries;
-    otherwise a later retry can create a duplicate public post.
+    provider_result carries any transaction identifier already issued by the
+    provider so reconciliation remains possible while automatic retry is blocked.
     """
-    pass
+    def __init__(self, message: str, provider_result: dict | None = None):
+        super().__init__(message)
+        self.provider_result = provider_result or {}
 
 
 # ── AI errors ─────────────────────────────────────────────────────────────────
