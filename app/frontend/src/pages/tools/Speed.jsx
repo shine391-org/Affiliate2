@@ -42,7 +42,7 @@ export default function ToolSpeed() {
       <Stack spacing={2.5}>
         <Box>
           <Typography variant="caption" sx={{ fontWeight: 600, display: "block", mb: 1 }}>
-            Speed multiplier — <strong>{speed.toFixed(2)}×</strong>
+            Hệ số tốc độ — <strong>{speed.toFixed(2)}×</strong>
           </Typography>
           <Slider
             value={speed}
