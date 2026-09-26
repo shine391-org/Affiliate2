@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useSearchParams } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import {
   Alert, Box, Button, Checkbox, Chip, CircularProgress, Divider, FormControl,
   FormControlLabel, InputLabel, LinearProgress, MenuItem, Paper, Select, Stack,
@@ -47,6 +47,7 @@ export default function Publish() {
   useDocumentTitle("Xuất bản")
   const showSnackbar = useAppStore((s) => s.showSnackbar)
   const [params, setParams] = useSearchParams()
+  const navigate = useNavigate()
   const [videos, setVideos] = useState([])
   const [settings, setSettings] = useState(null)
   const [loading, setLoading] = useState(true)
