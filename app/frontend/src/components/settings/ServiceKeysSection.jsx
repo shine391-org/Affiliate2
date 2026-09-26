@@ -252,14 +252,9 @@ function MetaPublishSection({ settings, updateSettings }) {
     setTesting(true)
     setProbe(null)
     try {
-      if (token.trim() || pageId.trim() !== (settings?.meta_page_id || "")) {
-        await updateSettings({
-          meta_page_id: pageId.trim(),
-          ...(token.trim() ? { meta_page_access_token: token.trim() } : {}),
-        })
-      }
       const { data } = await http.post("/api/settings/meta/test", {
         page_id: pageId.trim(),
+        ...(token.trim() ? { access_token: token.trim() } : {}),
       })
       setProbe(data)
       setToken("")
