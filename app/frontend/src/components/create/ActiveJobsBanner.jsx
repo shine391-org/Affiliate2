@@ -14,7 +14,7 @@ import useAppStore from "../../store/appStore"
  *  - fallbackLabel          Text shown when step/message are empty (default "Đang xử lý…").
  *  - collapseThreshold      Number of jobs before auto-collapsing (default 2).
  */
-export default function ActiveJobsBanner({ filter, onCancel, fallbackLabel = "Processing…", collapseThreshold = 2 }) {
+export default function ActiveJobsBanner({ filter, onCancel, fallbackLabel = "Đang xử lý…", collapseThreshold = 2 }) {
   const activeJobs = useAppStore((s) => s.activeJobs)
   const [expanded, setExpanded] = useState(false)
 
