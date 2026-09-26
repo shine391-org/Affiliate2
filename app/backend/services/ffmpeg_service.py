@@ -1097,6 +1097,56 @@ async def _probe_dimensions(video_path: Path) -> tuple[int, int]:
     return await asyncio.to_thread(_run)
 
 
+def labeled_reframe_filters(
+    input_label: str,
+    target_w: int,
+    target_h: int,
+    method: str,
+    *,
+    output_label: str = "framed",
+    prefix: str = "reframe",
+) -> list[str]:
+    """Build one canonical labeled FFmpeg reframe chain.
+
+    Used by filter_complex callers that need to compose reframe + captions in
+    one encode. Keeping the fit/crop geometry here prevents a second copy of
+    the widening-sensitive scale logic from drifting elsewhere.
+    """
+    if method == "blur_fill":
+        original = f"{prefix}_original"
+        background = f"{prefix}_bg"
+        blurred = f"{prefix}_blurred"
+        scaled = f"{prefix}_scaled"
+        return [
+            f"{input_label}split[{original}][{background}]",
+            (
+                f"[{background}]scale={target_w}:{target_h}:"
+                "force_original_aspect_ratio=increase,"
+                f"crop={target_w}:{target_h},boxblur=20:5[{blurred}]"
+            ),
+            (
+                f"[{original}]scale={target_w}:{target_h}:"
+                f"force_original_aspect_ratio=decrease[{scaled}]"
+            ),
+            f"[{blurred}][{scaled}]overlay=(W-w)/2:(H-h)/2[{output_label}]",
+        ]
+    if method == "crop":
+        return [
+            (
+                f"{input_label}scale={target_w}:{target_h}:"
+                "force_original_aspect_ratio=increase,"
+                f"crop={target_w}:{target_h}[{output_label}]"
+            )
+        ]
+    return [
+        (
+            f"{input_label}scale={target_w}:{target_h}:"
+            "force_original_aspect_ratio=decrease,"
+            f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:black[{output_label}]"
+        )
+    ]
+
+
 def pick_reframe_method(src_w: int, src_h: int, target_aspect: str) -> str:
     """Choose crop vs blur_fill for a re-frame. Pure — unit-tested.
 
