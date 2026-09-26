@@ -154,7 +154,7 @@ export default function ToolMetadata() {
             value={text}
             onChange={(e) => setText(e.target.value)}
             slotProps={{ htmlInput: { maxLength: 20000 } }}
-            helperText={`${text.length} / 20,000 chars`}
+            helperText={`${text.length} / 20.000 ký tự`}
           />
         )}
 
@@ -187,7 +187,7 @@ export default function ToolMetadata() {
 
         {mode === "file" && (
           <Alert severity="info" sx={{ fontSize: "0.82rem" }}>
-            Upload a video below. We'll transcribe it with Whisper, then generate metadata from the transcript.
+            Tải video lên bên dưới. Hệ thống sẽ chép lời bằng Whisper rồi tạo metadata từ bản chép lời.
           </Alert>
         )}
       </Stack>
