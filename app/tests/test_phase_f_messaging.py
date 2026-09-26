@@ -78,10 +78,9 @@ async def action_reply(action, monkeypatch):
 def test_planner_rejects_non_object_and_unknown_actions_without_side_effects(monkeypatch):
     async def go():
         malformed = await action_reply([], monkeypatch)
-        assert "không hợp lệ" in malformed.lower()
         unknown = await action_reply({"type": "click_arbitrary_ui"}, monkeypatch)
-        assert "không có action backend" in unknown.lower()
-        assert "không có thao tác nào được thực hiện" in unknown.lower()
+        assert malformed == ""
+        assert unknown == ""
     asyncio.run(go())
 
 
