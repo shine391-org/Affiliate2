@@ -292,6 +292,19 @@ async def _probe_key(body: AIProbeRequest) -> str:
     return decrypt_safe(s.ai_api_key_encrypted) if s.ai_api_key_encrypted else ""
 
 
+@router.get("/settings/ai/effective")
+async def effective_ai_runtime():
+    """Return the provider/model that runtime resolution would actually use."""
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(UserSettings).where(UserSettings.user_id == "local")
+        )
+        row = result.scalar_one_or_none()
+
+    from backend.core.ai_provider import describe_effective_ai
+    return describe_effective_ai(row)
+
+
 @router.post("/settings/ai/models")
 async def discover_ai_models(body: AIProbeRequest):
     """Discover models from OpenAI/OpenRouter/OpenAI-compatible endpoints."""
