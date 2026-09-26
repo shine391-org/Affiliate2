@@ -342,7 +342,7 @@ export default function ClipStudio({ workflow = "manual" }) {
   const requestedSourceId = searchParams.get("source")
   const smartCut = workflow === "smart-cut"
   const outputSourceType = smartCut ? "smart_cut" : "clip_extraction"
-  const workspaceTitle = smartCut ? "Smart Cut" : "Clip Studio"
+  const workspaceTitle = smartCut ? "Cắt thông minh" : "Studio Clip"
   const showSnackbar = useAppStore((s) => s.showSnackbar)
   const activeJobs = useAppStore((s) => s.activeJobs)
 
@@ -1236,7 +1236,7 @@ export default function ClipStudio({ workflow = "manual" }) {
                 <Box sx={{ py: 3, px: 4, textAlign: "center", width: "100%" }}>
                   <Typography variant="caption" sx={{ color: "text.disabled" }}>
                     {selectedSourceId
-                      ? smartCut ? "No approved Cắt thông minh from this video yet" : "Chưa có clip từ video này"
+                      ? smartCut ? "Chưa có đoạn Cắt thông minh nào từ video này được duyệt" : "Chưa có clip từ video này"
                       : smartCut ? "Chọn nguồn ở đầu Studio" : "Không có clip để hiển thị"}
                   </Typography>
                 </Box>
