@@ -23,6 +23,7 @@ from backend.services.download_browser_session import (
     SUPPORTED_DOWNLOAD_BROWSERS,
     normalize_download_browser,
     normalize_download_profile,
+    normalize_douyin_cdp_url,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,14 +42,21 @@ class SettingsResponse(BaseModel):
     # Service API keys (BYOK) — booleans only, never the plaintext key
     youtube_api_key_set: bool = False
     huggingface_token_set: bool = False
+    meta_page_access_token_set: bool = False
 
     # OAuth / browser-session status
     download_cookie_browser: str = "auto"
     download_cookie_profile: Optional[str] = None
+    douyin_cdp_url: str = "http://127.0.0.1:9222"
     youtube_channel_title: Optional[str] = None
     youtube_connected: bool = False
     tiktok_upload_connected: bool = False
     tiktok_legacy_cookie_present: bool = False
+    facebook_page_connected: bool = False
+    meta_page_id: Optional[str] = None
+    meta_page_name: Optional[str] = None
+    instagram_connected: bool = False
+    instagram_user_id: Optional[str] = None
 
     # Preferences
     preferred_voice_id: str = "21m00Tcm4TlvDq8ikWAM"
@@ -82,11 +90,14 @@ class SettingsUpdate(BaseModel):
     # Send empty string to clear a stored key.
     youtube_api_key: Optional[str] = None
     huggingface_token: Optional[str] = None
+    meta_page_access_token: Optional[str] = None
+    meta_page_id: Optional[str] = None
 
     # Canonical yt-dlp browser session. Cookies are never copied into this
     # request/model; only the local browser/profile selector is persisted.
     download_cookie_browser: Optional[str] = None
     download_cookie_profile: Optional[str] = None
+    douyin_cdp_url: Optional[str] = None
 
     # Preferences
     preferred_voice_id: Optional[str] = None
@@ -127,8 +138,10 @@ async def get_settings():
         ai_api_key_set=bool(s.ai_api_key_encrypted),
         youtube_api_key_set=bool(s.youtube_api_key_encrypted),
         huggingface_token_set=bool(s.huggingface_token_encrypted),
+        meta_page_access_token_set=bool(getattr(s, "meta_page_access_token_encrypted", None)),
         download_cookie_browser=normalize_download_browser(s.download_cookie_browser),
         download_cookie_profile=normalize_download_profile(s.download_cookie_profile),
+        douyin_cdp_url=normalize_douyin_cdp_url(getattr(s, "douyin_cdp_url", None)),
         youtube_channel_title=s.youtube_channel_title,
         youtube_connected=bool(s.youtube_credentials_json_encrypted),
         # Canonical Publish is connected only when the official OAuth token is
@@ -136,6 +149,17 @@ async def get_settings():
         # must not make Direct Post look ready.
         tiktok_upload_connected=bool(s.tiktok_upload_token_encrypted),
         tiktok_legacy_cookie_present=bool(s.tiktok_cookie_encrypted),
+        facebook_page_connected=bool(
+            getattr(s, "meta_page_access_token_encrypted", None)
+            and getattr(s, "meta_page_id", None)
+        ),
+        meta_page_id=getattr(s, "meta_page_id", None),
+        meta_page_name=getattr(s, "meta_page_name", None),
+        instagram_connected=bool(
+            getattr(s, "meta_page_access_token_encrypted", None)
+            and getattr(s, "instagram_user_id", None)
+        ),
+        instagram_user_id=getattr(s, "instagram_user_id", None),
         preferred_voice_id=s.preferred_voice_id or "21m00Tcm4TlvDq8ikWAM",
         tts_provider=s.tts_provider or "edge_tts",
         preferred_tts_voice=s.preferred_tts_voice,
@@ -187,6 +211,18 @@ async def update_settings(update: SettingsUpdate):
             s.youtube_api_key_encrypted = encrypt(update.youtube_api_key) if update.youtube_api_key else None
         if update.huggingface_token is not None:
             s.huggingface_token_encrypted = encrypt(update.huggingface_token) if update.huggingface_token else None
+        if update.meta_page_access_token is not None:
+            s.meta_page_access_token_encrypted = (
+                encrypt(update.meta_page_access_token)
+                if update.meta_page_access_token else None
+            )
+            if not update.meta_page_access_token:
+                s.meta_page_name = None
+                s.instagram_user_id = None
+        if update.meta_page_id is not None:
+            s.meta_page_id = update.meta_page_id.strip() or None
+            s.meta_page_name = None
+            s.instagram_user_id = None
 
         if update.download_cookie_browser is not None:
             try:
@@ -198,6 +234,11 @@ async def update_settings(update: SettingsUpdate):
                 )
         if update.download_cookie_profile is not None:
             s.download_cookie_profile = normalize_download_profile(update.download_cookie_profile)
+        if update.douyin_cdp_url is not None:
+            try:
+                s.douyin_cdp_url = normalize_douyin_cdp_url(update.douyin_cdp_url)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         # Preference fields
         if update.preferred_voice_id is not None:
@@ -281,6 +322,19 @@ async def _probe_key(body: AIProbeRequest) -> str:
     if not s or (s.ai_provider or "").lower().strip() != provider:
         return ""
     return decrypt_safe(s.ai_api_key_encrypted) if s.ai_api_key_encrypted else ""
+
+
+@router.get("/settings/ai/effective")
+async def effective_ai_runtime():
+    """Return the provider/model that runtime resolution would actually use."""
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(UserSettings).where(UserSettings.user_id == "local")
+        )
+        row = result.scalar_one_or_none()
+
+    from backend.core.ai_provider import describe_effective_ai
+    return describe_effective_ai(row)
 
 
 @router.post("/settings/ai/models")
@@ -527,9 +581,139 @@ async def tiktok_upload_callback(code: str = Query(...), state: str = Query(None
         return RedirectResponse(f"/?tiktok_error={str(e)[:200]}")
 
 
+class MetaPublishProbeRequest(BaseModel):
+    access_token: Optional[str] = None
+    page_id: Optional[str] = None
+
+
+@router.post("/settings/meta/test")
+async def test_meta_publish(body: MetaPublishProbeRequest):
+    """Validate a Meta Page token and discover its linked Instagram account."""
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(UserSettings).where(UserSettings.user_id == "local")
+        )
+        row = result.scalar_one_or_none()
+
+    token = (body.access_token or "").strip()
+    if not token and row and getattr(row, "meta_page_access_token_encrypted", None):
+        token = decrypt_safe(row.meta_page_access_token_encrypted) or ""
+    page_id = (body.page_id or "").strip() or (
+        getattr(row, "meta_page_id", None) if row else None
+    )
+    if not token:
+        raise HTTPException(status_code=400, detail="Meta Page access token is required.")
+    if not page_id:
+        raise HTTPException(status_code=400, detail="Facebook Page ID is required.")
+
+    from backend.services.meta_uploader import inspect_meta_page
+    try:
+        info = await inspect_meta_page(page_id=page_id, access_token=token)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Meta connection failed: {str(exc)[:300]}",
+        ) from exc
+
+    # Persist only verified identity metadata; plaintext token is persisted only
+    # when the caller explicitly supplied it in this request.
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(UserSettings).where(UserSettings.user_id == "local")
+        )
+        target = result.scalar_one_or_none()
+        if not target:
+            target = UserSettings(user_id="local")
+            db.add(target)
+        if body.access_token is not None:
+            target.meta_page_access_token_encrypted = encrypt(token)
+        target.meta_page_id = str(info["page_id"])
+        target.meta_page_name = info.get("page_name") or None
+        target.instagram_user_id = info.get("instagram_user_id") or None
+        await db.commit()
+
+    return info
+
+
 class DownloadSessionProbeRequest(BaseModel):
     browser: Optional[str] = None
     profile: Optional[str] = None
+
+
+class DownloadSessionHealthRequest(BaseModel):
+    browser: Optional[str] = None
+    profile: Optional[str] = None
+    douyin_cdp_url: Optional[str] = None
+
+
+@router.post("/settings/download-session/health")
+async def download_session_health(body: DownloadSessionHealthRequest):
+    """Report cookie readability and authenticated Douyin CDP readiness separately."""
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(UserSettings).where(UserSettings.user_id == "local")
+        )
+        row = result.scalar_one_or_none()
+
+    try:
+        browser = normalize_download_browser(
+            body.browser if body.browser is not None
+            else getattr(row, "download_cookie_browser", None)
+        )
+        profile = normalize_download_profile(
+            body.profile if body.browser is not None
+            else getattr(row, "download_cookie_profile", None)
+        )
+        cdp_url = normalize_douyin_cdp_url(
+            body.douyin_cdp_url if body.douyin_cdp_url is not None
+            else getattr(row, "douyin_cdp_url", None)
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    from backend.services.ytdlp_service import probe_browser_session
+    cookie = await probe_browser_session(browser, profile)
+
+    cdp = {
+        "url": cdp_url,
+        "connected": False,
+        "authenticated": False,
+        "error": None,
+    }
+    try:
+        from backend.services.douyin_browser_session import open_douyin_cdp_session
+        async with open_douyin_cdp_session(
+            cdp_url,
+            connect_timeout_ms=4_000,
+            navigation_timeout_ms=8_000,
+        ) as session:
+            cdp.update({
+                "connected": True,
+                "authenticated": True,
+                "cookie_count": len(session.cookie_dict),
+                "has_ms_token": bool(session.ms_token),
+                "user_agent": session.user_agent[:160] if session.user_agent else "",
+            })
+    except PermissionError as exc:
+        message = str(exc)
+        cdp["connected"] = "Cannot connect to Douyin CDP" not in message
+        cdp["error"] = message[:500]
+    except Exception as exc:
+        cdp["error"] = f"{type(exc).__name__}: {str(exc)[:400]}"
+
+    return {
+        "browser": browser,
+        "profile": profile,
+        "cookie": cookie,
+        "douyin_cdp": cdp,
+        "douyin_ready": bool(
+            (cookie.get("ok") and int(cookie.get("douyin_cookie_count") or 0) > 0)
+            or cdp["authenticated"]
+        ),
+        "tiktok_ready": bool(
+            cookie.get("ok") and int(cookie.get("tiktok_cookie_count") or 0) > 0
+        ),
+    }
 
 
 @router.post("/settings/download-session/test")

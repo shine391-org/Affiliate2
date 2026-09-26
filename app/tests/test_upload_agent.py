@@ -138,12 +138,13 @@ def ws(monkeypatch):
 
 @pytest.fixture()
 def providers(monkeypatch):
-    """Stub the three provider clients; each test sets outcomes."""
+    """Stub the four provider clients; each test sets outcomes."""
     calls: dict = {}
     outcomes: dict = {
         "youtube": {"video_id": "yt1", "url": "https://youtu.be/yt1"},
         "tiktok": {"publish_id": "tt1"},
-        "instagram": {"media_id": "ig1", "permalink": "https://instagram.com/p/ig1"},
+        "instagram": {"media_id": "ig1", "permalink": "https://instagram.com/p/ig1", "container_id": "igc1"},
+        "facebook": {"video_id": "fb1", "url": "https://facebook.com/reel/fb1"},
     }
 
     async def yt(**kw):
@@ -167,9 +168,17 @@ def providers(monkeypatch):
             raise out
         return out
 
+    async def fb(**kw):
+        calls["facebook"] = kw
+        out = outcomes["facebook"]
+        if isinstance(out, Exception):
+            raise out
+        return out
+
     monkeypatch.setattr("backend.services.youtube_uploader.upload_to_youtube", yt)
     monkeypatch.setattr("backend.services.tiktok_uploader.upload_to_tiktok", tt)
-    monkeypatch.setattr("backend.services.instagram_uploader.upload_to_instagram", ig)
+    monkeypatch.setattr("backend.services.meta_uploader.upload_instagram_reel", ig)
+    monkeypatch.setattr("backend.services.meta_uploader.upload_facebook_reel", fb)
     return {"calls": calls, "outcomes": outcomes}
 
 
@@ -354,11 +363,13 @@ class TestSuccessfulUploads:
         assert call["disable_duet"] is True
         assert call["disable_stitch"] is False
 
-    def test_instagram_reuses_the_tiktok_caption(self, ws, providers):
+    def test_instagram_uses_verified_meta_page_identity(self, ws, providers):
         async def run():
             await _make_settings(
-                instagram_access_token_encrypted=encrypt("IGT"),
-                instagram_user_id="ig_user_1")
+                meta_page_access_token_encrypted=encrypt("META"),
+                meta_page_id="page_1",
+                instagram_user_id="ig_user_1",
+            )
             vid = await _make_video(tiktok_title="short caption")
             jid = await _job()
             await UploadAgent().run(jid, vid, ["instagram"])
@@ -366,26 +377,54 @@ class TestSuccessfulUploads:
         video, publications = asyncio.run(run())
         call = providers["calls"]["instagram"]
         assert call["caption"] == "short caption"
-        assert call["access_token"] == "IGT" and call["ig_user_id"] == "ig_user_1"
+        assert call["access_token"] == "META" and call["ig_user_id"] == "ig_user_1"
         assert video.instagram_media_id == "ig1"
         assert len(publications) == 1
         assert publications[0].status == "PUBLISHED"
+        assert publications[0].provider_transaction_id == "igc1"
         assert publications[0].caption == call["caption"]
+
+    def test_facebook_uses_verified_page_identity(self, ws, providers):
+        async def run():
+            await _make_settings(
+                meta_page_access_token_encrypted=encrypt("META"),
+                meta_page_id="page_1",
+            )
+            vid = await _make_video()
+            jid = await _job()
+            await UploadAgent().run(
+                jid,
+                vid,
+                ["facebook"],
+                publish_options={"facebook": {"caption": "fb caption"}},
+            )
+            return await _publication_rows(vid)
+        publications = asyncio.run(run())
+        call = providers["calls"]["facebook"]
+        assert call["access_token"] == "META"
+        assert call["page_id"] == "page_1"
+        assert call["description"] == "fb caption"
+        assert publications[0].public_content_id == "fb1"
+        assert publications[0].external_url == "https://facebook.com/reel/fb1"
 
     def test_uploading_to_every_platform_at_once(self, ws, providers):
         async def run():
             await _make_settings(
                 youtube_credentials_json_encrypted=encrypt('{"token":"t"}'),
                 tiktok_upload_token_encrypted=encrypt("TOK"),
-                instagram_access_token_encrypted=encrypt("IGT"))
+                meta_page_access_token_encrypted=encrypt("META"),
+                meta_page_id="page_1",
+                instagram_user_id="ig_user_1")
             vid = await _make_video()
             jid = await _job()
-            await UploadAgent().run(jid, vid, ["youtube", "tiktok", "instagram"])
+            await UploadAgent().run(
+                jid, vid, ["youtube", "tiktok", "instagram", "facebook"]
+            )
             return await _job_row(jid), await _video_row(vid)
         job, video = asyncio.run(run())
         assert job.status == "success"
         assert set(json.loads(video.uploaded_platforms_json)) == {
-            "youtube", "tiktok", "instagram"}
+            "youtube", "tiktok", "instagram", "facebook"}
 
     def test_re_uploading_an_existing_destination_is_blocked(self, ws, providers):
         async def run():
@@ -458,6 +497,7 @@ class TestAuthFailures:
         ("youtube", "youtube_auth"),
         ("tiktok", "tiktok_upload_auth"),
         ("instagram", "instagram_upload_auth"),
+        ("facebook", "facebook_upload_auth"),
     ])
     def test_a_disconnected_account_names_its_setup_wizard(
             self, ws, providers, platform, wizard):
@@ -467,7 +507,9 @@ class TestAuthFailures:
             await _make_settings(
                 youtube_credentials_json_encrypted=None,
                 tiktok_upload_token_encrypted=None, tiktok_cookie_encrypted=None,
-                instagram_access_token_encrypted=None)
+                meta_page_access_token_encrypted=None,
+                meta_page_id=None,
+                instagram_user_id=None)
             jid = await _job()
             await UploadAgent().run(jid, await _make_video(), [platform])
             return await _job_row(jid)
@@ -483,7 +525,8 @@ class TestAuthFailures:
     @pytest.mark.parametrize("field,platform", [
         ("youtube_credentials_json_encrypted", "youtube"),
         ("tiktok_upload_token_encrypted", "tiktok"),
-        ("instagram_access_token_encrypted", "instagram"),
+        ("meta_page_access_token_encrypted", "instagram"),
+        ("meta_page_access_token_encrypted", "facebook"),
     ])
     def test_corrupted_credentials_ask_for_a_reconnect(
             self, ws, providers, field, platform):
@@ -493,7 +536,9 @@ class TestAuthFailures:
             fields = {"youtube_credentials_json_encrypted": None,
                       "tiktok_upload_token_encrypted": None,
                       "tiktok_cookie_encrypted": None,
-                      "instagram_access_token_encrypted": None}
+                      "meta_page_access_token_encrypted": None,
+                      "meta_page_id": "page_1",
+                      "instagram_user_id": "ig_user_1"}
             fields[field] = "not-a-valid-fernet-token"
             await _make_settings(**fields)
             jid = await _job()
@@ -526,6 +571,8 @@ class TestAuthFailures:
                 await agent._upload_tiktok(object(), None)
             with pytest.raises(UploadAuthError):
                 await agent._upload_instagram(object(), None)
+            with pytest.raises(UploadAuthError):
+                await agent._upload_facebook(object(), None)
         asyncio.run(run())
 
 

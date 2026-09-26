@@ -46,6 +46,7 @@ export default function AIProviderSection({ settings, updateSettings }) {
   const [probing, setProbing] = useState(false)
   const [editing, setEditing] = useState(!savedReady(settings))
   const [confirmRemove, setConfirmRemove] = useState(false)
+  const [effectiveRuntime, setEffectiveRuntime] = useState(null)
 
   useEffect(() => {
     if (!settings) return
@@ -62,6 +63,14 @@ export default function AIProviderSection({ settings, updateSettings }) {
       .catch(() => {})
   }, [])
 
+  useEffect(() => {
+    let alive = true
+    http.get("/api/settings/ai/effective")
+      .then(({ data }) => { if (alive) setEffectiveRuntime(data || null) })
+      .catch(() => { if (alive) setEffectiveRuntime(null) })
+    return () => { alive = false }
+  }, [settings?.ai_provider, settings?.ai_model, settings?.ai_base_url, settings?.ai_api_key_set])
+
   const meta = PROVIDERS[provider] || PROVIDERS.compatible
   const defaultModel = registry[provider]?.default_model || ""
   const effectiveModel = model || defaultModel
@@ -71,6 +80,40 @@ export default function AIProviderSection({ settings, updateSettings }) {
   )
   const keyIsSet = !!settings?.ai_api_key_set
   const connected = savedReady(settings)
+
+  const effectiveRuntimeCard = (
+    <Alert
+      severity={effectiveRuntime?.configured ? "info" : "warning"}
+      variant="outlined"
+    >
+      {effectiveRuntime?.configured ? (
+        <Stack spacing={0.5}>
+          <Typography variant="body2" sx={{ fontWeight: 700 }}>
+            AI runtime thực tế
+          </Typography>
+          <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+            <Chip size="small" label={"Nguồn: " + (effectiveRuntime.source === "settings" ? "Cài đặt" : ".env / môi trường")} />
+            <Chip size="small" label={"Provider: " + (effectiveRuntime.provider || "—")} />
+            <Chip size="small" label={"Model: " + (effectiveRuntime.model || "mặc định")} />
+          </Stack>
+          {effectiveRuntime.base_url && (
+            <Typography variant="caption" color="text.secondary" sx={{ wordBreak: "break-all" }}>
+              Base URL: {effectiveRuntime.base_url}
+            </Typography>
+          )}
+          {effectiveRuntime.source === "environment" && (
+            <Typography variant="caption" color="text.secondary">
+              Vì vậy pipeline vẫn có thể chạy dù form bên dưới chưa lưu API key. Muốn UI và runtime khớp tuyệt đối, hãy cấu hình cùng provider trong Cài đặt.
+            </Typography>
+          )}
+        </Stack>
+      ) : (
+        <Typography variant="body2">
+          Không có AI runtime hợp lệ trong Cài đặt hoặc môi trường. Các bước cần AI phải báo lỗi rõ thay vì fallback bí mật.
+        </Typography>
+      )}
+    </Alert>
+  )
 
   const probePayload = () => ({
     provider,
@@ -166,6 +209,7 @@ export default function AIProviderSection({ settings, updateSettings }) {
   if (!editing && connected) {
     return (
       <Stack spacing={2}>
+        {effectiveRuntimeCard}
         <Alert severity="success" variant="outlined" icon={<CheckCircleIcon fontSize="small" />}>
           <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
             <Typography variant="body2" sx={{ fontWeight: 600 }}>Đã cấu hình nhà cung cấp AI</Typography>
@@ -200,6 +244,7 @@ export default function AIProviderSection({ settings, updateSettings }) {
 
   return (
     <Stack spacing={2}>
+      {effectiveRuntimeCard}
       <Typography variant="body2" color="text.secondary">
         Use a cloud provider or a local OpenAI-compatible server. Model IDs are editable; the registry is only a suggestion list.
       </Typography>

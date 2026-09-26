@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Alert, Box, Button, Chip, FormControl, InputLabel, MenuItem, Paper, Select, Stack, ToggleButton, ToggleButtonGroup, Typography } from "@mui/material"
+import { Alert, Box, Button, Chip, CircularProgress, FormControl, InputLabel, MenuItem, Paper, Select, Stack, TextField, ToggleButton, ToggleButtonGroup, Typography } from "@mui/material"
 import MovieCreationOutlinedIcon from "@mui/icons-material/MovieCreationOutlined"
 import FolderOpenOutlinedIcon from "@mui/icons-material/FolderOpenOutlined"
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom"
@@ -101,9 +101,14 @@ export default function Studio() {
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const openActivity = useAppStore((s) => s.openActivity)
+  const startJob = useAppStore((s) => s.startJob)
+  const showSnackbar = useAppStore((s) => s.showSnackbar)
   const [sources, setSources] = useState([])
   const [loading, setLoading] = useState(true)
   const [sourceDetail, setSourceDetail] = useState(null)
+  const [sourceUrl, setSourceUrl] = useState("")
+  const [sourceDownloading, setSourceDownloading] = useState(false)
+  const [sourceDownloadJobId, setSourceDownloadJobId] = useState("")
   const mode = studioModeForPath(location.pathname)
   const sourceId = params.get("source") || ""
 
@@ -142,6 +147,70 @@ export default function Studio() {
     })
   }
 
+  const downloadSourceUrl = async () => {
+    const url = sourceUrl.trim()
+    if (!/^https?:\/\/\S+$/i.test(url) || sourceDownloading) {
+      if (url && !/^https?:\/\/\S+$/i.test(url)) {
+        showSnackbar("Hãy dán một liên kết http(s) đầy đủ.", "warning")
+      }
+      return
+    }
+    setSourceDownloading(true)
+    try {
+      const { data } = await http.post("/api/downloaded/batch-download", {
+        urls: [{ url }],
+        options: { quality: "best", container: "mp4", metadata: true },
+        analyze: false,
+      })
+      setSourceDownloadJobId(data.job_id)
+      startJob(data.job_id, "download", "Đang tải nguồn vào Thư viện…")
+      showSnackbar("Đang tải video vào Thư viện. Studio sẽ tự chọn nguồn khi hoàn tất.", "info")
+    } catch (error) {
+      setSourceDownloading(false)
+      showSnackbar(error.response?.data?.detail || "Không thể bắt đầu tải nguồn", "error")
+    }
+  }
+
+  useEffect(() => {
+    if (!sourceDownloadJobId) return undefined
+    let alive = true
+    const poll = async () => {
+      try {
+        const { data } = await http.get(`/api/jobs/${sourceDownloadJobId}`)
+        if (!alive) return
+        if (data?.status === "success") {
+          let output = data.output_json ?? data.output
+          if (typeof output === "string") {
+            try { output = JSON.parse(output) } catch { output = null }
+          }
+          const downloadedId = output?.downloaded_ids?.[0] || output?.videos?.[0]?.id
+          if (!downloadedId) {
+            setSourceDownloading(false)
+            setSourceDownloadJobId("")
+            showSnackbar("Video đã tải xong nhưng không tìm thấy ID asset mới.", "warning")
+            return
+          }
+          await loadSources()
+          chooseSource(downloadedId)
+          setSourceUrl("")
+          setSourceDownloading(false)
+          setSourceDownloadJobId("")
+          showSnackbar("Đã thêm vào Thư viện và chọn làm nguồn Studio.", "success")
+        } else if (["failed", "cancelled"].includes(data?.status)) {
+          setSourceDownloading(false)
+          setSourceDownloadJobId("")
+          showSnackbar(data?.error_message || "Tải nguồn thất bại", "error")
+        }
+      } catch {
+        // Keep the bounded poll alive; transient API failures should not make
+        // the source bar forget a real background download.
+      }
+    }
+    poll()
+    const timer = setInterval(poll, 1500)
+    return () => { alive = false; clearInterval(timer) }
+  }, [sourceDownloadJobId, loadSources, showSnackbar])
+
   const changeMode = (_, nextMode) => {
     if (!nextMode) return
     navigate(buildStudioModeHref(nextMode, location.search))
@@ -168,8 +237,29 @@ export default function Studio() {
           <Box sx={{ flex: 1 }} />
           <Button size="small" variant="outlined" onClick={openActivity}>Hoạt động</Button>
         </Stack>
-        <Stack direction={{ xs: "column", md: "row" }} spacing={1.25} alignItems={{ md: "center" }} sx={{ mt: 1.5 }}>
-          <FormControl size="small" sx={{ minWidth: { xs: "100%", md: 360 } }}>
+        <Stack direction={{ xs: "column", xl: "row" }} spacing={1.25} alignItems={{ xl: "center" }} sx={{ mt: 1.5 }}>
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ flex: 1, minWidth: { xl: 520 } }}>
+            <TextField
+              size="small"
+              fullWidth
+              value={sourceUrl}
+              onChange={(event) => setSourceUrl(event.target.value)}
+              onKeyDown={(event) => { if (event.key === "Enter") downloadSourceUrl() }}
+              placeholder="Dán link TikTok / Douyin / YouTube…"
+              disabled={sourceDownloading}
+              label="Tải nguồn mới vào Thư viện"
+            />
+            <Button
+              variant="contained"
+              onClick={downloadSourceUrl}
+              disabled={!sourceUrl.trim() || sourceDownloading}
+              startIcon={sourceDownloading ? <CircularProgress size={16} color="inherit" /> : null}
+              sx={{ whiteSpace: "nowrap", minWidth: 150 }}
+            >
+              {sourceDownloading ? "Đang tải…" : "Tải & dùng"}
+            </Button>
+          </Stack>
+          <FormControl size="small" sx={{ minWidth: { xs: "100%", xl: 320 } }}>
             <InputLabel>Nguồn từ Thư viện</InputLabel>
             <Select value={sourceId} label="Nguồn từ Thư viện" onChange={(event) => chooseSource(event.target.value)} disabled={loading}>
               <MenuItem value=""><em>Chọn một nguồn đã tải</em></MenuItem>

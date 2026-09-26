@@ -31,6 +31,7 @@ class UserSettings(Base, TimestampMixin):
     # are read by yt-dlp on demand.
     download_cookie_browser = Column(String(20), nullable=True)     # auto|edge|chrome|brave|firefox
     download_cookie_profile = Column(String(200), nullable=True)    # e.g. Default / Profile 1
+    douyin_cdp_url = Column(String(500), nullable=True)          # local DevTools endpoint, e.g. http://127.0.0.1:9222
 
     # ── YouTube upload OAuth ───────────────────────────
     youtube_credentials_json_encrypted = Column(Text, nullable=True)
@@ -74,7 +75,15 @@ class UserSettings(Base, TimestampMixin):
     music_genre = Column(String(20), default="lofi")  # lofi|cinematic|upbeat|ambient|corporate
     music_volume_db = Column(Float, default=-14.0)
 
-    # ── Instagram Upload ───────────────────────────────
+    # ── Meta Publish ───────────────────────────────────
+    # Canonical Facebook Login for Business path: one Page access token can
+    # publish a Facebook Page Reel and, when linked, an Instagram Professional
+    # (Business/Creator) Reel. Personal profiles are deliberately unsupported.
+    meta_page_access_token_encrypted = Column(Text, nullable=True)
+    meta_page_id = Column(String(100), nullable=True)
+    meta_page_name = Column(String(300), nullable=True)
+
+    # Legacy Instagram fields kept for migration/backward compatibility.
     instagram_access_token_encrypted = Column(Text, nullable=True)
     instagram_user_id = Column(String(100), nullable=True)
 

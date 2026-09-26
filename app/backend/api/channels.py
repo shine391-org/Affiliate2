@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (c) 2025-2026 ViralMint Contributors
 """
-REST API for reading YouTube/TikTok channel data.
+REST API for reading YouTube/TikTok/Douyin channel data.
 Supports multiple connected channels per user.
-Connect by URL — no OAuth needed. Uses YouTube Data API key + yt-dlp.
+YouTube/TikTok use their existing readers; Douyin is a separate authenticated
+CDP connector and never aliases to TikTok.
 """
 import logging
 
@@ -17,6 +18,23 @@ from backend.core.api_keys import get_youtube_api_key as _resolve_youtube_key
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/channels", tags=["channels"])
+
+
+async def _get_douyin_provider():
+    """Build the Douyin connector from the persisted local CDP endpoint."""
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(UserSettings).where(UserSettings.user_id == "local")
+        )
+        user_settings = result.scalar_one_or_none()
+
+    from backend.services.download_browser_session import normalize_douyin_cdp_url
+    from backend.sources.douyin import DouyinProvider
+
+    cdp_url = normalize_douyin_cdp_url(
+        getattr(user_settings, "douyin_cdp_url", None)
+    )
+    return DouyinProvider(cdp_url=cdp_url)
 
 
 async def _get_youtube_api_key() -> str:
@@ -63,13 +81,16 @@ async def list_channels(platform: str = Query(None), user_id: str = "local"):
 
 @router.post("/connect")
 async def connect_channel(body: dict = None):
-    """Connect a YouTube or TikTok channel by URL. Supports multiple channels."""
+    """Connect a YouTube, TikTok or Douyin channel by URL."""
     body = body or {}
     platform = body.get("platform", "").strip().lower()
     url = body.get("url", "").strip()
 
-    if platform not in ("youtube", "tiktok"):
-        raise HTTPException(status_code=400, detail="platform must be 'youtube' or 'tiktok'")
+    if platform not in ("youtube", "tiktok", "douyin"):
+        raise HTTPException(
+            status_code=400,
+            detail="platform must be 'youtube', 'tiktok' or 'douyin'",
+        )
     if not url:
         raise HTTPException(status_code=400, detail="url is required")
 
@@ -119,6 +140,46 @@ async def connect_channel(body: dict = None):
                 video_count = info.get("video_count", 0)
         except Exception:
             pass  # metadata is optional — connect still succeeds
+
+    elif platform == "douyin":
+        provider = await _get_douyin_provider()
+        if not url.startswith("http"):
+            creator_id = url.strip().lstrip("@")
+            if not creator_id:
+                raise HTTPException(status_code=400, detail="Douyin profile URL is required")
+            url = f"https://www.douyin.com/user/{creator_id}"
+
+        creator_id = provider.creator_id_from_url(url)
+        if not creator_id:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Douyin connector needs a full creator profile URL such as "
+                    "https://www.douyin.com/user/<sec_user_id>."
+                ),
+            )
+        channel_id = creator_id
+        url = f"https://www.douyin.com/user/{creator_id}"
+        try:
+            info = await provider.creator_info(creator_id)
+        except PermissionError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Douyin session is not ready. Open Settings → Source Providers, "
+                    "verify CDP login, then retry. " + str(exc)[:250]
+                ),
+            ) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Douyin profile lookup failed: {str(exc)[:250]}",
+            ) from exc
+
+        channel_name = info.get("display_name", "")
+        thumbnail_url = info.get("avatar_url", "")
+        subscriber_count = info.get("follower_count", 0)
+        video_count = info.get("video_count", 0)
 
     async with AsyncSessionLocal() as db:
         # Check if this channel is already connected
@@ -185,7 +246,10 @@ async def disconnect_channel(body: dict = None):
         await db.commit()
 
     from backend.services.channel_reader import cache_clear
-    cache_clear("yt_" if platform == "youtube" else "tt_")
+    if platform == "youtube":
+        cache_clear("yt_")
+    elif platform == "tiktok":
+        cache_clear("tt_")
     return {"ok": True}
 
 
@@ -196,7 +260,7 @@ async def search_channels(
     q: str = Query(""),
     platform: str = Query("youtube"),
 ):
-    """Search for YouTube channels or TikTok profiles by name."""
+    """Search channels. Douyin intentionally accepts a profile URL, not fake name search."""
     q = q.strip()
     if not q:
         raise HTTPException(status_code=400, detail="Search query is required")
@@ -222,8 +286,38 @@ async def search_channels(
             logger.error(f"TikTok search failed: {e}", exc_info=True)
             raise HTTPException(status_code=502, detail=f"TikTok search error: {str(e)[:200]}")
 
+    elif platform == "douyin":
+        provider = await _get_douyin_provider()
+        creator_id = provider.creator_id_from_url(q)
+        if not creator_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Douyin name search is not exposed here. Paste a Douyin creator profile URL.",
+            )
+        try:
+            info = await provider.creator_info(creator_id)
+            return {"results": [{
+                "channel_id": creator_id,
+                "username": creator_id,
+                "display_name": info.get("display_name", creator_id),
+                "thumbnail_url": info.get("avatar_url", ""),
+                "follower_count": info.get("follower_count", 0),
+                "video_count": info.get("video_count", 0),
+                "url": f"https://www.douyin.com/user/{creator_id}",
+            }]}
+        except PermissionError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)[:300]) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Douyin profile lookup failed: {str(exc)[:200]}",
+            ) from exc
+
     else:
-        raise HTTPException(status_code=400, detail="platform must be 'youtube' or 'tiktok'")
+        raise HTTPException(
+            status_code=400,
+            detail="platform must be 'youtube', 'tiktok' or 'douyin'",
+        )
 
 
 # ── Fetch channel videos ────────────────────────────────────────────────────
@@ -273,6 +367,64 @@ async def get_channel_videos(
         except Exception as e:
             logger.error(f"TikTok channel fetch failed: {e}", exc_info=True)
             raise HTTPException(status_code=502, detail=f"TikTok error: {str(e)[:200]}")
+
+
+    elif ch.platform == "douyin":
+        from backend.sources.base import ProviderStatus
+
+        provider = await _get_douyin_provider()
+        creator_id = ch.channel_id or provider.creator_id_from_url(ch.channel_url)
+        if not creator_id:
+            raise HTTPException(status_code=400, detail="Stored Douyin channel has no creator ID")
+
+        try:
+            info = await provider.creator_info(creator_id)
+            history = await provider.creator_history(
+                creator_id,
+                creator_name=ch.channel_name or "",
+                limit=200,
+            )
+        except PermissionError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)[:300]) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Douyin connector failed: {str(exc)[:250]}",
+            ) from exc
+
+        if history.status == ProviderStatus.AUTH_REQUIRED:
+            raise HTTPException(status_code=409, detail=history.error or "Douyin login required")
+        if history.status == ProviderStatus.ERROR:
+            raise HTTPException(status_code=502, detail=history.error or "Douyin creator fetch failed")
+
+        videos = [{
+            "video_id": item.get("video_id", ""),
+            "title": item.get("title", ""),
+            "cover_url": item.get("thumbnail_url", ""),
+            "created_at": (
+                item.get("upload_date").timestamp()
+                if getattr(item.get("upload_date"), "timestamp", None)
+                else 0
+            ),
+            "view_count": item.get("views", 0) or 0,
+            "like_count": item.get("likes", 0) or 0,
+            "comment_count": item.get("comments", 0) or 0,
+            "share_count": item.get("shares", 0) or 0,
+            "duration": item.get("duration_seconds", 0) or 0,
+            "url": item.get("video_url", ""),
+        } for item in history.items]
+
+        return {
+            "connected": True,
+            "user": {
+                "display_name": info.get("display_name", ch.channel_name or ""),
+                "avatar_url": info.get("avatar_url", ch.thumbnail_url or ""),
+                "follower_count": info.get("follower_count", ch.subscriber_count or 0),
+                "video_count": info.get("video_count", ch.video_count or len(videos)),
+            },
+            "videos": videos,
+            "has_more": False,
+        }
 
 
 # ── Analyze (reuses existing download + analyze pipeline) ───────────────────

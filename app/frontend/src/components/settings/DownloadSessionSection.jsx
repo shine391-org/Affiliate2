@@ -21,6 +21,7 @@ export default function DownloadSessionSection({ settings, updateSettings }) {
   const showSnackbar = useAppStore((s) => s.showSnackbar)
   const [browser, setBrowser] = useState(settings?.download_cookie_browser || "auto")
   const [profile, setProfile] = useState(settings?.download_cookie_profile || "")
+  const [cdpUrl, setCdpUrl] = useState(settings?.douyin_cdp_url || "http://127.0.0.1:9222")
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
   const [probe, setProbe] = useState(null)
@@ -28,7 +29,8 @@ export default function DownloadSessionSection({ settings, updateSettings }) {
   useEffect(() => {
     setBrowser(settings?.download_cookie_browser || "auto")
     setProfile(settings?.download_cookie_profile || "")
-  }, [settings?.download_cookie_browser, settings?.download_cookie_profile])
+    setCdpUrl(settings?.douyin_cdp_url || "http://127.0.0.1:9222")
+  }, [settings?.download_cookie_browser, settings?.download_cookie_profile, settings?.douyin_cdp_url])
 
   const save = async () => {
     setSaving(true)
@@ -36,6 +38,7 @@ export default function DownloadSessionSection({ settings, updateSettings }) {
       await updateSettings({
         download_cookie_browser: browser,
         download_cookie_profile: profile,
+        douyin_cdp_url: cdpUrl,
       })
       showSnackbar("Đã lưu phiên trình duyệt để tải xuống", "success")
     } finally {
@@ -47,16 +50,20 @@ export default function DownloadSessionSection({ settings, updateSettings }) {
     setTesting(true)
     setProbe(null)
     try {
-      const { data } = await http.post("/api/settings/download-session/test", {
+      const { data } = await http.post("/api/settings/download-session/health", {
         browser,
         profile,
+        douyin_cdp_url: cdpUrl,
       })
       setProbe(data)
-      if (data.ok) {
-        showSnackbar(`Đọc được phiên trình duyệt qua ${data.resolved_browser || browser}`, "success")
+      if (data.douyin_ready || data.tiktok_ready) {
+        showSnackbar(
+          `Douyin ${data.douyin_ready ? "READY" : "chưa sẵn sàng"} · TikTok ${data.tiktok_ready ? "READY" : "chưa sẵn sàng"}`,
+          data.douyin_ready ? "success" : "warning",
+        )
       } else {
         showSnackbar(
-          data.error || "Browser cookie store is not readable",
+          data.douyin_cdp?.error || data.cookie?.error || "Chưa có phiên đăng nhập dùng được",
           "warning",
         )
       }
@@ -69,7 +76,9 @@ export default function DownloadSessionSection({ settings, updateSettings }) {
     }
   }
 
-  const byteDanceCookies = (probe?.douyin_cookie_count || 0) + (probe?.tiktok_cookie_count || 0)
+  const cookieProbe = probe?.cookie || null
+  const cdpProbe = probe?.douyin_cdp || null
+  const byteDanceCookies = (cookieProbe?.douyin_cookie_count || 0) + (cookieProbe?.tiktok_cookie_count || 0)
 
   return (
     <Box sx={{ p: 2, border: 1, borderColor: "divider", borderRadius: 2, mb: 2 }}>
@@ -103,9 +112,19 @@ export default function DownloadSessionSection({ settings, updateSettings }) {
           />
         </Stack>
 
+        <TextField
+          size="small"
+          fullWidth
+          label="Douyin CDP URL"
+          value={cdpUrl}
+          onChange={(event) => { setCdpUrl(event.target.value); setProbe(null) }}
+          placeholder="http://127.0.0.1:9222"
+          helperText="Endpoint DevTools local của Edge/Chrome đã mở bằng --remote-debugging-port. Chỉ localhost được chấp nhận."
+        />
+
         <Alert severity="info" variant="outlined">
-          Test session checks only whether yt-dlp can read the local browser cookie store.
-          A failed test can still allow Douyin downloads through the authenticated CDP browser; TikTok still requires a readable browser-cookie session.
+          Kiểm tra đầy đủ tách riêng browser-cookie, kết nối CDP và trạng thái đăng nhập Douyin.
+          TikTok vẫn cần cookie đúng domain; Douyin dùng cookie hoặc CDP authenticated fallback.
         </Alert>
 
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1} flexWrap="wrap" useFlexGap>
@@ -113,7 +132,7 @@ export default function DownloadSessionSection({ settings, updateSettings }) {
             {saving ? "Saving…" : "Save"}
           </Button>
           <Button variant="outlined" startIcon={<RefreshOutlinedIcon />} onClick={test} disabled={testing}>
-            {testing ? "Testing…" : "Test session"}
+            {testing ? "Đang kiểm tra…" : "Kiểm tra đầy đủ"}
           </Button>
           <Button variant="text" startIcon={<LoginOutlinedIcon />} href="https://www.douyin.com/" target="_blank" rel="noreferrer">
             Open Douyin
@@ -123,34 +142,51 @@ export default function DownloadSessionSection({ settings, updateSettings }) {
           </Button>
         </Stack>
 
-        {probe && probe.ok && (
-          <Alert severity={byteDanceCookies > 0 ? "success" : "warning"}>
-            <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="center">
-              <span>
-                Cookie store is readable from <strong>{probe.resolved_browser}</strong>
-                {probe.profile ? ` / ${probe.profile}` : ""}.
-              </span>
-              <Chip size="small" label={`${probe.cookie_count || 0} tổng`} />
-              <Chip size="small" label={`Douyin ${probe.douyin_cookie_count || 0}`} />
-              <Chip size="small" label={`TikTok ${probe.tiktok_cookie_count || 0}`} />
-            </Stack>
-            {byteDanceCookies === 0 && (
-              <Typography variant="caption" sx={{ display: "block", mt: 0.75 }}>
-                Browser access works, but no Douyin/TikTok-domain cookies were found in this profile. TikTok needs matching cookies; Douyin may use the authenticated CDP fallback instead.
-              </Typography>
-            )}
-            {byteDanceCookies > 0 && (
-              <Typography variant="caption" sx={{ display: "block", mt: 0.75 }}>
-                Domain cookies do not guarantee that the login is still valid; the real URL download remains the final check.
-              </Typography>
-            )}
-          </Alert>
-        )}
+        {probe && (
+          <Alert severity={probe.douyin_ready ? "success" : "warning"}>
+            <Stack spacing={1}>
+              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="center">
+                <Chip
+                  size="small"
+                  color={cookieProbe?.ok ? "success" : "warning"}
+                  label={cookieProbe?.ok ? "Cookie store: OK" : "Cookie store: FAIL"}
+                />
+                <Chip
+                  size="small"
+                  color={cdpProbe?.connected ? "success" : "warning"}
+                  label={cdpProbe?.connected ? "CDP: Connected" : "CDP: Disconnected"}
+                />
+                <Chip
+                  size="small"
+                  color={cdpProbe?.authenticated ? "success" : "warning"}
+                  label={cdpProbe?.authenticated ? "Douyin: Authenticated" : "Douyin: Login required"}
+                />
+                <Chip size="small" variant="outlined" label={probe.douyin_ready ? "Douyin READY" : "Douyin chưa sẵn sàng"} />
+                <Chip size="small" variant="outlined" label={probe.tiktok_ready ? "TikTok READY" : "TikTok chưa sẵn sàng"} />
+              </Stack>
 
-        {probe && !probe.ok && (
-          <Alert severity="warning">
-            {probe.error || "Browser cookie store is not readable."}
-            {" "}Douyin can still use the authenticated CDP browser fallback; TikTok cannot.
+              {cookieProbe?.ok ? (
+                <Typography variant="caption">
+                  Cookie: <strong>{cookieProbe.resolved_browser || browser}</strong>
+                  {cookieProbe.profile ? " / " + cookieProbe.profile : ""}
+                  {" · " + byteDanceCookies + " ByteDance cookie(s) · Douyin " + (cookieProbe.douyin_cookie_count || 0) + " · TikTok " + (cookieProbe.tiktok_cookie_count || 0)}
+                </Typography>
+              ) : (
+                <Typography variant="caption" color="text.secondary">
+                  Cookie path: {cookieProbe?.error || "không đọc được cookie store"}
+                </Typography>
+              )}
+
+              <Typography variant="caption" color="text.secondary">
+                CDP: {cdpProbe?.url || cdpUrl}
+                {cdpProbe?.authenticated
+                  ? " · đăng nhập hợp lệ · " + (cdpProbe.cookie_count || 0) + " cookie(s)"
+                  : " · " + (cdpProbe?.error || "chưa xác nhận đăng nhập")}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Media resolver chỉ được xác nhận cuối cùng khi tải một URL Douyin thật; health check không giả vờ rằng chỉ đăng nhập là đủ.
+              </Typography>
+            </Stack>
           </Alert>
         )}
       </Stack>
