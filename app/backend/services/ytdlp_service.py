@@ -16,6 +16,7 @@ from backend.core.http_utils import get_user_agent
 from backend.services.download_browser_session import (
     cookiesfrombrowser_value,
     get_download_browser_session,
+    get_douyin_cdp_url,
     normalize_download_browser,
     normalize_download_profile,
 )
@@ -605,6 +606,7 @@ def _required_bytedance_cookie_count(url: str, session: dict) -> int:
 async def _prepare_download_source(
     url: str,
     cookie_session: dict,
+    douyin_cdp_url: str | None = None,
 ) -> tuple[str, dict[str, str] | None, str | None]:
     """Choose the URL that the canonical yt-dlp pipeline will download.
 
@@ -625,7 +627,7 @@ async def _prepare_download_source(
         try:
             from backend.services.douyin_media_resolver import resolve_douyin_media
             resolved = await asyncio.wait_for(
-                resolve_douyin_media(url),
+                resolve_douyin_media(url, cdp_url=douyin_cdp_url),
                 timeout=45,
             )
         except Exception as exc:
@@ -858,12 +860,13 @@ async def download_video(
     _opt_postprocessors = _opt_overrides.pop("_vm_postprocessors", [])
     _format_chain = _dlopts.format_chain(_opts) or FORMAT_FALLBACK_CHAIN
     cookie_browser, cookie_profile = await get_download_browser_session()
+    douyin_cdp_url = await get_douyin_cdp_url()
     cookie_session = await asyncio.to_thread(
         _inspect_browser_session, cookie_browser, cookie_profile
     )
     cookie_session_ok = bool(cookie_session.get("ok"))
     effective_url, resolved_headers, resolved_via = await _prepare_download_source(
-        url, cookie_session
+        url, cookie_session, douyin_cdp_url=douyin_cdp_url
     )
     use_browser_cookies = cookie_session_ok and resolved_via is None
     effective_headers = {
