@@ -153,6 +153,17 @@ def _publication_result_fields(platform: str, result: dict | None) -> tuple[str 
 
 
 class UploadAgent:
+    async def _send_upload_complete(self, payload: dict, user_id: str) -> None:
+        """Notification failure must never rewrite an already-persisted publish."""
+        try:
+            await ws_manager.send(payload, user_id)
+        except Exception:
+            logger.warning(
+                "Upload completion notification failed for %s",
+                payload.get("platform"),
+                exc_info=True,
+            )
+
     async def run(
         self,
         job_id: str,
@@ -261,7 +272,7 @@ class UploadAgent:
                         result=result,
                     )
                     uploaded.append("youtube")
-                    await ws_manager.send({
+                    await self._send_upload_complete({
                         "type": "upload_complete",
                         "platform": "youtube",
                         "url": result.get("url", ""),
@@ -280,7 +291,7 @@ class UploadAgent:
                         result=result,
                     )
                     uploaded.append("tiktok")
-                    await ws_manager.send({
+                    await self._send_upload_complete({
                         "type": "upload_complete",
                         "platform": "tiktok",
                         "publish_id": result.get("publish_id"),
@@ -298,7 +309,7 @@ class UploadAgent:
                         result=result,
                     )
                     uploaded.append("instagram")
-                    await ws_manager.send({
+                    await self._send_upload_complete({
                         "type": "upload_complete",
                         "platform": "instagram",
                         "url": result.get("permalink", ""),
