@@ -50,7 +50,7 @@ function ResultPreview({ jobId }) {
     return (
       <Alert severity="info" sx={{ fontSize: "0.85rem" }}>
         {loading
-          ? "Loading result…"
+          ? "Đang tải kết quả…"
           : <>Kết quả đã sẵn sàng — bấm <strong>Tải xuống</strong> bên dưới để lấy tệp JSON.</>}
       </Alert>
     )
