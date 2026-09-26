@@ -534,7 +534,8 @@ class TestPersistence:
             self, ws, providers):
         from backend.core.exceptions import UploadOutcomeUncertainError
         providers["outcomes"]["tiktok"] = UploadOutcomeUncertainError(
-            "provider accepted bytes but final status timed out"
+            "provider accepted bytes but final status timed out",
+            provider_result={"publish_id": "tt-uncertain-1"},
         )
 
         async def run():
@@ -556,6 +557,7 @@ class TestPersistence:
         assert "outcome is unknown" in (job.error_message or "").lower()
         assert len(publications) == 1
         assert publications[0].status == "OUTCOME_UNKNOWN"
+        assert publications[0].provider_transaction_id == "tt-uncertain-1"
         assert publications[0].published_at is None
         assert "tiktok" in uncertain
 
