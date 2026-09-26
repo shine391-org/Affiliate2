@@ -111,6 +111,7 @@ class TestCookieBrowserDetection:
 
     def test_no_browser_at_all_is_none(self, monkeypatch):
         monkeypatch.setattr(YT.platform, "system", lambda: "Darwin")
+        monkeypatch.setattr(YT.shutil, "which", lambda binary: None)
         monkeypatch.setattr(YT.Path, "exists", lambda self: False)
         assert YT._detect_cookie_browser() is None
 
