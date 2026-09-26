@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { Box, LinearProgress, Typography } from "@mui/material"
 import { ws } from "../../api/websocket"
+import { localizeUiMessage } from "../../utils/localizeUiMessage"
 
 export default function JobProgress({ jobId }) {
   const [progress, setProgress] = useState({ percent: 0, step: "" })
@@ -24,7 +25,7 @@ export default function JobProgress({ jobId }) {
       />
       {progress.step && (
         <Typography variant="caption" sx={{ color: "text.secondary", mt: 0.25, display: "block" }}>
-          {progress.step}
+          {localizeUiMessage(progress.step)}
         </Typography>
       )}
     </Box>
