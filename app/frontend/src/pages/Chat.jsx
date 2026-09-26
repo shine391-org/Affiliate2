@@ -370,7 +370,7 @@ export default function Chat() {
                 variant="body1"
                 sx={{ color: "text.secondary", mb: 5, maxWidth: 440, mx: "auto", lineHeight: 1.6, textAlign: "center" }}
               >
-                Your AI content strategy assistant. Scout trending videos, generate originals, and publish everywhere.
+                Trợ lý chiến lược nội dung AI của bạn. Theo dõi video đang thịnh hành, tạo nội dung nguyên bản và xuất bản đa nền tảng.
               </Typography>
 
               {suggestions.length > 0 && (
