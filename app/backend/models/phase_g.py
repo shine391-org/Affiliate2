@@ -28,6 +28,7 @@ class RadarObservation(Base):
     id = Column(String(36), primary_key=True, default=lambda: str(uuid4()))
     scout_result_id = Column(String(36), nullable=False, index=True)
     legacy_snapshot_id = Column(Integer, nullable=True, unique=True)
+    job_id = Column(String(36), nullable=True, index=True)
     captured_at = Column(DateTime, nullable=False, index=True)
     views = Column(Integer, nullable=True)
     likes = Column(Integer, nullable=True)

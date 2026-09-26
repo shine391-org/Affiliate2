@@ -80,10 +80,18 @@ async def _job_count(job_type: str) -> int:
 
 
 async def _generated_video(*, approved: bool) -> str:
+    from backend.agents.uploader import file_sha256
+    from backend.config import settings
     from backend.database import AsyncSessionLocal
     from backend.models.generated_video import GeneratedVideo
     from backend.models.user_settings import UserSettings
     from sqlalchemy import select
+
+    settings.TMP_DIR.mkdir(parents=True, exist_ok=True)
+    media = settings.TMP_DIR / "planner-publish-test.mp4"
+    media.write_bytes(b"planner-publish-fixture")
+    artifact_hash = file_sha256(media) if approved else None
+
     async with AsyncSessionLocal() as db:
         settings = (await db.execute(select(UserSettings).where(
             UserSettings.user_id == "local"))).scalar_one_or_none()
@@ -98,8 +106,10 @@ async def _generated_video(*, approved: bool) -> str:
             user_id="local",
             title="Publish candidate",
             status="ready",
-            video_path="/tmp/planner-publish.mp4",
+            video_path=str(media),
+            artifact_sha256=artifact_hash,
             publish_approved_at=datetime.utcnow() if approved else None,
+            publish_approval_artifact_sha256=artifact_hash,
         )
         db.add(row)
         await db.commit()

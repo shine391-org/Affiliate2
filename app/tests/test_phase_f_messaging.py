@@ -35,10 +35,24 @@ def clean_user():
 
 
 async def asset(title, *, approved=False, published=False, platform="youtube"):
-    row = GeneratedVideo(user_id=UID, title=title, status="uploaded" if published else "ready",
-        video_path="phase-f-test.mp4", publish_approved_at=datetime.utcnow() if approved else None,
+    from backend.agents.uploader import file_sha256
+    from backend.config import settings
+
+    settings.TMP_DIR.mkdir(parents=True, exist_ok=True)
+    media = settings.TMP_DIR / "phase-f-messaging-test.mp4"
+    media.write_bytes(b"phase-f-messaging-fixture")
+    artifact_hash = file_sha256(media) if approved else None
+    row = GeneratedVideo(
+        user_id=UID,
+        title=title,
+        status="uploaded" if published else "ready",
+        video_path=str(media),
+        artifact_sha256=artifact_hash,
+        publish_approved_at=datetime.utcnow() if approved else None,
+        publish_approval_artifact_sha256=artifact_hash,
         uploaded_platforms_json=f'["{platform}"]' if published else "[]",
-        youtube_video_id=f"yt-{title}" if published and platform == "youtube" else None)
+        youtube_video_id=f"yt-{title}" if published and platform == "youtube" else None,
+    )
     async with AsyncSessionLocal() as db:
         db.add(row)
         await db.commit()

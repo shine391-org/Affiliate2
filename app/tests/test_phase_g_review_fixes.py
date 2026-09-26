@@ -70,6 +70,14 @@ def test_startup_wires_phase_g_migration_before_runtime_schema_init():
     assert init_pos < migrate_pos < import_pos
 
 
+def test_supported_launcher_does_not_initialize_database_twice():
+    source = (ROOT / "app" / "run.py").read_text(encoding="utf-8")
+    assert "asyncio.run(init_db())" not in source
+    main = (ROOT / "app" / "backend" / "main.py").read_text(encoding="utf-8")
+    assert "async def lifespan" in main
+    assert "await init_db()" in main
+
+
 @pytest.mark.asyncio
 async def test_scout_save_enriches_identity_precreated_by_radar():
     await init_db()

@@ -70,6 +70,15 @@ def test_every_supported_aspect_has_dimensions():
         assert w > 0 and h > 0
 
 
+def test_labeled_reframe_filter_uses_fill_when_widening_choice_is_crop():
+    from backend.services.ffmpeg_service import labeled_reframe_filters
+
+    filters = labeled_reframe_filters("[0:v]", 1920, 1080, "crop")
+    joined = ";".join(filters)
+    assert "force_original_aspect_ratio=increase" in joined
+    assert "force_original_aspect_ratio=decrease" not in joined
+
+
 @pytest.mark.asyncio
 async def test_auto_resolves_the_method_before_ffmpeg_sees_it(tmp_path, monkeypatch):
     """`method="auto"` must be resolved by the probe — never reach the filter

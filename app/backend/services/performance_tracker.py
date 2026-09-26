@@ -82,7 +82,7 @@ async def poll_all_uploaded_videos():
                 continue
             metrics = await fetch_youtube_metrics(video.youtube_video_id, video.user_id or "local")
             if metrics is not None:
-                await _save_metrics(video.id, "youtube", metrics)
+                await _save_metrics(video.id, "youtube", metrics, source="youtube_api")
         except Exception as exc:
             logger.warning("YouTube metric sync failed for %s: %s", video.id, exc)
     # TikTok publish_id is an upload transaction ID, not necessarily a public
@@ -133,8 +133,14 @@ async def fetch_tiktok_metrics(publish_id: str) -> dict | None:
     return None
 
 
-async def _save_metrics(generated_video_id: str, platform: str, metrics: dict) -> bool:
-    """Append a changed snapshot only for an exact published asset/platform."""
+async def _save_metrics(
+    generated_video_id: str,
+    platform: str,
+    metrics: dict,
+    *,
+    source: str = "manual",
+) -> bool:
+    """Append a changed snapshot linked to the exact canonical publication."""
     if platform not in PLATFORMS:
         raise ValueError("Unsupported platform")
     values = normalize_metrics(metrics)
@@ -149,7 +155,22 @@ async def _save_metrics(generated_video_id: str, platform: str, metrics: dict) -
         ).order_by(VideoMetrics.fetched_at.desc()).limit(1))).scalar_one_or_none()
         if latest and all(getattr(latest, key) == value for key, value in values.items()):
             return False
-        db.add(VideoMetrics(generated_video_id=generated_video_id, platform=platform, **values))
+        publication = (await db.execute(select(PublicationRecord).where(
+            PublicationRecord.generated_video_id == generated_video_id,
+            PublicationRecord.platform == platform,
+            PublicationRecord.status == "PUBLISHED",
+        ).order_by(
+            PublicationRecord.published_at.desc(),
+            PublicationRecord.updated_at.desc(),
+        ).limit(1))).scalar_one_or_none()
+        db.add(VideoMetrics(
+            generated_video_id=generated_video_id,
+            publication_record_id=publication.id if publication else None,
+            platform=platform,
+            source=source,
+            raw_json=json.dumps(metrics, ensure_ascii=False, sort_keys=True),
+            **values,
+        ))
         await db.commit()
     return True
 

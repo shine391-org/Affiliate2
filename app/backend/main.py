@@ -253,17 +253,10 @@ def create_app() -> FastAPI:
     # with credentials — CORS hides the response on simple requests but the
     # side effect has already happened. This middleware rejects them up front.
     #
-    # LAN mode: OSS documents an optional HOST=0.0.0.0 so a phone on the same
-    # WiFi can drive the UI at http://<lan-ip>:16888. That legitimate traffic
-    # carries an Origin the loopback allowlist can't enumerate (the LAN IP is
-    # unknown ahead of time), so when the user has explicitly opted into LAN
-    # exposure we skip the strict origin check entirely. On the loopback
-    # default (127.0.0.1) we enforce it.
-    # Only HOST=0.0.0.0 has an unenumerable origin (the phone hits the machine's
-    # LAN IP, unknown ahead of time) → skip the strict check there. A concrete
-    # non-loopback bind (e.g. HOST=192.168.1.5) DOES have an enumerable origin,
-    # so we keep CSRF enforced and just allowlist it below. Reverse-proxy / custom
-    # domain deployments set FRONTEND_URL, which is already allowlisted.
+    # LAN mode still enforces CSRF. The machine's LAN IP is not known ahead
+    # of time when binding to 0.0.0.0, so we additionally accept the exact
+    # same-origin Host used for this request. Cross-site origins remain blocked.
+    # Reverse-proxy/custom-domain deployments can use FRONTEND_URL explicitly.
     lan_mode = settings.HOST == "0.0.0.0"
     allowed_origins = {
         settings.FRONTEND_URL,
@@ -276,7 +269,7 @@ def create_app() -> FastAPI:
         allowed_origins.add(f"http://{settings.HOST}:{settings.PORT}")
     safe_methods = {"GET", "HEAD", "OPTIONS"}
 
-    def _origin_ok(header: str) -> bool:
+    def _origin_ok(header: str | None, request: Request) -> bool:
         if not header:
             return False
         try:
@@ -284,18 +277,36 @@ def create_app() -> FastAPI:
             origin = f"{parsed.scheme}://{parsed.netloc}"
         except Exception:
             return False
-        return origin in allowed_origins
+        if origin in allowed_origins:
+            return True
+        if lan_mode:
+            # The built SPA is served from the backend itself. In 0.0.0.0 mode
+            # the public LAN address is dynamic, but accepting an arbitrary
+            # Origin == Host would permit DNS-rebinding (evil.example resolving
+            # to the LAN machine). Auto-allow only literal local/private IPs;
+            # named hosts/domains must be declared through FRONTEND_URL.
+            request_host = request.headers.get("host", "")
+            if parsed.scheme not in {"http", "https"} or parsed.netloc != request_host:
+                return False
+            try:
+                from ipaddress import ip_address
+                host = parsed.hostname or ""
+                address = ip_address(host)
+            except ValueError:
+                return host == "localhost"
+            return address.is_private or address.is_loopback or address.is_link_local
+        return False
 
     @app.middleware("http")
     async def csrf_origin_check(request: Request, call_next):
-        if lan_mode or request.method in safe_methods:
+        if request.method in safe_methods:
             return await call_next(request)
         origin = request.headers.get("origin")
         referer = request.headers.get("referer")
         # No Origin AND no Referer → non-browser client (CLI, server) → allow.
-        # If either is present, at least one must be in the allowlist.
+        # If either is present, at least one must be an approved/same origin.
         if origin or referer:
-            if not (_origin_ok(origin) or _origin_ok(referer)):
+            if not (_origin_ok(origin, request) or _origin_ok(referer, request)):
                 return JSONResponse(
                     {"detail": "Forbidden: invalid origin"}, status_code=403
                 )

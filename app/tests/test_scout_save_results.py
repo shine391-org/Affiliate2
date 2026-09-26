@@ -17,6 +17,7 @@ These tests pin that contract.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -40,23 +41,44 @@ def _fake_scout_result(video_id: str, platform: str, **overrides) -> dict:
 
 
 def _make_fake_session(existing_keys_to_ids: dict[tuple[str, str], str]):
-    """Return a mock session that:
-      - reports the given (video_id, platform) → id pairs as already
-        in the table (for the dedup pre-fetch)
-      - assigns new ids to anything inserted via db.add(sr); db.flush()
-    """
+    """Return an ORM-shape fake session for ScoutAgent._save_results."""
     fetched_rows = [
-        (id_, video_id, platform)
+        SimpleNamespace(
+            id=id_,
+            video_id=video_id,
+            platform=platform,
+            job_id="first-job",
+            video_url=f"https://stored.example/{video_id}",
+            embed_url=None,
+            title=f"Stored {video_id}",
+            description=None,
+            author="Stored Author",
+            author_url=None,
+            creator_id=None,
+            thumbnail_url=None,
+            duration_seconds=None,
+            upload_date=None,
+            views=1,
+            likes=1,
+            comments=1,
+            shares=0,
+            virality_score=1.0,
+            views_per_hour=None,
+            outlier_score=None,
+            subscriber_count=None,
+            channel_avg_views=None,
+        )
         for (video_id, platform), id_ in existing_keys_to_ids.items()
     ]
 
+    scalars = MagicMock()
+    scalars.all = MagicMock(return_value=fetched_rows)
     fetched_result = MagicMock()
-    fetched_result.fetchall = MagicMock(return_value=fetched_rows)
+    fetched_result.scalars = MagicMock(return_value=scalars)
 
     next_id = [1000]
 
     def _fake_flush_side_effect():
-        # New row's id assigned at flush time — simulate that.
         if fake_session._pending_row is not None:
             fake_session._pending_row.id = f"new-{next_id[0]}"
             next_id[0] += 1
@@ -80,7 +102,6 @@ def _make_fake_session(existing_keys_to_ids: dict[tuple[str, str], str]):
             return False
 
     return FakeCM, fake_session
-
 
 class TestSaveResultsDedupDisplay:
     """The post-2026-05-12 contract: dedup is STORAGE-only. Every

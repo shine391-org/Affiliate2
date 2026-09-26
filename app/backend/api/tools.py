@@ -386,10 +386,10 @@ async def translate_tool(
     if not (target_language or "").strip():
         raise HTTPException(400, "target_language is required")
 
-    from backend.agents.job_helper import create_job as _create_job
+    from backend.agents.job_helper import create_job
     from backend.core.task_runner import dispatch
     from backend.core.tool_runners import run_tool_translate
-    job = await _create_job("tool:translate", "local", {
+    job = await create_job("tool:translate", "local", {
         "target_language": target_language,
         "mode": mode,
         "voice_id": voice_id if mode == "full_dub" else None,

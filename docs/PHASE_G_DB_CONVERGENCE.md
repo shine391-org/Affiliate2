@@ -1,6 +1,6 @@
 # Phase G — Database Convergence and Legacy Cleanup
 
-Status: IMPLEMENTATION COMPLETE (local)
+Status: COMPLETE — merged to `master`; closeout hardening follows on the same endpoint
 
 Date: 2026-09-25
 
@@ -192,13 +192,11 @@ isolated to a temp dir by `app/tests/conftest.py` (no real DB mutated).
   (Phase F performance subset = 6 passed, matching baseline.)
 - `git diff --check` across the repository: clean.
 
-### Final branch / HEAD / origin evidence
-- Branch: `phase-g-db-convergence-cleanup`
-- Local HEAD: `680a8db` (4 commits)
-  341f839 feat(db) · f826476 refactor(db) · 672113b refactor(cleanup) ·
-  680a8db test(db)
-- `phase-g-db-convergence-cleanup` vs `master` (a675a22):
-  +4 ahead, 0 behind.
-- `git diff --check`: clean (no trailing-whitespace/EOL errors).
-- Pushed to `origin/phase-g-db-convergence-cleanup`; LOCAL_HEAD ==
-  ORIGIN_HEAD after push.
+### Final merge evidence
+- Phase-G source branch: `phase-g-db-convergence-cleanup`.
+- Phase G was merged/fast-forwarded into `master`; canonical Phase-G master
+  endpoint: `059c1325b337455bfb878b47ea40c7777875dd3e`.
+- The original Phase-G branch evidence (`680a8db` and its local QA) is
+  historical implementation evidence, not the current branch state.
+- Subsequent changes on `fix/master-closeout-20260925` are review-driven
+  hardening of the same Phase-G endpoint, not a new persistence/product phase.
