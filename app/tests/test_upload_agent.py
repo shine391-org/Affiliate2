@@ -479,6 +479,37 @@ class TestAuthFailures:
 
 
 class TestPersistence:
+    def test_provider_success_with_local_commit_failure_is_not_safe_to_retry(
+            self, ws, providers, monkeypatch):
+        async def fail_finalize(*args, **kwargs):
+            raise RuntimeError("local commit failed")
+
+        async def run():
+            await _make_settings(
+                youtube_credentials_json_encrypted=encrypt('{"token":"t"}'))
+            vid = await _make_video()
+            jid = await _job()
+            monkeypatch.setattr(
+                UploadAgent, "_finalize_successful_publication", fail_finalize
+            )
+            await UploadAgent().run(jid, vid, ["youtube"])
+            job = await _job_row(jid)
+            video = await _video_row(vid)
+            publications = await _publication_rows(vid)
+            from backend.agents.uploader import uncertain_publication_destinations
+            uncertain = await uncertain_publication_destinations(vid)
+            return job, video, publications, uncertain
+
+        job, video, publications, uncertain = asyncio.run(run())
+        assert job.status == "failed"
+        assert "provider upload succeeded" in job.error_message.lower()
+        assert json.loads(video.uploaded_platforms_json or "[]") == []
+        assert len(publications) == 1
+        assert publications[0].status == "PERSISTENCE_ERROR"
+        assert publications[0].public_content_id == "yt1"
+        assert publications[0].published_at is not None
+        assert "youtube" in uncertain
+
     def test_marking_a_vanished_video_is_survivable(self, ws, providers):
         """The row can be deleted while an upload is in flight."""
         async def run():
