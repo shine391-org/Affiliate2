@@ -18,7 +18,7 @@ const terminal = (status) => ["success", "failed", "cancelled"].includes(status)
 const STATUS_LABELS = { ready: "Sẵn sàng", uploaded: "Đã tải lên", pending: "Đang chờ", running: "Đang chạy", success: "Hoàn tất", failed: "Thất bại", cancelled: "Đã hủy" }
 const SOURCE_LABELS = { generated: "Đã tạo", smart_video: "Video thông minh", clip_extraction: "Clip", smart_cut: "Cắt thông minh", motion_graphics: "Đồ họa chuyển động" }
 
-function PlatformCard({ name, connected, connectLabel, onConnect, onPublish, busy, published, hint, children }) {
+function PlatformCard({ name, connected, reconnect = false, connectLabel, onConnect, onPublish, busy, published, hint, children }) {
   return (
     <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
       <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
@@ -29,7 +29,7 @@ function PlatformCard({ name, connected, connectLabel, onConnect, onPublish, bus
       <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>{hint}</Typography>
       {children}
       <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 1.25 }}>
-        {!connected && onConnect && (
+        {(!connected || reconnect) && onConnect && (
           <Button variant="outlined" startIcon={<OpenInNewOutlinedIcon />} onClick={onConnect}>
             {connectLabel || "Kết nối"}
           </Button>
@@ -72,6 +72,7 @@ export default function Publish() {
   const [tiktokDisableComment, setTikTokDisableComment] = useState(false)
   const [tiktokDisableDuet, setTikTokDisableDuet] = useState(false)
   const [tiktokDisableStitch, setTikTokDisableStitch] = useState(false)
+  const [tiktokCreatorRefreshKey, setTikTokCreatorRefreshKey] = useState(0)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -164,7 +165,7 @@ export default function Publish() {
       .finally(() => { if (alive) setTikTokCreatorLoading(false) })
 
     return () => { alive = false }
-  }, [settings?.tiktok_upload_connected, settings?.tiktok_default_privacy])
+  }, [settings?.tiktok_upload_connected, settings?.tiktok_default_privacy, tiktokCreatorRefreshKey])
 
   useEffect(() => {
     if (!selected) {
@@ -291,7 +292,16 @@ export default function Publish() {
         icon={<CloudUploadOutlinedIcon sx={{ fontSize: 22 }} />}
         title="Xuất bản"
         subtitle="Một luồng chuẩn cho đầu ra đã được người dùng duyệt và phân phối lên nền tảng"
-        actions={<Button size="small" variant="outlined" startIcon={<RefreshOutlinedIcon />} onClick={load} disabled={loading}>Làm mới</Button>}
+        actions={<Button
+          size="small"
+          variant="outlined"
+          startIcon={<RefreshOutlinedIcon />}
+          onClick={() => {
+            load()
+            setTikTokCreatorRefreshKey((value) => value + 1)
+          }}
+          disabled={loading}
+        >Làm mới</Button>}
       />
 
       {error && <Alert severity="error" sx={{ mx: { xs: 1.5, md: 2.5 }, mt: 1 }}>{error}</Alert>}
@@ -409,7 +419,8 @@ export default function Publish() {
                 <PlatformCard
                   name="TikTok"
                   connected={Boolean(settings?.tiktok_upload_connected)}
-                  connectLabel="Kết nối TikTok OAuth"
+                  reconnect={Boolean(tiktokCreatorError)}
+                  connectLabel={tiktokCreatorError ? "Kết nối lại TikTok OAuth" : "Kết nối TikTok OAuth"}
                   onConnect={() => connect("/api/settings/tiktok-upload-auth")}
                   onPublish={() => publish("tiktok")}
                   busy={Boolean(active) || !selected.publish_approved || tiktokCreatorLoading || !tiktokCreator || !tiktokPrivacy}
@@ -428,7 +439,23 @@ export default function Publish() {
                         <Typography variant="caption" color="text.secondary">Đang đọc quyền Direct Post…</Typography>
                       </Stack>
                     )}
-                    {tiktokCreatorError && <Alert severity="warning" variant="outlined">{tiktokCreatorError}</Alert>}
+                    {tiktokCreatorError && (
+                      <Alert
+                        severity="warning"
+                        variant="outlined"
+                        action={
+                          <Button
+                            color="inherit"
+                            size="small"
+                            onClick={() => setTikTokCreatorRefreshKey((value) => value + 1)}
+                          >
+                            Thử lại
+                          </Button>
+                        }
+                      >
+                        {tiktokCreatorError}
+                      </Alert>
+                    )}
                     {tiktokCreator && (
                       <>
                         <Typography variant="caption" color="text.secondary">
