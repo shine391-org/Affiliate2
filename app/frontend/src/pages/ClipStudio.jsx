@@ -374,6 +374,7 @@ export default function ClipStudio({ workflow = "manual" }) {
   const [sourceFilter, setSourceFilter] = useState("")
   const [previewVideo, setPreviewVideo] = useState(null) // source video for the play popup
   const [searchQuery, setSearchQuery] = useState("")
+  const [effectiveAi, setEffectiveAi] = useState(null)
   const [sortBy, setSortBy] = useState("virality") // virality | newest | duration
   const [sortAnchor, setSortAnchor] = useState(null)
 
@@ -459,6 +460,15 @@ export default function ClipStudio({ workflow = "manual" }) {
   }, [requestedSourceId, outputSourceType, smartCut])
 
   useEffect(() => { fetchData() }, [fetchData])
+
+  useEffect(() => {
+    if (!smartCut) return undefined
+    let alive = true
+    http.get("/api/settings/ai/effective")
+      .then(({ data }) => { if (alive) setEffectiveAi(data || null) })
+      .catch(() => { if (alive) setEffectiveAi(null) })
+    return () => { alive = false }
+  }, [smartCut])
 
   // Auto-refresh when a clip extraction OR suggestion job completes. The
   // suggestion half matters for a non-obvious reason: Ask AI may run Whisper
@@ -745,6 +755,23 @@ export default function ClipStudio({ workflow = "manual" }) {
             <Typography variant="caption" sx={{ color: "text.secondary" }}>
               {clipTotal ?? clips.length} {smartCut ? "đoạn cắt đã duyệt" : "clip"} từ {sources.length} video{clipTotal > clips.length ? ` · đang hiện ${clips.length} mục mới nhất` : ""}
             </Typography>
+            {smartCut && (
+              <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mt: 0.5 }}>
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  color={effectiveAi?.configured ? "primary" : "warning"}
+                  label={
+                    effectiveAi?.configured
+                      ? `AI chọn đoạn: ${effectiveAi.provider || effectiveAi.runtime_provider} · ${effectiveAi.model || "mặc định"}`
+                      : "AI chọn đoạn: chưa cấu hình"
+                  }
+                />
+                <Typography variant="caption" color="text.secondary">
+                  Smart Cut dùng AI runtime toàn cục; không có mô hình riêng mang thương hiệu donor.
+                </Typography>
+              </Stack>
+            )}
           </Box>
         </Stack>
 
