@@ -108,7 +108,7 @@ export default function MotionGraphics() {
     <PageHero
       icon={<MovieFilterIcon sx={{ fontSize: 22 }} />}
       title="Đồ họa chuyển động"
-      subtitle="Thiết kế composition động — chữ động, thẻ số liệu, lower third — và kết xuất ngay trên máy"
+      subtitle="Thiết kế bố cục động — chữ động, thẻ số liệu, thanh tiêu đề dưới — và kết xuất ngay trên máy"
       dense
       actions={
         (installed || sourceId) ? (
