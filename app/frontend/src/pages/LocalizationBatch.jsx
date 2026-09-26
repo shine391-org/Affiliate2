@@ -11,7 +11,7 @@ import useAppStore from "../store/appStore"
 import useDocumentTitle from "../hooks/useDocumentTitle"
 
 export default function LocalizationBatch({ embedded = false }) {
-  useDocumentTitle("Localization Batch")
+  useDocumentTitle("Bản địa hóa hàng loạt")
   const startJob = useAppStore((s) => s.startJob)
   const showSnackbar = useAppStore((s) => s.showSnackbar)
   const [files, setFiles] = useState([])
@@ -33,7 +33,7 @@ export default function LocalizationBatch({ embedded = false }) {
 
   const submit = async () => {
     if (!files.length) {
-      showSnackbar("Select at least one video", "warning")
+      showSnackbar("Hãy chọn ít nhất một video", "warning")
       return
     }
     setSubmitting(true)
@@ -49,12 +49,12 @@ export default function LocalizationBatch({ embedded = false }) {
       })
       const created = data?.jobs || []
       created.forEach((job) => {
-        startJob(job.job_id, "tool:translate", "Queued for HQ localization…")
+        startJob(job.job_id, "tool:translate", "Đã xếp hàng để bản địa hóa HQ…")
       })
       setJobs(created)
-      showSnackbar("Queued " + created.length + " localization jobs", "success")
+      showSnackbar("Đã xếp hàng " + created.length + " tác vụ bản địa hóa", "success")
     } catch (err) {
-      showSnackbar(err.response?.data?.detail || "Batch submit failed", "error")
+      showSnackbar(err.response?.data?.detail || "Gửi hàng loạt thất bại", "error")
     } finally {
       setSubmitting(false)
     }
@@ -66,15 +66,15 @@ export default function LocalizationBatch({ embedded = false }) {
         <PageHero
           backTo="/studio/localize"
           icon={<TranslateOutlinedIcon sx={{ fontSize: 22 }} />}
-          title="Localization Batch"
-          subtitle="Run the same proven HQ localization pipeline across up to 20 videos"
+          title="Bản địa hóa hàng loạt"
+          subtitle="Chạy cùng quy trình bản địa hóa HQ cho tối đa 20 video"
         />
       )}
       <Box sx={{ flex: 1, overflow: "auto", p: embedded ? 1 : 3 }}>
         <Stack spacing={2.5} sx={{ maxWidth: 900, mx: "auto" }}>
           <Alert severity="info" variant="outlined">
-            Every item gets its own persisted stage manifest, resume state, QC report
-            and Expert workspace. Batch does not use a cheaper second engine.
+            Mỗi mục có manifest từng bước, trạng thái tiếp tục và báo cáo QC riêng
+            cùng vùng làm việc nâng cao. Chế độ hàng loạt không dùng engine rẻ hơn.
           </Alert>
 
           <Button
@@ -99,26 +99,26 @@ export default function LocalizationBatch({ embedded = false }) {
 
           <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
             <FormControl size="small" fullWidth>
-              <InputLabel>Profile</InputLabel>
-              <Select value={profileId} label="Profile" onChange={(e) => setProfileId(e.target.value)}>
+              <InputLabel>Hồ sơ</InputLabel>
+              <Select value={profileId} label="Hồ sơ" onChange={(e) => setProfileId(e.target.value)}>
                 {profiles.map((p) => <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>)}
               </Select>
             </FormControl>
             <FormControl size="small" fullWidth>
-              <InputLabel>Target</InputLabel>
-              <Select value={target} label="Target" onChange={(e) => setTarget(e.target.value)}>
-                <MenuItem value="vi">Vietnamese</MenuItem>
-                <MenuItem value="en">English</MenuItem>
-                <MenuItem value="zh">Chinese</MenuItem>
-                <MenuItem value="ja">Japanese</MenuItem>
-                <MenuItem value="ko">Korean</MenuItem>
+              <InputLabel>Ngôn ngữ đích</InputLabel>
+              <Select value={target} label="Ngôn ngữ đích" onChange={(e) => setTarget(e.target.value)}>
+                <MenuItem value="vi">Tiếng Việt</MenuItem>
+                <MenuItem value="en">Tiếng Anh</MenuItem>
+                <MenuItem value="zh">Tiếng Trung</MenuItem>
+                <MenuItem value="ja">Tiếng Nhật</MenuItem>
+                <MenuItem value="ko">Tiếng Hàn</MenuItem>
               </Select>
             </FormControl>
             <FormControl size="small" fullWidth>
-              <InputLabel>Mode</InputLabel>
-              <Select value={mode} label="Mode" onChange={(e) => setMode(e.target.value)}>
-                <MenuItem value="full_dub">HQ full dub</MenuItem>
-                <MenuItem value="captions_only">Captions only</MenuItem>
+              <InputLabel>Chế độ</InputLabel>
+              <Select value={mode} label="Chế độ" onChange={(e) => setMode(e.target.value)}>
+                <MenuItem value="full_dub">Lồng tiếng HQ đầy đủ</MenuItem>
+                <MenuItem value="captions_only">Chỉ phụ đề</MenuItem>
               </Select>
             </FormControl>
           </Stack>
@@ -129,12 +129,12 @@ export default function LocalizationBatch({ embedded = false }) {
             disabled={submitting || !files.length || !profileId}
             sx={{ alignSelf: "flex-start" }}
           >
-            {submitting ? "Queuing…" : "Run batch"}
+            {submitting ? "Đang xếp hàng…" : "Chạy hàng loạt"}
           </Button>
 
           {jobs.length > 0 && (
             <Box>
-              <Typography variant="subtitle2" sx={{ mb: 1 }}>Queued jobs</Typography>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>Tác vụ đã xếp hàng</Typography>
               <Stack spacing={0.75}>
                 {jobs.map((job) => (
                   <Typography key={job.job_id} variant="caption" color="text.secondary">

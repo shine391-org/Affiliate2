@@ -14,6 +14,7 @@ import ChevronLeftIcon from "@mui/icons-material/ChevronLeft"
 import WarningAmberIcon from "@mui/icons-material/WarningAmber"
 import http from "../../api/http"
 import useAppStore from "../../store/appStore"
+import { localizeUiMessage } from "../../utils/localizeUiMessage"
 import { toolJobTypeFor } from "./toolJobType"
 import ToolInputContext from "./ToolInputContext"
 import PageHero from "../PageHero"
@@ -94,9 +95,9 @@ function AutoPreview({ jobId }) {
   return (
     <Stack alignItems="center" spacing={1.5} sx={{ py: 6, px: 2 }}>
       <CheckCircleOutlinedIcon sx={{ fontSize: 48, color: "success.main" }} />
-      <Typography variant="body1" sx={{ fontWeight: 600 }}>Your file is ready</Typography>
+      <Typography variant="body1" sx={{ fontWeight: 600 }}>Tệp đã sẵn sàng</Typography>
       <Typography variant="caption" sx={{ color: "text.secondary", textAlign: "center" }}>
-        Download it below, or run the tool again with new settings.
+        Tải xuống bên dưới hoặc chạy lại công cụ với cài đặt mới.
       </Typography>
     </Stack>
   )
@@ -114,7 +115,7 @@ export default function ToolRunner({
   canSubmit = true,
   children,            // tool-specific config UI
   onJobComplete,       // optional — (jobId) => void
-  processLabel = "Process",
+  processLabel = "Xử lý",
   // Optional cost / usage hint string (e.g. "Free", "BYOK"). Rendered as a
   // muted caption in the PageHero secondary row. ToolRunner just forwards the
   // value through.
@@ -127,7 +128,7 @@ export default function ToolRunner({
                        //   `/api/tools/download/{jobId}` URL. Used to switch
                        //   to ?bundle=true when variations > 1 so one click
                        //   downloads a ZIP of all outputs.
-  downloadLabel = "Download",  // optional override for the button label
+  downloadLabel = "Tải xuống",  // optional override for the button label
   // Optional human-readable reason the Process button is disabled, shown as
   // a tooltip on hover. Only surfaces when canSubmit is false (a missing
   // file/script reports its own message).
@@ -163,7 +164,7 @@ export default function ToolRunner({
   //   resultOpen     — the rail exists at all (false fully dismisses it)
   //   railCollapsed  — true shrinks it to a thin "Result ready" tab pinned
   //                    to the screen edge; click the tab to expand again.
-  // Auto-opens (expanded) on success; the hero keeps a "View result" button
+  // Auto-opens (expanded) on success; the hero keeps a "Xem kết quả" button
   // to bring it back after a full dismiss.
   const [resultOpen, setResultOpen] = useState(false)
   const [railCollapsed, setRailCollapsed] = useState(false)
@@ -252,7 +253,7 @@ export default function ToolRunner({
     if (!f) return
     const maxBytes = maxMB * 1024 * 1024
     if (f.size > maxBytes) {
-      setError(`File too large (max ${maxMB} MB)`)
+      setError(`Tệp quá lớn (tối đa ${maxMB} MB)`)
       return
     }
     setFile(f)
@@ -278,7 +279,7 @@ export default function ToolRunner({
     const form = new FormData()
     if (!hideFileInput) {
       if (!file) {
-        setError("Please select a file")
+        setError("Hãy chọn một tệp")
         return
       }
       form.append("file", file)
@@ -315,7 +316,7 @@ export default function ToolRunner({
       startJob(data.job_id, toolJobTypeFor(endpoint), "Starting...")
       setJobId(data.job_id)
     } catch (e) {
-      const msg = e?.response?.data?.detail || e.message || "Upload failed"
+      const msg = e?.response?.data?.detail || e.message || "Tải lên thất bại"
       setError(msg)
       showSnackbar?.(msg, "error")
     }
@@ -334,7 +335,7 @@ export default function ToolRunner({
   const submitBlockedReason = !submitDisabled
     ? ""
     : missingPrimaryInput
-      ? "Select a video file first"
+      ? "Hãy chọn tệp video trước"
       : disabledReason
 
   // ⌘/Ctrl+Enter runs the tool from anywhere in the page (incl. while a
@@ -355,7 +356,7 @@ export default function ToolRunner({
 
   // Auto-open the result rail (expanded) the moment the job lands. Keyed on
   // the jobSuccess transition only — if the user dismisses it while the job
-  // is still terminal, it stays closed (reopen via the hero "View result"
+  // is still terminal, it stays closed (reopen via the hero "Xem kết quả"
   // button) until a fresh run flips jobSuccess again.
   useEffect(() => {
     if (jobSuccess) { setResultOpen(true); setRailCollapsed(false) }
@@ -401,7 +402,7 @@ export default function ToolRunner({
           // The primary action stays available whenever a job ISN'T running,
           // so the user can immediately generate again (with tweaked inputs)
           // after a result lands — no page refresh needed. When a result
-          // exists but its rail was dismissed, a secondary "View result"
+          // exists but its rail was dismissed, a secondary "Xem kết quả"
           // button reopens it.
           !jobRunning && (
             <Stack direction="row" spacing={1}>
@@ -412,7 +413,7 @@ export default function ToolRunner({
                   onClick={reopenResult}
                   sx={{ flexShrink: 0 }}
                 >
-                  View result
+                  Xem kết quả
                 </Button>
               )}
               {/* Tooltip needs a non-disabled wrapper to receive hover
@@ -523,10 +524,10 @@ export default function ToolRunner({
                 <Stack spacing={1} alignItems="center">
                   <CloudUploadOutlinedIcon sx={{ fontSize: 40, color: "text.secondary" }} />
                   <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                    Drop a video here or click to browse
+                    Thả video vào đây hoặc bấm để chọn tệp
                   </Typography>
                   <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                    {acceptExts.replace(/\./g, "").toUpperCase()} · up to {maxMB} MB
+                    {acceptExts.replace(/\./g, "").toUpperCase()} · tối đa {maxMB} MB
                   </Typography>
                 </Stack>
               )}
@@ -560,12 +561,12 @@ export default function ToolRunner({
                 icon={<WarningAmberIcon />}
                 sx={{ "& .MuiAlert-message": { fontWeight: 500 } }}
               >
-                Don't leave or refresh this page — the job is in progress.
-                Closing the page will interrupt it and you'll need to start over.
+                Đừng rời hoặc tải lại trang khi tác vụ đang chạy.
+                Đóng trang sẽ làm gián đoạn và bạn sẽ phải bắt đầu lại.
               </Alert>
               <GlassPanel sx={{ p: 2.5 }}>
                 <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
-                  {job.step || "Working…"}
+                  {localizeUiMessage(job.step || "Đang xử lý…")}
                 </Typography>
                 <LinearProgress variant="determinate" value={job.percent || 0} sx={{ borderRadius: 1, height: 8 }} />
                 <Typography variant="caption" sx={{ color: "text.secondary", mt: 0.5, display: "block" }}>
@@ -581,8 +582,8 @@ export default function ToolRunner({
 
           {/* Failed */}
           {jobFailed && (
-            <Alert severity="error" action={<Button size="small" onClick={reset}>Try again</Button>}>
-              {job?.step || terminal?.step || "Job failed"}
+            <Alert severity="error" action={<Button size="small" onClick={reset}>Thử lại</Button>}>
+              {localizeUiMessage(job?.step || terminal?.step || "Tác vụ thất bại")}
             </Alert>
           )}
         </Box>
@@ -623,15 +624,15 @@ export default function ToolRunner({
           >
             <CheckCircleOutlinedIcon sx={{ color: "success.main" }} />
             <Typography variant="subtitle1" sx={{ flex: 1, fontWeight: 700, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {title} — ready
+              {title} — sẵn sàng
             </Typography>
-            <Tooltip title="Minimize to edge">
-              <IconButton size="small" onClick={() => setRailCollapsed(true)} aria-label="Minimize result">
+            <Tooltip title="Thu gọn sang cạnh">
+              <IconButton size="small" onClick={() => setRailCollapsed(true)} aria-label="Thu gọn kết quả">
                 <ChevronRightIcon fontSize="small" />
               </IconButton>
             </Tooltip>
-            <Tooltip title="Close">
-              <IconButton size="small" onClick={() => setResultOpen(false)} aria-label="Close result">
+            <Tooltip title="Đóng">
+              <IconButton size="small" onClick={() => setResultOpen(false)} aria-label="Đóng kết quả">
                 <CloseIcon fontSize="small" />
               </IconButton>
             </Tooltip>
@@ -648,7 +649,7 @@ export default function ToolRunner({
 
           {/* Footer actions */}
           <Stack direction="row" spacing={1} sx={{ p: 2, borderTop: 1, borderColor: "divider", flexShrink: 0 }}>
-            <Button fullWidth variant="outlined" onClick={reset}>Run again</Button>
+            <Button fullWidth variant="outlined" onClick={reset}>Chạy lại</Button>
             <Button
               fullWidth
               variant="contained"
@@ -666,10 +667,10 @@ export default function ToolRunner({
       {/* Collapsed edge tab — persistent handle on the right edge. Vertical
           "Result ready" label; click to expand the rail back open. */}
       {resultOpen && jobSuccess && railCollapsed && (
-        <Tooltip title="Show generated result" placement="left">
+        <Tooltip title="Hiện kết quả đã tạo" placement="left">
           <ButtonBase
             onClick={() => setRailCollapsed(false)}
-            aria-label="Show generated result"
+            aria-label="Hiện kết quả đã tạo"
             sx={(t) => ({
               position: "fixed",
               right: 0,
@@ -701,7 +702,7 @@ export default function ToolRunner({
                 letterSpacing: "0.04em",
               }}
             >
-              Result ready
+              Kết quả đã sẵn sàng
             </Typography>
           </ButtonBase>
         </Tooltip>

@@ -15,7 +15,7 @@ export default function SceneStoryboard({
   splitLoading,
   maxScenes = 12,
   showSplitButton = true,
-  emptyMessage = "No scenes yet. Click 'Split into Scenes' to auto-split your script, or add scenes manually.",
+  emptyMessage = "Chưa có cảnh. Bấm 'Tách thành cảnh' để tự chia kịch bản hoặc thêm cảnh thủ công.",
 }) {
   const updateScene = (idx, updates) => {
     setScenes(prev => prev.map((s, i) => i === idx ? { ...s, ...updates } : s))
@@ -36,7 +36,7 @@ export default function SceneStoryboard({
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1.5 }}>
         <Typography variant="subtitle2" sx={{ fontWeight: 600, color: "text.secondary" }}>
           <SplitscreenIcon sx={{ fontSize: 16, verticalAlign: "text-bottom", mr: 0.5 }} />
-          Scenes ({scenes.length || "none"})
+          Cảnh ({scenes.length || "không"})
         </Typography>
         {showSplitButton && (
           <Button
@@ -46,7 +46,7 @@ export default function SceneStoryboard({
             startIcon={<SplitscreenIcon sx={{ fontSize: 14 }} />}
             sx={{ fontSize: "0.75rem", textTransform: "none" }}
           >
-            {splitLoading ? "Splitting..." : "Split into Scenes"}
+            {splitLoading ? "Đang tách..." : "Tách thành cảnh"}
           </Button>
         )}
       </Stack>
@@ -79,7 +79,7 @@ export default function SceneStoryboard({
               {/* Scene number + delete */}
               <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.75 }}>
                 <Typography variant="caption" sx={{ fontWeight: 700, color: "primary.main" }}>
-                  Scene {idx + 1}
+                  Cảnh {idx + 1}
                 </Typography>
                 {scenes.length > 1 && (
                   <IconButton size="small" onClick={() => removeScene(idx)} sx={{ p: 0.25 }}>
@@ -95,7 +95,7 @@ export default function SceneStoryboard({
         </Stack>
       )}
 
-      {/* Add scene button */}
+      {/* Thêm cảnh button */}
       <Button
         size="small"
         onClick={addScene}
@@ -103,7 +103,7 @@ export default function SceneStoryboard({
         startIcon={<AddIcon sx={{ fontSize: 14 }} />}
         sx={{ mt: 1.5, fontSize: "0.75rem", textTransform: "none" }}
       >
-        Add scene {scenes.length >= maxScenes && `(max ${maxScenes})`}
+        Thêm cảnh {scenes.length >= maxScenes && `(tối đa ${maxScenes})`}
       </Button>
     </Paper>
   )

@@ -22,7 +22,7 @@ const SERVICES = [
   {
     id: "youtube",
     label: "YouTube Data API",
-    description: "Powers YouTube scouting, channel reader, and comment analysis",
+    description: "Dùng cho quét YouTube, đọc kênh và phân tích bình luận",
     icon: <YouTubeIcon sx={{ color: "#FF0000", fontSize: 28 }} />,
     settingsKey: "youtube_api_key",      // POST /api/settings field
     setFlag: "youtube_api_key_set",       // GET response flag (masked)
@@ -33,7 +33,7 @@ const SERVICES = [
   {
     id: "huggingface",
     label: "Hugging Face",
-    description: "Optional Phase-C dependency for gated pyannote/WhisperX speaker diarization; not required for downloading",
+    description: "Phụ thuộc tùy chọn của Phase C cho pyannote/WhisperX tách người nói; không cần cho tải xuống",
     icon: <HubOutlinedIcon sx={{ color: "#f59e0b", fontSize: 28 }} />,
     settingsKey: "huggingface_token",
     setFlag: "huggingface_token_set",
@@ -66,7 +66,7 @@ function ServiceKeyRow({ service, settings, updateSettings }) {
   const handleSave = async () => {
     const value = apiKey.trim()
     if (!value) {
-      showSnackbar("Paste your API key first", "warning")
+      showSnackbar("Hãy dán API key trước", "warning")
       return
     }
     setSaving(true)
@@ -74,7 +74,7 @@ function ServiceKeyRow({ service, settings, updateSettings }) {
       await updateSettings({ [service.settingsKey]: value })
       setApiKey("")
       setEditing(false)
-      showSnackbar(`${service.label} key saved`, "success")
+      showSnackbar(`Đã lưu khóa ${service.label}`, "success")
     } catch (e) {
       // updateSettings already shows a snackbar on error
     } finally {
@@ -89,7 +89,7 @@ function ServiceKeyRow({ service, settings, updateSettings }) {
       await updateSettings({ [service.settingsKey]: "" })
       setApiKey("")
       setEditing(true)
-      showSnackbar(`${service.label} key removed — falling back to .env (if configured)`, "info")
+      showSnackbar(`Đã xóa khóa ${service.label} — sẽ dùng .env nếu có cấu hình`, "info")
     } catch (e) {
       // handled in updateSettings
     } finally {
@@ -120,7 +120,7 @@ function ServiceKeyRow({ service, settings, updateSettings }) {
                 color="success"
                 variant="outlined"
                 icon={<CheckCircleIcon fontSize="small" />}
-                label="key set"
+                label="đã có khóa"
                 sx={{ fontWeight: 500 }}
               />
             )}
@@ -207,16 +207,16 @@ function ServiceKeyRow({ service, settings, updateSettings }) {
       )}
 
       <Dialog open={confirmRemove} onClose={() => setConfirmRemove(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>Remove {service.label} key?</DialogTitle>
+        <DialogTitle>Xóa khóa {service.label}?</DialogTitle>
         <DialogContent>
           <Typography variant="body2">
             This deletes the encrypted key from your local database. Affiliate2 will fall back to
-            the corresponding key in your <code>.env</code> file (if set). Features that depend on
+            khóa tương ứng trong tệp <code>.env</code> (nếu có). Các tính năng phụ thuộc vào
             this service will stop working until you add a new key or restore the .env one.
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setConfirmRemove(false)}>Cancel</Button>
+          <Button onClick={() => setConfirmRemove(false)}>Hủy</Button>
           <Button color="error" variant="contained" onClick={handleRemove}>
             Remove key
           </Button>
@@ -230,7 +230,7 @@ export default function ServiceKeysSection({ settings, updateSettings }) {
   return (
     <Stack spacing={0}>
       <DownloadSessionSection settings={settings} updateSettings={updateSettings} />
-      <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Service keys / optional dependencies</Typography>
+      <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Khóa dịch vụ / phụ thuộc tùy chọn</Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         API keys below are separate from browser login. They are encrypted before storage.
         Hugging Face is only needed for gated multi-speaker diarization; it does not affect video download.

@@ -76,7 +76,7 @@ export default function FacetBar({
               >
                 <Icon sx={{ fontSize: 16, color: active ? "primary.main" : "inherit" }} />
                 <Typography sx={{ fontSize: "0.79rem", fontWeight: active ? 700 : 500, letterSpacing: "-0.01em" }}>
-                  {k === "all" ? "All" : MEDIA[k].label}
+                  {k === "all" ? "Tất cả" : MEDIA[k].label}
                 </Typography>
                 <Typography sx={{
                   fontSize: "0.68rem", fontWeight: 600, fontVariantNumeric: "tabular-nums",
@@ -149,10 +149,10 @@ export default function FacetBar({
 
         <Select
           size="small" value={producer} onChange={(e) => onProducerChange(e.target.value)}
-          aria-label="Filter by tool"
+          aria-label="Lọc theo công cụ"
           sx={{ height: 28, fontSize: "0.76rem", "& .MuiSelect-select": { py: 0 }, minWidth: 132 }}
         >
-          <MenuItem value="all" sx={{ fontSize: "0.8rem" }}>Any tool</MenuItem>
+          <MenuItem value="all" sx={{ fontSize: "0.8rem" }}>Mọi công cụ</MenuItem>
           {producerOptions.map((p) => (
             <MenuItem key={p.key} value={p.key} sx={{ fontSize: "0.8rem" }}>
               {p.label} <Box component="span" sx={{ ml: 0.6, color: "text.disabled" }}>{p.count}</Box>
@@ -162,13 +162,13 @@ export default function FacetBar({
 
         <Select
           size="small" value={sort} onChange={(e) => onSortChange(e.target.value)}
-          aria-label="Sort"
+          aria-label="Sắp xếp"
           sx={{ height: 28, fontSize: "0.76rem", "& .MuiSelect-select": { py: 0 }, minWidth: 116 }}
         >
-          <MenuItem value="newest" sx={{ fontSize: "0.8rem" }}>Newest</MenuItem>
-          <MenuItem value="oldest" sx={{ fontSize: "0.8rem" }}>Oldest</MenuItem>
-          <MenuItem value="longest" sx={{ fontSize: "0.8rem" }}>Longest</MenuItem>
-          <MenuItem value="title" sx={{ fontSize: "0.8rem" }}>Title A–Z</MenuItem>
+          <MenuItem value="newest" sx={{ fontSize: "0.8rem" }}>Mới nhất</MenuItem>
+          <MenuItem value="oldest" sx={{ fontSize: "0.8rem" }}>Cũ nhất</MenuItem>
+          <MenuItem value="longest" sx={{ fontSize: "0.8rem" }}>Dài nhất</MenuItem>
+          <MenuItem value="title" sx={{ fontSize: "0.8rem" }}>Tiêu đề A–Z</MenuItem>
         </Select>
 
         <Box sx={{ flex: 1 }} />
@@ -178,17 +178,17 @@ export default function FacetBar({
           onChange={(_, v) => v && onViewChange(v)}
           sx={{ height: 28, "& .MuiToggleButton-root": { px: 1.1, fontSize: "0.72rem", textTransform: "none", gap: 0.5 } }}
         >
-          <ToggleButton value="grid" aria-label="Grid view">
+          <ToggleButton value="grid" aria-label="Dạng lưới">
             <GridViewRoundedIcon sx={{ fontSize: 15 }} /> Grid
           </ToggleButton>
-          <ToggleButton value="tree" aria-label="Group by source">
+          <ToggleButton value="tree" aria-label="Nhóm theo nguồn">
             <AccountTreeRoundedIcon sx={{ fontSize: 15 }} /> By source
           </ToggleButton>
         </ToggleButtonGroup>
 
-        <Tooltip title={dense ? "Comfortable rows" : "Dense rows"}>
+        <Tooltip title={dense ? "Hàng thoáng" : "Hàng gọn"}>
           <IconButton size="small" onClick={() => onDenseChange(!dense)}
-            aria-label={dense ? "Comfortable rows" : "Dense rows"}
+            aria-label={dense ? "Hàng thoáng" : "Hàng gọn"}
             sx={{ border: 1, borderColor: "divider", borderRadius: "8px", width: 28, height: 28 }}>
             {dense ? <ViewModuleRoundedIcon sx={{ fontSize: 16 }} /> : <ViewComfyRoundedIcon sx={{ fontSize: 16 }} />}
           </IconButton>

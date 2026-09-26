@@ -112,7 +112,7 @@ export default function StockVideo() {
     if (a.aspectRatio) setAspectRatio(a.aspectRatio)
     if (a.visualStyle) setVisualStyle(a.visualStyle)
     setPreviewVideoUrl(null)
-    showSnackbar(`Loaded "${s.label}" — tweak the script or hit Generate`, "success")
+    showSnackbar(`Đã tải "${s.label}" — chỉnh kịch bản hoặc bấm Tạo`, "success")
   }
 
   const handleApplyTemplate = (defaults) => {
@@ -125,7 +125,7 @@ export default function StockVideo() {
 
   const handleGenerate = async () => {
     if (!script?.trim()) {
-      showSnackbar("Please write a script or generate one with AI first", "warning")
+      showSnackbar("Hãy viết kịch bản hoặc tạo bằng AI trước", "warning")
       return
     }
     setGenerating(true)
@@ -148,7 +148,7 @@ export default function StockVideo() {
         user_images: operation === "i2v" ? [] : userImages,
       }
       await http.post("/api/generate/stock", body)
-      showSnackbar("Stock video generation started!", "success")
+      showSnackbar("Đã bắt đầu tạo video kho!", "success")
       navigate("/library?tab=generated")
     } catch (err) {
       showSnackbar(err.response?.data?.detail || err.message, "error")
@@ -165,14 +165,14 @@ export default function StockVideo() {
 
   const openFolder = () =>
     http.post("/api/settings/open-folder", { folder: "generated" })
-      .catch(() => showSnackbar("Could not open folder", "error"))
+      .catch(() => showSnackbar("Không thể mở thư mục", "error"))
 
   return (
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <PageHero
         icon={<PhotoLibraryIcon />}
-        title="Smart Video"
-        subtitle="Turn a script into a captioned short — Pexels footage matched to every line"
+        title="Video thông minh"
+        subtitle="Biến kịch bản thành video ngắn có phụ đề — cảnh Pexels khớp theo từng dòng"
         accentColor="#2E9E6B"
         actions={
           <Stack direction="row" spacing={1} alignItems="center">
@@ -193,7 +193,7 @@ export default function StockVideo() {
             >
               Templates
             </Button>
-            <Tooltip title="Open generated folder">
+            <Tooltip title="Mở thư mục đã tạo">
               <Button size="small" variant="outlined" sx={{ minWidth: 0, px: 1 }} onClick={openFolder}>
                 <FolderOpenIcon fontSize="small" />
               </Button>
@@ -205,7 +205,7 @@ export default function StockVideo() {
               startIcon={<MovieCreationIcon />}
               sx={{ borderRadius: 2, fontWeight: 600, textTransform: "none", px: 2.5 }}
             >
-              {generating ? "Starting…" : "Generate"}
+              {generating ? "Đang bắt đầu…" : "Tạo"}
             </Button>
           </Stack>
         }
@@ -240,7 +240,7 @@ export default function StockVideo() {
                 <PreviewCanvas
                   paletteA={palette.cA}
                   paletteB={palette.cB}
-                  captionText={script || "Your caption animates here"}
+                  captionText={script || "Phụ đề sẽ chuyển động tại đây"}
                   aspectRatio={aspectRatio}
                 />
               )}
@@ -294,13 +294,13 @@ export default function StockVideo() {
               </Button>
               <Box sx={{ flex: 1 }} />
               <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                {script ? `${script.trim().split(/\s+/).filter(Boolean).length} words` : "empty"}
+                {script ? `${script.trim().split(/\s+/).filter(Boolean).length} từ` : "trống"}
               </Typography>
             </Stack>
 
             <TextField
               size="small" fullWidth
-              placeholder="Optional: tell the AI the angle, tone, or audience…"
+              placeholder="Tùy chọn: mô tả góc nội dung, giọng điệu hoặc đối tượng cho AI…"
               value={scriptInstructions}
               onChange={(e) => setScriptInstructions(e.target.value)}
               sx={{ mb: 1 }}
@@ -311,7 +311,7 @@ export default function StockVideo() {
                 multiline fullWidth
                 value={script}
                 onChange={(e) => setScript(e.target.value)}
-                placeholder="Write your script here, or hit “AI script” to draft one…"
+                placeholder="Viết kịch bản tại đây hoặc bấm “Kịch bản AI” để tạo bản nháp…"
                 sx={{
                   height: "100%",
                   "& .MuiOutlinedInput-root": { height: "100%", alignItems: "flex-start", fontSize: "0.9rem" },
@@ -324,7 +324,7 @@ export default function StockVideo() {
                   bgcolor: "rgba(0,0,0,0.25)", display: "flex", alignItems: "center", justifyContent: "center",
                   pointerEvents: "none",
                 }}>
-                  <Chip label="Writing your script…" color="primary" />
+                  <Chip label="Đang viết kịch bản…" color="primary" />
                 </Box>
               </Fade>
             </Box>

@@ -50,17 +50,17 @@ const FALLBACK_EDGE_VOICES = [
 // Blank-page starters — drop in a skeleton the user can fill, then "✨ Enhance"
 // it into a polished script. Each is a template with bracketed gaps.
 const SCRIPT_STARTERS = [
-  { label: "3 quick tips", text: "Here are three quick tips that will change how you [topic].\n\nFirst, [tip one].\nSecond, [tip two].\nAnd third, [tip three].\n\nTry it and let me know how it goes." },
-  { label: "Story hook", text: "I almost gave up on [thing] — until I figured out one small change.\n\nHere's exactly what happened, and the simple shift that turned it around." },
-  { label: "Product promo", text: "If you struggle with [problem], you need to see this.\n\nIt [benefit] in seconds — no [pain point] required. Here's how it works." },
-  { label: "Did you know", text: "Did you know that [surprising fact]? Most people have no idea.\n\nHere's why it matters — and the one thing you should do about it today." },
+  { label: "3 mẹo nhanh", text: "Here are three quick tips that will change how you [topic].\n\nFirst, [tip one].\nSecond, [tip two].\nAnd third, [tip three].\n\nTry it and let me know how it goes." },
+  { label: "Hook câu chuyện", text: "I almost gave up on [thing] — until I figured out one small change.\n\nHere's exactly what happened, and the simple shift that turned it around." },
+  { label: "Quảng bá sản phẩm", text: "If you struggle with [problem], you need to see this.\n\nIt [benefit] in seconds — no [pain point] required. Here's how it works." },
+  { label: "Bạn có biết", text: "Did you know that [surprising fact]? Most people have no idea.\n\nHere's why it matters — and the one thing you should do about it today." },
 ]
 
 const MAX_CHARS = 10_000
 const VIDEO_MAX_MB = 1000  // mirrors ToolRunner default + backend VIDEO_MAX_BYTES
 
 export default function ToolVoiceover() {
-  useDocumentTitle("Voice-over")
+  useDocumentTitle("Lồng tiếng")
   const [text, setText] = useState("")
   const [provider, setProvider] = useState("edge_tts")
   const [voiceId, setVoiceId] = useState(FALLBACK_EDGE_VOICES[0].voice_id)
@@ -102,13 +102,13 @@ export default function ToolVoiceover() {
           setVoicesByProvider((prev) => ({ ...prev, [provider]: list }))
         } else {
           // Empty response — fall back to the hardcoded list.
-          setVoicesError("No voices returned by backend, using fallback list")
+          setVoicesError("Backend không trả về giọng đọc, đang dùng danh sách dự phòng")
         }
       })
       .catch((err) => {
         if (cancelled) return
-        const msg = err.response?.data?.detail || err.message || "Network error"
-        setVoicesError(`Couldn't load voice list (${msg}). Using fallback.`)
+        const msg = err.response?.data?.detail || err.message || "Lỗi mạng"
+        setVoicesError(`Không thể tải danh sách giọng (${msg}). Đang dùng danh sách dự phòng.`)
         // Tool stays usable via fallbackFor(provider) — see `voices` above.
       })
       .finally(() => { if (!cancelled) setVoicesLoading(false) })
@@ -182,14 +182,14 @@ export default function ToolVoiceover() {
         }
       }
       audio.onerror = () => {
-        showSnackbar("Couldn't play preview audio", "error")
+        showSnackbar("Không thể phát âm thanh nghe thử", "error")
         setPreviewVoice(null)
       }
       await audio.play()
       setPreviewVoice(voice)
     } catch (err) {
-      const msg = err.response?.data?.detail || err.message || "Preview failed"
-      showSnackbar(`Voice preview failed: ${msg}`, "error")
+      const msg = err.response?.data?.detail || err.message || "Nghe thử thất bại"
+      showSnackbar(`Nghe thử giọng thất bại: ${msg}`, "error")
     } finally {
       setPreviewLoading(null)
     }
@@ -204,14 +204,14 @@ export default function ToolVoiceover() {
 
   return (
     <ToolRunner
-      title="Voice-over Generator"
-      description="Turn a script into natural TTS audio"
+      title="Tạo lồng tiếng"
+      description="Biến kịch bản thành giọng đọc TTS tự nhiên"
       icon={<RecordVoiceOverOutlinedIcon fontSize="large" />}
       endpoint="/api/tools/voiceover"
       hideFileInput
       extraFiles={{ video }}
       canSubmit={chars > 0 && !overLimit}
-      disabledReason={overLimit ? "Script is over the character limit" : "Enter a script to generate"}
+      disabledReason={overLimit ? "Kịch bản vượt giới hạn ký tự" : "Nhập kịch bản để tạo giọng đọc"}
       fieldBuilder={() => ({
         text,
         provider,
@@ -228,7 +228,7 @@ export default function ToolVoiceover() {
           {!text.trim() && (
             <Box>
               <Typography variant="caption" sx={{ fontWeight: 600, display: "block", mb: 0.75, color: "text.secondary" }}>
-                Start from a template
+                Bắt đầu từ mẫu
               </Typography>
               <Stack direction="row" useFlexGap flexWrap="wrap" sx={{ gap: 0.75 }}>
                 {SCRIPT_STARTERS.map((s) => (
@@ -249,21 +249,21 @@ export default function ToolVoiceover() {
             enhanceKind="voiceover"
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="Paste your script here..."
+            placeholder="Dán kịch bản vào đây..."
             error={overLimit}
             helperText={
               overLimit
-                ? `Over ${MAX_CHARS.toLocaleString()} char limit — reduce to submit`
-                : `${chars.toLocaleString()} / ${MAX_CHARS.toLocaleString()} chars`
+                ? `Vượt giới hạn ${MAX_CHARS.toLocaleString()} ký tự — hãy rút gọn để tiếp tục`
+                : `${chars.toLocaleString()} / ${MAX_CHARS.toLocaleString()} ký tự`
             }
           />
 
           <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
             <FormControl size="small" sx={{ minWidth: 180 }}>
-              <InputLabel>Provider</InputLabel>
-              <Select value={provider} label="Provider" onChange={(e) => setProvider(e.target.value)}>
-                <MenuItem value="edge_tts">Edge TTS (free)</MenuItem>
-                <MenuItem value="openai_tts">OpenAI TTS (standard)</MenuItem>
+              <InputLabel>Nhà cung cấp</InputLabel>
+              <Select value={provider} label="Nhà cung cấp" onChange={(e) => setProvider(e.target.value)}>
+                <MenuItem value="edge_tts">Edge TTS (miễn phí)</MenuItem>
+                <MenuItem value="openai_tts">OpenAI TTS (tiêu chuẩn)</MenuItem>
               </Select>
             </FormControl>
             <Autocomplete
@@ -272,8 +272,8 @@ export default function ToolVoiceover() {
               options={voices}
               value={selectedVoice}
               loading={voicesLoading}
-              loadingText="Loading voices…"
-              noOptionsText={voicesError ?? "No voices match"}
+              loadingText="Đang tải danh sách giọng…"
+              noOptionsText={voicesError ?? "Không có giọng đọc phù hợp"}
               onChange={(_e, newVoice) => {
                 if (newVoice) setVoiceId(newVoice.voice_id)
               }}
@@ -291,7 +291,7 @@ export default function ToolVoiceover() {
               renderInput={(params) => (
                 <TextField
                   {...params}
-                  label="Voice"
+                  label="Giọng đọc"
                   InputProps={{
                     ...params.InputProps,
                     endAdornment: (
@@ -325,7 +325,7 @@ export default function ToolVoiceover() {
                         </Typography>
                       )}
                     </Box>
-                    <Tooltip title={isPlaying ? "Stop preview" : "Preview voice"} placement="left" arrow>
+                    <Tooltip title={isPlaying ? "Dừng nghe thử" : "Nghe thử giọng"} placement="left" arrow>
                       <IconButton
                         size="small"
                         onClick={() => playPreview(option.voice_id)}
@@ -356,9 +356,9 @@ export default function ToolVoiceover() {
               fullWidth
               value={voiceInstructions}
               onChange={(e) => setVoiceInstructions(e.target.value)}
-              label="Voice instructions (optional)"
-              placeholder="e.g. Speak slowly with emphasis on key words. Use a friendly, conversational tone."
-              helperText="Steer how the OpenAI voice delivers the script. Leave blank for default."
+              label="Hướng dẫn giọng đọc (tùy chọn)"
+              placeholder="Ví dụ: Nói chậm, nhấn mạnh từ khóa, giọng thân thiện và tự nhiên."
+              helperText="Điều chỉnh cách giọng OpenAI đọc kịch bản. Để trống để dùng mặc định."
             />
           )}
 
@@ -379,7 +379,7 @@ export default function ToolVoiceover() {
                 const f = e.target.files?.[0]
                 if (!f) { setVideo(null); return }
                 if (f.size > VIDEO_MAX_MB * 1024 * 1024) {
-                  showSnackbar(`Video too large (max ${VIDEO_MAX_MB} MB)`, "error")
+                  showSnackbar(`Video quá lớn (tối đa ${VIDEO_MAX_MB} MB)`, "error")
                   e.target.value = ""
                   return
                 }

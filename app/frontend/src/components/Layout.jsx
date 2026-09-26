@@ -208,8 +208,8 @@ export default function Layout() {
           navigate away from whatever you were doing. */}
       {runningJobCount > 0 && (
         <Box sx={{ px: collapsed && !isNarrow ? 0.75 : 1.5, pb: 1 }}>
-          <Tooltip title="Show activity" placement="right" arrow>
-            <ListItemButton onClick={openActivity} aria-label="Show activity"
+          <Tooltip title="Hiện hoạt động" placement="right" arrow>
+            <ListItemButton onClick={openActivity} aria-label="Hiện hoạt động"
               sx={{
                 borderRadius: 2, py: 0.75,
                 justifyContent: collapsed && !isNarrow ? "center" : "flex-start",
@@ -234,7 +234,7 @@ export default function Layout() {
         {bottomItems.map(renderNavItem)}
         {/* Expand button at the bottom when collapsed */}
         {!isNarrow && collapsed && (
-          <Tooltip title="Expand sidebar" placement="right" arrow>
+          <Tooltip title="Mở rộng thanh bên" placement="right" arrow>
             <ListItemButton
               onClick={() => setCollapsed(false)}
               sx={{
@@ -340,9 +340,9 @@ export default function Layout() {
           try {
             await http.delete(`/api/jobs/${jobId}`)
             removeJob(jobId)
-            showSnackbar("Job cancelled", "info")
+            showSnackbar("Đã hủy tác vụ", "info")
           } catch (e) {
-            showSnackbar(e.response?.data?.detail || "Could not cancel that job", "error")
+            showSnackbar(e.response?.data?.detail || "Không thể hủy tác vụ này", "error")
           } finally {
             fetchJobs()
           }
@@ -358,12 +358,12 @@ export default function Layout() {
               // The second call removes the now-cancelled row. A 409 means it
               // backs a Library file — surface that rather than swallow it.
               await http.delete(`/api/jobs/${job.id}`).catch(() => {})
-              showSnackbar("Job cancelled and removed", "info")
+              showSnackbar("Đã hủy và xóa tác vụ", "info")
             } else {
-              showSnackbar("Job removed", "info")
+              showSnackbar("Đã xóa tác vụ", "info")
             }
           } catch (e) {
-            showSnackbar(e.response?.data?.detail || "Could not remove that job", "error")
+            showSnackbar(e.response?.data?.detail || "Không thể xóa tác vụ này", "error")
           } finally {
             fetchJobs()
           }
@@ -385,7 +385,7 @@ export default function Layout() {
               "info",
             )
           } catch (e) {
-            showSnackbar(e.response?.data?.detail || "Could not clear those jobs", "error")
+            showSnackbar(e.response?.data?.detail || "Không thể xóa các tác vụ này", "error")
           } finally {
             fetchJobs()
           }

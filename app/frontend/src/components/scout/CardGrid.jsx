@@ -21,7 +21,7 @@ function ViralityChip({ score }) {
 
 function VPHChip({ vph }) {
   if (!vph || vph < 100) return null
-  const label = vph >= 5000 ? "TRENDING NOW" : vph >= 1000 ? "Rising" : "Active"
+  const label = vph >= 5000 ? "ĐANG LÊN" : vph >= 1000 ? "Đang tăng" : "Đang hoạt động"
   const color = vph >= 5000 ? "error" : vph >= 1000 ? "warning" : "default"
   return <Chip label={`${label} \u00B7 ${formatViews(vph)}/hr`} size="small" color={color} variant="outlined" sx={{ fontSize: "0.65rem", height: 22 }} />
 }
@@ -29,10 +29,10 @@ function VPHChip({ vph }) {
 function OutlierChip({ score }) {
   if (!score || score < 3) return null
   let color, label
-  if (score >= 20) { color = "error"; label = `🔥 ${score}x MONSTER` }
-  else if (score >= 10) { color = "error"; label = `⚡ ${score}x BREAKOUT` }
-  else if (score >= 5) { color = "warning"; label = `🚀 ${score}x STRONG` }
-  else { color = "info"; label = `${score}x outlier` }
+  if (score >= 20) { color = "error"; label = `🔥 ${score}x BÙNG NỔ` }
+  else if (score >= 10) { color = "error"; label = `⚡ ${score}x ĐỘT PHÁ` }
+  else if (score >= 5) { color = "warning"; label = `🚀 ${score}x MẠNH` }
+  else { color = "info"; label = `${score}x ngoại lệ` }
   return <Chip label={label} size="small" color={color} variant="outlined" sx={{ fontWeight: 700, fontSize: "0.65rem", height: 22 }} />
 }
 
@@ -41,7 +41,7 @@ function RadarChip({ score, confidence }) {
   const color = score >= 70 ? "success" : score >= 45 ? "warning" : "default"
   const pct = confidence == null ? "" : ` · ${Math.round(confidence * 100)}% conf`
   return (
-    <Tooltip title={`Longitudinal Radar score${pct}`} arrow>
+    <Tooltip title={`Điểm Radar theo thời gian${pct}`} arrow>
       <Chip label={`Radar ${Number(score).toFixed(0)}`} size="small" color={color}
         variant="outlined" sx={{ fontWeight: 700, fontSize: "0.65rem", height: 22 }} />
     </Tooltip>
@@ -51,7 +51,7 @@ function RadarChip({ score, confidence }) {
 function CreatorOutlierChip({ ratio }) {
   if (ratio == null || ratio < 1.5) return null
   return (
-    <Tooltip title="Performance vs this creator's own historical median" arrow>
+    <Tooltip title="Hiệu suất so với trung vị lịch sử của chính creator này" arrow>
       <Chip label={`Creator ${Number(ratio).toFixed(1)}x`} size="small"
         color={ratio >= 4 ? "error" : ratio >= 2 ? "warning" : "info"}
         variant="outlined" sx={{ fontSize: "0.65rem", height: 22 }} />
@@ -92,7 +92,7 @@ export default function CardGrid({
   const showMore = useCallback(() => setVisibleCount((c) => c + PAGE_SIZE), [])
 
   if (!results || results.length === 0) {
-    return <Typography sx={{ color: "text.secondary" }}>No results yet.</Typography>
+    return <Typography sx={{ color: "text.secondary" }}>Chưa có kết quả.</Typography>
   }
 
   const handleDownload = async (e, id) => {
@@ -143,7 +143,7 @@ export default function CardGrid({
             {r.is_downloaded && (
               <Chip
                 icon={isNews ? <BookmarkAddedIcon /> : <CheckCircleIcon />}
-                label={isNews ? "Saved" : "Downloaded"}
+                label={isNews ? "Đã lưu" : "Đã tải"}
                 size="small"
                 color="success"
                 sx={{ position: "absolute", top: 8, right: 8, zIndex: 2 }}
@@ -240,7 +240,7 @@ export default function CardGrid({
             <CardContent sx={{ p: 1.5 }}>
               <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 0.5, flexWrap: "wrap", gap: 0.5 }}>
                 <Box sx={{ display: "flex", gap: 0.5, alignItems: "center", flexWrap: "wrap" }}>
-                  <Chip label={isNews ? "NEWS" : r.platform} size="small" variant="outlined"
+                  <Chip label={isNews ? "TIN" : r.platform} size="small" variant="outlined"
                     icon={isNews ? <NewspaperIcon sx={{ fontSize: "14px !important" }} /> : undefined}
                     sx={{ textTransform: "uppercase", fontSize: "0.65rem", height: 22,
                       ...(isNews && { borderColor: "warning.main", color: "warning.main" }) }} />
@@ -254,7 +254,7 @@ export default function CardGrid({
                       sx={{ fontSize: "0.65rem", height: 22 }} />
                   )}
                   {isNews && newsDesc?.word_count > 0 && (
-                    <Chip label={`${newsDesc.word_count} words`} size="small" variant="outlined" sx={{ fontSize: "0.6rem", height: 20 }} />
+                    <Chip label={`${newsDesc.word_count} từ`} size="small" variant="outlined" sx={{ fontSize: "0.6rem", height: 20 }} />
                   )}
                   {isNews && newsDesc?.emotional_tone && (
                     <Chip label={newsDesc.emotional_tone} size="small" variant="outlined" color="info" sx={{ fontSize: "0.6rem", height: 20 }} />
@@ -307,7 +307,7 @@ export default function CardGrid({
                 )}
                 <Box sx={{ flex: 1 }} />
                 {r.video_url && (
-                  <Tooltip title={isNews ? "Open article" : "Open original"} arrow>
+                  <Tooltip title={isNews ? "Mở bài viết" : "Mở bản gốc"} arrow>
                     <IconButton
                       size="small"
                       onClick={(e) => { e.stopPropagation(); window.open(r.video_url, "_blank", "noopener") }}
@@ -317,7 +317,7 @@ export default function CardGrid({
                     </IconButton>
                   </Tooltip>
                 )}
-                <Tooltip title="Delete" arrow>
+                <Tooltip title="Xóa" arrow>
                   <IconButton
                     size="small"
                     onClick={(e) => { e.stopPropagation(); onDelete(r.id) }}

@@ -35,10 +35,10 @@ export default class ErrorBoundary extends Component {
           <Paper variant="outlined" sx={{ p: 4, maxWidth: 480, textAlign: "center", borderRadius: 3 }}>
             <ErrorOutlineIcon sx={{ fontSize: 56, color: "error.main", mb: 2 }} />
             <Typography variant="h5" sx={{ fontWeight: 700, mb: 1 }}>
-              Something went wrong
+              Đã xảy ra lỗi
             </Typography>
             <Typography variant="body2" sx={{ color: "text.secondary", mb: 3 }}>
-              An unexpected error occurred. Your data is safe — try reloading the page.
+              Đã xảy ra lỗi không mong muốn. Dữ liệu của bạn vẫn an toàn — hãy thử tải lại trang.
             </Typography>
             {this.state.error && (
               <Paper variant="outlined" sx={{
@@ -52,10 +52,10 @@ export default class ErrorBoundary extends Component {
             )}
             <Box sx={{ display: "flex", gap: 1.5, justifyContent: "center" }}>
               <Button variant="outlined" onClick={this.handleReset}>
-                Try Again
+                Thử lại
               </Button>
               <Button variant="contained" onClick={this.handleReload}>
-                Reload Page
+                Tải lại trang
               </Button>
             </Box>
           </Paper>

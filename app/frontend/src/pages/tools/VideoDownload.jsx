@@ -14,6 +14,7 @@ import WarningAmberIcon from "@mui/icons-material/WarningAmber"
 import http from "../../api/http"
 import useAppStore from "../../store/appStore"
 import useDocumentTitle from "../../hooks/useDocumentTitle"
+import { localizeUiMessage } from "../../utils/localizeUiMessage"
 import PageHero from "../../components/PageHero"
 import { GlassPanel } from "../../utils/glassFx"
 
@@ -28,7 +29,7 @@ import { GlassPanel } from "../../utils/glassFx"
 const MAX_URLS = 20
 
 const QUALITIES = [
-  { id: "best", label: "Best" },
+  { id: "best", label: "Tốt nhất" },
   { id: "2160p", label: "4K" },
   { id: "1440p", label: "1440p" },
   { id: "1080p", label: "1080p" },
@@ -54,7 +55,7 @@ function parseUrls(raw) {
 const isHttpUrl = (u) => /^https?:\/\/\S+$/i.test(u)
 
 export default function VideoDownload() {
-  useDocumentTitle("Video Download")
+  useDocumentTitle("Tải video")
   const navigate = useNavigate()
   const showSnackbar = useAppStore((s) => s.showSnackbar)
   const startJob = useAppStore((s) => s.startJob)
@@ -133,15 +134,15 @@ export default function VideoDownload() {
       setJobId(data.job_id)
       // The batch endpoint doesn't emit job_started, so seed the store here —
       // that's what feeds the progress bar and the global active-jobs banner.
-      startJob(data.job_id, "download", "Starting download…")
+      startJob(data.job_id, "download", "Đang bắt đầu tải xuống…")
       // The server echoes the options it ACTUALLY applied after validation.
       // If it dropped everything we asked for, say so rather than letting the
       // user assume the toggles did something.
       if (Object.keys(options).length && !Object.keys(data.options || {}).length) {
-        showSnackbar("Downloading with default settings — the options weren't accepted.", "warning")
+        showSnackbar("Đang tải với cài đặt mặc định — các tùy chọn đã chọn không được chấp nhận.", "warning")
       }
     } catch (e) {
-      showSnackbar(e?.response?.data?.detail || "Couldn't start the download", "error")
+      showSnackbar(e?.response?.data?.detail || "Không thể bắt đầu tải xuống", "error")
       setSubmitting(false)
       return
     }
@@ -199,8 +200,8 @@ export default function VideoDownload() {
     <Box>
       <PageHero
         icon={<DownloadForOfflineOutlinedIcon />}
-        title="Video Download"
-        subtitle="Paste a link — download from YouTube, TikTok, Douyin, Bilibili, X and other yt-dlp sources. Login-gated sites reuse your configured browser session."
+        title="Tải video"
+        subtitle="Dán liên kết để tải từ YouTube, TikTok, Douyin, Bilibili, X và các nguồn yt-dlp khác. Trang yêu cầu đăng nhập sẽ dùng lại phiên trình duyệt đã cấu hình."
         backTo="/utilities"
         actions={
           <Button size="small" variant="outlined" onClick={() => navigate("/settings?section=services")}>
@@ -224,22 +225,22 @@ export default function VideoDownload() {
                 maxRows={10}
                 value={raw}
                 onChange={(e) => setRaw(e.target.value)}
-                placeholder={"https://www.youtube.com/watch?v=...\nhttps://www.tiktok.com/@user/video/...\n\nOne per line — up to 20 at once."}
+                placeholder={"https://www.youtube.com/watch?v=...\nhttps://www.tiktok.com/@user/video/...\n\nMỗi dòng một liên kết — tối đa 20 liên kết/lần."}
                 disabled={busy}
               />
               <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: "wrap", rowGap: 1 }}>
                 {valid.length > 0 && (
                   <Chip size="small" color="primary" variant="outlined"
-                        label={`${valid.length} link${valid.length > 1 ? "s" : ""}`} />
+                        label={`${valid.length} liên kết`} />
                 )}
                 {invalid.length > 0 && (
                   <Chip size="small" color="warning" variant="outlined"
                         icon={<WarningAmberIcon />}
-                        label={`${invalid.length} not a valid http(s) link — will be skipped`} />
+                        label={`${invalid.length} liên kết http(s) không hợp lệ — sẽ bỏ qua`} />
                 )}
                 {overCap && (
                   <Chip size="small" color="warning" variant="outlined"
-                        label={`Only the first ${MAX_URLS} will download`} />
+                        label={`Chỉ tải ${MAX_URLS} liên kết đầu tiên`} />
                 )}
               </Stack>
             </Box>
@@ -248,7 +249,7 @@ export default function VideoDownload() {
 
             {/* ── Quality ───────────────────────────────────────────── */}
             <Box>
-              <Typography variant="subtitle2" sx={{ mb: 1 }}>Quality</Typography>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>Chất lượng</Typography>
               <ToggleButtonGroup
                 exclusive
                 size="small"
@@ -286,19 +287,19 @@ export default function VideoDownload() {
                   so a screen reader (and anything driving the page by
                   accessible name) sees three unlabelled comboboxes. */}
               <FormControl size="small" sx={{ minWidth: 150 }} disabled={busy}>
-                <InputLabel id="vd-subs-label">Subtitles</InputLabel>
-                <Select labelId="vd-subs-label" label="Subtitles" value={subtitles}
+                <InputLabel id="vd-subs-label">Phụ đề</InputLabel>
+                <Select labelId="vd-subs-label" label="Phụ đề" value={subtitles}
                         onChange={(e) => setSubtitles(e.target.value)}>
-                  <MenuItem value="off">None</MenuItem>
-                  <MenuItem value="embed">Embed in video</MenuItem>
-                  <MenuItem value="file">Separate .srt file</MenuItem>
+                  <MenuItem value="off">Không</MenuItem>
+                  <MenuItem value="embed">Nhúng vào video</MenuItem>
+                  <MenuItem value="file">Tệp .srt riêng</MenuItem>
                 </Select>
               </FormControl>
 
               <FormControl size="small" sx={{ minWidth: 140 }}
                            disabled={busy || subtitles === "off"}>
-                <InputLabel id="vd-lang-label">Language</InputLabel>
-                <Select labelId="vd-lang-label" label="Language" value={subLang}
+                <InputLabel id="vd-lang-label">Ngôn ngữ</InputLabel>
+                <Select labelId="vd-lang-label" label="Ngôn ngữ" value={subLang}
                         onChange={(e) => setSubLang(e.target.value)}>
                   {SUB_LANGS.map(([code, name]) => (
                     <MenuItem key={code} value={code}>{name}</MenuItem>
@@ -307,8 +308,8 @@ export default function VideoDownload() {
               </FormControl>
 
               <FormControl size="small" sx={{ minWidth: 120 }} disabled={busy}>
-                <InputLabel id="vd-format-label">Format</InputLabel>
-                <Select labelId="vd-format-label" label="Format" value={container}
+                <InputLabel id="vd-format-label">Định dạng</InputLabel>
+                <Select labelId="vd-format-label" label="Định dạng" value={container}
                         onChange={(e) => setContainer(e.target.value)}>
                   <MenuItem value="mp4">MP4</MenuItem>
                   <MenuItem value="mkv">MKV</MenuItem>
@@ -326,13 +327,13 @@ export default function VideoDownload() {
               <FormControlLabel
                 control={<Checkbox size="small" checked={thumbnail} disabled={busy}
                                    onChange={(e) => setThumbnail(e.target.checked)} />}
-                label={<Typography variant="body2">Embed cover art</Typography>}
+                label={<Typography variant="body2">Nhúng ảnh bìa</Typography>}
               />
-              <Tooltip title="Adds title/artist tags and chapter markers to the file">
+              <Tooltip title="Thêm thẻ tiêu đề/nghệ sĩ và mốc chương vào tệp">
                 <FormControlLabel
                   control={<Checkbox size="small" checked={metadata} disabled={busy}
                                      onChange={(e) => setMetadata(e.target.checked)} />}
-                  label={<Typography variant="body2">Metadata + chapters</Typography>}
+                  label={<Typography variant="body2">Metadata + chương</Typography>}
                 />
               </Tooltip>
             </Stack>
@@ -349,10 +350,10 @@ export default function VideoDownload() {
                 startIcon={<DownloadForOfflineOutlinedIcon />}
               >
                 {busy
-                  ? "Downloading…"
+                  ? "Đang tải xuống…"
                   : submitCount > 1
-                    ? `Download ${submitCount} videos`
-                    : "Download"}
+                    ? `Tải ${submitCount} video`
+                    : "Tải xuống"}
               </Button>
             </Stack>
 
@@ -363,7 +364,7 @@ export default function VideoDownload() {
                   value={job?.percent || 0}
                 />
                 <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: "block" }}>
-                  {job?.step || "Starting…"}
+                  {localizeUiMessage(job?.step || "Đang bắt đầu…")}
                 </Typography>
               </Box>
             )}
@@ -374,11 +375,11 @@ export default function VideoDownload() {
                 icon={<CheckCircleOutlinedIcon />}
                 action={
                   <Button size="small" onClick={() => navigate("/library")}>
-                    Open Library
+                    Mở Thư viện
                   </Button>
                 }
               >
-                {finalStep || terminal?.step || "Download complete."}
+                {localizeUiMessage(finalStep || terminal?.step || "Tải xuống hoàn tất.")}
               </Alert>
             )}
 
@@ -407,12 +408,12 @@ export default function VideoDownload() {
                     )}
                     {v.extras_dropped && (
                       <Typography variant="caption" color="warning.main">
-                        embed extras (cover art / metadata) couldn't be added to this file
+                        không thể nhúng dữ liệu bổ sung (ảnh bìa / metadata) vào tệp này
                       </Typography>
                     )}
                     {(v.subtitle_files || []).length > 0 && (
                       <Typography variant="caption" color="text.secondary">
-                        subtitles saved next to the video: {v.subtitle_files.join(", ")}
+                        phụ đề đã lưu cạnh video: {v.subtitle_files.join(", ")}
                       </Typography>
                     )}
                   </Stack>
@@ -421,7 +422,7 @@ export default function VideoDownload() {
             )}
             {failed && (
               <Alert severity="error">
-                {terminal?.step || "The download failed."}
+                {localizeUiMessage(terminal?.step || "Tải xuống thất bại.")}
               </Alert>
             )}
           </Stack>
@@ -430,7 +431,7 @@ export default function VideoDownload() {
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ mt: 2 }}>
           <Button size="small" variant="outlined" startIcon={<VideoLibraryOutlinedIcon />}
                   onClick={() => navigate("/library")}>
-            Library
+            Thư viện
           </Button>
         </Stack>
       </Box>

@@ -53,17 +53,17 @@ export default function HealthDashboard() {
       </Typography>
     </Box>
   )
-  if (!health) return <Typography sx={{ color: "error.main", fontSize: "0.85rem" }}>Failed to load health status</Typography>
+  if (!health) return <Typography sx={{ color: "error.main", fontSize: "0.85rem" }}>Không thể tải tình trạng hệ thống</Typography>
 
   const sessionBrowser = health.download_session?.resolved_browser || health.download_session?.browser
   const sessionProfile = health.download_session?.profile
   const items = [
-    { label: "ImageMagick", key: "imagemagick", description: "Required for caption rendering" },
-    { label: "yt-dlp", key: "ytdlp", description: "Video downloader", extra: health.ytdlp?.version ? `v${health.ytdlp.version}` : null },
+    { label: "ImageMagick", key: "imagemagick", description: "Cần để kết xuất phụ đề" },
+    { label: "yt-dlp", key: "ytdlp", description: "Trình tải video", extra: health.ytdlp?.version ? `v${health.ytdlp.version}` : null },
     {
-      label: "Download Browser Session",
+      label: "Phiên trình duyệt tải xuống",
       key: "download_session",
-      description: "yt-dlp browser-cookie source; Douyin can fall back to authenticated CDP if Windows blocks cookie decryption",
+      description: "Nguồn cookie trình duyệt cho yt-dlp; Douyin có thể dùng CDP đã đăng nhập nếu Windows chặn giải mã cookie",
       extra: sessionBrowser ? `${sessionBrowser}${sessionProfile ? ` / ${sessionProfile}` : ""}` : null,
     },
   ]
@@ -73,7 +73,7 @@ export default function HealthDashboard() {
       {/* Header row */}
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
         <Stack direction="row" spacing={1}>
-          <Tooltip title="Open storage folder">
+          <Tooltip title="Mở thư mục lưu trữ">
             <IconButton size="small" onClick={() => openFolder("storage")} sx={{ color: "text.secondary" }}>
               <FolderOpenIcon sx={{ fontSize: 20 }} />
             </IconButton>

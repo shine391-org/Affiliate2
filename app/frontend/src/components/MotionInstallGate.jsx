@@ -67,7 +67,7 @@ export default function MotionInstallGate({ onBack }) {
           )}
         </Typography>
         <Stack direction="row" spacing={1.5} justifyContent="center">
-          {onBack && <Button variant="outlined" onClick={onBack}>Back</Button>}
+          {onBack && <Button variant="outlined" onClick={onBack}>Quay lại</Button>}
           <Button variant="contained" onClick={() => navigate("/settings#motion-graphics")}>
             {updating ? "Update from Settings" : "Install from Settings"}
           </Button>

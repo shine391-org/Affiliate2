@@ -81,7 +81,7 @@ const JOB_ICONS = {
 }
 
 const JOB_LABELS = {
-  scout: "Scouting", download: "Downloading", generate: "Generating", upload: "Uploading",
+  scout: "Đang quét", download: "Đang tải xuống", generate: "Đang tạo", upload: "Đang tải lên",
 }
 
 function ActiveJobsPanel() {
@@ -110,14 +110,14 @@ function ActiveJobsPanel() {
               "&:hover": (isFailed || isSuccess) ? { opacity: 0.7 } : {},
             }}
               onClick={() => { if (isFailed || isSuccess) removeJob(job.jobId) }}
-              title={isFailed || isSuccess ? "Click to dismiss" : ""}
+              title={isFailed || isSuccess ? "Bấm để đóng" : ""}
             >
               <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mb: isRunning ? 0.5 : 0 }}>
                 {isSuccess ? <CheckCircleOutlineIcon sx={{ fontSize: 14, color: "success.main" }} /> :
                   isFailed ? <ErrorOutlineIcon sx={{ fontSize: 14, color: "error.main" }} /> :
                   JOB_ICONS[job.jobType] || JOB_ICONS.scout}
                 <Typography variant="caption" sx={{ fontWeight: 500, fontSize: "0.72rem", color: "text.primary", flex: 1 }} noWrap>
-                  {isSuccess ? `${label} done` : isFailed ? `${label} failed` : `${label}...`}
+                  {isSuccess ? `${label} xong` : isFailed ? `${label} thất bại` : `${label}...`}
                 </Typography>
                 {isRunning && job.percent > 0 && (
                   <Typography variant="caption" sx={{ fontSize: "0.65rem", color: "text.secondary" }}>
@@ -150,32 +150,32 @@ const SIDEBAR_WIDTH = 260
 const STARTER_SUGGESTIONS = [
   {
     icon: <SearchIcon sx={{ fontSize: 28, color: "primary.main" }} />,
-    title: "Scout trending videos",
-    description: "Find viral content across YouTube, TikTok, and Douyin",
-    message: "Scout trending videos on YouTube",
+    title: "Tìm video đang lên",
+    description: "Tìm nội dung viral trên YouTube, TikTok và Douyin",
+    message: "Quét video đang thịnh hành trên YouTube",
   },
   {
     icon: <SensorsIcon sx={{ fontSize: 28, color: "primary.main" }} />,
-    title: "Analyze a channel",
-    description: "Paste a YouTube or TikTok channel URL for a full breakdown",
+    title: "Phân tích kênh",
+    description: "Dán URL kênh YouTube hoặc TikTok để phân tích đầy đủ",
     message: "Analyze a YouTube channel for me",
   },
   {
     icon: <AnalyticsIcon sx={{ fontSize: 28, color: "primary.main" }} />,
-    title: "Download & analyze",
-    description: "Transcribe competitors and extract viral insights",
-    message: "Download and analyze a video",
+    title: "Tải & phân tích",
+    description: "Chép lời nội dung đối thủ và rút ra insight viral",
+    message: "Tải xuống và phân tích một video",
   },
   {
     icon: <AutoAwesomeIcon sx={{ fontSize: 28, color: "primary.main" }} />,
-    title: "Generate AI video",
-    description: "Create original videos with AI voice and visuals",
-    message: "Generate an original video",
+    title: "Tạo video AI",
+    description: "Tạo video mới bằng giọng AI và hình ảnh",
+    message: "Tạo một video nguyên bản",
   },
   {
     icon: <NewspaperIcon sx={{ fontSize: 28, color: "primary.main" }} />,
-    title: "Scout trending news",
-    description: "Find hot articles and generate commentary videos",
+    title: "Quét tin đang lên",
+    description: "Tìm bài viết nóng và tạo video bình luận",
     message: "Scout trending news",
   },
 ]
@@ -210,7 +210,7 @@ export default function Chat() {
       setSessions(res.data)
     }).catch((err) => {
       console.error("Failed to load chat sessions:", err)
-      showSnackbar("Could not load chat history", "warning")
+      showSnackbar("Không thể tải lịch sử trò chuyện", "warning")
     })
 
     const savedSessionId = sessionStorage.getItem("vm_active_session")
@@ -278,7 +278,7 @@ export default function Chat() {
   }
 
   const handleDeleteSession = (sessionId) => {
-    openConfirm("Delete chat?", "This conversation will be permanently removed.", async () => {
+    openConfirm("Xóa cuộc trò chuyện?", "Cuộc trò chuyện này sẽ bị xóa vĩnh viễn.", async () => {
       try {
         await http.delete(`/api/chat/sessions/${sessionId}`)
         removeSession(sessionId)
@@ -287,9 +287,9 @@ export default function Chat() {
           setMessages([])
           setSuggestions(STARTER_SUGGESTIONS)
         }
-        showSnackbar("Chat deleted", "info")
+        showSnackbar("Đã xóa cuộc trò chuyện", "info")
       } catch {
-        showSnackbar("Failed to delete chat", "error")
+        showSnackbar("Xóa cuộc trò chuyện thất bại", "error")
       }
     })
   }
@@ -370,7 +370,7 @@ export default function Chat() {
                 variant="body1"
                 sx={{ color: "text.secondary", mb: 5, maxWidth: 440, mx: "auto", lineHeight: 1.6, textAlign: "center" }}
               >
-                Your AI content strategy assistant. Scout trending videos, generate originals, and publish everywhere.
+                Trợ lý chiến lược nội dung AI của bạn. Theo dõi video đang thịnh hành, tạo nội dung nguyên bản và xuất bản đa nền tảng.
               </Typography>
 
               {suggestions.length > 0 && (
@@ -439,7 +439,7 @@ export default function Chat() {
           {isStreaming && !streamingText && (
             <Box sx={{ display: "flex", alignItems: "center", gap: 1, py: 2, px: 1, maxWidth: 900, mx: "auto" }}>
               <CircularProgress size={16} sx={{ color: "text.secondary" }} />
-              <Typography variant="body2" sx={{ color: "text.secondary" }}>Thinking...</Typography>
+              <Typography variant="body2" sx={{ color: "text.secondary" }}>Đang suy nghĩ...</Typography>
             </Box>
           )}
 
@@ -550,8 +550,8 @@ export default function Chat() {
         <DialogTitle>{confirmDialog.title}</DialogTitle>
         <DialogContent><Typography>{confirmDialog.message}</Typography></DialogContent>
         <DialogActions>
-          <Button onClick={closeConfirm}>Cancel</Button>
-          <Button color="error" variant="contained" onClick={() => { confirmDialog.onConfirm?.(); closeConfirm() }}>Delete</Button>
+          <Button onClick={closeConfirm}>Hủy</Button>
+          <Button color="error" variant="contained" onClick={() => { confirmDialog.onConfirm?.(); closeConfirm() }}>Xóa</Button>
         </DialogActions>
       </Dialog>
     </Box>

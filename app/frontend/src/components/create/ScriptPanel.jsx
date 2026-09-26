@@ -23,12 +23,12 @@ export default function ScriptPanel({
   const estSeconds = wordCount > 0 ? Math.ceil(wordCount / 2.5) : 0
 
   const placeholderInstruction = sourceId
-    ? "Tell AI how to write the script, e.g. 'write in Chinese', 'make it funny', 'focus on the hook'..."
-    : "Enter a topic or instructions, e.g. '5 tips for saving money', 'explain quantum computing simply'..."
+    ? "Hướng dẫn AI viết kịch bản, ví dụ: 'viết bằng tiếng Trung', 'làm vui hơn', 'tập trung vào hook'..."
+    : "Nhập chủ đề hoặc hướng dẫn, ví dụ: '5 mẹo tiết kiệm tiền', 'giải thích điện toán lượng tử đơn giản'..."
 
   const placeholderScript = sourceId
-    ? "Click 'Generate with AI' to create a script from the competitor insights, or write your own..."
-    : "Write your video script here. The AI will narrate this text over the generated visuals."
+    ? "Bấm 'Tạo bằng AI' để tạo kịch bản từ insight đối thủ hoặc tự viết..."
+    : "Viết kịch bản video tại đây. AI sẽ đọc nội dung này trên hình ảnh được tạo."
 
   return (
     <Stack spacing={2}>
@@ -71,13 +71,13 @@ export default function ScriptPanel({
               startIcon={<AutoFixHighIcon />}
               sx={{ whiteSpace: "nowrap", minWidth: 140 }}
             >
-              {scriptLoading ? "Generating..." : scriptGenerated ? "Regenerate" : "Generate with AI"}
+              {scriptLoading ? "Đang tạo..." : scriptGenerated ? "Tạo lại" : "Tạo bằng AI"}
             </Button>
           </Stack>
           <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: "block" }}>
             {sourceId
-              ? "Optional — leave empty for default AI generation based on competitor insights"
-              : "Describe your video topic — AI will write a complete narration script"
+              ? "Tùy chọn — để trống để AI tạo mặc định dựa trên insight đối thủ"
+              : "Mô tả chủ đề video — AI sẽ viết kịch bản lời thoại hoàn chỉnh"
             }
           </Typography>
         </Box>
@@ -96,7 +96,7 @@ export default function ScriptPanel({
           <Typography variant="caption" sx={{ color: "text.secondary" }}>
             {wordCount > 0
               ? `${wordCount} words \u2248 ${estSeconds}s`
-              : "Empty — AI will auto-generate if left blank"
+              : "Đang trống — AI sẽ tự tạo nếu để trống"
             }
           </Typography>
           {script.trim() && (

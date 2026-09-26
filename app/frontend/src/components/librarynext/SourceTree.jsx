@@ -122,7 +122,7 @@ function Family({ root, nodes, onOpen, dimmedIds }) {
           flexShrink: 0, fontSize: "0.7rem", fontWeight: 700, color: alpha(oc, 0.9),
           fontVariantNumeric: "tabular-nums",
         }}>
-          {count} derived
+          {count} nội dung phái sinh
         </Typography>
       </Stack>
 

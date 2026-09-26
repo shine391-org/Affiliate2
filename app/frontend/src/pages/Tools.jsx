@@ -46,22 +46,22 @@ const TOOLS = [
   // Video — visual / structural edits
   {
     id: "video-download",
-    title: "Video Download",
-    description: "Paste a link and pull the video down — pick the quality, keep or embed subtitles.",
+    title: "Tải video",
+    description: "Dán liên kết để tải video — chọn chất lượng, giữ riêng hoặc nhúng phụ đề.",
     icon: <DownloadForOfflineOutlinedIcon />,
     category: "video",
   },
   {
     id: "merge-clips",
-    title: "Merge Clips",
-    description: "Stitch multiple clips into one video. Auto-crop to your target aspect.",
+    title: "Ghép clip",
+    description: "Ghép nhiều clip thành một video. Tự cắt theo tỷ lệ khung hình mong muốn.",
     icon: <MovieFilterOutlinedIcon />,
     category: "video",
   },
   {
     id: "transform",
-    title: "Transform",
-    description: "Flip, rotate, loop, or change a clip's volume.",
+    title: "Biến đổi",
+    description: "Lật, xoay, lặp hoặc thay đổi âm lượng clip.",
     icon: <TransformIcon />,
     category: "video",
   },
@@ -69,65 +69,65 @@ const TOOLS = [
     // One runner, one job type, one history — but its own card, because
     // "remove audio" is what people search for, not "transform".
     id: "remove-audio",
-    title: "Remove Audio",
-    description: "Strip the sound from a video and keep the picture untouched.",
+    title: "Xóa âm thanh",
+    description: "Loại bỏ âm thanh khỏi video, giữ nguyên hình ảnh.",
     icon: <VolumeOffOutlinedIcon />,
     category: "audio",
     route: "/utilities/transform?op=mute",
   },
   {
     id: "compress",
-    title: "Compress Video",
-    description: "Shrink a file for email, chat, or an upload limit. Pick a size and a strength.",
+    title: "Nén video",
+    description: "Giảm dung lượng để gửi email, chat hoặc đáp ứng giới hạn tải lên. Chọn độ phân giải và mức nén.",
     icon: <CompressOutlinedIcon />,
     category: "video",
   },
   {
     id: "crop",
-    title: "Crop Video",
-    description: "Drag a box over the frame and keep just that part. Free-form or a fixed shape.",
+    title: "Cắt khung video",
+    description: "Kéo vùng chọn trên khung hình và chỉ giữ phần đó. Tự do hoặc theo tỷ lệ cố định.",
     icon: <CropOutlinedIcon />,
     category: "video",
   },
   {
     id: "reframe",
-    title: "Reframe to Vertical",
-    description: "Convert 16:9 to 9:16 with face-tracking for Shorts/TikTok.",
+    title: "Đổi khung dọc",
+    description: "Đổi 16:9 sang 9:16 với bám khuôn mặt cho Shorts/TikTok.",
     icon: <AspectRatioOutlinedIcon />,
     category: "video",
   },
   {
     id: "watermark",
-    title: "Add Watermark",
-    description: "Brand every export with your logo. Position, opacity, size.",
+    title: "Thêm watermark",
+    description: "Gắn logo lên mọi bản xuất. Chỉnh vị trí, độ mờ và kích thước.",
     icon: <BrandingWatermarkOutlinedIcon />,
     category: "video",
   },
   {
     id: "gif",
     title: "Video → GIF",
-    description: "Convert any clip to an animated GIF. Two-pass palette for clean colors.",
+    description: "Chuyển clip thành GIF động với bảng màu hai lượt cho màu sắc sạch hơn.",
     icon: <GifOutlinedIcon />,
     category: "video",
   },
   {
     id: "speed",
-    title: "Speed up / Slow down",
-    description: "Re-time a video 0.25× to 4×, with optional pitch preservation.",
+    title: "Tăng / giảm tốc",
+    description: "Điều chỉnh tốc độ video từ 0.25× đến 4×, có thể giữ cao độ giọng.",
     icon: <SpeedOutlinedIcon />,
     category: "video",
   },
   {
     id: "trim",
-    title: "Trim / Cut",
-    description: "Keep just the part you want — set a start and end, drop the rest.",
+    title: "Cắt đoạn",
+    description: "Chỉ giữ đoạn cần dùng — đặt điểm bắt đầu và kết thúc, bỏ phần còn lại.",
     icon: <ContentCutOutlinedIcon />,
     category: "video",
   },
   {
     id: "auto-zoom",
-    title: "Auto-Zoom",
-    description: "Subtle zoom punch-ins on spoken words for extra energy.",
+    title: "Tự động zoom",
+    description: "Tự zoom nhẹ theo lời nói để video có nhịp hơn.",
     icon: <ZoomInMapOutlinedIcon />,
     category: "video",
   },
@@ -135,29 +135,29 @@ const TOOLS = [
   // Audio — cleanup / processing / voice
   {
     id: "voiceover",
-    title: "Voice-over Generator",
-    description: "Turn a script into natural TTS audio.",
+    title: "Tạo lồng tiếng",
+    description: "Biến kịch bản thành giọng đọc TTS tự nhiên.",
     icon: <RecordVoiceOverOutlinedIcon />,
     category: "audio",
   },
   {
     id: "audio-enhance",
-    title: "Enhance Audio",
-    description: "Denoise hiss, normalize loudness, polish speech.",
+    title: "Cải thiện âm thanh",
+    description: "Khử nhiễu, cân bằng âm lượng và làm sạch giọng nói.",
     icon: <GraphicEqOutlinedIcon />,
     category: "audio",
   },
   {
     id: "remove-silence",
-    title: "Silence Remover",
-    description: "Auto-cut pauses, fillers, and dead air.",
+    title: "Cắt khoảng lặng",
+    description: "Tự cắt khoảng nghỉ, từ đệm và đoạn im lặng.",
     icon: <FastRewindOutlinedIcon />,
     category: "audio",
   },
   {
     id: "music-visualizer",
-    title: "Music Visualizer",
-    description: "Audio → animated waveform / bars / spectrum video, synced to the sound.",
+    title: "Trực quan hóa nhạc",
+    description: "Biến âm thanh thành video waveform / cột / phổ chuyển động đồng bộ nhạc.",
     icon: <GraphicEqIcon />,
     category: "audio",
   },
@@ -165,57 +165,57 @@ const TOOLS = [
   // Subtitles & Insights — text overlays + analysis
   {
     id: "captions",
-    title: "Add Captions",
-    description: "Burn word-by-word captions. Viral, classic, or bold styles.",
+    title: "Thêm phụ đề",
+    description: "Chèn phụ đề từng từ với các kiểu Viral, cổ điển hoặc đậm.",
     icon: <SubtitlesOutlinedIcon />,
     category: "subtitles",
   },
   {
     id: "subtitles",
-    title: "Export Subtitles",
-    description: "Transcribe to a downloadable .srt / .vtt file or plain transcript.",
+    title: "Xuất phụ đề",
+    description: "Chép lời thành tệp .srt / .vtt hoặc văn bản thuần để tải xuống.",
     icon: <ClosedCaptionOutlinedIcon />,
     category: "subtitles",
   },
   {
     id: "translate",
-    title: "Translate + Dub",
-    description: "Translate captions to 19+ languages or dub the audio entirely.",
+    title: "Dịch + lồng tiếng",
+    description: "Dịch phụ đề sang hơn 19 ngôn ngữ hoặc lồng tiếng toàn bộ.",
     icon: <TranslateOutlinedIcon />,
     category: "subtitles",
   },
   {
     id: "localization-batch",
-    title: "Localization Batch",
-    description: "Run one HQ localization profile across up to 20 videos with persisted resume state.",
+    title: "Bản địa hóa hàng loạt",
+    description: "Chạy một hồ sơ bản địa hóa HQ cho tối đa 20 video, có thể tiếp tục từ trạng thái đã lưu.",
     icon: <PlaylistAddCheckOutlinedIcon />,
     category: "subtitles",
   },
   {
     id: "localization-review",
-    title: "Localization Review",
-    description: "Open QC exceptions, edit translation/timing/voice, regenerate chunks, and rerun downstream stages.",
+    title: "Duyệt bản địa hóa",
+    description: "Mở lỗi QC, sửa bản dịch/nhịp/giọng, tạo lại từng đoạn và chạy lại các bước phía sau.",
     icon: <FactCheckOutlinedIcon />,
     category: "subtitles",
   },
   {
     id: "hook-analysis",
-    title: "Hook Detector",
-    description: "Score the first 10s of any video + get stronger opening alternatives.",
+    title: "Phân tích hook",
+    description: "Chấm 10 giây đầu video và gợi ý cách mở đầu mạnh hơn.",
     icon: <LightbulbOutlinedIcon />,
     category: "subtitles",
   },
   {
     id: "metadata",
-    title: "Title / Tags / Description",
-    description: "SEO metadata for any video, transcript, or topic — YT + TikTok ready.",
+    title: "Tiêu đề / Thẻ / Mô tả",
+    description: "Tạo metadata SEO cho video, bản chép lời hoặc chủ đề — dùng ngay cho YouTube + TikTok.",
     icon: <LabelOutlinedIcon />,
     category: "subtitles",
   },
   {
     id: "auto-chapters",
-    title: "Auto Chapters",
-    description: "AI-generated YouTube chapter markers from your long-form video.",
+    title: "Tự tạo chương",
+    description: "AI tự tạo mốc chương YouTube từ video dài.",
     icon: <FormatListNumberedIcon />,
     category: "subtitles",
   },
@@ -231,21 +231,21 @@ const CATEGORIES = [
   {
     id: "video",
     label: "Video",
-    description: "Visual and structural edits to finished footage.",
+    description: "Chỉnh hình ảnh và cấu trúc cho video hoàn chỉnh.",
     icon: <VideocamOutlinedIcon />,
     accent: "info",
   },
   {
     id: "audio",
-    label: "Audio",
-    description: "Voice, cleanup, and polish for the soundtrack.",
+    label: "Âm thanh",
+    description: "Giọng đọc, làm sạch và hoàn thiện âm thanh.",
     icon: <HeadphonesOutlinedIcon />,
     accent: "success",
   },
   {
     id: "subtitles",
-    label: "Subtitles & Insights",
-    description: "Captions, translation, and analysis overlays.",
+    label: "Phụ đề & Phân tích",
+    description: "Phụ đề, dịch thuật và lớp phân tích.",
     icon: <ClosedCaptionOutlinedIcon />,
     accent: "warning",
   },
@@ -347,7 +347,7 @@ function CategorySection({ category, tools, onPick }) {
 // ── Page ───────────────────────────────────────────────────────────────────
 
 export default function Tools() {
-  useDocumentTitle("Utilities")
+  useDocumentTitle("Công cụ")
   const navigate = useNavigate()
   const visibleTools = TOOLS.filter((tool) => !WORKFLOW_OWNED_UTILITY_IDS.has(tool.id))
   const pick = (id) => {
@@ -367,8 +367,8 @@ export default function Tools() {
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <PageHero
         icon={<BuildOutlinedIcon sx={{ fontSize: 22 }} />}
-        title="Utilities"
-        subtitle="Single-purpose utilities to refine finished videos"
+        title="Tiện ích"
+        subtitle="Các tiện ích chuyên dụng để tinh chỉnh video đã hoàn thiện"
       />
 
       {/* Body */}
@@ -381,7 +381,7 @@ export default function Tools() {
             size="small"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search utilities — e.g. caption, reframe, speed, download…"
+            placeholder="Tìm tiện ích — ví dụ: phụ đề, đổi khung, tốc độ, tải xuống…"
             sx={{ mb: 2.5 }}
             slotProps={{
               input: {
@@ -409,7 +409,7 @@ export default function Tools() {
               </Box>
             ) : (
               <Typography variant="body2" sx={{ color: "text.secondary", textAlign: "center", py: 6 }}>
-                No utilities match “{query.trim()}”. Try “caption”, “audio”, “speed”, or “download”.
+                Không có tiện ích nào khớp “{query.trim()}”. Hãy thử “phụ đề”, “âm thanh”, “tốc độ” hoặc “tải xuống”.
               </Typography>
             )
           ) : (

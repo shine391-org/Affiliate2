@@ -26,10 +26,10 @@ const MAX_MB = 1000
 const ACCEPT = ".mp4,.mov,.mkv,.webm,.m4v"
 
 const ASPECT_OPTIONS = [
-  { id: "auto",  label: "Auto",      sub: "match first clip" },
-  { id: "9:16",  label: "Vertical",  sub: "TikTok / Shorts" },
-  { id: "16:9",  label: "Landscape", sub: "YouTube" },
-  { id: "1:1",   label: "Square",    sub: "Instagram" },
+  { id: "auto",  label: "Tự động",      sub: "khớp clip đầu tiên" },
+  { id: "9:16",  label: "Dọc",  sub: "TikTok / Shorts" },
+  { id: "16:9",  label: "Ngang", sub: "YouTube" },
+  { id: "1:1",   label: "Vuông",    sub: "Instagram" },
 ]
 
 // Card visual constants — kept in one place so the empty-state placeholder
@@ -37,7 +37,7 @@ const ASPECT_OPTIONS = [
 const CARD_W = 140
 
 export default function ToolMergeClips() {
-  useDocumentTitle("Merge Clips")
+  useDocumentTitle("Ghép clip")
   const navigate = useNavigate()
   const inputRef = useRef(null)
   const [clips, setClips] = useState([])      // [{ id, file, url }]
@@ -99,7 +99,7 @@ export default function ToolMergeClips() {
       }
       const ext = "." + (f.name.split(".").pop() || "").toLowerCase()
       if (!ACCEPT.split(",").includes(ext)) {
-        setError(`"${f.name}" is not a supported video format.`)
+        setError(`"${f.name}" không phải định dạng video được hỗ trợ.`)
         continue
       }
       valid.push({
@@ -115,7 +115,7 @@ export default function ToolMergeClips() {
         for (const c of merged.slice(MAX_CLIPS)) {
           try { URL.revokeObjectURL(c.url) } catch { /* noop */ }
         }
-        setError(`Max ${MAX_CLIPS} clips per merge — keeping the first ${MAX_CLIPS}.`)
+        setError(`Tối đa ${MAX_CLIPS} clip mỗi lần ghép — chỉ giữ ${MAX_CLIPS} clip đầu tiên.`)
         return merged.slice(0, MAX_CLIPS)
       }
       return merged
@@ -191,7 +191,7 @@ export default function ToolMergeClips() {
   const submit = async () => {
     setError("")
     if (clips.length < MIN_CLIPS) {
-      setError(`Need at least ${MIN_CLIPS} clips.`)
+      setError(`Cần ít nhất ${MIN_CLIPS} clip.`)
       return
     }
     const form = new FormData()
@@ -204,10 +204,10 @@ export default function ToolMergeClips() {
         headers: { "Content-Type": "multipart/form-data" },
         timeout: 300000,
       })
-      startJob(data.job_id, toolJobTypeFor("/api/tools/merge-clips"), "Starting...")
+      startJob(data.job_id, toolJobTypeFor("/api/tools/merge-clips"), "Đang bắt đầu…")
       setJobId(data.job_id)
     } catch (e) {
-      const msg = e?.response?.data?.detail || e.message || "Upload failed"
+      const msg = e?.response?.data?.detail || e.message || "Tải lên thất bại"
       setError(msg)
       showSnackbar?.(msg, "error")
     }
@@ -255,10 +255,10 @@ export default function ToolMergeClips() {
           </Box>
           <Box sx={{ minWidth: 0 }}>
             <Typography variant="h5" sx={{ fontWeight: 700, letterSpacing: -0.3 }}>
-              Merge Clips
+              Ghép clip
             </Typography>
             <Typography variant="caption" sx={{ color: "text.secondary", mt: 0.25, display: "block" }} noWrap>
-              Stitch multiple clips into one video — auto-cropped to your target aspect.
+              Ghép nhiều clip thành một video — tự cắt khung theo tỷ lệ đích.
             </Typography>
           </Box>
         </Stack>
@@ -270,7 +270,7 @@ export default function ToolMergeClips() {
             disabled={clips.length < MIN_CLIPS}
             sx={{ flexShrink: 0, px: 3 }}
           >
-            Merge {clips.length >= MIN_CLIPS ? `${clips.length} clips` : "clips"}
+            Ghép {clips.length >= MIN_CLIPS ? `${clips.length} clip` : "clip"}
           </Button>
         )}
       </Box>
@@ -316,11 +316,11 @@ export default function ToolMergeClips() {
                 <CloudUploadOutlinedIcon sx={{ fontSize: 40, color: "text.secondary" }} />
                 <Typography variant="body2" sx={{ fontWeight: 600 }}>
                   {clips.length === 0
-                    ? "Drop clips here or click to browse"
-                    : `Add more clips (${clips.length}/${MAX_CLIPS})`}
+                    ? "Thả clip vào đây hoặc bấm để chọn tệp"
+                    : `Thêm clip (${clips.length}/${MAX_CLIPS})`}
                 </Typography>
                 <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                  {ACCEPT.replace(/\./g, "").toUpperCase()} · up to {MAX_MB} MB each · {MIN_CLIPS}-{MAX_CLIPS} clips
+                  {ACCEPT.replace(/\./g, "").toUpperCase()} · tối đa {MAX_MB} MB mỗi tệp · {MIN_CLIPS}-{MAX_CLIPS} clip
                 </Typography>
               </Stack>
             </GlassPanel>
@@ -333,7 +333,7 @@ export default function ToolMergeClips() {
             <GlassPanel sx={{ p: 2.5 }}>
               <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
                 <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-                  Output aspect ratio
+                  Tỷ lệ khung hình đầu ra
                 </Typography>
                 <Stack
                   direction="row" alignItems="center" spacing={0.75}
@@ -358,19 +358,19 @@ export default function ToolMergeClips() {
                     />
                   </Box>
                   <Typography variant="caption" sx={{ fontWeight: 600 }}>
-                    Export all platforms (ZIP)
+                    Xuất cho mọi nền tảng (ZIP)
                   </Typography>
                 </Stack>
               </Stack>
               {bundle ? (
                 <Typography variant="caption" sx={{ color: "text.secondary", display: "block" }}>
-                  Renders the merge three times — 9:16 (TikTok / Reels / Shorts), 1:1 (Instagram Feed),
-                  and 16:9 (YouTube) — and downloads as a single ZIP.
+                  Kết xuất bản ghép ba lần — 9:16 (TikTok / Reels / Shorts), 1:1 (Instagram Feed)
+                  và 16:9 (YouTube) — rồi tải xuống trong một tệp ZIP.
                 </Typography>
               ) : (
                 <>
                   <Typography variant="caption" sx={{ color: "text.secondary", display: "block", mb: 1.5 }}>
-                    Each clip is center-cropped to fill the target. Auto picks the closest match to your first clip.
+                    Mỗi clip được cắt giữa để lấp đầy khung đích. Tự động chọn tỷ lệ gần nhất với clip đầu tiên.
                   </Typography>
                   <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                     {ASPECT_OPTIONS.map((opt) => (
@@ -398,15 +398,15 @@ export default function ToolMergeClips() {
             </GlassPanel>
           )}
 
-          {/* Transition between clips */}
+          {/* Chuyển cảnh giữa các clip */}
           <GlassPanel sx={{ p: 2, borderRadius: 2 }}>
             <Typography variant="caption" sx={{ fontWeight: 700, display: "block", mb: 1 }}>
-              Transition between clips
+              Chuyển cảnh giữa các clip
             </Typography>
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
               {[
-                { id: "none", label: "Hard cut", sub: "Instant — fastest" },
-                { id: "crossfade", label: "Crossfade", sub: "Short dissolve" },
+                { id: "none", label: "Cắt thẳng", sub: "Tức thì — nhanh nhất" },
+                { id: "crossfade", label: "Chuyển mờ", sub: "Hòa trộn ngắn" },
               ].map((opt) => (
                 <Chip
                   key={opt.id}
@@ -443,12 +443,12 @@ export default function ToolMergeClips() {
                 icon={<WarningAmberIcon />}
                 sx={{ "& .MuiAlert-message": { fontWeight: 500 } }}
               >
-                Don't leave or refresh this page — clips merging is in progress.
-                Closing the page will interrupt the process and you'll need to start over.
+                Đừng rời hoặc tải lại trang khi đang ghép clip.
+                Đóng trang sẽ làm gián đoạn và bạn sẽ phải bắt đầu lại.
               </Alert>
               <GlassPanel sx={{ p: 2.5 }}>
                 <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
-                  {job.step || "Working…"}
+                  {job.step || "Đang xử lý…"}
                 </Typography>
                 <LinearProgress variant="determinate" value={job.percent || 0} sx={{ borderRadius: 1, height: 8 }} />
                 <Typography variant="caption" sx={{ color: "text.secondary", mt: 0.5, display: "block" }}>
@@ -472,17 +472,17 @@ export default function ToolMergeClips() {
                 >
                   Download
                 </Button>
-                <Button size="small" onClick={reset}>Merge more</Button>
+                <Button size="small" onClick={reset}>Ghép thêm</Button>
               </Stack>
             }>
-              Done. Your merged video is ready.
+              Hoàn tất. Video đã ghép sẵn sàng.
             </Alert>
           )}
 
           {/* Failed */}
           {jobFailed && (
-            <Alert severity="error" action={<Button size="small" onClick={reset}>Try again</Button>}>
-              {job?.step || terminal?.step || "Job failed"}
+            <Alert severity="error" action={<Button size="small" onClick={reset}>Thử lại</Button>}>
+              {job?.step || terminal?.step || "Tác vụ thất bại"}
             </Alert>
           )}
         </Box>

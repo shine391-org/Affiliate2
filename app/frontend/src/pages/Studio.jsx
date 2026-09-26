@@ -28,7 +28,7 @@ function CreativeRemakeReserved({ source, context, navigate }) {
             <Typography variant="h5" sx={{ fontWeight: 800 }}>{contract.title}</Typography>
             <Typography variant="body2" color="text.secondary">{contract.promise}</Typography>
           </Box>
-          <Chip label={`Phase ${contract.phase} readiness`} variant="outlined" />
+          <Chip label={`Mức sẵn sàng Phase ${contract.phase}`} variant="outlined" />
         </Stack>
 
         <Alert severity="info" variant="outlined">
@@ -36,11 +36,11 @@ function CreativeRemakeReserved({ source, context, navigate }) {
         </Alert>
 
         {!source ? (
-          <Alert severity="warning">Select a source from Library first. Phase {contract.phase} must reuse that persisted source ID rather than upload/import it again.</Alert>
+          <Alert severity="warning">Hãy chọn nguồn từ Thư viện trước. Phase {contract.phase} phải dùng lại ID nguồn đã lưu thay vì tải lên/nhập lại.</Alert>
         ) : (
           <>
             <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-              <Typography variant="subtitle2" sx={{ mb: 1 }}>Shared source contract</Typography>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>Liên kết nguồn dùng chung</Typography>
               <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
                 <Chip size="small" label={`source ${context?.source_id || source.id}`} />
                 <Chip size="small" variant="outlined" label={context?.library_key || `dl:${source.id}`} />
@@ -50,19 +50,19 @@ function CreativeRemakeReserved({ source, context, navigate }) {
             </Paper>
 
             <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-              <Typography variant="subtitle2">Storyboard approval contract</Typography>
+              <Typography variant="subtitle2">Quy trình duyệt storyboard</Typography>
               <Typography variant="body2" sx={{ mt: 0.75 }}>
                 Phase E must persist source → scene map → creative beats → asset map → storyboard, then stop for explicit human approval before composition/render.
               </Typography>
-              <Button size="small" sx={{ mt: 1 }} disabled>Storyboard review · Phase E</Button>
+              <Button size="small" sx={{ mt: 1 }} disabled>Duyệt storyboard · Phase E</Button>
               <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.75 }}>
                 The Review contract is reserved, but the queue stays disabled until a real Creative Remake engine registers live exceptions.
               </Typography>
             </Paper>
 
             <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-              <Typography variant="subtitle2">Contextual asset providers</Typography>
-              <Typography variant="caption" color="text.secondary">Existing providers stay secondary capabilities; Creative Remake may call them from this project context.</Typography>
+              <Typography variant="subtitle2">Nguồn tư liệu theo ngữ cảnh</Typography>
+              <Typography variant="caption" color="text.secondary">Các nguồn hiện có vẫn là khả năng phụ; Làm lại sáng tạo có thể gọi chúng từ ngữ cảnh dự án này.</Typography>
               <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ mt: 1.25 }}>
                 {STUDIO_ASSET_PROVIDERS.map((provider) => (
                   <Button
@@ -77,7 +77,7 @@ function CreativeRemakeReserved({ source, context, navigate }) {
             </Paper>
 
             <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-              <Typography variant="subtitle2">Reserved workflow</Typography>
+              <Typography variant="subtitle2">Quy trình dự kiến</Typography>
               <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
                 {contract.steps.map((step, index) => <Chip key={step} size="small" variant="outlined" label={`${index + 1}. ${step.replaceAll("-", " ")}`} />)}
               </Stack>
@@ -153,7 +153,7 @@ export default function Studio() {
         <Stack direction={{ xs: "column", lg: "row" }} spacing={1.5} alignItems={{ lg: "center" }}>
           <Box sx={{ minWidth: 180 }}>
             <Typography variant="h5" sx={{ fontWeight: 800 }}>Studio</Typography>
-            <Typography variant="caption" color="text.secondary">One source, one project context, multiple workflows</Typography>
+            <Typography variant="caption" color="text.secondary">Một nguồn, một ngữ cảnh dự án, nhiều quy trình</Typography>
           </Box>
           <ToggleButtonGroup
             exclusive value={mode} onChange={changeMode} size="small"
@@ -166,25 +166,25 @@ export default function Studio() {
             ))}
           </ToggleButtonGroup>
           <Box sx={{ flex: 1 }} />
-          <Button size="small" variant="outlined" onClick={openActivity}>Activity</Button>
+          <Button size="small" variant="outlined" onClick={openActivity}>Hoạt động</Button>
         </Stack>
         <Stack direction={{ xs: "column", md: "row" }} spacing={1.25} alignItems={{ md: "center" }} sx={{ mt: 1.5 }}>
           <FormControl size="small" sx={{ minWidth: { xs: "100%", md: 360 } }}>
-            <InputLabel>Source from Library</InputLabel>
-            <Select value={sourceId} label="Source from Library" onChange={(event) => chooseSource(event.target.value)} disabled={loading}>
-              <MenuItem value=""><em>Select a downloaded source</em></MenuItem>
+            <InputLabel>Nguồn từ Thư viện</InputLabel>
+            <Select value={sourceId} label="Nguồn từ Thư viện" onChange={(event) => chooseSource(event.target.value)} disabled={loading}>
+              <MenuItem value=""><em>Chọn một nguồn đã tải</em></MenuItem>
               {sources.map((item) => <MenuItem key={item.id} value={item.id}>{item.title || item.id}</MenuItem>)}
             </Select>
           </FormControl>
           {source ? (
             <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
-              <Chip label={source.platform || "local"} size="small" />
+              <Chip label={source.platform || "cục bộ"} size="small" />
               {source.duration_seconds > 0 && <Chip label={`${source.duration_seconds}s`} size="small" variant="outlined" />}
               {source.media_metadata?.width && <Chip label={`${source.media_metadata.width}×${source.media_metadata.height}`} size="small" variant="outlined" />}
-              {source.source_url && <Button size="small" href={source.source_url} target="_blank" rel="noopener">Open source</Button>}
+              {source.source_url && <Button size="small" href={source.source_url} target="_blank" rel="noopener">Mở nguồn</Button>}
             </Stack>
           ) : (
-            <Button size="small" startIcon={<FolderOpenOutlinedIcon />} onClick={() => navigate("/library")}>Choose from Library</Button>
+            <Button size="small" startIcon={<FolderOpenOutlinedIcon />} onClick={() => navigate("/library")}>Chọn từ Thư viện</Button>
           )}
         </Stack>
       </Box>

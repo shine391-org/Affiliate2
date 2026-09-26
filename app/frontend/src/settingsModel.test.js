@@ -13,7 +13,7 @@ test("Settings sections reflect configuration ownership", () => {
 test("Source Providers owns downloader/browser configuration", () => {
   assert.equal(
     SETTINGS_SECTIONS.find(({ value }) => value === "services")?.label,
-    "Source Providers",
+    "Nguồn dữ liệu",
   )
 })
 

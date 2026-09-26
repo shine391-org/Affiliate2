@@ -28,7 +28,7 @@ import useAppStore from "../store/appStore"
 const DEFAULT_ROWS = 50
 
 export default function Scout() {
-  useDocumentTitle("Discover / Spy")
+  useDocumentTitle("Khám phá / Theo dõi")
   const navigate = useNavigate()
   const showSnackbar = useAppStore((s) => s.showSnackbar)
   const jobs = useAppStore((s) => s.jobs)   // polled once, app-wide, in Layout
@@ -47,7 +47,7 @@ export default function Scout() {
       setResults(data.results || [])
       setTotal(data.total || 0)
     } catch {
-      showSnackbar("Could not load scout results", "error")
+      showSnackbar("Không thể tải kết quả theo dõi", "error")
     } finally {
       setLoading(false)
     }
@@ -59,14 +59,14 @@ export default function Scout() {
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <PageHero
         icon={<TravelExploreIcon sx={{ fontSize: 22 }} />}
-        title="Discover / Spy"
-        subtitle="Trending videos worth borrowing from — leads, not files"
+        title="Khám phá / Theo dõi"
+        subtitle="Video đang lên đáng tham khảo — đây là lead, không phải tệp"
         accentColor="#0097a7"
         actions={
           <Stack direction="row" spacing={1}>
-            <Tooltip title="Refresh results">
+            <Tooltip title="Làm mới kết quả">
               <Button size="small" variant="outlined" sx={{ minWidth: 0, px: 1 }}
-                aria-label="Refresh results"
+                aria-label="Làm mới kết quả"
                 onClick={() => { setPage(0); fetchResults(null, 0, rowsPerPage) }}>
                 <RefreshIcon fontSize="small" />
               </Button>

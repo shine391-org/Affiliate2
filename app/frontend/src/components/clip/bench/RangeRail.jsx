@@ -167,7 +167,7 @@ const Row = memo(function Row({
           {len < 60 ? `${Math.round(len)}s` : `${Math.floor(len / 60)}m${String(Math.round(len % 60)).padStart(2, "0")}`}
         </Typography>
         <IconButton
-          size="small" aria-label={`Remove range ${index + 1}`}
+          size="small" aria-label={`Xóa đoạn ${index + 1}`}
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => { e.stopPropagation(); onRemove(range.id) }}
           sx={{ p: 0.15, ml: 0.25, color: "text.disabled", "&:hover": { color: "error.main" } }}
@@ -229,26 +229,26 @@ export default function RangeRail({
         </Typography>
         <Box sx={{ flex: 1 }} />
         {aiSlot}
-        <Tooltip title={atCap ? `The bench holds ${MAX_RANGES} ranges` : "Add a range at the playhead (N)"}>
+        <Tooltip title={atCap ? `Bàn cắt chứa tối đa ${MAX_RANGES} đoạn` : "Thêm đoạn tại vị trí phát (N)"}>
           <span>
             <IconButton size="small" disabled={atCap} onClick={onAdd}
-              aria-label="Add a range at the playhead" sx={{ p: 0.2 }}>
+              aria-label="Thêm đoạn tại vị trí phát" sx={{ p: 0.2 }}>
               <AddIcon sx={{ fontSize: 16 }} />
             </IconButton>
           </span>
         </Tooltip>
-        <Tooltip title="Paste times you already have — show notes, a chapter list, a message">
+        <Tooltip title="Dán mốc thời gian có sẵn — ghi chú, danh sách chương hoặc tin nhắn">
           <span>
             <IconButton size="small" disabled={atCap} onClick={onPaste}
-              aria-label="Paste timestamps" sx={{ p: 0.2 }}>
+              aria-label="Dán mốc thời gian" sx={{ p: 0.2 }}>
               <ContentPasteIcon sx={{ fontSize: 15 }} />
             </IconButton>
           </span>
         </Tooltip>
-        <Tooltip title="Remove every pending range">
+        <Tooltip title="Xóa mọi đoạn đang chờ">
           <span>
             <IconButton size="small" disabled={!ranges.length} onClick={onClear}
-              aria-label="Clear all ranges" sx={{ p: 0.2 }}>
+              aria-label="Xóa tất cả đoạn" sx={{ p: 0.2 }}>
               <DeleteSweepIcon sx={{ fontSize: 15 }} />
             </IconButton>
           </span>
@@ -268,8 +268,8 @@ export default function RangeRail({
         {ranges.length === 0 ? (
           <Stack spacing={0.75} sx={{ p: 1 }}>
             <Typography sx={{ fontSize: "0.66rem", color: "text.disabled", lineHeight: 1.5 }}>
-              No ranges yet. Drag across the filmstrip, press <strong>N</strong>,
-              paste timestamps, or <strong>Ask AI</strong> to propose some.
+              Chưa có đoạn nào. Kéo trên dải phim, nhấn <strong>N</strong>,
+              dán mốc thời gian hoặc <strong>Hỏi AI</strong> để đề xuất.
             </Typography>
             <Button size="small" startIcon={<AddIcon sx={{ fontSize: 15 }} />} onClick={onAdd}
               sx={{ textTransform: "none", fontSize: "0.7rem", alignSelf: "flex-start" }}>

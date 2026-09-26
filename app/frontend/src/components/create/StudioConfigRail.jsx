@@ -16,12 +16,12 @@ import UserImagesPanel from "./UserImagesPanel"
 
 // Transition presets the stock pipeline can honor when stitching clips.
 export const TRANSITIONS = [
-  { id: "auto", label: "Auto" },
-  { id: "none", label: "Hard cut" },
-  { id: "fade", label: "Fade" },
-  { id: "slide", label: "Slide" },
+  { id: "auto", label: "Tự động" },
+  { id: "none", label: "Cắt thẳng" },
+  { id: "fade", label: "Mờ dần" },
+  { id: "slide", label: "Trượt" },
   { id: "zoom", label: "Zoom" },
-  { id: "whip", label: "Whip pan" },
+  { id: "whip", label: "Quét nhanh" },
 ]
 
 function Panel({ title, children, sx }) {
@@ -50,7 +50,7 @@ export default function StudioConfigRail({
     <Box sx={{ width: { xs: 300, lg: 344 }, flexShrink: 0, overflowY: "auto", overflowX: "hidden", p: 1.75, height: "100%" }}>
       <Stack spacing={1.5}>
         {/* Visual Style — drives the render's look + the live preview palette */}
-        <Panel title="Visual Style">
+        <Panel title="Phong cách hình ảnh">
           <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1 }}>
             {STYLES.map((s) => (
               <StyleSwatch
@@ -65,38 +65,38 @@ export default function StudioConfigRail({
         </Panel>
 
         {/* Format & mode */}
-        <Panel title="Format & Mode">
+        <Panel title="Định dạng & Chế độ">
           <ToggleButtonGroup
             value={aspectRatio} exclusive fullWidth size="small"
             onChange={(_, v) => v && setAspectRatio(v)}
             sx={{ mb: 1, "& .MuiToggleButton-root": { textTransform: "none", fontSize: "0.78rem", py: 0.4 } }}
           >
-            <ToggleButton value="9:16">9:16 · Vertical</ToggleButton>
-            <ToggleButton value="16:9">16:9 · Wide</ToggleButton>
+            <ToggleButton value="9:16">9:16 · Dọc</ToggleButton>
+            <ToggleButton value="16:9">16:9 · Ngang</ToggleButton>
           </ToggleButtonGroup>
           <ToggleButtonGroup
             value={operation} exclusive fullWidth size="small"
             onChange={(_, v) => v && setOperation(v)}
             sx={{ "& .MuiToggleButton-root": { textTransform: "none", fontSize: "0.78rem", py: 0.4 } }}
           >
-            <ToggleButton value="t2v">Script → Video</ToggleButton>
-            <ToggleButton value="i2v"><ImageIcon sx={{ fontSize: 15, mr: 0.5 }} />Image</ToggleButton>
+            <ToggleButton value="t2v">Kịch bản → Video</ToggleButton>
+            <ToggleButton value="i2v"><ImageIcon sx={{ fontSize: 15, mr: 0.5 }} />Ảnh</ToggleButton>
           </ToggleButtonGroup>
           {operation === "i2v" && (
             <Box sx={{ mt: 1.25 }}>
-              <ImageUpload label="Input image" value={startImage} onChange={setStartImage} onRemove={() => setStartImage(null)} />
+              <ImageUpload label="Ảnh đầu vào" value={startImage} onChange={setStartImage} onRemove={() => setStartImage(null)} />
             </Box>
           )}
         </Panel>
 
         {/* The user's own stills, filling scenes of an otherwise-stock video.
-            Only offered in Script → Video: the Image mode above is the
+            Only offered in Kịch bản → Video: the Image mode above is the
             all-or-nothing version of the same idea (one picture becomes the
             whole video), and showing both invites picking two answers to one
             question. The backend resolves the clash the same way — per-scene
             images win — but the UI should never create it. */}
         {operation !== "i2v" && (
-          <Panel title="Your Images">
+          <Panel title="Ảnh của bạn">
             <UserImagesPanel
               images={userImages}
               setImages={setUserImages}
@@ -111,7 +111,7 @@ export default function StudioConfigRail({
         </Panel>
 
         {/* Transitions between stock clips */}
-        <Panel title="Transitions">
+        <Panel title="Chuyển cảnh">
           <Stack direction="row" flexWrap="wrap" useFlexGap sx={{ gap: 0.75 }}>
             {TRANSITIONS.map((t) => (
               <Chip

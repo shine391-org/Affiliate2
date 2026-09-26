@@ -81,9 +81,9 @@ export default function DownloadedDetail({ video, onUseAsInspiration, onClose, o
     try {
       const res = await http.post(`/api/downloaded/${video.id}/ai-action`, { action, ...extra })
       setAiActionResult({ action, ...res.data })
-      showSnackbar(`AI action "${action}" complete`, "success")
+      showSnackbar(`Tác vụ AI "${action}" đã hoàn tất`, "success")
     } catch (e) {
-      showSnackbar(e.response?.data?.detail || `AI action failed: ${e.message}`, "error")
+      showSnackbar(e.response?.data?.detail || `Tác vụ AI thất bại: ${e.message}`, "error")
     } finally {
       setAiActionLoading(null)
     }
@@ -105,14 +105,14 @@ export default function DownloadedDetail({ video, onUseAsInspiration, onClose, o
             clearInterval(pollId)
             clearTimeout(safetyTimeout)
             setReanalyzing(false)
-            showSnackbar("Re-analysis complete!", "success")
+            showSnackbar("Phân tích lại hoàn tất!", "success")
             const detail = await http.get(`/api/downloaded/${video.id}`)
             if (onDetailUpdate) onDetailUpdate({ ...detail.data, _type: "downloaded" })
           } else if (status === "failed") {
             clearInterval(pollId)
             clearTimeout(safetyTimeout)
             setReanalyzing(false)
-            showSnackbar(`Re-analysis failed: ${error_message || "unknown error"}`, "error")
+            showSnackbar(`Phân tích lại thất bại: ${error_message || "lỗi không xác định"}`, "error")
           }
         } catch { /* keep polling */ }
       }, 3000)
@@ -124,7 +124,7 @@ export default function DownloadedDetail({ video, onUseAsInspiration, onClose, o
       pollRef.current = { pollId, safetyTimeout }
     } catch (e) {
       setReanalyzing(false)
-      showSnackbar(`Re-analyze failed: ${e.response?.data?.detail || e.message}`, "error")
+      showSnackbar(`Phân tích lại thất bại: ${e.response?.data?.detail || e.message}`, "error")
     }
   }
 
@@ -143,7 +143,7 @@ export default function DownloadedDetail({ video, onUseAsInspiration, onClose, o
       <Stack direction="row" alignItems="center" justifyContent="space-between"
         sx={{ px: 2.5, py: 1.5, bgcolor: "action.hover" }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 600, flex: 1, minWidth: 0 }} noWrap>
-          {video.title || "Untitled"}
+          {video.title || "Chưa đặt tên"}
         </Typography>
         <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
           {video.platform !== "news" && (
@@ -170,7 +170,7 @@ export default function DownloadedDetail({ video, onUseAsInspiration, onClose, o
                       aspect_ratio: "9:16", tts_provider: "edge_tts",
                       caption_enabled: true, caption_style: "viral", music_enabled: true, music_genre: "lofi",
                     })
-                    showSnackbar("Quick video generation started!", "success")
+                    showSnackbar("Đã bắt đầu tạo video nhanh!", "success")
                   } catch (e) { showSnackbar(e.response?.data?.detail || e.message, "error") }
                 }}
                 sx={{ fontWeight: 700 }}>
@@ -211,7 +211,7 @@ export default function DownloadedDetail({ video, onUseAsInspiration, onClose, o
               <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: "action.hover" }}>
                 <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
                   <NewspaperIcon sx={{ color: "warning.main" }} />
-                  <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>News Article</Typography>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Bài viết tin tức</Typography>
                   {video.source_url && (
                     <Chip label={(() => { try { return new URL(video.source_url).hostname.replace("www.", "") } catch { return "source" } })()}
                       size="small" variant="outlined" sx={{ fontSize: "0.65rem", height: 20 }} />
@@ -228,25 +228,25 @@ export default function DownloadedDetail({ video, onUseAsInspiration, onClose, o
                   <Stack spacing={1} sx={{ mb: 1.5 }}>
                     {video.insights.why_trending && (
                       <Box sx={{ p: 1, borderRadius: 1, bgcolor: (t) => t.palette.mode === "dark" ? "rgba(255,152,0,0.08)" : "rgba(255,152,0,0.06)" }}>
-                        <Typography variant="caption" sx={{ fontWeight: 700, color: "warning.main" }}>Why Trending</Typography>
+                        <Typography variant="caption" sx={{ fontWeight: 700, color: "warning.main" }}>Vì sao đang lên</Typography>
                         <Typography variant="body2" sx={{ fontSize: "0.82rem" }}>{video.insights.why_trending}</Typography>
                       </Box>
                     )}
                     {video.insights.hook && (
                       <Box>
-                        <Typography variant="caption" sx={{ fontWeight: 700, color: "text.secondary" }}>Video Hook</Typography>
+                        <Typography variant="caption" sx={{ fontWeight: 700, color: "text.secondary" }}>Hook video</Typography>
                         <Typography variant="body2" sx={{ fontSize: "0.85rem", fontWeight: 500 }}>&ldquo;{video.insights.hook}&rdquo;</Typography>
                       </Box>
                     )}
                     {video.insights.suggested_angle && (
                       <Box>
-                        <Typography variant="caption" sx={{ fontWeight: 700, color: "text.secondary" }}>Suggested Angle</Typography>
+                        <Typography variant="caption" sx={{ fontWeight: 700, color: "text.secondary" }}>Góc đề xuất</Typography>
                         <Typography variant="body2" sx={{ fontSize: "0.82rem" }}>{video.insights.suggested_angle}</Typography>
                       </Box>
                     )}
                     {video.insights.talking_points?.length > 0 && (
                       <Box>
-                        <Typography variant="caption" sx={{ fontWeight: 700, color: "text.secondary" }}>Talking Points</Typography>
+                        <Typography variant="caption" sx={{ fontWeight: 700, color: "text.secondary" }}>Ý chính</Typography>
                         {video.insights.talking_points.map((pt, i) => (
                           <Typography key={i} variant="body2" sx={{ fontSize: "0.8rem", pl: 1 }}>• {pt}</Typography>
                         ))}
@@ -257,7 +257,7 @@ export default function DownloadedDetail({ video, onUseAsInspiration, onClose, o
                 {video.transcript && (
                   <>
                     <Divider sx={{ my: 1 }} />
-                    <Typography variant="caption" sx={{ fontWeight: 700, color: "text.secondary", display: "block", mb: 0.5 }}>Article Text</Typography>
+                    <Typography variant="caption" sx={{ fontWeight: 700, color: "text.secondary", display: "block", mb: 0.5 }}>Nội dung bài viết</Typography>
                     <Typography variant="body2" sx={{ fontSize: "0.82rem", color: "text.secondary", lineHeight: 1.6, maxHeight: 250, overflowY: "auto" }}>
                       {video.transcript.slice(0, 2000)}{video.transcript.length > 2000 ? "..." : ""}
                     </Typography>
@@ -266,7 +266,7 @@ export default function DownloadedDetail({ video, onUseAsInspiration, onClose, o
               </Paper>
             ) : (
               <Box sx={{ height: 200, borderRadius: 2, bgcolor: "action.hover", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <Typography sx={{ color: "text.disabled" }}>No video file</Typography>
+                <Typography sx={{ color: "text.disabled" }}>Không có tệp video</Typography>
               </Box>
             )}
 
@@ -297,14 +297,14 @@ export default function DownloadedDetail({ video, onUseAsInspiration, onClose, o
           {/* Right column: AI Insights + Transcript */}
           <Grid size={{ xs: 12, md: 8 }}>
             {video.insights ? (<>
-              <Typography variant="overline" sx={{ color: "text.secondary", mb: 1, display: "block" }}>AI Insights</Typography>
+              <Typography variant="overline" sx={{ color: "text.secondary", mb: 1, display: "block" }}>Phân tích AI</Typography>
               <Stack spacing={1.5}>
                 {video.insights.hook && <InsightRow label="Hook" color="secondary.main" value={video.insights.hook} />}
-                {video.insights.structure && <InsightRow label="Structure" color="secondary.main" value={video.insights.structure} />}
-                {video.insights.tone && <InsightRow label="Tone" color="secondary.main" value={video.insights.tone} />}
-                {video.insights.why_viral && <InsightRow label="Why viral" color="warning.main" value={video.insights.why_viral} />}
-                {video.insights.suggested_angle && <InsightRow label="Your angle" color="primary.main" value={video.insights.suggested_angle} />}
-                {video.insights.suggested_title && <InsightRow label="Title idea" color="primary.main" value={video.insights.suggested_title} />}
+                {video.insights.structure && <InsightRow label="Cấu trúc" color="secondary.main" value={video.insights.structure} />}
+                {video.insights.tone && <InsightRow label="Giọng điệu" color="secondary.main" value={video.insights.tone} />}
+                {video.insights.why_viral && <InsightRow label="Vì sao viral" color="warning.main" value={video.insights.why_viral} />}
+                {video.insights.suggested_angle && <InsightRow label="Góc của bạn" color="primary.main" value={video.insights.suggested_angle} />}
+                {video.insights.suggested_title && <InsightRow label="Gợi ý tiêu đề" color="primary.main" value={video.insights.suggested_title} />}
               </Stack>
 
               {/* ── AI Action Buttons (Notion-style inline refinement) ────── */}
@@ -314,46 +314,46 @@ export default function DownloadedDetail({ video, onUseAsInspiration, onClose, o
               </Typography>
               <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ gap: 0.75 }}>
                 <AIActionButton
-                  label="Stronger Hook"
+                  label="Hook mạnh hơn"
                   icon={<WhatshotIcon sx={{ fontSize: 16 }} />}
                   loading={aiActionLoading === "strengthen_hook"}
                   onClick={() => handleAiAction("strengthen_hook")}
-                  tooltip="Rewrite the hook to be more attention-grabbing"
+                  tooltip="Viết lại hook để thu hút chú ý hơn"
                 />
                 <AIActionButton
-                  label="Improve Angle"
+                  label="Cải thiện góc"
                   icon={<AutoFixHighIcon sx={{ fontSize: 16 }} />}
                   loading={aiActionLoading === "improve_angle"}
                   onClick={() => handleAiAction("improve_angle")}
-                  tooltip="Elaborate and strengthen the suggested video angle"
+                  tooltip="Mở rộng và làm mạnh hơn góc video đề xuất"
                 />
                 <AIActionButton
-                  label="5 Title Ideas"
+                  label="5 ý tưởng tiêu đề"
                   icon={<EditIcon sx={{ fontSize: 16 }} />}
                   loading={aiActionLoading === "suggest_titles"}
                   onClick={() => handleAiAction("suggest_titles")}
-                  tooltip="Generate 5 click-worthy title alternatives"
+                  tooltip="Tạo 5 tiêu đề thay thế hấp dẫn hơn"
                 />
                 <AIActionButton
-                  label="Make Shorter"
+                  label="Rút ngắn"
                   icon={<ContentCutIcon sx={{ fontSize: 16 }} />}
                   loading={aiActionLoading === "rewrite_shorter"}
                   onClick={() => handleAiAction("rewrite_shorter")}
-                  tooltip="Shorten the suggested angle to 1-2 punchy sentences"
+                  tooltip="Rút góc đề xuất còn 1–2 câu ngắn, mạnh"
                 />
                 <AIActionButton
-                  label="For TikTok"
+                  label="Cho TikTok"
                   icon={<AspectRatioIcon sx={{ fontSize: 16 }} />}
                   loading={aiActionLoading === "rewrite_for_platform"}
                   onClick={() => handleAiAction("rewrite_for_platform", { platform: "TikTok" })}
-                  tooltip="Adapt concept specifically for TikTok's format"
+                  tooltip="Điều chỉnh ý tưởng riêng cho định dạng TikTok"
                 />
                 <AIActionButton
-                  label="Translate"
+                  label="Dịch"
                   icon={<TravelExploreIcon sx={{ fontSize: 16 }} />}
                   loading={aiActionLoading === "translate"}
                   onClick={() => handleAiAction("translate", { language: "Chinese" })}
-                  tooltip="Translate all insights into Chinese"
+                  tooltip="Dịch toàn bộ insight sang tiếng Trung"
                 />
               </Stack>
 
@@ -376,20 +376,20 @@ export default function DownloadedDetail({ video, onUseAsInspiration, onClose, o
                     <Stack spacing={0.75}>
                       {aiActionResult.result.map((title, i) => (
                         <Paper key={i} variant="outlined" sx={{ px: 1.5, py: 0.75, borderRadius: 1.5, cursor: "pointer", "&:hover": { bgcolor: "action.hover" } }}
-                          onClick={() => { navigator.clipboard?.writeText(title); showSnackbar("Copied to clipboard", "success") }}>
+                          onClick={() => { navigator.clipboard?.writeText(title); showSnackbar("Đã sao chép vào bộ nhớ tạm", "success") }}>
                           <Typography variant="body2" sx={{ fontSize: "0.85rem" }}>
                             {i + 1}. {title}
                           </Typography>
                         </Paper>
                       ))}
-                      <Typography variant="caption" sx={{ color: "text.disabled" }}>Click a title to copy</Typography>
+                      <Typography variant="caption" sx={{ color: "text.disabled" }}>Bấm tiêu đề để sao chép</Typography>
                     </Stack>
                   ) : aiActionResult.action === "rewrite_for_platform" && typeof aiActionResult.result === "object" ? (
                     <Stack spacing={1}>
                       {aiActionResult.result.hook && <InsightRow label="Hook" color="secondary.main" value={aiActionResult.result.hook} />}
-                      {aiActionResult.result.suggested_angle && <InsightRow label="Angle" color="primary.main" value={aiActionResult.result.suggested_angle} />}
-                      {aiActionResult.result.suggested_title && <InsightRow label="Title" color="primary.main" value={aiActionResult.result.suggested_title} />}
-                      {aiActionResult.result.format_tips && <InsightRow label="Format Tips" color="warning.main" value={aiActionResult.result.format_tips} />}
+                      {aiActionResult.result.suggested_angle && <InsightRow label="Góc" color="primary.main" value={aiActionResult.result.suggested_angle} />}
+                      {aiActionResult.result.suggested_title && <InsightRow label="Tiêu đề" color="primary.main" value={aiActionResult.result.suggested_title} />}
+                      {aiActionResult.result.format_tips && <InsightRow label="Mẹo định dạng" color="warning.main" value={aiActionResult.result.format_tips} />}
                     </Stack>
                   ) : aiActionResult.action === "translate" && typeof aiActionResult.result === "object" ? (
                     <Stack spacing={1}>
@@ -406,8 +406,8 @@ export default function DownloadedDetail({ video, onUseAsInspiration, onClose, o
               )}
             </>) : !video.transcript && (
               <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", minHeight: 200, color: "text.disabled" }}>
-                <Typography variant="body2" sx={{ mb: 1 }}>No analysis yet</Typography>
-                <Typography variant="caption">Use the Re-analyze button to transcribe and extract insights</Typography>
+                <Typography variant="body2" sx={{ mb: 1 }}>Chưa có phân tích</Typography>
+                <Typography variant="caption">Dùng nút Phân tích lại để chép lời và trích xuất insight</Typography>
               </Box>
             )}
 

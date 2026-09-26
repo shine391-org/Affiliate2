@@ -13,7 +13,7 @@ import useDocumentTitle from "../hooks/useDocumentTitle"
 const DEFAULT_ROWS = 50
 
 export default function Candidates() {
-  useDocumentTitle("Discover / Candidates")
+  useDocumentTitle("Khám phá / Ứng viên")
   const navigate = useNavigate()
   const showSnackbar = useAppStore((state) => state.showSnackbar)
   const [results, setResults] = useState([])
@@ -34,7 +34,7 @@ export default function Candidates() {
       setTotal(candidateResponse.data?.total || 0)
       setDownloads(downloadResponse.data?.videos || [])
     } catch (error) {
-      showSnackbar(error.response?.data?.detail || "Could not load candidates", "error")
+      showSnackbar(error.response?.data?.detail || "Không thể tải danh sách ứng viên", "error")
     } finally {
       setLoading(false)
     }
@@ -48,8 +48,8 @@ export default function Candidates() {
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <PageHero
         icon={<Inventory2OutlinedIcon sx={{ fontSize: 22 }} />}
-        title="Discover / Candidates"
-        subtitle="Persisted Scout and Radar leads. Saved/shortlist state is not yet available, so this view does not fake it."
+        title="Khám phá / Ứng viên"
+        subtitle="Các lead đã lưu từ Scout và Radar. Trạng thái đã lưu/danh sách rút gọn chưa khả dụng nên màn hình này không giả lập dữ liệu."
         accentColor="#7c3aed"
         actions={
           <Button size="small" variant="outlined" startIcon={<RefreshIcon />}
@@ -62,7 +62,7 @@ export default function Candidates() {
         {loading ? (
           <Stack alignItems="center" sx={{ py: 8 }}><CircularProgress size={32} /></Stack>
         ) : results.length === 0 ? (
-          <Alert severity="info">No persisted candidates yet. Run Discover / Spy to collect source evidence.</Alert>
+          <Alert severity="info">Chưa có ứng viên nào được lưu. Hãy chạy Khám phá / Theo dõi để thu thập dữ liệu nguồn.</Alert>
         ) : (
           <>
             <ScoutResults

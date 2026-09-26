@@ -54,7 +54,7 @@ export default function UserImagesPanel({ images, setImages, onError }) {
           added.push(res.data.url)
         } catch (err) {
           onError?.(
-            `Couldn't upload ${file.name}: ${err.response?.data?.detail || err.message}`,
+            `Không thể tải lên ${file.name}: ${err.response?.data?.detail || err.message}`,
           )
         }
       }
@@ -99,10 +99,10 @@ export default function UserImagesPanel({ images, setImages, onError }) {
               >
                 {idx + 1}
               </Box>
-              <Tooltip title={`Remove image ${idx + 1}`}>
+              <Tooltip title={`Xóa ảnh ${idx + 1}`}>
                 <IconButton
                   size="small"
-                  aria-label={`Remove image ${idx + 1}`}
+                  aria-label={`Xóa ảnh ${idx + 1}`}
                   onClick={() => removeAt(idx)}
                   sx={{
                     position: "absolute", top: -6, right: -6,

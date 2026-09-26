@@ -23,13 +23,13 @@ export const PHASE_E_REMAKE_STEPS = [
 export const STUDIO_ASSET_PROVIDERS = [
   {
     id: "stock",
-    label: "Stock / Smart Video",
+    label: "Video kho / Video thông minh",
     path: "/stock",
     capabilities: ["b-roll", "generated-video", "script-driven"],
   },
   {
     id: "motion",
-    label: "Motion Graphics",
+    label: "Đồ họa chuyển động",
     path: "/motion",
     capabilities: ["motion-graphics", "kinetic-type", "lower-thirds"],
   },
@@ -102,18 +102,18 @@ export function studioAssetProviderHref(provider, sourceId = "") {
 export const STUDIO_READINESS = {
   "smart-cut": {
     phase: "D",
-    title: "Smart Cut",
-    promise: "Reuse source media, canonical transcript and source timeline; propose bounded ranges for human approval before render.",
+    title: "Cắt thông minh",
+    promise: "Dùng lại media nguồn, bản chép lời chuẩn và timeline nguồn; đề xuất các đoạn giới hạn để người dùng duyệt trước khi kết xuất.",
     steps: PHASE_D_SMART_CUT_STEPS,
     requires: ["source", "timeline"],
-    review_categories: ["Timing", "Visual", "QC"],
+    review_categories: ["Nhịp", "Hình ảnh", "QC"],
   },
   remake: {
     phase: "E",
-    title: "Creative Remake",
-    promise: "Reuse the same source/project context, map external assets, and require explicit storyboard approval before composition/render.",
+    title: "Làm lại sáng tạo",
+    promise: "Dùng lại cùng ngữ cảnh nguồn/dự án, ánh xạ tư liệu ngoài và yêu cầu duyệt storyboard rõ ràng trước khi dựng/kết xuất.",
     steps: PHASE_E_REMAKE_STEPS,
     requires: ["source", "asset-providers", "storyboard-approval"],
-    review_categories: ["Storyboard", "Visual", "QC"],
+    review_categories: ["Storyboard", "Hình ảnh", "QC"],
   },
 }

@@ -1,12 +1,12 @@
 export const REVIEW_FILTERS = [
-  { value: "needs-review", label: "Needs Review", enabled: true },
-  { value: "translation", label: "Translation", enabled: true },
-  { value: "timing", label: "Timing", enabled: true },
-  { value: "audio", label: "Audio", enabled: true },
+  { value: "needs-review", label: "Cần duyệt", enabled: true },
+  { value: "translation", label: "Bản dịch", enabled: true },
+  { value: "timing", label: "Nhịp", enabled: true },
+  { value: "audio", label: "Âm thanh", enabled: true },
   { value: "storyboard", label: "Storyboard · Phase E", enabled: false, phase: "E" },
-  { value: "visual", label: "Visual · Phase D/E", enabled: false, phase: "D/E" },
+  { value: "visual", label: "Hình ảnh · Phase D/E", enabled: false, phase: "D/E" },
   { value: "qc", label: "QC", enabled: true },
-  { value: "publish", label: "Publish", enabled: false },
+  { value: "publish", label: "Xuất bản", enabled: false },
 ]
 
 export const REVIEW_WORKFLOW_CONTRACTS = {
@@ -30,11 +30,11 @@ export const REVIEW_WORKFLOW_CONTRACTS = {
 
 export function formatReviewIssue(issue) {
   if (typeof issue === "string") return issue
-  if (!issue || typeof issue !== "object") return "Review required"
+  if (!issue || typeof issue !== "object") return "Cần duyệt"
   if (issue.message) return issue.message
-  const label = String(issue.code || issue.reason || "Review required").replaceAll("_", " ")
+  const label = String(issue.code || issue.reason || "Cần duyệt").replaceAll("_", " ")
   const count = Number(issue.count)
-  return Number.isFinite(count) && count > 0 ? `${label} · ${count} affected items` : label
+  return Number.isFinite(count) && count > 0 ? `${label} · ${count} mục bị ảnh hưởng` : label
 }
 
 function categoriesFor(raw) {
@@ -72,7 +72,7 @@ export function createReviewItem({
   return {
     id,
     workflow,
-    source: source || workflow || "Review item",
+    source: source || workflow || "Mục cần duyệt",
     project: project || "",
     severity,
     status,
@@ -124,7 +124,7 @@ export function adaptLocalizationException(raw) {
     ...createReviewItem({
       id: `localization:${raw.job_id}`,
       workflow: "Localize",
-      source: request.source_title || request.filename || request.downloaded_video_id || request.target_language || "Localization job",
+      source: request.source_title || request.filename || request.downloaded_video_id || request.target_language || "Tác vụ bản địa hóa",
       project: raw.job_id,
       severity: status === "FAILED" ? "error" : "warning",
       status,

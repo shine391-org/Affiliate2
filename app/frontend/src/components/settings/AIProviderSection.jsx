@@ -20,7 +20,7 @@ const PROVIDERS = {
   ollama: { label: "Ollama (local)", baseUrl: "http://localhost:11434/v1" },
   lmstudio: { label: "LM Studio (local)", baseUrl: "http://localhost:1234/v1" },
   vllm: { label: "vLLM (local)", baseUrl: "http://localhost:8000/v1" },
-  compatible: { label: "Custom OpenAI-compatible" },
+  compatible: { label: "Tùy chỉnh tương thích OpenAI" },
 }
 
 const isCompatible = (provider) => ["ollama", "lmstudio", "vllm", "compatible"].includes(provider)
@@ -90,15 +90,15 @@ export default function AIProviderSection({ settings, updateSettings }) {
     const hasNewKey = !!apiKey.trim()
     const switchingProvider = provider !== (settings?.ai_provider || "openai")
     if (meta.keyRequired && !hasNewKey && (!keyIsSet || switchingProvider)) {
-      showSnackbar("Paste the API key for this provider", "warning")
+      showSnackbar("Dán API key cho nhà cung cấp này", "warning")
       return
     }
     if (!effectiveModel.trim()) {
-      showSnackbar("Enter or discover a model ID", "warning")
+      showSnackbar("Nhập hoặc dò tìm ID mô hình", "warning")
       return
     }
     if (isCompatible(provider) && !baseUrl.trim()) {
-      showSnackbar("Base URL is required", "warning")
+      showSnackbar("Cần Base URL", "warning")
       return
     }
 
@@ -113,7 +113,7 @@ export default function AIProviderSection({ settings, updateSettings }) {
       await updateSettings(updates)
       setApiKey("")
       setEditing(false)
-      showSnackbar("AI provider saved", "success")
+      showSnackbar("Đã lưu nhà cung cấp AI", "success")
     } finally {
       setSaving(false)
     }
@@ -126,9 +126,9 @@ export default function AIProviderSection({ settings, updateSettings }) {
       const models = data?.models || []
       setDiscovered(models)
       if (!model && models.length === 1) setModel(models[0])
-      showSnackbar(models.length ? `Found ${models.length} models` : "No models returned", models.length ? "success" : "warning")
+      showSnackbar(models.length ? `Tìm thấy ${models.length} mô hình` : "Không có mô hình nào được trả về", models.length ? "success" : "warning")
     } catch (err) {
-      showSnackbar(err.response?.data?.detail || "Model discovery failed", "error")
+      showSnackbar(err.response?.data?.detail || "Dò tìm mô hình thất bại", "error")
     } finally {
       setProbing(false)
     }
@@ -136,15 +136,15 @@ export default function AIProviderSection({ settings, updateSettings }) {
 
   const handleTest = async () => {
     if (!effectiveModel.trim()) {
-      showSnackbar("Enter or discover a model ID first", "warning")
+      showSnackbar("Hãy nhập hoặc dò tìm ID mô hình trước", "warning")
       return
     }
     setProbing(true)
     try {
       await http.post("/api/settings/ai/test", probePayload())
-      showSnackbar("Connection OK", "success")
+      showSnackbar("Kết nối OK", "success")
     } catch (err) {
-      showSnackbar(err.response?.data?.detail || "Connection failed", "error")
+      showSnackbar(err.response?.data?.detail || "Kết nối thất bại", "error")
     } finally {
       setProbing(false)
     }
@@ -157,7 +157,7 @@ export default function AIProviderSection({ settings, updateSettings }) {
       await updateSettings({ ai_api_key: "" })
       setApiKey("")
       setEditing(true)
-      showSnackbar("Stored API key removed", "info")
+      showSnackbar("Đã xóa API key đã lưu", "info")
     } finally {
       setSaving(false)
     }
@@ -168,9 +168,9 @@ export default function AIProviderSection({ settings, updateSettings }) {
       <Stack spacing={2}>
         <Alert severity="success" variant="outlined" icon={<CheckCircleIcon fontSize="small" />}>
           <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-            <Typography variant="body2" sx={{ fontWeight: 600 }}>AI provider configured</Typography>
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>Đã cấu hình nhà cung cấp AI</Typography>
             <Chip size="small" label={PROVIDERS[settings.ai_provider]?.label || settings.ai_provider} color="primary" variant="outlined" />
-            {settings.ai_model && <Chip size="small" label={`model: ${settings.ai_model}`} variant="outlined" />}
+            {settings.ai_model && <Chip size="small" label={`mô hình: ${settings.ai_model}`} variant="outlined" />}
           </Stack>
           {settings.ai_base_url && (
             <Typography variant="caption" sx={{ color: "text.secondary", display: "block", mt: 0.75 }}>
@@ -179,7 +179,7 @@ export default function AIProviderSection({ settings, updateSettings }) {
           )}
         </Alert>
         <Stack direction="row" spacing={1.5}>
-          <Button variant="contained" startIcon={<EditIcon />} onClick={() => setEditing(true)} disabled={saving}>Update</Button>
+          <Button variant="contained" startIcon={<EditIcon />} onClick={() => setEditing(true)} disabled={saving}>Cập nhật</Button>
           {keyIsSet && (
             <Button variant="outlined" color="error" startIcon={<DeleteIcon />} onClick={() => setConfirmRemove(true)} disabled={saving}>
               Remove key
@@ -187,11 +187,11 @@ export default function AIProviderSection({ settings, updateSettings }) {
           )}
         </Stack>
         <Dialog open={confirmRemove} onClose={() => setConfirmRemove(false)} maxWidth="xs" fullWidth>
-          <DialogTitle>Remove API key?</DialogTitle>
-          <DialogContent><Typography variant="body2">This deletes the encrypted key from the local database.</Typography></DialogContent>
+          <DialogTitle>Xóa API key?</DialogTitle>
+          <DialogContent><Typography variant="body2">Thao tác này xóa khóa đã mã hóa khỏi cơ sở dữ liệu cục bộ.</Typography></DialogContent>
           <DialogActions>
-            <Button onClick={() => setConfirmRemove(false)}>Cancel</Button>
-            <Button color="error" variant="contained" onClick={handleRemove}>Remove key</Button>
+            <Button onClick={() => setConfirmRemove(false)}>Hủy</Button>
+            <Button color="error" variant="contained" onClick={handleRemove}>Xóa khóa</Button>
           </DialogActions>
         </Dialog>
       </Stack>
@@ -205,8 +205,8 @@ export default function AIProviderSection({ settings, updateSettings }) {
       </Typography>
 
       <FormControl size="small" fullWidth>
-        <InputLabel>Provider</InputLabel>
-        <Select value={provider} label="Provider" onChange={(e) => handleProviderChange(e.target.value)} disabled={saving || probing}>
+        <InputLabel>Nhà cung cấp</InputLabel>
+        <Select value={provider} label="Nhà cung cấp" onChange={(e) => handleProviderChange(e.target.value)} disabled={saving || probing}>
           {Object.entries(PROVIDERS).map(([id, item]) => <MenuItem key={id} value={id}>{item.label}</MenuItem>)}
         </Select>
       </FormControl>
@@ -224,28 +224,28 @@ export default function AIProviderSection({ settings, updateSettings }) {
       )}
 
       <TextField
-        label="Model ID"
+        label="ID mô hình"
         size="small"
         fullWidth
         value={effectiveModel}
         onChange={(e) => setModel(e.target.value)}
-        placeholder="e.g. qwen3:14b or provider/model"
+        placeholder="ví dụ: qwen3:14b hoặc provider/model"
         disabled={saving || probing}
         inputProps={{ list: "ai-model-suggestions" }}
-        helperText="Type any model ID, or discover models from supported endpoints."
+        helperText="Nhập bất kỳ ID mô hình nào hoặc dò tìm từ endpoint được hỗ trợ."
       />
       <datalist id="ai-model-suggestions">
         {suggestions.map((m) => <option key={m} value={m} />)}
       </datalist>
 
       <TextField
-        label={meta.keyRequired ? "API key" : "API key (optional)"}
+        label={meta.keyRequired ? "API key" : "API key (tùy chọn)"}
         type={showKey ? "text" : "password"}
         size="small"
         fullWidth
         value={apiKey}
         onChange={(e) => setApiKey(e.target.value)}
-        placeholder={keyIsSet ? "(leave empty to keep existing key)" : (meta.placeholder || "optional for local servers")}
+        placeholder={keyIsSet ? "(để trống để giữ khóa hiện tại)" : (meta.placeholder || "tùy chọn với máy chủ cục bộ")}
         disabled={saving || probing}
         autoComplete="off"
         InputProps={{
@@ -267,7 +267,7 @@ export default function AIProviderSection({ settings, updateSettings }) {
           Test connection
         </Button>
         <Box sx={{ flex: 1 }} />
-        {connected && <Button variant="text" onClick={() => setEditing(false)} disabled={saving || probing}>Cancel</Button>}
+        {connected && <Button variant="text" onClick={() => setEditing(false)} disabled={saving || probing}>Hủy</Button>}
         <Button variant="contained" startIcon={<SaveIcon />} onClick={handleSave} disabled={saving || probing}>
           {saving ? "Saving…" : "Save"}
         </Button>

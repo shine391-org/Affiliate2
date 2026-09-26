@@ -20,10 +20,10 @@ import useAppStore from "../../store/appStore"
 import { STATUS_COLOR } from "./constants"
 
 const EXPORT_FORMATS = [
-  { aspect: "9:16", label: "9:16 Vertical", desc: "TikTok, Reels, Shorts" },
-  { aspect: "16:9", label: "16:9 Landscape", desc: "YouTube, Web" },
-  { aspect: "1:1",  label: "1:1 Square", desc: "Instagram, Facebook" },
-  { aspect: "4:5",  label: "4:5 Portrait", desc: "Instagram Feed" },
+  { aspect: "9:16", label: "9:16 Dọc", desc: "TikTok, Reels, Shorts" },
+  { aspect: "16:9", label: "16:9 Ngang", desc: "YouTube, Web" },
+  { aspect: "1:1",  label: "1:1 Vuông", desc: "Instagram, Facebook" },
+  { aspect: "4:5",  label: "4:5 Chân dung", desc: "Instagram Feed" },
 ]
 
 export default function GeneratedDetail({ video, onUpload, onDelete, onClose, onDetailUpdate }) {
@@ -37,10 +37,10 @@ export default function GeneratedDetail({ video, onUpload, onDelete, onClose, on
     setRegenThumb(true)
     try {
       const res = await http.post(`/api/videos/${video.id}/regenerate-thumbnail`)
-      showSnackbar("Thumbnail regenerated!", "success")
+      showSnackbar("Đã tạo lại ảnh thu nhỏ!", "success")
       if (onDetailUpdate) onDetailUpdate({ ...video, thumbnail_path: res.data.thumbnail_path })
     } catch (e) {
-      showSnackbar(`Thumbnail regen failed: ${e.response?.data?.detail || e.message}`, "error")
+      showSnackbar(`Tạo lại ảnh thu nhỏ thất bại: ${e.response?.data?.detail || e.message}`, "error")
     } finally {
       setRegenThumb(false)
     }
@@ -66,11 +66,11 @@ export default function GeneratedDetail({ video, onUpload, onDelete, onClose, on
       // Convert comma-separated tags string to array
       payload.youtube_tags = payload.youtube_tags
       const res = await http.patch(`/api/videos/${video.id}`, payload)
-      showSnackbar("Video metadata updated", "success")
+      showSnackbar("Đã cập nhật metadata video", "success")
       setEditing(false)
       if (onDetailUpdate) onDetailUpdate({ ...video, ...res.data, youtube_tags: res.data.youtube_tags })
     } catch (e) {
-      showSnackbar(`Save failed: ${e.response?.data?.detail || e.message}`, "error")
+      showSnackbar(`Lưu thất bại: ${e.response?.data?.detail || e.message}`, "error")
     } finally {
       setSaving(false)
     }
@@ -104,9 +104,9 @@ export default function GeneratedDetail({ video, onUpload, onDelete, onClose, on
       a.download = `${(video.title || "video").replace(/[^a-zA-Z0-9]/g, "_")}_${targetAspect.replace(":", "x")}.mp4`
       a.click()
       URL.revokeObjectURL(url)
-      showSnackbar(`Exported as ${targetAspect}`, "success")
+      showSnackbar(`Đã xuất dạng ${targetAspect}`, "success")
     } catch (e) {
-      showSnackbar(`Export failed: ${e.response?.data?.detail || e.message}`, "error")
+      showSnackbar(`Xuất thất bại: ${e.response?.data?.detail || e.message}`, "error")
     } finally {
       setExporting(false)
     }
@@ -127,7 +127,7 @@ export default function GeneratedDetail({ video, onUpload, onDelete, onClose, on
       <Stack direction="row" alignItems="center" justifyContent="space-between"
         sx={{ px: 2.5, py: 1.5, bgcolor: "action.hover" }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 600, flex: 1, minWidth: 0 }} noWrap>
-          {video.title || "Untitled"}
+          {video.title || "Chưa đặt tên"}
         </Typography>
         <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
           <Chip label={video.status} size="small" color={STATUS_COLOR[video.status] || "default"} />
@@ -182,7 +182,7 @@ export default function GeneratedDetail({ video, onUpload, onDelete, onClose, on
                     <ListItemIcon><DownloadIcon fontSize="small" /></ListItemIcon>
                     <ListItemText
                       primary={f.label}
-                      secondary={f.aspect === video.aspect_ratio ? "Current — download original" : f.desc}
+                      secondary={f.aspect === video.aspect_ratio ? "Hiện tại — tải bản gốc" : f.desc}
                       slotProps={{ primary: { fontSize: "0.85rem" }, secondary: { fontSize: "0.72rem" } }}
                     />
                   </MenuItem>
@@ -216,14 +216,14 @@ export default function GeneratedDetail({ video, onUpload, onDelete, onClose, on
               />
             ) : (
               <Box sx={{ height: 200, borderRadius: 2, bgcolor: "action.hover", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <Typography sx={{ color: "text.disabled" }}>Video not yet generated</Typography>
+                <Typography sx={{ color: "text.disabled" }}>Video chưa được tạo</Typography>
               </Box>
             )}
 
             {/* Meta chips */}
             <Stack direction="row" spacing={1} sx={{ mt: 1.5 }} flexWrap="wrap" useFlexGap>
               <Chip
-                label={video.source_type === "clip_extraction" ? "Clip" : "Stock"}
+                label={video.source_type === "clip_extraction" ? "Clip" : "Video kho"}
                 size="small" variant={video.source_type === "clip_extraction" ? "filled" : "outlined"}
                 color={video.source_type === "clip_extraction" ? "secondary" : "default"}
                 icon={video.source_type === "clip_extraction" ? <ContentCutIcon /> : undefined} />
@@ -239,10 +239,10 @@ export default function GeneratedDetail({ video, onUpload, onDelete, onClose, on
                   color={video.clip_virality_score >= 8 ? "success" : video.clip_virality_score >= 6 ? "warning" : "default"} />
               )}
               {video.caption_status === "failed" && (
-                <Chip icon={<WarningAmberIcon />} label="Captions failed" size="small" color="warning" variant="filled" />
+                <Chip icon={<WarningAmberIcon />} label="Phụ đề lỗi" size="small" color="warning" variant="filled" />
               )}
               {video.metadata_status === "fallback" && (
-                <Chip icon={<WarningAmberIcon />} label="AI metadata failed" size="small" color="warning" variant="outlined" />
+                <Chip icon={<WarningAmberIcon />} label="Metadata AI lỗi" size="small" color="warning" variant="outlined" />
               )}
               {video.estimated_cost_usd > 0 && (
                 <Chip label={`$${video.estimated_cost_usd.toFixed(2)}`} size="small" variant="outlined" />
@@ -280,31 +280,31 @@ export default function GeneratedDetail({ video, onUpload, onDelete, onClose, on
           <Grid size={{ xs: 12, md: 8 }}>
             {editing ? (
               <Stack spacing={2}>
-                <TextField label="Title" size="small" fullWidth
+                <TextField label="Tiêu đề" size="small" fullWidth
                   value={draft.title} onChange={e => setField("title", e.target.value)} />
-                <TextField label="Script" size="small" fullWidth multiline minRows={4} maxRows={12}
+                <TextField label="Kịch bản" size="small" fullWidth multiline minRows={4} maxRows={12}
                   value={draft.script} onChange={e => setField("script", e.target.value)} />
                 <Divider />
                 <Typography variant="overline" sx={{ color: "text.secondary" }}>YouTube</Typography>
-                <TextField label="YouTube Title" size="small" fullWidth
+                <TextField label="Tiêu đề YouTube" size="small" fullWidth
                   value={draft.youtube_title} onChange={e => setField("youtube_title", e.target.value)} />
-                <TextField label="YouTube Description" size="small" fullWidth multiline minRows={2} maxRows={6}
+                <TextField label="Mô tả YouTube" size="small" fullWidth multiline minRows={2} maxRows={6}
                   value={draft.youtube_description} onChange={e => setField("youtube_description", e.target.value)} />
-                <TextField label="YouTube Tags (comma-separated)" size="small" fullWidth
+                <TextField label="Thẻ YouTube (cách nhau bằng dấu phẩy)" size="small" fullWidth
                   value={draft.youtube_tags} onChange={e => setField("youtube_tags", e.target.value)}
-                  helperText="Separate tags with commas" />
+                  helperText="Phân tách thẻ bằng dấu phẩy" />
                 <Divider />
                 <Typography variant="overline" sx={{ color: "text.secondary" }}>TikTok</Typography>
-                <TextField label="TikTok Title" size="small" fullWidth
+                <TextField label="Tiêu đề TikTok" size="small" fullWidth
                   value={draft.tiktok_title} onChange={e => setField("tiktok_title", e.target.value)} />
-                <TextField label="TikTok Description" size="small" fullWidth multiline minRows={2} maxRows={4}
+                <TextField label="Mô tả TikTok" size="small" fullWidth multiline minRows={2} maxRows={4}
                   value={draft.tiktok_description} onChange={e => setField("tiktok_description", e.target.value)} />
               </Stack>
             ) : (
               <>
                 {video.script && (
                   <Box sx={{ mb: 2 }}>
-                    <Typography variant="overline" sx={{ color: "text.secondary" }}>Script</Typography>
+                    <Typography variant="overline" sx={{ color: "text.secondary" }}>Kịch bản</Typography>
                     <Paper variant="outlined" sx={{ p: 1.5, maxHeight: 320, overflowY: "auto", fontSize: "0.82rem", color: "text.secondary", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
                       {video.script}
                     </Paper>
@@ -342,8 +342,8 @@ export default function GeneratedDetail({ video, onUpload, onDelete, onClose, on
 
                 {!video.script && !video.youtube_title && !video.tiktok_title && (
                   <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", minHeight: 200, color: "text.disabled" }}>
-                    <Typography variant="body2" sx={{ mb: 1 }}>No script or metadata yet</Typography>
-                    <Typography variant="caption">This video is still being generated</Typography>
+                    <Typography variant="body2" sx={{ mb: 1 }}>Chưa có kịch bản hoặc metadata</Typography>
+                    <Typography variant="caption">Video vẫn đang được tạo</Typography>
                   </Box>
                 )}
               </>

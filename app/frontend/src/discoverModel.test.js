@@ -4,9 +4,9 @@ import assert from "node:assert/strict"
 import { candidateStatus, downloadedByScoutResult, thumbnailRequestKey } from "./discoverModel.js"
 
 test("candidate status reflects canonical persisted state", () => {
-  assert.equal(candidateStatus({ is_analyzed: true, is_downloaded: true }), "Analyzed")
-  assert.equal(candidateStatus({ is_downloaded: true }), "Downloaded")
-  assert.equal(candidateStatus({}), "Discovered")
+  assert.equal(candidateStatus({ is_analyzed: true, is_downloaded: true }), "Đã phân tích")
+  assert.equal(candidateStatus({ is_downloaded: true }), "Đã tải")
+  assert.equal(candidateStatus({}), "Đã phát hiện")
 })
 
 test("downloaded media is indexed by its scout lineage", () => {

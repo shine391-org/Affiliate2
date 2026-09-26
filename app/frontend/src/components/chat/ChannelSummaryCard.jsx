@@ -88,9 +88,9 @@ export default function ChannelSummaryCard({ summary }) {
     setDownloading(true)
     try {
       await http.post("/api/downloaded/batch-download", { urls })
-      showSnackbar(`Downloading ${urls.length} videos... (Job started)`, "info")
+      showSnackbar(`Đang tải ${urls.length} video... (đã bắt đầu tác vụ)`, "info")
     } catch (e) {
-      showSnackbar(`Download failed: ${e.response?.data?.detail || e.message}`, "error")
+      showSnackbar(`Tải xuống thất bại: ${e.response?.data?.detail || e.message}`, "error")
     } finally {
       setDownloading(false)
     }
@@ -116,14 +116,14 @@ export default function ChannelSummaryCard({ summary }) {
               {subscriber_count > 0 && (
                 <Chip
                   icon={<PeopleIcon sx={{ fontSize: 14 }} />}
-                  label={`${formatCount(subscriber_count)} followers`}
+                  label={`${formatCount(subscriber_count)} người theo dõi`}
                   size="small"
                   variant="outlined"
                 />
               )}
-              <Chip label={`${videos.length} videos listed`} size="small" variant="outlined" />
+              <Chip label={`${videos.length} video`} size="small" variant="outlined" />
               {summary.median_views > 0 && (
-                <Chip label={`Median: ${formatCount(summary.median_views)} views`} size="small" variant="outlined" color="info" />
+                <Chip label={`Trung vị: ${formatCount(summary.median_views)} lượt xem`} size="small" variant="outlined" color="info" />
               )}
             </Stack>
           </Box>
@@ -254,7 +254,7 @@ export default function ChannelSummaryCard({ summary }) {
               </Typography>
               <Box sx={{ flex: 1, minWidth: 0 }}>
                 <Typography variant="body2" noWrap fontWeight={500}>
-                  {v.title || "Untitled"}
+                  {v.title || "Chưa đặt tên"}
                 </Typography>
                 <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
                   {v.view_count != null && (

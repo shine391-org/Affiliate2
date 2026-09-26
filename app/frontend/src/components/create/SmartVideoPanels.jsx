@@ -16,10 +16,10 @@ export function CompactSourcePanel({ source }) {
   const insights = source.insights || {}
   const insightItems = [
     insights.hook            && { label: "Hook",      color: "secondary.main", value: insights.hook },
-    insights.structure       && { label: "Structure", color: "secondary.main", value: insights.structure },
-    insights.why_viral       && { label: "Why viral", color: "warning.main",   value: insights.why_viral },
-    insights.suggested_angle && { label: "Angle",     color: "primary.main",   value: insights.suggested_angle },
-    insights.suggested_title && { label: "Title",     color: "primary.main",   value: insights.suggested_title },
+    insights.structure       && { label: "Cấu trúc", color: "secondary.main", value: insights.structure },
+    insights.why_viral       && { label: "Vì sao viral", color: "warning.main",   value: insights.why_viral },
+    insights.suggested_angle && { label: "Góc triển khai",     color: "primary.main",   value: insights.suggested_angle },
+    insights.suggested_title && { label: "Tiêu đề",     color: "primary.main",   value: insights.suggested_title },
   ].filter(Boolean)
 
   return (
@@ -32,7 +32,7 @@ export function CompactSourcePanel({ source }) {
           Inspiration
         </Typography>
         <Typography variant="caption" sx={{ fontWeight: 700, fontSize: "0.78rem", flex: 1, minWidth: 0 }} noWrap title={source.title}>
-          {source.title || "Untitled"}
+          {source.title || "Chưa đặt tên"}
         </Typography>
         {source.transcript && (
           <Button

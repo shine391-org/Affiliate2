@@ -78,7 +78,7 @@ function ConnectForm({ platform, onConnected }) {
       })
       setResults(data.results || [])
       if ((data.results || []).length === 0) {
-        setError("No channels found. Try a different name or use the URL option below.")
+        setError("Không tìm thấy kênh. Hãy thử tên khác hoặc dùng tùy chọn URL bên dưới.")
       }
     } catch (e) {
       setError(e.response?.data?.detail || e.message)
@@ -126,16 +126,16 @@ function ConnectForm({ platform, onConnected }) {
         <LiveTvIcon sx={{ fontSize: 52, color: "primary.main", mb: 1, opacity: 0.8 }} />
       )}
       <Typography variant="h6" sx={{ fontWeight: 700, mb: 0.5 }}>
-        Connect a {label} Channel
+        Kết nối kênh {label}
       </Typography>
       <Typography variant="body2" sx={{ color: "text.secondary", mb: 2.5, maxWidth: 480, mx: "auto" }}>
-        Search for any {label} channel by name{isYT ? "" : " or @handle"} to view analytics and download videos
+        Tìm kênh {label} theo tên{isYT ? "" : " or @handle"} để xem phân tích và tải video
       </Typography>
 
       <Stack direction="row" spacing={1} sx={{ maxWidth: 480, mx: "auto", mb: 2 }}>
         <TextField
           fullWidth size="small"
-          placeholder={isYT ? "Search by channel name..." : "Search by @handle or name..."}
+          placeholder={isYT ? "Tìm theo tên kênh..." : "Tìm theo @handle hoặc tên..."}
           value={query} onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleSearch()}
           disabled={searching || loading}
@@ -164,15 +164,15 @@ function ConnectForm({ platform, onConnected }) {
                 </Typography>
                 <Stack direction="row" spacing={1} sx={{ mt: 0.25 }}>
                   <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                    {formatCount(ch.subscriber_count || ch.follower_count)} {isYT ? "subscribers" : "followers"}
+                    {formatCount(ch.subscriber_count || ch.follower_count)} {isYT ? "người đăng ký" : "người theo dõi"}
                   </Typography>
                   <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                    {formatCount(ch.video_count)} videos
+                    {formatCount(ch.video_count)} video
                   </Typography>
                 </Stack>
               </Box>
               {loading ? <CircularProgress size={20} /> : (
-                <Tooltip title="Select this channel">
+                <Tooltip title="Chọn kênh này">
                   <CheckCircleIcon sx={{ color: "primary.main", fontSize: 24 }} />
                 </Tooltip>
               )}
@@ -186,7 +186,7 @@ function ConnectForm({ platform, onConnected }) {
       )}
 
       <Divider sx={{ my: 2, maxWidth: 480, mx: "auto" }}>
-        <Chip label="or" size="small" />
+        <Chip label="hoặc" size="small" />
       </Divider>
 
       {!showUrlInput ? (
@@ -273,7 +273,7 @@ function VideoCard({ video, platform, onAnalyze, onDownload }) {
           overflow: "hidden", textOverflow: "ellipsis",
           display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
         }}>
-          {video.title || "Untitled"}
+          {video.title || "Chưa đặt tên"}
         </Typography>
         <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, flexWrap: "wrap" }}>
           <Typography variant="caption" sx={{ color: "text.secondary" }}>
@@ -303,13 +303,13 @@ function VideoCard({ video, platform, onAnalyze, onDownload }) {
             Download & Analyze
           </Button>
           <Box sx={{ flex: 1 }} />
-          <Tooltip title="Analyze this video" arrow>
+          <Tooltip title="Phân tích video này" arrow>
             <IconButton size="small" onClick={(e) => { e.stopPropagation(); onAnalyze(video) }}
               sx={{ p: 0.5, color: "text.secondary", "&:hover": { color: "primary.main" } }}>
               <TravelExploreIcon sx={{ fontSize: "1.1rem" }} />
             </IconButton>
           </Tooltip>
-          <Tooltip title={`Open on ${isYT ? "YouTube" : "TikTok"}`} arrow>
+          <Tooltip title={`Mở trên ${isYT ? "YouTube" : "TikTok"}`} arrow>
             <IconButton size="small"
               onClick={(e) => { e.stopPropagation(); window.open(video.url, "_blank", "noopener") }}
               sx={{ p: 0.5, color: "text.secondary", "&:hover": { color: "primary.main" } }}>
@@ -363,9 +363,9 @@ function ChannelDetail({ channel, onBack }) {
   const handleAnalyze = async (video) => {
     try {
       await http.post("/api/channels/analyze", { video_url: video.url, title: video.title })
-      showSnackbar(`Analyzing: ${video.title || "video"}`, "info")
+      showSnackbar(`Đang phân tích: ${video.title || "video"}`, "info")
     } catch (e) {
-      showSnackbar(`Failed to start analysis: ${e.response?.data?.detail || e.message}`, "error")
+      showSnackbar(`Không thể bắt đầu phân tích: ${e.response?.data?.detail || e.message}`, "error")
     }
   }
 
@@ -374,9 +374,9 @@ function ChannelDetail({ channel, onBack }) {
       await http.post("/api/downloaded/batch-download", {
         urls: [{ url: video.url, title: video.title || "" }],
       })
-      showSnackbar(`Downloading: ${video.title || "video"}`, "info", { label: "View in Library", href: "/library" })
+      showSnackbar(`Đang tải xuống: ${video.title || "video"}`, "info", { label: "Xem trong Thư viện", href: "/library" })
     } catch (e) {
-      showSnackbar(`Download failed: ${e.response?.data?.detail || e.message}`, "error")
+      showSnackbar(`Tải xuống thất bại: ${e.response?.data?.detail || e.message}`, "error")
     }
   }
 
@@ -398,20 +398,20 @@ function ChannelDetail({ channel, onBack }) {
         <Avatar src={channel.thumbnail_url || channelInfo?.thumbnail_url} sx={{ width: 44, height: 44 }} />
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography variant="h6" sx={{ fontWeight: 600, fontSize: "1rem" }}>
-            {channel.channel_name || channelInfo?.title || channelInfo?.display_name || "Channel"}
+            {channel.channel_name || channelInfo?.title || channelInfo?.display_name || "Kênh"}
           </Typography>
           <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }}>
             <Chip size="small" variant="outlined"
-              label={`${formatCount(channel.subscriber_count || channelInfo?.subscriber_count || channelInfo?.follower_count || 0)} ${isYT ? "subscribers" : "followers"}`} />
+              label={`${formatCount(channel.subscriber_count || channelInfo?.subscriber_count || channelInfo?.follower_count || 0)} ${isYT ? "người đăng ký" : "người theo dõi"}`} />
             <Chip size="small" variant="outlined"
-              label={`${formatCount(channel.video_count || channelInfo?.video_count || 0)} videos`} />
+              label={`${formatCount(channel.video_count || channelInfo?.video_count || 0)} video`} />
             {channelInfo?.median_views > 0 && (
               <Chip size="small" variant="outlined" color="info"
-                label={`Median: ${formatCount(channelInfo.median_views)} views`} />
+                label={`Trung vị: ${formatCount(channelInfo.median_views)} lượt xem`} />
             )}
           </Stack>
         </Box>
-        <Tooltip title="Refresh">
+        <Tooltip title="Làm mới">
           <IconButton size="small" onClick={handleRefresh}>
             <RefreshIcon fontSize="small" />
           </IconButton>
@@ -439,12 +439,12 @@ function ChannelDetail({ channel, onBack }) {
         })
 
         const stats = [
-          { label: "Total Views", value: formatCount(totalViews) },
-          { label: "Avg Views", value: formatCount(avgViews) },
-          { label: "Median Views", value: formatCount(medianViews) },
+          { label: "Tổng lượt xem", value: formatCount(totalViews) },
+          { label: "Lượt xem TB", value: formatCount(avgViews) },
+          { label: "Trung vị lượt xem", value: formatCount(medianViews) },
           { label: "Engagement", value: `${engagementRate}%` },
-          { label: "Last 30d", value: `${recentVideos.length} videos` },
-          { label: "Top Video", value: formatCount(topPerformer?.view_count || 0) + " views" },
+          { label: "30 ngày qua", value: `${recentVideos.length} video` },
+          { label: "Video nổi bật", value: formatCount(topPerformer?.view_count || 0) + " lượt xem" },
         ]
 
         return (
@@ -477,14 +477,14 @@ function ChannelDetail({ channel, onBack }) {
           {/* Sort control */}
           <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
             <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, fontSize: "0.7rem" }}>
-              {videos.length} video{videos.length !== 1 ? "s" : ""}
+              {videos.length} video
             </Typography>
             <FormControl size="small" sx={{ minWidth: 130 }}>
               <Select value={sortBy} onChange={(e) => { setSortBy(e.target.value); setPage(0) }}
                 sx={{ fontSize: "0.82rem", "& .MuiSelect-select": { py: 0.5 } }}>
-                <MenuItem value="recent">Recent</MenuItem>
-                <MenuItem value="views">Most Views</MenuItem>
-                <MenuItem value="likes">Most Likes</MenuItem>
+                <MenuItem value="recent">Gần đây</MenuItem>
+                <MenuItem value="views">Nhiều lượt xem nhất</MenuItem>
+                <MenuItem value="likes">Nhiều lượt thích nhất</MenuItem>
               </Select>
             </FormControl>
           </Stack>
@@ -492,7 +492,7 @@ function ChannelDetail({ channel, onBack }) {
           {/* Video cards grid */}
           {sorted.length === 0 ? (
             <Paper elevation={0} sx={{ p: 3, textAlign: "center", border: 1, borderColor: "divider", borderRadius: 2 }}>
-              <Typography variant="body2" sx={{ color: "text.secondary" }}>No videos found.</Typography>
+              <Typography variant="body2" sx={{ color: "text.secondary" }}>Không tìm thấy video.</Typography>
             </Paper>
           ) : (
             <>
@@ -540,7 +540,7 @@ function PlatformTab({ platform }) {
         setSelectedChannel(list[0])
       }
     } catch (e) {
-      showSnackbar(`Failed to load channels: ${e.message}`, "error")
+      showSnackbar(`Không thể tải kênh: ${e.message}`, "error")
     } finally {
       setLoading(false)
     }
@@ -552,9 +552,9 @@ function PlatformTab({ platform }) {
     try {
       await http.post("/api/channels/disconnect", { id: ch.id })
       setChannels((prev) => prev.filter((c) => c.id !== ch.id))
-      showSnackbar(`${ch.channel_name || "Channel"} disconnected`, "info")
+      showSnackbar(`${ch.channel_name || "Kênh"} đã ngắt kết nối`, "info")
     } catch (e) {
-      showSnackbar(`Failed to disconnect: ${e.message}`, "error")
+      showSnackbar(`Ngắt kết nối thất bại: ${e.message}`, "error")
     }
   }
 
@@ -601,10 +601,10 @@ function PlatformTab({ platform }) {
     <Box>
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
         <Typography variant="body2" sx={{ color: "text.secondary", fontWeight: 600 }}>
-          {channels.length} channel{channels.length !== 1 ? "s" : ""} connected
+          {channels.length} kênh đã kết nối
         </Typography>
         <Button variant="contained" startIcon={<AddIcon />} onClick={() => setShowAdd(true)}>
-          Add Channel
+          Thêm kênh
         </Button>
       </Stack>
 
@@ -631,12 +631,12 @@ function PlatformTab({ platform }) {
                 <Stack direction="row" spacing={1} sx={{ mt: 0.25 }}>
                   {ch.subscriber_count > 0 && (
                     <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                      {formatCount(ch.subscriber_count)} {isYT ? "subs" : "followers"}
+                      {formatCount(ch.subscriber_count)} {isYT ? "người đăng ký" : "người theo dõi"}
                     </Typography>
                   )}
                   {ch.video_count > 0 && (
                     <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                      {formatCount(ch.video_count)} videos
+                      {formatCount(ch.video_count)} video
                     </Typography>
                   )}
                 </Stack>
@@ -645,7 +645,7 @@ function PlatformTab({ platform }) {
                 <Button size="small" variant="text" sx={{ minWidth: 0 }}>
                   View videos
                 </Button>
-                <Tooltip title="Disconnect">
+                <Tooltip title="Ngắt kết nối">
                   <IconButton size="small" onClick={(e) => { e.stopPropagation(); handleDisconnect(ch) }}
                     sx={{ color: "text.secondary" }}>
                     <LinkOffIcon fontSize="small" />
@@ -663,7 +663,7 @@ function PlatformTab({ platform }) {
 /* ── Main Page ─────────────────────────────────────────────────── */
 
 export default function Channels() {
-  useDocumentTitle("Discover / Channels")
+  useDocumentTitle("Khám phá / Kênh")
   const [tab, setTab] = useState(0)
   return (
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>

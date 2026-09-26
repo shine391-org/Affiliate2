@@ -20,7 +20,7 @@ function parseTime(s) {
 }
 
 export default function ToolTrim() {
-  useDocumentTitle("Trim / Cut")
+  useDocumentTitle("Cắt đoạn")
   const [start, setStart] = useState("0:00")
   const [end, setEnd] = useState("")
 
@@ -33,11 +33,11 @@ export default function ToolTrim() {
 
   return (
     <ToolRunner
-      title="Trim / Cut"
-      description="Keep just the part you want — set a start and end, drop the rest"
+      title="Cắt đoạn"
+      description="Chỉ giữ đoạn cần dùng — đặt điểm bắt đầu và kết thúc, bỏ phần còn lại"
       icon={<ContentCutIcon fontSize="large" />}
       endpoint="/api/tools/trim"
-      processLabel="Trim"
+      processLabel="Cắt đoạn"
       canSubmit={rangeOk}
       disabledReason={
         !endOk ? "Set an end time" : tooShort ? "Range must be at least 0.5s" : "Set a start before the end"
@@ -51,20 +51,20 @@ export default function ToolTrim() {
           </Typography>
           <Stack direction="row" spacing={2}>
             <TextField
-              label="Start" size="small" sx={{ width: 150 }}
+              label="Bắt đầu" size="small" sx={{ width: 150 }}
               placeholder="0:00"
               value={start}
               onChange={(e) => setStart(e.target.value)}
               error={start !== "" && !startOk}
-              helperText="seconds or M:SS"
+              helperText="giây hoặc M:SS"
             />
             <TextField
-              label="End" size="small" sx={{ width: 150 }}
+              label="Kết thúc" size="small" sx={{ width: 150 }}
               placeholder="0:30"
               value={end}
               onChange={(e) => setEnd(e.target.value)}
               error={end !== "" && (!endOk || tooShort)}
-              helperText={tooShort ? "≥ 0.5s range" : "seconds or M:SS"}
+              helperText={tooShort ? "đoạn phải ≥ 0,5 giây" : "seconds or M:SS"}
             />
           </Stack>
         </Box>

@@ -26,9 +26,9 @@ const TOPIC_STARTERS = [
 ]
 
 const MODES = [
-  { value: "text", label: "Paste script", description: "Fastest — no transcription" },
-  { value: "topic", label: "From topic", description: "Generate from a bare topic string" },
-  { value: "file", label: "Upload video", description: "Whisper transcribes first" },
+  { value: "text", label: "Dán kịch bản", description: "Nhanh nhất — không cần chép lời" },
+  { value: "topic", label: "Từ chủ đề", description: "Tạo từ một chủ đề ngắn" },
+  { value: "file", label: "Tải video lên", description: "Whisper sẽ chép lời trước" },
 ]
 
 function ResultPreview({ jobId }) {
@@ -42,32 +42,32 @@ function ResultPreview({ jobId }) {
   const copy = (s) => {
     if (!s) return
     navigator.clipboard.writeText(s).then(
-      () => showSnackbar?.("Copied", "success"),
-      () => showSnackbar?.("Could not copy", "warning"),
+      () => showSnackbar?.("Đã sao chép", "success"),
+      () => showSnackbar?.("Không thể sao chép", "warning"),
     )
   }
   if (!metadata) {
     return (
       <Alert severity="info" sx={{ fontSize: "0.85rem" }}>
         {loading
-          ? "Loading result…"
-          : <>Result ready — click <strong>Download</strong> below to get the JSON file.</>}
+          ? "Đang tải kết quả…"
+          : <>Kết quả đã sẵn sàng — bấm <strong>Tải xuống</strong> bên dưới để lấy tệp JSON.</>}
       </Alert>
     )
   }
   const tags = metadata.youtube_tags || []
   return (
     <Stack spacing={1.5}>
-      <Field label="YouTube title" value={metadata.youtube_title} onCopy={copy} />
-      <Field label="YouTube description" value={metadata.youtube_description} onCopy={copy} multiline />
+      <Field label="Tiêu đề YouTube" value={metadata.youtube_title} onCopy={copy} />
+      <Field label="Mô tả YouTube" value={metadata.youtube_description} onCopy={copy} multiline />
       {tags.length > 0 && (
         <Field
-          label="YouTube tags"
+          label="Thẻ YouTube"
           value={tags.join(", ")}
           onCopy={copy}
         />
       )}
-      <Field label="TikTok caption" value={metadata.tiktok_title} onCopy={copy} multiline />
+      <Field label="Chú thích TikTok" value={metadata.tiktok_title} onCopy={copy} multiline />
     </Stack>
   )
 }
@@ -87,7 +87,7 @@ function Field({ label, value, onCopy, multiline }) {
           {value}
         </Typography>
       </Box>
-      <Tooltip title="Copy">
+      <Tooltip title="Sao chép">
         <IconButton size="small" onClick={() => onCopy(value)} sx={{ flexShrink: 0 }}>
           <ContentCopyIcon sx={{ fontSize: "0.95rem" }} />
         </IconButton>
@@ -97,7 +97,7 @@ function Field({ label, value, onCopy, multiline }) {
 }
 
 export default function ToolMetadata() {
-  useDocumentTitle("Metadata Generator")
+  useDocumentTitle("Tạo metadata")
   const [mode, setMode] = useState("text")
   const [text, setText] = useState("")
   const [topic, setTopic] = useState("")
@@ -108,12 +108,12 @@ export default function ToolMetadata() {
 
   return (
     <ToolRunner
-      title="Title / Description / Tags"
-      description="Generate SEO metadata for a video, transcript, or bare topic"
+      title="Tiêu đề / Mô tả / Thẻ"
+      description="Tạo metadata SEO cho video, bản chép lời hoặc chủ đề"
       icon={<LabelOutlinedIcon fontSize="large" />}
       endpoint="/api/tools/metadata"
-      processLabel="Generate"
-      downloadLabel="Download JSON"
+      processLabel="Tạo metadata"
+      downloadLabel="Tải JSON"
       hideFileInput={mode !== "file"}
       canSubmit={canSubmit}
       disabledReason={mode === "topic" ? "Enter a topic" : "Paste your script or transcript"}
@@ -149,12 +149,12 @@ export default function ToolMetadata() {
             minRows={6} maxRows={18}
             autoFocus
             enhanceKind="metadata"
-            label="Script / transcript"
-            placeholder="Paste a script, transcript, or rough outline. The AI will turn it into platform metadata."
+            label="Kịch bản / bản chép lời"
+            placeholder="Dán kịch bản, bản chép lời hoặc dàn ý. AI sẽ chuyển thành metadata cho nền tảng."
             value={text}
             onChange={(e) => setText(e.target.value)}
             slotProps={{ htmlInput: { maxLength: 20000 } }}
-            helperText={`${text.length} / 20,000 chars`}
+            helperText={`${text.length} / 20.000 ký tự`}
           />
         )}
 
@@ -176,8 +176,8 @@ export default function ToolMetadata() {
             <TextField
               fullWidth
               autoFocus
-              label="Topic"
-              placeholder='e.g. "AI startup ideas for solo founders in 2026"'
+              label="Chủ đề"
+              placeholder='ví dụ: "Ý tưởng startup AI cho người sáng lập solo năm 2026"'
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
               slotProps={{ htmlInput: { maxLength: 500 } }}
@@ -187,7 +187,7 @@ export default function ToolMetadata() {
 
         {mode === "file" && (
           <Alert severity="info" sx={{ fontSize: "0.82rem" }}>
-            Upload a video below. We'll transcribe it with Whisper, then generate metadata from the transcript.
+            Tải video lên bên dưới. Hệ thống sẽ chép lời bằng Whisper rồi tạo metadata từ bản chép lời.
           </Alert>
         )}
       </Stack>

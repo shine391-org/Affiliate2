@@ -23,7 +23,7 @@ export default function VideoEmbed({ platform, videoId, embedUrl, videoUrl }) {
       >
         <img
           src={thumbUrl}
-          alt="Video thumbnail"
+          alt="Ảnh thu nhỏ video"
           style={{ width: "100%", height: "100%", objectFit: "cover" }}
         />
         <Box
@@ -69,7 +69,7 @@ export default function VideoEmbed({ platform, videoId, embedUrl, videoUrl }) {
         }}
         onClick={() => window.open(watchUrl, "_blank")}
       >
-        <Typography variant="caption" sx={{ color: "grey.500" }}>TikTok Video</Typography>
+        <Typography variant="caption" sx={{ color: "grey.500" }}>Video TikTok</Typography>
         <Box
           className="play-overlay"
           sx={{

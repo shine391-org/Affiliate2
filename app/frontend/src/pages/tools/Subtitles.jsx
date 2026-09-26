@@ -13,23 +13,23 @@ import useDocumentTitle from "../../hooks/useDocumentTitle"
 // INTO the video instead, use Add Captions.
 
 const FORMATS = [
-  { value: "srt", label: "SRT", description: "Subtitles — universal" },
-  { value: "vtt", label: "VTT", description: "WebVTT — web players" },
-  { value: "txt", label: "TXT", description: "Plain transcript" },
+  { value: "srt", label: "SRT", description: "Phụ đề — phổ biến" },
+  { value: "vtt", label: "VTT", description: "WebVTT — trình phát web" },
+  { value: "txt", label: "TXT", description: "Bản chép lời thuần" },
 ]
 
 export default function ToolSubtitles() {
-  useDocumentTitle("Export Subtitles")
+  useDocumentTitle("Xuất phụ đề")
   const [format, setFormat] = useState("srt")
 
   return (
     <ToolRunner
-      title="Export Subtitles"
-      description="Transcribe a video to a downloadable .srt / .vtt subtitle file or a plain transcript"
+      title="Xuất phụ đề"
+      description="Chép lời video thành tệp phụ đề .srt / .vtt hoặc bản chép lời thuần"
       icon={<ClosedCaptionOutlinedIcon fontSize="large" />}
       endpoint="/api/tools/subtitles"
-      processLabel="Transcribe"
-      downloadLabel={`Download .${format}`}
+      processLabel="Chép lời"
+      downloadLabel={`Tải .${format}`}
       fieldBuilder={() => ({ format })}
     >
       <Alert
@@ -39,7 +39,7 @@ export default function ToolSubtitles() {
       >
         Works on videos with clear spoken audio. Music-only or silent clips
         return no subtitles. To burn captions onto the video instead, use{" "}
-        <strong>Add Captions</strong>.
+        <strong>Thêm phụ đề</strong>.
       </Alert>
 
       <Typography variant="caption" sx={{ fontWeight: 600, display: "block", mb: 1 }}>

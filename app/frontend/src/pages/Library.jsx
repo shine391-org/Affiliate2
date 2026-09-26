@@ -54,8 +54,8 @@ const IMPORT_ACCEPT = "video/*,audio/*,.mp4,.mov,.avi,.mkv,.webm,.mp3,.wav,.m4a,
 
 // Reads as a sentence in the empty state: "no audio files that were …".
 const ORIGIN_PHRASE = {
-  created: "made in ViralMint",
-  edited: "made from something you already own",
+  created: "được tạo trong ViralMint",
+  edited: "được chỉnh từ nội dung bạn đã có",
   imported: "brought in from outside",
 }
 
@@ -81,7 +81,7 @@ function treeKeys(families, loners) {
 }
 
 export default function Library() {
-  useDocumentTitle("Library")
+  useDocumentTitle("Thư viện")
   const theme = useTheme()
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
@@ -268,7 +268,7 @@ export default function Library() {
       setDrawerItem(data.item)
       setDrawerLineage({ ancestors: data.ancestors || [], children: data.children || [] })
     } catch {
-      showSnackbar("That item is no longer in your library", "info")
+      showSnackbar("Mục này không còn trong Thư viện", "info")
     }
   }, [items, openItem, showSnackbar])
 
@@ -298,10 +298,10 @@ export default function Library() {
       const { data } = await http.post("/api/downloaded/import", form, {
         headers: { "Content-Type": "multipart/form-data" },
       })
-      showSnackbar(data.message || "Imported", "success")
+      showSnackbar(data.message || "Đã nhập", "success")
       refresh()
     } catch (e) {
-      showSnackbar(e.response?.data?.detail || "Import failed", "error")
+      showSnackbar(e.response?.data?.detail || "Nhập tệp thất bại", "error")
     } finally {
       setImporting(false)
     }
@@ -320,7 +320,7 @@ export default function Library() {
     const del = DELETE_BY_SOURCE[item.source]
     if (!del) {
       showSnackbar(
-        "Music tracks live in storage/music/ — remove the file there", "info",
+        "Tệp nhạc nằm trong storage/music/ — hãy xóa trực tiếp tại đó", "info",
       )
       return
     }
@@ -328,15 +328,15 @@ export default function Library() {
       await del(item)
       removeLocal(item.key)
       refresh()  // facet counts and pageCount come from the server
-      showSnackbar("Deleted", "success")
+      showSnackbar("Đã xóa", "success")
     } catch (e) {
-      showSnackbar(e.response?.data?.detail || "Could not delete that item", "error")
+      showSnackbar(e.response?.data?.detail || "Không thể xóa mục này", "error")
     }
   }
 
   const confirmDeleteOne = (item) => openConfirm(
-    "Delete this item?",
-    `“${item.title}” is removed from disk. This cannot be undone.`,
+    "Xóa mục này?",
+    `“${item.title}” sẽ bị xóa khỏi ổ đĩa. Không thể hoàn tác.`,
     () => deleteOne(item),
   )
 
@@ -378,14 +378,14 @@ export default function Library() {
     // Music tracks are yours on disk and there is no endpoint that removes
     // them. Counting them as failures is the honest read: the user asked and
     // it did not happen.
-    failures.push(...byStore.music.map((i) => `${i.title} (music tracks are removed from storage/music/)`))
+    failures.push(...byStore.music.map((i) => `${i.title} (tệp nhạc được xóa khỏi storage/music/)`))
     succeeded.forEach((i) => removeLocal(i.key))
     setSelected(new Map())
     refresh()
     showSnackbar(
       failures.length
-        ? `Deleted ${ok}; ${failures.length} could not be deleted`
-        : `Deleted ${ok} item${ok === 1 ? "" : "s"}`,
+        ? `Đã xóa ${ok}; ${failures.length} mục không thể xóa`
+        : `Đã xóa ${ok} mục`,
       failures.length ? "warning" : "success",
     )
   }
@@ -404,9 +404,9 @@ export default function Library() {
   const cancelJob = async (jobId) => {
     try {
       await http.delete(`/api/jobs/${jobId}`)
-      showSnackbar("Job cancelled", "info")
+      showSnackbar("Đã hủy tác vụ", "info")
     } catch (e) {
-      showSnackbar(e.response?.data?.detail || "Could not cancel that job", "error")
+      showSnackbar(e.response?.data?.detail || "Không thể hủy tác vụ này", "error")
     }
   }
 
@@ -417,21 +417,21 @@ export default function Library() {
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <PageHero
         icon={<PhotoLibraryRoundedIcon sx={{ fontSize: 22 }} />}
-        title="Library"
+        title="Thư viện"
         subtitle={
           loading && !libraryTotal
-            ? "Reading your library…"
+            ? "Đang đọc Thư viện…"
             // Library-wide count only. The per-origin numbers live on the From
             // chips, where they are filter-scoped on purpose — printing them
             // here next to a library-wide total made the header contradict
             // itself as soon as you picked a media tab.
-            : `${libraryTotal} items`
+            : `${libraryTotal} mục`
         }
         accentColor="#0097a7"
         actions={
           <Stack direction="row" spacing={1} alignItems="center">
             <TextField
-              placeholder="Search library…"
+              placeholder="Tìm trong thư viện…"
               size="small"
               value={q}
               onChange={(e) => setQ(e.target.value)}
@@ -446,12 +446,12 @@ export default function Library() {
                 button over without one, so clicking it did nothing. */}
             <Button size="small" variant="outlined" component="label"
               disabled={importing} startIcon={<FileUploadRoundedIcon />}>
-              {importing ? "Importing…" : "Import"}
+              {importing ? "Đang nhập…" : "Nhập tệp"}
               <input type="file" hidden accept={IMPORT_ACCEPT} onChange={handleImport} />
             </Button>
             <Button size="small" variant="outlined" onClick={openActivity}
               startIcon={<BoltRoundedIcon sx={{ fontSize: 17 }} />}>
-              Activity
+              Hoạt động
               {(runningCount > 0 || recentFailures.length > 0) && (
                 <Box component="span" sx={{
                   ml: 0.7, px: 0.6, borderRadius: "999px", fontSize: "0.68rem", fontWeight: 700,
@@ -498,18 +498,18 @@ export default function Library() {
           }}>
             <LightbulbRoundedIcon sx={{ fontSize: 17, color: "#0097a7", mt: "1px" }} />
             <Typography sx={{ flex: 1, fontSize: "0.78rem", color: "text.secondary", lineHeight: 1.65 }}>
-              <strong>Two questions, two controls.</strong> The tabs say what a file <em>is</em>; the
-              From chips say where it <em>came from</em>. A downloaded mp3 is Audio + Sources, a
-              voice-over is Audio + Created, an enhanced podcast is Audio + Edited — all three live
-              in Audio, and none of them needs a tab of its own. Switch to
-              <strong> By source</strong> to see each download with everything you made from it.
+              <strong>Hai câu hỏi, hai bộ lọc.</strong> Các tab cho biết tệp <em>là gì</em>;
+              các chip Nguồn cho biết tệp <em>đến từ đâu</em>. MP3 tải về là Âm thanh + Nguồn,
+              lồng tiếng là Âm thanh + Đã tạo, podcast đã cải thiện là Âm thanh + Đã chỉnh — cả ba đều nằm
+              trong Âm thanh và không cần tab riêng. Chuyển sang
+              <strong>Theo nguồn</strong> để xem từng nội dung tải về cùng mọi sản phẩm tạo từ nó.
               <br />
-              Scout results are deliberately not here — a lead is not a file you own, so it has its
-              own page. Jobs split in two: work in flight appears as a tile in the grid where it will
-              land, and the full log lives in <strong>Activity</strong> (top right), reachable from
-              every page instead of only this one.
+              Kết quả Scout không nằm ở đây — lead không phải tệp bạn sở hữu nên có trang riêng.
+              Tác vụ được chia hai: công việc đang chạy xuất hiện dưới dạng ô trong lưới tại nơi đầu ra sẽ nằm,
+              còn nhật ký đầy đủ nằm trong <strong>Hoạt động</strong> (góc trên bên phải), có thể mở từ
+              mọi trang thay vì chỉ trang này.
             </Typography>
-            <IconButton size="small" onClick={() => setShowWhy(false)} aria-label="Dismiss">
+            <IconButton size="small" onClick={() => setShowWhy(false)} aria-label="Đóng hướng dẫn">
               <CloseRoundedIcon sx={{ fontSize: 15 }} />
             </IconButton>
           </Stack>
@@ -524,14 +524,14 @@ export default function Library() {
             <Box component="span" sx={{ color: originTextColor(origins[0], theme.palette.mode === "dark"), fontWeight: 700 }}>
               {ORIGINS[origins[0]]?.label}
             </Box>
-            {" is "}
+            {" gồm "}
             {facets.producers.slice(0, 5).map((p, i) => (
               <Box component="span" key={p.key}>
                 {i > 0 ? " · " : ""}
                 <strong>{p.count}</strong> {p.label.toLowerCase()}
               </Box>
             ))}
-            {facets.producers.length > 5 && ` · +${facets.producers.length - 5} more tools`}
+            {facets.producers.length > 5 && ` · +${facets.producers.length - 5} công cụ khác`}
           </Typography>
         )}
 
@@ -544,9 +544,9 @@ export default function Library() {
             <ErrorOutlineRoundedIcon sx={{ fontSize: 18, color: "error.main" }} />
             <Typography sx={{ flex: 1, fontSize: "0.8rem", color: "text.secondary" }}>
               <strong>
-                {recentFailures.length} {recentFailures.length === 1 ? "run" : "runs"} didn't finish
+                {recentFailures.length} tác vụ chưa hoàn tất
               </strong>{" "}
-              in the last day — nothing was added to your library.
+              trong 24 giờ qua — chưa có gì được thêm vào Thư viện.
             </Typography>
             <Button size="small" variant="outlined" color="error"
               onClick={openActivity}>
@@ -581,20 +581,20 @@ export default function Library() {
           <Stack alignItems="center" spacing={1.5} sx={{ py: 10 }}>
             <InventoryRoundedIcon sx={{ fontSize: 40, color: "text.disabled" }} />
             <Typography sx={{ fontSize: "0.95rem", fontWeight: 600 }}>
-              {filtersActive ? "Nothing matches those filters" : "Your library is empty"}
+              {filtersActive ? "Không có mục nào khớp bộ lọc" : "Thư viện đang trống"}
             </Typography>
             <Typography sx={{
               fontSize: "0.82rem", color: "text.secondary", textAlign: "center", maxWidth: 380,
             }}>
               {filtersActive
                 ? (media !== "all" && origins.length === 1
-                  ? `You have no ${MEDIA[media]?.plural} that were ${ORIGIN_PHRASE[origins[0]]}.`
-                  : "Widen the media tab or the From chips to see more.")
-                : "Renders, downloads and anything you edit collect here."}
+                  ? `Bạn không có ${MEDIA[media]?.plural} ${ORIGIN_PHRASE[origins[0]]}.`
+                  : "Mở rộng tab loại tệp hoặc chip Nguồn để xem thêm.")
+                : "Bản kết xuất, nội dung tải xuống và mọi tệp bạn chỉnh sửa sẽ tập trung tại đây."}
             </Typography>
             {filtersActive
-              ? <Button size="small" variant="outlined" onClick={clearFilters}>Clear filters</Button>
-              : <Button size="small" variant="contained" onClick={() => navigate("/stock")}>Make a video</Button>}
+              ? <Button size="small" variant="outlined" onClick={clearFilters}>Xóa bộ lọc</Button>
+              : <Button size="small" variant="contained" onClick={() => navigate("/stock")}>Tạo video</Button>}
           </Stack>
         ) : (
           <>
@@ -660,21 +660,21 @@ export default function Library() {
           },
           "& .MuiIconButton-root": { color: "primary.contrastText" },
         }}>
-          <Chip size="small" label={`${selected.size} selected`}
+          <Chip size="small" label={`${selected.size} mục đã chọn`}
             sx={{
               fontWeight: 800, height: 24,
               bgcolor: alpha("#fff", 0.22), color: "primary.contrastText",
             }} />
           <Button size="small" startIcon={<DeleteOutlineRoundedIcon sx={{ fontSize: 16 }} />}
             onClick={() => openConfirm(
-              `Delete ${selected.size} item${selected.size === 1 ? "" : "s"}?`,
-              "The files are removed from disk. This cannot be undone.",
+              `Xóa ${selected.size} mục?`,
+              "Các tệp sẽ bị xóa khỏi ổ đĩa và không thể hoàn tác.",
               deleteSelected,
-              { confirmLabel: `Delete ${selected.size}` },
+              { confirmLabel: `Xóa ${selected.size}` },
             )}>
-            Delete
+            Xóa
           </Button>
-          <IconButton size="small" onClick={() => setSelected(new Map())} aria-label="Clear selection">
+          <IconButton size="small" onClick={() => setSelected(new Map())} aria-label="Bỏ chọn tất cả">
             <CloseRoundedIcon sx={{ fontSize: 16 }} />
           </IconButton>
         </Box>
@@ -687,16 +687,16 @@ export default function Library() {
         slotProps={{ paper: { sx: { minWidth: 190 } } }}>
         <MenuItem sx={{ fontSize: "0.84rem" }}
           onClick={() => { const it = moreMenu.item; setMoreMenu(null); openItem(it) }}>
-          Open details
+          Mở chi tiết
         </MenuItem>
         <MenuItem sx={{ fontSize: "0.84rem" }}
           component="a" href={moreMenu?.item?.stream_url} download
           onClick={() => setMoreMenu(null)}>
-          Save a copy
+          Lưu bản sao
         </MenuItem>
         <MenuItem sx={{ fontSize: "0.84rem", color: "error.main" }}
           onClick={() => { const it = moreMenu.item; setMoreMenu(null); confirmDeleteOne(it) }}>
-          Delete
+          Xóa
         </MenuItem>
       </Menu>
 
@@ -715,8 +715,8 @@ export default function Library() {
         // Same confirm every other delete route gets — the drawer must not be
         // the one place a single click destroys a file.
         onConfirmDelete={(item, perform) => openConfirm(
-          "Delete this item?",
-          `“${item.title}” is removed from disk. This cannot be undone.`,
+          "Xóa mục này?",
+          `“${item.title}” sẽ bị xóa khỏi ổ đĩa. Không thể hoàn tác.`,
           perform,
         )}
       />

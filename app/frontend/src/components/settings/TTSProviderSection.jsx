@@ -12,7 +12,7 @@ const PROVIDERS = {
   openai_compatible_tts: { label: "OpenAI-compatible TTS", base: true, defaultModel: "tts-1" },
   azure_tts: { label: "Azure Speech", needsKey: true, region: true },
   elevenlabs: { label: "ElevenLabs", needsKey: true, base: true, defaultModel: "eleven_multilingual_v2" },
-  gpt_sovits: { label: "GPT-SoVITS (local voice clone)", base: true, defaultBase: "http://127.0.0.1:9880" },
+  gpt_sovits: { label: "GPT-SoVITS (clone giọng cục bộ)", base: true, defaultBase: "http://127.0.0.1:9880" },
 }
 
 export default function TTSProviderSection({ settings, updateSettings }) {
@@ -52,19 +52,19 @@ export default function TTSProviderSection({ settings, updateSettings }) {
 
   const save = async () => {
     if (meta.needsKey && provider !== settings?.tts_provider && !key.trim()) {
-      showSnackbar("Add the API key for the new TTS provider", "warning")
+      showSnackbar("Thêm API key cho nhà cung cấp TTS mới", "warning")
       return
     }
     if (meta.needsKey && !key.trim() && !settings?.tts_api_key_set) {
-      showSnackbar("Add the API key for this TTS provider", "warning")
+      showSnackbar("Thêm API key cho nhà cung cấp TTS này", "warning")
       return
     }
     if (meta.base && !baseUrl.trim()) {
-      showSnackbar("Base URL is required for this provider", "warning")
+      showSnackbar("Nhà cung cấp này cần Base URL", "warning")
       return
     }
     if (meta.region && !region.trim() && !baseUrl.trim()) {
-      showSnackbar("Azure Region or a custom endpoint is required", "warning")
+      showSnackbar("Cần Azure Region hoặc endpoint tùy chỉnh", "warning")
       return
     }
 
@@ -80,7 +80,7 @@ export default function TTSProviderSection({ settings, updateSettings }) {
       if (key.trim()) updates.tts_api_key = key.trim()
       await updateSettings(updates)
       setKey("")
-      showSnackbar("TTS provider saved", "success")
+      showSnackbar("Đã lưu nhà cung cấp TTS", "success")
     } finally {
       setSaving(false)
     }
@@ -95,8 +95,8 @@ export default function TTSProviderSection({ settings, updateSettings }) {
       </Alert>
 
       <FormControl size="small" fullWidth>
-        <InputLabel>TTS provider</InputLabel>
-        <Select value={provider} label="TTS provider" onChange={(e) => changeProvider(e.target.value)}>
+        <InputLabel>Nhà cung cấp TTS</InputLabel>
+        <Select value={provider} label="Nhà cung cấp TTS" onChange={(e) => changeProvider(e.target.value)}>
           {Object.entries(PROVIDERS).map(([id, p]) => (
             <MenuItem key={id} value={id}>{p.label}</MenuItem>
           ))}
@@ -104,16 +104,16 @@ export default function TTSProviderSection({ settings, updateSettings }) {
       </FormControl>
 
       <TextField
-        label="Default voice ID"
+        label="ID giọng mặc định"
         size="small"
         value={voice}
         onChange={(e) => setVoice(e.target.value)}
-        helperText="Leave empty for provider/language default. Expert mode can override per speaker or segment."
+        helperText="Để trống để dùng mặc định của nhà cung cấp/ngôn ngữ. Chế độ nâng cao có thể ghi đè theo từng người nói hoặc từng đoạn."
       />
 
       {provider !== "edge_tts" && (
         <TextField
-          label="Model"
+          label="Mô hình"
           size="small"
           value={model}
           onChange={(e) => setModel(e.target.value)}
@@ -133,7 +133,7 @@ export default function TTSProviderSection({ settings, updateSettings }) {
 
       {meta.region && (
         <TextField
-          label="Azure Region"
+          label="Vùng Azure"
           size="small"
           value={region}
           onChange={(e) => setRegion(e.target.value)}

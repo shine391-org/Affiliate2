@@ -65,7 +65,7 @@ function Section({ icon, title, description, children, accentColor }) {
 
 
 export default function Settings() {
-  useDocumentTitle("Settings")
+  useDocumentTitle("Cài đặt")
   const { settings, loading, error, fetchSettings, updateSettings } = useSettings()
   const [params, setParams] = useSearchParams()
   const section = normalizeSettingsSection(params.get("section"))
@@ -80,13 +80,13 @@ export default function Settings() {
 
   if (loading) return (
     <Box sx={{ p: 4, display: "flex", justifyContent: "center" }}>
-      <Typography sx={{ color: "text.secondary" }}>Loading settings...</Typography>
+      <Typography sx={{ color: "text.secondary" }}>Đang tải cài đặt...</Typography>
     </Box>
   )
   if (error || !settings) return (
     <Box sx={{ p: 4, textAlign: "center" }}>
-      <Typography sx={{ color: "error.main", mb: 2 }}>{error || "Failed to load settings"}</Typography>
-      <Button variant="outlined" onClick={fetchSettings}>Retry</Button>
+      <Typography sx={{ color: "error.main", mb: 2 }}>{error || "Không thể tải cài đặt"}</Typography>
+      <Button variant="outlined" onClick={fetchSettings}>Thử lại</Button>
     </Box>
   )
 
@@ -119,7 +119,7 @@ export default function Settings() {
           onChange={setSection}
           variant="scrollable"
           scrollButtons="auto"
-          aria-label="Settings sections"
+          aria-label="Các mục cài đặt"
         >
           {SETTINGS_SECTIONS.map((item) => <Tab key={item.value} value={item.value} label={item.label} />)}
         </Tabs>
@@ -131,8 +131,8 @@ export default function Settings() {
           {section === "ai" && (
             <Section
               icon={<SmartToyIcon sx={{ fontSize: 20 }} />}
-              title="AI Connections"
-              description="Provider, endpoint, credentials and global/default model"
+              title="Kết nối AI"
+              description="Nhà cung cấp, endpoint, thông tin xác thực và mô hình mặc định/toàn cục"
               accentColor="#0d9f6e"
             >
               <AIProviderSection settings={settings} updateSettings={updateSettings} />
@@ -142,8 +142,8 @@ export default function Settings() {
           {section === "localization" && (
             <Section
               icon={<RecordVoiceOverOutlinedIcon sx={{ fontSize: 20 }} />}
-              title="Localization Profiles"
-              description="Reusable C6/C7 models, language style, ASR, timing, audio, render and QC defaults"
+              title="Hồ sơ bản địa hóa"
+              description="Cấu hình dùng lại cho mô hình C6/C7, phong cách ngôn ngữ, ASR, nhịp, âm thanh, kết xuất và QC"
               accentColor="#0f766e"
             >
               <LocalizationProfilesSection settings={settings} />
@@ -153,8 +153,8 @@ export default function Settings() {
           {section === "tts" && (
             <Section
               icon={<RecordVoiceOverOutlinedIcon sx={{ fontSize: 20 }} />}
-              title="TTS / Voices"
-              description="Global TTS connection and credentials. Profiles reference these defaults without duplicating secrets."
+              title="TTS / Giọng đọc"
+              description="Kết nối và thông tin xác thực TTS dùng chung. Hồ sơ tham chiếu các mặc định này mà không sao chép bí mật."
               accentColor="#9333ea"
             >
               <TTSProviderSection settings={settings} updateSettings={updateSettings} />
@@ -164,8 +164,8 @@ export default function Settings() {
           {section === "services" && (
             <Section
               icon={<KeyIcon sx={{ fontSize: 20 }} />}
-              title="Source Providers / Service Keys"
-              description="Per-service credentials used by discovery and supported integrations"
+              title="Nguồn dữ liệu / Khóa dịch vụ"
+              description="Thông tin xác thực theo từng dịch vụ dùng cho khám phá và các tích hợp được hỗ trợ"
               accentColor="#2563eb"
             >
               <ServiceKeysSection settings={settings} updateSettings={updateSettings} />
@@ -175,8 +175,8 @@ export default function Settings() {
           {section === "addons" && (
             <Section
               icon={<MovieFilterIcon sx={{ fontSize: 20 }} />}
-              title="Add-ons"
-              description="Optional engines installed on demand into the data folder"
+              title="Tiện ích bổ sung"
+              description="Các engine tùy chọn được cài khi cần vào thư mục dữ liệu"
               accentColor="#7c3aed"
             >
               <MotionGraphicsSection />
@@ -186,8 +186,8 @@ export default function Settings() {
           {section === "health" && (
             <Section
               icon={<MonitorHeartIcon sx={{ fontSize: 20 }} />}
-              title="System Health"
-              description="Dependency status, provider availability and storage/runtime checks"
+              title="Tình trạng hệ thống"
+              description="Trạng thái phụ thuộc, khả dụng nhà cung cấp và kiểm tra lưu trữ/runtime"
               accentColor="#dc2626"
             >
               <HealthDashboard />

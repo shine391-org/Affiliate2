@@ -14,14 +14,14 @@ import useDocumentTitle from "../../hooks/useDocumentTitle"
 import { CAPTION_STYLES as STYLES, EMOJI_LEVELS } from "../../components/tools/captionOptions"
 
 export default function ToolCaptions() {
-  useDocumentTitle("Add Captions")
+  useDocumentTitle("Thêm phụ đề")
   const [style, setStyle] = useState("viral")
   const [emojiStyle, setEmojiStyle] = useState("moderate")
 
   return (
     <ToolRunner
-      title="Add Captions"
-      description="Auto-transcribe your video's speech and burn word-by-word captions in TikTok / Reels style — no typing"
+      title="Thêm phụ đề"
+      description="Tự chép lời và chèn phụ đề từng từ theo phong cách TikTok / Reels — không cần gõ tay"
       icon={<SubtitlesOutlinedIcon fontSize="large" />}
       endpoint="/api/tools/captions"
       fieldBuilder={() => ({ style, emoji_style: emojiStyle })}
@@ -59,8 +59,8 @@ export default function ToolCaptions() {
 
       <Box sx={{ mt: 1 }}>
         <FormControl size="small" sx={{ minWidth: 180 }}>
-          <InputLabel>Emoji intensity</InputLabel>
-          <Select value={emojiStyle} label="Emoji intensity" onChange={(e) => setEmojiStyle(e.target.value)}>
+          <InputLabel>Mức emoji</InputLabel>
+          <Select value={emojiStyle} label="Mức emoji" onChange={(e) => setEmojiStyle(e.target.value)}>
             {EMOJI_LEVELS.map((e) => (
               <MenuItem key={e.value} value={e.value}>{e.label}</MenuItem>
             ))}

@@ -20,9 +20,9 @@ export default function SourcePanel({ source }) {
   return (
     <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mb: 2 }}>
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
-        <Typography variant="overline" sx={{ color: "text.secondary" }}>Inspiration Source</Typography>
+        <Typography variant="overline" sx={{ color: "text.secondary" }}>Nguồn cảm hứng</Typography>
       </Stack>
-      <Typography variant="body2" sx={{ fontWeight: 600, mb: 1.5 }}>{source.title || "Untitled"}</Typography>
+      <Typography variant="body2" sx={{ fontWeight: 600, mb: 1.5 }}>{source.title || "Chưa đặt tên"}</Typography>
 
       {source.transcript && (
         <Box sx={{ mb: 1.5 }}>
@@ -42,10 +42,10 @@ export default function SourcePanel({ source }) {
       {Object.keys(insights).length > 0 && (
         <Stack spacing={1}>
           {insights.hook && <InsightRow label="Hook" color="secondary.main" value={insights.hook} />}
-          {insights.structure && <InsightRow label="Structure" color="secondary.main" value={insights.structure} />}
-          {insights.why_viral && <InsightRow label="Why viral" color="warning.main" value={insights.why_viral} />}
-          {insights.suggested_angle && <InsightRow label="Your angle" color="primary.main" value={insights.suggested_angle} />}
-          {insights.suggested_title && <InsightRow label="Title idea" color="primary.main" value={insights.suggested_title} />}
+          {insights.structure && <InsightRow label="Cấu trúc" color="secondary.main" value={insights.structure} />}
+          {insights.why_viral && <InsightRow label="Vì sao viral" color="warning.main" value={insights.why_viral} />}
+          {insights.suggested_angle && <InsightRow label="Góc của bạn" color="primary.main" value={insights.suggested_angle} />}
+          {insights.suggested_title && <InsightRow label="Gợi ý tiêu đề" color="primary.main" value={insights.suggested_title} />}
         </Stack>
       )}
     </Paper>

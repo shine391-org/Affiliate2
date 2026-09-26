@@ -1,15 +1,15 @@
 export const PRIMARY_NAV_ITEMS = [
-  { to: "/discover/spy", label: "Discover", icon: "discover", activeRoot: "/discover" },
-  { to: "/library", label: "Library", icon: "library" },
+  { to: "/discover/spy", label: "Khám phá", icon: "discover", activeRoot: "/discover" },
+  { to: "/library", label: "Thư viện", icon: "library" },
   { to: "/studio", label: "Studio", icon: "studio" },
-  { to: "/review", label: "Review", icon: "review" },
-  { to: "/publish", label: "Publish", icon: "publish" },
-  { to: "/performance", label: "Performance", icon: "performance" },
-  { to: "/utilities", label: "Utilities", icon: "utilities" },
+  { to: "/review", label: "Duyệt", icon: "review" },
+  { to: "/publish", label: "Xuất bản", icon: "publish" },
+  { to: "/performance", label: "Hiệu suất", icon: "performance" },
+  { to: "/utilities", label: "Công cụ", icon: "utilities" },
 ]
 
 export const BOTTOM_NAV_ITEMS = [
-  { to: "/settings", label: "Settings", icon: "settings" },
+  { to: "/settings", label: "Cài đặt", icon: "settings" },
 ]
 
 export const LEGACY_ROUTE_TARGETS = {
@@ -26,9 +26,9 @@ export const LEGACY_ROUTE_TARGETS = {
 }
 
 export const DISCOVER_SECTIONS = [
-  { value: "spy", label: "Spy", to: "/discover/spy" },
-  { value: "channels", label: "Channels", to: "/discover/channels" },
-  { value: "candidates", label: "Candidates", to: "/discover/candidates" },
+  { value: "spy", label: "Theo dõi", to: "/discover/spy" },
+  { value: "channels", label: "Kênh", to: "/discover/channels" },
+  { value: "candidates", label: "Ứng viên", to: "/discover/candidates" },
 ]
 
 export function discoverSectionForPath(pathname) {

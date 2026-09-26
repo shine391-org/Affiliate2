@@ -189,7 +189,7 @@ export default function AssetTile({
               e.stopPropagation()   // or the tile behind it also acts
               onToggleSelect?.(item)
             }}
-            aria-label={selected ? "Deselect" : "Select"}
+            aria-label={selected ? "Bỏ chọn" : "Chọn"}
             sx={{
               position: "absolute", top: 6, left: 8, width: 20, height: 20,
               borderRadius: "6px", display: "flex", alignItems: "center", justifyContent: "center",
@@ -212,19 +212,19 @@ export default function AssetTile({
         }}>
           <Stack direction="row" spacing={0.5} alignItems="center" sx={{ flex: 1, minWidth: 0 }}>
             {dur && <Pill>{dur}</Pill>}
-            {item.status === "failed" && <Pill tone="error">Failed</Pill>}
-            {item.status === "draft" && <Pill>Draft</Pill>}
+            {item.status === "failed" && <Pill tone="error">Thất bại</Pill>}
+            {item.status === "draft" && <Pill>Bản nháp</Pill>}
             {item.hook_score != null && (
               <Pill><BoltRoundedIcon sx={{ fontSize: 11, mr: 0.2, mb: "-1px" }} />{item.hook_score}</Pill>
             )}
           </Stack>
           {active && (
             <Stack direction="row" spacing={0.25} sx={{ flexShrink: 0 }}>
-              <FrameAction title={item.media === "image" || item.media === "doc" ? "Open" : "Play"}
+              <FrameAction title={item.media === "image" || item.media === "doc" ? "Mở" : "Phát"}
                 onClick={(e) => { e.stopPropagation(); onOpen?.(item) }}>
                 <PlayArrowRoundedIcon sx={{ fontSize: 16 }} />
               </FrameAction>
-              <FrameAction title="More" onClick={(e) => { e.stopPropagation(); onMore?.(item, e) }}>
+              <FrameAction title="Thêm" onClick={(e) => { e.stopPropagation(); onMore?.(item, e) }}>
                 <MoreHorizRoundedIcon sx={{ fontSize: 16 }} />
               </FrameAction>
             </Stack>

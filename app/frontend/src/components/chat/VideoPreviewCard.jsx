@@ -12,7 +12,7 @@ export default function VideoPreviewCard({ video }) {
   const handleUpload = async (platforms) => {
     try {
       await http.post(`/api/videos/${video.id}/upload`, { platforms })
-      showSnackbar(`Upload started for ${platforms.join(", ")}`, "success")
+      showSnackbar(`Đã bắt đầu tải lên ${platforms.join(", ")}`, "success")
     } catch (e) {
       showSnackbar(e.response?.data?.detail || e.message, "error")
     }
@@ -43,15 +43,15 @@ export default function VideoPreviewCard({ video }) {
           p: 1.5,
         }}>
           <Typography variant="body2" sx={{ color: "#fff", fontWeight: 500 }}>
-            {video.title || "Untitled Video"}
+            {video.title || "Video chưa đặt tên"}
           </Typography>
         </Box>
       </Box>
 
       <CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}>
         <Stack direction="row" spacing={0.5} sx={{ mb: 1 }}>
-          <Chip label={video.status || "ready"} size="small" color="success" sx={{ height: 20, fontSize: "0.65rem" }} />
-          <Chip label={video.source_type === "clip_extraction" ? "Clip" : "Stock"} size="small" variant="outlined" sx={{ height: 20, fontSize: "0.65rem" }} />
+          <Chip label={video.status || "sẵn sàng"} size="small" color="success" sx={{ height: 20, fontSize: "0.65rem" }} />
+          <Chip label={video.source_type === "clip_extraction" ? "Clip" : "Video kho"} size="small" variant="outlined" sx={{ height: 20, fontSize: "0.65rem" }} />
           <Chip label={video.aspect_ratio || "9:16"} size="small" variant="outlined" sx={{ height: 20, fontSize: "0.65rem" }} />
         </Stack>
 

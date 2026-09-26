@@ -51,7 +51,7 @@ const SL_STATE = {
 }
 
 export default function Messaging() {
-  useDocumentTitle("Messaging")
+  useDocumentTitle("Nhắn tin")
   const showSnackbar = useAppStore((s) => s.showSnackbar)
 
   const [loading, setLoading] = useState(true)
@@ -161,7 +161,7 @@ export default function Messaging() {
         setSlInfo({ bot_user_id: "", team_name: "", chat_id: "", error: "" })
       }
     } catch (e) {
-      showSnackbar("Failed to load messaging status", "error")
+      showSnackbar("Không thể tải trạng thái nhắn tin", "error")
     } finally {
       setLoading(false)
     }
@@ -174,7 +174,7 @@ export default function Messaging() {
       ws.on("telegram_connected", (msg) => {
         setTgState(STATE.CONNECTED)
         setTgInfo(prev => ({ ...prev, chat_id: msg.chat_id || prev.chat_id }))
-        showSnackbar("Telegram connected — you'll receive notifications here", "success")
+        showSnackbar("Telegram đã kết nối — bạn sẽ nhận thông báo tại đây", "success")
       }),
       ws.on("whatsapp_qr", (msg) => {
         setWaQr(msg.qr || "")
@@ -193,12 +193,12 @@ export default function Messaging() {
       ws.on("discord_connected", (msg) => {
         setDcState(DC_STATE.CONNECTED)
         setDcInfo(prev => ({ ...prev, chat_id: msg.chat_id || prev.chat_id }))
-        showSnackbar("Discord connected — you'll receive notifications here", "success")
+        showSnackbar("Discord đã kết nối — bạn sẽ nhận thông báo tại đây", "success")
       }),
       ws.on("slack_connected", (msg) => {
         setSlState(SL_STATE.CONNECTED)
         setSlInfo(prev => ({ ...prev, chat_id: msg.chat_id || prev.chat_id }))
-        showSnackbar("Slack connected — you'll receive notifications here", "success")
+        showSnackbar("Slack đã kết nối — bạn sẽ nhận thông báo tại đây", "success")
       }),
     ]
     return () => { unsubs.forEach(fn => fn()) }
@@ -206,7 +206,7 @@ export default function Messaging() {
 
   const handleConnect = async () => {
     if (!botToken.trim()) {
-      showSnackbar("Paste your bot token first", "warning")
+      showSnackbar("Hãy dán token bot trước", "warning")
       return
     }
     setSaving(true)
@@ -221,12 +221,12 @@ export default function Messaging() {
       setTgState(data.chat_id ? STATE.CONNECTED : STATE.AWAITING_START)
       setBotToken("")
       showSnackbar(
-        data.chat_id ? "Telegram connected" : "Bot configured — now send /start to your bot",
+        data.chat_id ? "Telegram đã kết nối" : "Đã cấu hình bot — hãy gửi /start cho bot",
         "success",
       )
     } catch (e) {
       setTgState(STATE.DISCONNECTED)
-      showSnackbar(e.response?.data?.detail || "Connect failed", "error")
+      showSnackbar(e.response?.data?.detail || "Kết nối thất bại", "error")
     } finally {
       setSaving(false)
     }
@@ -237,9 +237,9 @@ export default function Messaging() {
       await http.post("/api/messaging/telegram/disconnect")
       setTgState(STATE.DISCONNECTED)
       setTgInfo({ bot_username: "", bot_url: "", chat_id: "" })
-      showSnackbar("Telegram disconnected", "info")
+      showSnackbar("Telegram đã ngắt kết nối", "info")
     } catch (e) {
-      showSnackbar(e.response?.data?.detail || "Disconnect failed", "error")
+      showSnackbar(e.response?.data?.detail || "Ngắt kết nối thất bại", "error")
     }
   }
 
@@ -247,9 +247,9 @@ export default function Messaging() {
     setTesting(true)
     try {
       await http.post("/api/messaging/telegram/test")
-      showSnackbar("Test message sent — check Telegram", "success")
+      showSnackbar("Đã gửi tin nhắn thử — kiểm tra Telegram", "success")
     } catch (e) {
-      showSnackbar(e.response?.data?.detail || "Test failed — did you send /start to the bot?", "error")
+      showSnackbar(e.response?.data?.detail || "Gửi thử thất bại — bạn đã gửi /start cho bot chưa?", "error")
     } finally {
       setTesting(false)
     }
@@ -261,10 +261,10 @@ export default function Messaging() {
     try {
       await http.post("/api/messaging/whatsapp/connect")
       setWaState(WA_STATE.PAIRING)
-      showSnackbar("Generating QR code — scan it from your phone", "info")
+      showSnackbar("Đang tạo mã QR — hãy quét bằng điện thoại", "info")
     } catch (e) {
       setWaState(WA_STATE.DISCONNECTED)
-      showSnackbar(e.response?.data?.detail || "WhatsApp connect failed", "error")
+      showSnackbar(e.response?.data?.detail || "Kết nối WhatsApp thất bại", "error")
     } finally {
       setWaSaving(false)
     }
@@ -276,9 +276,9 @@ export default function Messaging() {
       setWaState(WA_STATE.DISCONNECTED)
       setWaInfo({ chat_id: "", error: "" })
       setWaQr("")
-      showSnackbar("WhatsApp disconnected", "info")
+      showSnackbar("WhatsApp đã ngắt kết nối", "info")
     } catch (e) {
-      showSnackbar(e.response?.data?.detail || "Disconnect failed", "error")
+      showSnackbar(e.response?.data?.detail || "Ngắt kết nối thất bại", "error")
     }
   }
 
@@ -286,9 +286,9 @@ export default function Messaging() {
     setWaTesting(true)
     try {
       await http.post("/api/messaging/whatsapp/test")
-      showSnackbar("Test message sent — check WhatsApp", "success")
+      showSnackbar("Đã gửi tin nhắn thử — kiểm tra WhatsApp", "success")
     } catch (e) {
-      showSnackbar(e.response?.data?.detail || "Test failed — is WhatsApp paired?", "error")
+      showSnackbar(e.response?.data?.detail || "Gửi thử thất bại — WhatsApp đã ghép nối chưa?", "error")
     } finally {
       setWaTesting(false)
     }
@@ -296,7 +296,7 @@ export default function Messaging() {
 
   const handleDCConnect = async () => {
     if (!dcToken.trim()) {
-      showSnackbar("Paste your Discord bot token first", "warning")
+      showSnackbar("Hãy dán token bot Discord trước", "warning")
       return
     }
     setDcSaving(true)
@@ -312,12 +312,12 @@ export default function Messaging() {
       setDcState(data.chat_id ? DC_STATE.CONNECTED : DC_STATE.AWAITING_DM)
       setDcToken("")
       showSnackbar(
-        data.chat_id ? "Discord connected" : "Bot online — invite it and DM it to finish setup",
+        data.chat_id ? "Discord đã kết nối" : "Bot đang online — hãy mời bot và nhắn riêng để hoàn tất thiết lập",
         "success",
       )
     } catch (e) {
       setDcState(DC_STATE.DISCONNECTED)
-      showSnackbar(e.response?.data?.detail || "Discord connect failed", "error")
+      showSnackbar(e.response?.data?.detail || "Kết nối Discord thất bại", "error")
     } finally {
       setDcSaving(false)
     }
@@ -328,9 +328,9 @@ export default function Messaging() {
       await http.post("/api/messaging/discord/disconnect")
       setDcState(DC_STATE.DISCONNECTED)
       setDcInfo({ bot_username: "", bot_invite_url: "", chat_id: "", error: "" })
-      showSnackbar("Discord disconnected", "info")
+      showSnackbar("Discord đã ngắt kết nối", "info")
     } catch (e) {
-      showSnackbar(e.response?.data?.detail || "Disconnect failed", "error")
+      showSnackbar(e.response?.data?.detail || "Ngắt kết nối thất bại", "error")
     }
   }
 
@@ -338,9 +338,9 @@ export default function Messaging() {
     setDcTesting(true)
     try {
       await http.post("/api/messaging/discord/test")
-      showSnackbar("Test message sent — check Discord", "success")
+      showSnackbar("Đã gửi tin nhắn thử — kiểm tra Discord", "success")
     } catch (e) {
-      showSnackbar(e.response?.data?.detail || "Test failed — DM your bot first", "error")
+      showSnackbar(e.response?.data?.detail || "Gửi thử thất bại — hãy nhắn riêng cho bot trước", "error")
     } finally {
       setDcTesting(false)
     }
@@ -348,7 +348,7 @@ export default function Messaging() {
 
   const handleSLConnect = async () => {
     if (!slBotToken.trim() || !slAppToken.trim()) {
-      showSnackbar("Paste both the bot token (xoxb-) and app-level token (xapp-)", "warning")
+      showSnackbar("Hãy dán cả token bot (xoxb-) và token cấp ứng dụng (xapp-)", "warning")
       return
     }
     setSlSaving(true)
@@ -368,12 +368,12 @@ export default function Messaging() {
       setSlBotToken("")
       setSlAppToken("")
       showSnackbar(
-        data.chat_id ? "Slack connected" : "Bot online — DM it in Slack to finish setup",
+        data.chat_id ? "Slack đã kết nối" : "Bot đang online — hãy nhắn riêng cho bot trên Slack để hoàn tất thiết lập",
         "success",
       )
     } catch (e) {
       setSlState(SL_STATE.DISCONNECTED)
-      showSnackbar(e.response?.data?.detail || "Slack connect failed", "error")
+      showSnackbar(e.response?.data?.detail || "Kết nối Slack thất bại", "error")
     } finally {
       setSlSaving(false)
     }
@@ -384,9 +384,9 @@ export default function Messaging() {
       await http.post("/api/messaging/slack/disconnect")
       setSlState(SL_STATE.DISCONNECTED)
       setSlInfo({ bot_user_id: "", team_name: "", chat_id: "", error: "" })
-      showSnackbar("Slack disconnected", "info")
+      showSnackbar("Slack đã ngắt kết nối", "info")
     } catch (e) {
-      showSnackbar(e.response?.data?.detail || "Disconnect failed", "error")
+      showSnackbar(e.response?.data?.detail || "Ngắt kết nối thất bại", "error")
     }
   }
 
@@ -394,42 +394,42 @@ export default function Messaging() {
     setSlTesting(true)
     try {
       await http.post("/api/messaging/slack/test")
-      showSnackbar("Test message sent — check Slack", "success")
+      showSnackbar("Đã gửi tin nhắn thử — kiểm tra Slack", "success")
     } catch (e) {
-      showSnackbar(e.response?.data?.detail || "Test failed — DM your bot first", "error")
+      showSnackbar(e.response?.data?.detail || "Gửi thử thất bại — hãy nhắn riêng cho bot trước", "error")
     } finally {
       setSlTesting(false)
     }
   }
 
   const statusChip = () => {
-    if (tgState === STATE.CONNECTED) return <Chip icon={<CheckCircleIcon />} label="Connected" color="success" size="small" />
-    if (tgState === STATE.AWAITING_START) return <Chip label="Awaiting /start" color="warning" size="small" />
-    if (tgState === STATE.CONNECTING) return <Chip label="Connecting…" size="small" />
-    return <Chip label="Not connected" size="small" />
+    if (tgState === STATE.CONNECTED) return <Chip icon={<CheckCircleIcon />} label="Đã kết nối" color="success" size="small" />
+    if (tgState === STATE.AWAITING_START) return <Chip label="Chờ /start" color="warning" size="small" />
+    if (tgState === STATE.CONNECTING) return <Chip label="Đang kết nối…" size="small" />
+    return <Chip label="Chưa kết nối" size="small" />
   }
 
   const waStatusChip = () => {
-    if (waState === WA_STATE.CONNECTED) return <Chip icon={<CheckCircleIcon />} label="Connected" color="success" size="small" />
-    if (waState === WA_STATE.PAIRING) return <Chip label="Scan QR code" color="warning" size="small" />
-    if (waState === WA_STATE.UNAVAILABLE) return <Chip label="Unavailable" size="small" />
-    return <Chip label="Not connected" size="small" />
+    if (waState === WA_STATE.CONNECTED) return <Chip icon={<CheckCircleIcon />} label="Đã kết nối" color="success" size="small" />
+    if (waState === WA_STATE.PAIRING) return <Chip label="Quét mã QR" color="warning" size="small" />
+    if (waState === WA_STATE.UNAVAILABLE) return <Chip label="Không khả dụng" size="small" />
+    return <Chip label="Chưa kết nối" size="small" />
   }
 
   const dcStatusChip = () => {
-    if (dcState === DC_STATE.CONNECTED) return <Chip icon={<CheckCircleIcon />} label="Connected" color="success" size="small" />
-    if (dcState === DC_STATE.AWAITING_DM) return <Chip label="DM your bot" color="warning" size="small" />
-    if (dcState === DC_STATE.CONNECTING) return <Chip label="Connecting…" size="small" />
-    if (dcState === DC_STATE.UNAVAILABLE) return <Chip label="Unavailable" size="small" />
-    return <Chip label="Not connected" size="small" />
+    if (dcState === DC_STATE.CONNECTED) return <Chip icon={<CheckCircleIcon />} label="Đã kết nối" color="success" size="small" />
+    if (dcState === DC_STATE.AWAITING_DM) return <Chip label="Nhắn bot của bạn" color="warning" size="small" />
+    if (dcState === DC_STATE.CONNECTING) return <Chip label="Đang kết nối…" size="small" />
+    if (dcState === DC_STATE.UNAVAILABLE) return <Chip label="Không khả dụng" size="small" />
+    return <Chip label="Chưa kết nối" size="small" />
   }
 
   const slStatusChip = () => {
-    if (slState === SL_STATE.CONNECTED) return <Chip icon={<CheckCircleIcon />} label="Connected" color="success" size="small" />
-    if (slState === SL_STATE.AWAITING_DM) return <Chip label="DM your bot" color="warning" size="small" />
-    if (slState === SL_STATE.CONNECTING) return <Chip label="Connecting…" size="small" />
-    if (slState === SL_STATE.UNAVAILABLE) return <Chip label="Unavailable" size="small" />
-    return <Chip label="Not connected" size="small" />
+    if (slState === SL_STATE.CONNECTED) return <Chip icon={<CheckCircleIcon />} label="Đã kết nối" color="success" size="small" />
+    if (slState === SL_STATE.AWAITING_DM) return <Chip label="Nhắn bot của bạn" color="warning" size="small" />
+    if (slState === SL_STATE.CONNECTING) return <Chip label="Đang kết nối…" size="small" />
+    if (slState === SL_STATE.UNAVAILABLE) return <Chip label="Không khả dụng" size="small" />
+    return <Chip label="Chưa kết nối" size="small" />
   }
 
   return (
@@ -449,7 +449,7 @@ export default function Messaging() {
               Messaging
             </Typography>
             <Typography variant="caption" sx={{ color: "text.secondary" }}>
-              Connect a messaging app to control ViralMint from your phone and receive job notifications
+              Kết nối ứng dụng nhắn tin để điều khiển ViralMint từ điện thoại và nhận thông báo tác vụ
             </Typography>
           </Box>
         </Stack>
@@ -472,7 +472,7 @@ export default function Messaging() {
             <Box sx={{ flex: 1 }}>
               <Typography variant="h6" sx={{ fontWeight: 600 }}>Telegram</Typography>
               <Typography variant="caption" color="text.secondary">
-                Two-way chat with your ViralMint planner and job notifications
+                Trò chuyện hai chiều với trợ lý ViralMint và nhận thông báo tác vụ
               </Typography>
             </Box>
             {statusChip()}
@@ -483,7 +483,7 @@ export default function Messaging() {
           {tgState === STATE.CONNECTED && (
             <Stack spacing={2}>
               <Alert severity="success" variant="outlined">
-                Connected to{" "}
+                Đã kết nối với{" "}
                 {tgInfo.bot_url ? (
                   <Link href={tgInfo.bot_url} target="_blank" rel="noreferrer" sx={{ fontWeight: 600 }}>
                     @{tgInfo.bot_username}
@@ -491,7 +491,7 @@ export default function Messaging() {
                 ) : (
                   <strong>@{tgInfo.bot_username}</strong>
                 )}
-                . Send any message to your bot to chat with the planner.
+                . Gửi bất kỳ tin nhắn nào cho bot để trò chuyện với planner.
               </Alert>
               <Stack direction="row" spacing={1.5}>
                 <Button
@@ -500,7 +500,7 @@ export default function Messaging() {
                   onClick={handleTest}
                   disabled={testing}
                 >
-                  Send test message
+                  Gửi tin nhắn thử
                 </Button>
                 <Button
                   variant="outlined"
@@ -508,7 +508,7 @@ export default function Messaging() {
                   startIcon={<LogoutIcon />}
                   onClick={handleDisconnect}
                 >
-                  Disconnect
+                  Ngắt kết nối
                 </Button>
               </Stack>
             </Stack>
@@ -523,14 +523,14 @@ export default function Messaging() {
                     @{tgInfo.bot_username}
                   </Link>
                 ) : (
-                  <strong>your bot</strong>
+                  <strong>bot của bạn</strong>
                 )}
-                {" "}in Telegram and send <code>/start</code> to activate notifications.
+                {" "}trên Telegram và gửi <code>/start</code> để bật thông báo.
               </Alert>
               <Stack direction="row" spacing={1.5}>
-                <Button variant="outlined" onClick={fetchStatus}>Refresh status</Button>
+                <Button variant="outlined" onClick={fetchStatus}>Làm mới trạng thái</Button>
                 <Button variant="outlined" color="error" startIcon={<LogoutIcon />} onClick={handleDisconnect}>
-                  Cancel
+                  Hủy
                 </Button>
               </Stack>
             </Stack>
@@ -539,12 +539,12 @@ export default function Messaging() {
           {(tgState === STATE.DISCONNECTED || tgState === STATE.CONNECTING) && (
             <Stack spacing={2}>
               <Typography variant="body2" color="text.secondary">
-                Create a bot via{" "}
+                Tạo bot qua{" "}
                 <Link href="https://t.me/BotFather" target="_blank" rel="noreferrer">@BotFather</Link>
-                {" "}on Telegram (send <code>/newbot</code>), then paste the bot token below.
+                {" "}trên Telegram (gửi <code>/newbot</code>), rồi dán token bot bên dưới.
               </Typography>
               <TextField
-                label="Bot token"
+                label="Token bot"
                 type="password"
                 fullWidth
                 size="small"
@@ -561,7 +561,7 @@ export default function Messaging() {
                   disabled={saving || !botToken.trim()}
                   startIcon={saving ? <CircularProgress size={16} color="inherit" /> : null}
                 >
-                  {saving ? "Connecting…" : "Connect"}
+                  {saving ? "Đang kết nối…" : "Kết nối"}
                 </Button>
               </Box>
             </Stack>
@@ -579,7 +579,7 @@ export default function Messaging() {
             <Box sx={{ flex: 1 }}>
               <Typography variant="h6" sx={{ fontWeight: 600 }}>WhatsApp</Typography>
               <Typography variant="caption" color="text.secondary">
-                Two-way chat + notifications via QR-scan device pairing
+                Trò chuyện hai chiều + thông báo qua ghép nối thiết bị bằng mã QR
               </Typography>
             </Box>
             {waStatusChip()}
@@ -589,12 +589,12 @@ export default function Messaging() {
 
           {waState === WA_STATE.UNAVAILABLE && (
             <Alert severity="warning" variant="outlined">
-              WhatsApp support requires the <code>neonize</code> Python package, which ships a
-              native library. Install dependencies with <code>pip install -r requirements.txt</code>,
-              then restart the app.
+              Hỗ trợ WhatsApp cần gói Python <code>neonize</code>, đi kèm một
+              thư viện native. Cài các phụ thuộc bằng <code>pip install -r requirements.txt</code>,
+              rồi khởi động lại ứng dụng.
               {waInfo.error && (
                 <Typography variant="caption" display="block" sx={{ mt: 1, opacity: 0.8 }}>
-                  Details: {waInfo.error}
+                  Chi tiết: {waInfo.error}
                 </Typography>
               )}
             </Alert>
@@ -603,8 +603,8 @@ export default function Messaging() {
           {waState === WA_STATE.CONNECTED && (
             <Stack spacing={2}>
               <Alert severity="success" variant="outlined">
-                WhatsApp paired. Message yourself on WhatsApp to chat with the planner — job
-                notifications will arrive in the same thread.
+                WhatsApp đã ghép nối. Nhắn tin cho chính bạn trên WhatsApp để trò chuyện với trợ lý — thông báo
+                tác vụ sẽ đến trong cùng cuộc hội thoại.
               </Alert>
               <Stack direction="row" spacing={1.5}>
                 <Button
@@ -614,7 +614,7 @@ export default function Messaging() {
                   disabled={waTesting}
                   sx={{ bgcolor: "#25D366", "&:hover": { bgcolor: "#128C7E" } }}
                 >
-                  Send test message
+                  Gửi tin nhắn thử
                 </Button>
                 <Button
                   variant="outlined"
@@ -622,7 +622,7 @@ export default function Messaging() {
                   startIcon={<LogoutIcon />}
                   onClick={handleWADisconnect}
                 >
-                  Disconnect
+                  Ngắt kết nối
                 </Button>
               </Stack>
             </Stack>
@@ -631,11 +631,11 @@ export default function Messaging() {
           {(waState === WA_STATE.DISCONNECTED || waState === WA_STATE.PAIRING) && (
             <Stack spacing={2}>
               <Typography variant="body2" color="text.secondary">
-                Get scout, download, and upload alerts on WhatsApp — and chat with ViralMint
-                straight from your phone. Pairs in seconds, just like WhatsApp Web.
+                Nhận cảnh báo Scout, tải xuống và tải lên trên WhatsApp — đồng thời trò chuyện với ViralMint
+                ngay từ điện thoại. Ghép nối nhanh tương tự WhatsApp Web.
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Click Connect to generate a QR code, then open WhatsApp → Settings → Linked
+                Bấm Kết nối để tạo mã QR, sau đó mở WhatsApp → Cài đặt → Thiết bị liên kết
                 Devices → Link a Device to scan it.
               </Typography>
               <Box>
@@ -651,8 +651,8 @@ export default function Messaging() {
                   sx={{ bgcolor: "#25D366", "&:hover": { bgcolor: "#128C7E" } }}
                 >
                   {waState === WA_STATE.PAIRING
-                    ? "Waiting for scan…"
-                    : waSaving ? "Generating QR…" : "Connect WhatsApp"}
+                    ? "Đang chờ quét…"
+                    : waSaving ? "Đang tạo QR…" : "Kết nối WhatsApp"}
                 </Button>
               </Box>
             </Stack>
@@ -670,7 +670,7 @@ export default function Messaging() {
             <Box sx={{ flex: 1 }}>
               <Typography variant="h6" sx={{ fontWeight: 600 }}>Discord</Typography>
               <Typography variant="caption" color="text.secondary">
-                DM your bot to chat with the planner and get job notifications
+                Nhắn riêng cho bot để trò chuyện với trợ lý và nhận thông báo tác vụ
               </Typography>
             </Box>
             {dcStatusChip()}
@@ -680,11 +680,11 @@ export default function Messaging() {
 
           {dcState === DC_STATE.UNAVAILABLE && (
             <Alert severity="warning" variant="outlined">
-              Discord support requires the <code>discord.py</code> Python package. Install
-              dependencies with <code>pip install -r requirements.txt</code>, then restart the app.
+              Hỗ trợ Discord cần gói Python <code>discord.py</code>. Hãy cài
+              các phụ thuộc bằng <code>pip install -r requirements.txt</code>, rồi khởi động lại ứng dụng.
               {dcInfo.error && (
                 <Typography variant="caption" display="block" sx={{ mt: 1, opacity: 0.8 }}>
-                  Details: {dcInfo.error}
+                  Chi tiết: {dcInfo.error}
                 </Typography>
               )}
             </Alert>
@@ -693,8 +693,8 @@ export default function Messaging() {
           {dcState === DC_STATE.CONNECTED && (
             <Stack spacing={2}>
               <Alert severity="success" variant="outlined">
-                Connected as <strong>{dcInfo.bot_username}</strong>. DM your bot on Discord to
-                chat with the planner — notifications arrive in the same thread.
+                Đã kết nối dưới tên <strong>{dcInfo.bot_username}</strong>. Nhắn riêng cho bot trên Discord để
+                trò chuyện với trợ lý — thông báo sẽ đến trong cùng cuộc hội thoại.
               </Alert>
               <Stack direction="row" spacing={1.5}>
                 <Button
@@ -704,7 +704,7 @@ export default function Messaging() {
                   disabled={dcTesting}
                   sx={{ bgcolor: "#5865F2", "&:hover": { bgcolor: "#4752C4" } }}
                 >
-                  Send test message
+                  Gửi tin nhắn thử
                 </Button>
                 <Button
                   variant="outlined"
@@ -712,7 +712,7 @@ export default function Messaging() {
                   startIcon={<LogoutIcon />}
                   onClick={handleDCDisconnect}
                 >
-                  Disconnect
+                  Ngắt kết nối
                 </Button>
               </Stack>
             </Stack>
@@ -721,22 +721,22 @@ export default function Messaging() {
           {dcState === DC_STATE.AWAITING_DM && (
             <Stack spacing={2}>
               <Alert severity="info" variant="outlined">
-                Bot online as <strong>{dcInfo.bot_username}</strong>.
+                Bot đang online dưới tên <strong>{dcInfo.bot_username}</strong>.
                 {dcInfo.bot_invite_url && (
                   <>
                     {" "}
                     <Link href={dcInfo.bot_invite_url} target="_blank" rel="noreferrer" sx={{ fontWeight: 600 }}>
-                      Invite it to a server
+                      Mời bot vào máy chủ
                     </Link>
-                    {" "}if you haven't yet, then
+                    {" "}nếu bạn chưa làm, sau đó
                   </>
                 )}
-                {" "}DM the bot from any Discord client to activate notifications.
+                {" "}nhắn riêng cho bot từ bất kỳ ứng dụng Discord nào để bật thông báo.
               </Alert>
               <Stack direction="row" spacing={1.5}>
-                <Button variant="outlined" onClick={fetchStatus}>Refresh status</Button>
+                <Button variant="outlined" onClick={fetchStatus}>Làm mới trạng thái</Button>
                 <Button variant="outlined" color="error" startIcon={<LogoutIcon />} onClick={handleDCDisconnect}>
-                  Cancel
+                  Hủy
                 </Button>
               </Stack>
             </Stack>
@@ -745,15 +745,15 @@ export default function Messaging() {
           {(dcState === DC_STATE.DISCONNECTED || dcState === DC_STATE.CONNECTING) && (
             <Stack spacing={2}>
               <Typography variant="body2" color="text.secondary">
-                Create a bot at{" "}
+                Tạo bot tại{" "}
                 <Link href="https://discord.com/developers/applications" target="_blank" rel="noreferrer">
                   discord.com/developers/applications
                 </Link>
-                {" "}— click <strong>New Application</strong> → <strong>Bot</strong> → copy the token and paste below.
-                DMs work without any privileged intents.
+                {" "}— bấm <strong>New Application</strong> → <strong>Bot</strong> → sao chép token rồi dán bên dưới.
+                Tin nhắn riêng hoạt động mà không cần privileged intents.
               </Typography>
               <TextField
-                label="Bot token"
+                label="Token bot"
                 type="password"
                 fullWidth
                 size="small"
@@ -771,7 +771,7 @@ export default function Messaging() {
                   startIcon={dcSaving ? <CircularProgress size={16} color="inherit" /> : null}
                   sx={{ bgcolor: "#5865F2", "&:hover": { bgcolor: "#4752C4" } }}
                 >
-                  {dcSaving ? "Connecting…" : "Connect"}
+                  {dcSaving ? "Đang kết nối…" : "Kết nối"}
                 </Button>
               </Box>
             </Stack>
@@ -789,7 +789,7 @@ export default function Messaging() {
             <Box sx={{ flex: 1 }}>
               <Typography variant="h6" sx={{ fontWeight: 600 }}>Slack</Typography>
               <Typography variant="caption" color="text.secondary">
-                Socket Mode — no public URL needed. DM your bot to chat and get notifications.
+                Socket Mode — không cần URL công khai. Nhắn riêng cho bot để trò chuyện và nhận thông báo.
               </Typography>
             </Box>
             {slStatusChip()}
@@ -799,11 +799,11 @@ export default function Messaging() {
 
           {slState === SL_STATE.UNAVAILABLE && (
             <Alert severity="warning" variant="outlined">
-              Slack support requires the <code>slack-sdk</code> Python package. Install
-              dependencies with <code>pip install -r requirements.txt</code>, then restart the app.
+              Hỗ trợ Slack cần gói Python <code>slack-sdk</code>. Hãy cài
+              các phụ thuộc bằng <code>pip install -r requirements.txt</code>, rồi khởi động lại ứng dụng.
               {slInfo.error && (
                 <Typography variant="caption" display="block" sx={{ mt: 1, opacity: 0.8 }}>
-                  Details: {slInfo.error}
+                  Chi tiết: {slInfo.error}
                 </Typography>
               )}
             </Alert>
@@ -812,8 +812,8 @@ export default function Messaging() {
           {slState === SL_STATE.CONNECTED && (
             <Stack spacing={2}>
               <Alert severity="success" variant="outlined">
-                Connected to <strong>{slInfo.team_name || "your Slack workspace"}</strong>. DM
-                your bot in Slack to chat with the planner — notifications arrive in the same thread.
+                Đã kết nối với <strong>{slInfo.team_name || "workspace Slack của bạn"}</strong>. Nhắn riêng
+                cho bot trên Slack để trò chuyện với trợ lý — thông báo sẽ đến trong cùng cuộc hội thoại.
               </Alert>
               <Stack direction="row" spacing={1.5}>
                 <Button
@@ -823,7 +823,7 @@ export default function Messaging() {
                   disabled={slTesting}
                   sx={{ bgcolor: "#611F69", "&:hover": { bgcolor: "#4A154B" } }}
                 >
-                  Send test message
+                  Gửi tin nhắn thử
                 </Button>
                 <Button
                   variant="outlined"
@@ -831,7 +831,7 @@ export default function Messaging() {
                   startIcon={<LogoutIcon />}
                   onClick={handleSLDisconnect}
                 >
-                  Disconnect
+                  Ngắt kết nối
                 </Button>
               </Stack>
             </Stack>
@@ -840,13 +840,13 @@ export default function Messaging() {
           {slState === SL_STATE.AWAITING_DM && (
             <Stack spacing={2}>
               <Alert severity="info" variant="outlined">
-                Bot online{slInfo.team_name ? ` in ${slInfo.team_name}` : ""}. Open Slack and
-                DM your bot (search its name in the sidebar) to activate notifications.
+                Bot đang online{slInfo.team_name ? ` trong ${slInfo.team_name}` : ""}. Mở Slack và
+                nhắn riêng cho bot (tìm tên bot ở thanh bên) để bật thông báo.
               </Alert>
               <Stack direction="row" spacing={1.5}>
-                <Button variant="outlined" onClick={fetchStatus}>Refresh status</Button>
+                <Button variant="outlined" onClick={fetchStatus}>Làm mới trạng thái</Button>
                 <Button variant="outlined" color="error" startIcon={<LogoutIcon />} onClick={handleSLDisconnect}>
-                  Cancel
+                  Hủy
                 </Button>
               </Stack>
             </Stack>
@@ -855,16 +855,16 @@ export default function Messaging() {
           {(slState === SL_STATE.DISCONNECTED || slState === SL_STATE.CONNECTING) && (
             <Stack spacing={2}>
               <Typography variant="body2" color="text.secondary">
-                Create a Slack app at{" "}
+                Tạo ứng dụng Slack tại{" "}
                 <Link href="https://api.slack.com/apps" target="_blank" rel="noreferrer">api.slack.com/apps</Link>.
-                Enable <strong>Socket Mode</strong>, generate an app-level token with{" "}
-                <code>connections:write</code>, and install the bot to your workspace with scopes{" "}
+                Bật <strong>Socket Mode</strong>, tạo token cấp ứng dụng với{" "}
+                <code>connections:write</code>, và cài bot vào workspace với các scope{" "}
                 <code>chat:write</code>, <code>im:history</code>, <code>im:read</code>,{" "}
-                <code>im:write</code>, <code>users:read</code>. Then subscribe to the{" "}
-                <code>message.im</code> event.
+                <code>im:write</code>, <code>users:read</code>. Sau đó đăng ký sự kiện{" "}
+                <code>message.im</code> .
               </Typography>
               <TextField
-                label="Bot token (xoxb-…)"
+                label="Token bot (xoxb-…)"
                 type="password"
                 fullWidth
                 size="small"
@@ -875,7 +875,7 @@ export default function Messaging() {
                 autoComplete="off"
               />
               <TextField
-                label="App-level token (xapp-…)"
+                label="Token cấp ứng dụng (xapp-…)"
                 type="password"
                 fullWidth
                 size="small"
@@ -893,7 +893,7 @@ export default function Messaging() {
                   startIcon={slSaving ? <CircularProgress size={16} color="inherit" /> : null}
                   sx={{ bgcolor: "#611F69", "&:hover": { bgcolor: "#4A154B" } }}
                 >
-                  {slSaving ? "Connecting…" : "Connect"}
+                  {slSaving ? "Đang kết nối…" : "Kết nối"}
                 </Button>
               </Box>
             </Stack>
@@ -918,7 +918,7 @@ export default function Messaging() {
             onClick={handleWADisconnect}
             size="small"
             sx={{ position: "absolute", right: 8, top: 8 }}
-            aria-label="Close"
+            aria-label="Đóng"
           >
             <CloseIcon fontSize="small" />
           </IconButton>
@@ -926,7 +926,7 @@ export default function Messaging() {
         <DialogContent>
           <Stack spacing={2} alignItems="center">
             <Typography variant="body2" color="text.secondary" sx={{ textAlign: "center" }}>
-              On your phone, open <strong>WhatsApp → Settings → Linked Devices → Link a Device</strong>,
+              Trên điện thoại, mở <strong>WhatsApp → Cài đặt → Thiết bị liên kết → Liên kết thiết bị</strong>,
               then scan this code.
             </Typography>
             {waQr ? (
@@ -936,17 +936,17 @@ export default function Messaging() {
             ) : (
               <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, py: 6 }}>
                 <CircularProgress size={20} />
-                <Typography variant="body2" color="text.secondary">Waiting for QR code…</Typography>
+                <Typography variant="body2" color="text.secondary">Đang chờ mã QR…</Typography>
               </Box>
             )}
             <Typography variant="caption" color="text.secondary" sx={{ textAlign: "center" }}>
-              The code refreshes automatically. This dialog closes once pairing completes.
+              Mã sẽ tự làm mới. Hộp thoại này sẽ đóng khi ghép nối hoàn tất.
             </Typography>
           </Stack>
         </DialogContent>
         <DialogActions>
           <Button onClick={handleWADisconnect} color="error" startIcon={<LogoutIcon />}>
-            Cancel pairing
+            Hủy ghép nối
           </Button>
         </DialogActions>
       </Dialog>

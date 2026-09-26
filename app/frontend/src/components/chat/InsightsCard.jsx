@@ -11,7 +11,7 @@ export default function InsightsCard({ videos }) {
   const handleGenerate = async (id) => {
     try {
       const { data } = await http.post(`/api/downloaded/${id}/generate`)
-      showSnackbar("Video generation started!", "success")
+      showSnackbar("Đã bắt đầu tạo video!", "success")
     } catch (err) {
       showSnackbar(err.response?.data?.detail || err.message, "error")
     }
@@ -37,7 +37,7 @@ export default function InsightsCard({ videos }) {
           <Card key={v.id} elevation={0} sx={{ border: 1, borderColor: "divider", borderRadius: 2 }}>
             <CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}>
               <Typography variant="body2" sx={{ fontWeight: 500, mb: 0.5, color: "text.primary" }}>
-                {v.title || "Untitled"}
+                {v.title || "Chưa đặt tên"}
               </Typography>
 
               {v.insights && (
@@ -50,7 +50,7 @@ export default function InsightsCard({ videos }) {
                   )}
                   {v.insights.suggested_angle && (
                     <Typography variant="caption">
-                      <Box component="span" sx={{ color: "info.main", fontWeight: 500 }}>Your angle: </Box>
+                      <Box component="span" sx={{ color: "info.main", fontWeight: 500 }}>Góc của bạn: </Box>
                       {v.insights.suggested_angle}
                     </Typography>
                   )}

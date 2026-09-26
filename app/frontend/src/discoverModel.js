@@ -1,7 +1,7 @@
 export function candidateStatus(candidate) {
-  if (candidate?.is_analyzed) return "Analyzed"
-  if (candidate?.is_downloaded) return "Downloaded"
-  return "Discovered"
+  if (candidate?.is_analyzed) return "Đã phân tích"
+  if (candidate?.is_downloaded) return "Đã tải"
+  return "Đã phát hiện"
 }
 
 export function downloadedByScoutResult(videos = []) {

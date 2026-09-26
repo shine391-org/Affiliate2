@@ -20,7 +20,7 @@ const QUICK_SPEEDS = [
 ]
 
 export default function ToolSpeed() {
-  useDocumentTitle("Speed up / Slow down")
+  useDocumentTitle("Tăng / giảm tốc")
   const [speed, setSpeed] = useState(1.5)
   const [keepPitch, setKeepPitch] = useState(true)
 
@@ -30,11 +30,11 @@ export default function ToolSpeed() {
 
   return (
     <ToolRunner
-      title="Speed up / Slow down"
-      description="Adjust video playback speed from 0.25× to 4× with optional pitch preservation"
+      title="Tăng / giảm tốc"
+      description="Điều chỉnh tốc độ phát video từ 0.25× đến 4×, có thể giữ cao độ giọng"
       icon={<SpeedOutlinedIcon fontSize="large" />}
       endpoint="/api/tools/speed"
-      processLabel="Apply speed"
+      processLabel="Áp dụng tốc độ"
       canSubmit={!isNoOp}
       disabledReason="Pick a speed other than 1×"
       fieldBuilder={() => ({ speed, keep_pitch: keepPitch })}
@@ -42,7 +42,7 @@ export default function ToolSpeed() {
       <Stack spacing={2.5}>
         <Box>
           <Typography variant="caption" sx={{ fontWeight: 600, display: "block", mb: 1 }}>
-            Speed multiplier — <strong>{speed.toFixed(2)}×</strong>
+            Hệ số tốc độ — <strong>{speed.toFixed(2)}×</strong>
           </Typography>
           <Slider
             value={speed}
@@ -93,8 +93,8 @@ export default function ToolSpeed() {
               </Typography>
               <Typography variant="caption" sx={{ color: "text.secondary" }}>
                 {keepPitch
-                  ? "Voices stay natural even at higher speeds (recommended)"
-                  : "Audio plays at the new speed — chipmunk effect at >1×, slowed-down deep voice at <1×"}
+                  ? "Giọng vẫn tự nhiên ở tốc độ cao hơn (khuyên dùng)"
+                  : "Âm thanh chạy theo tốc độ mới — nhanh hơn sẽ cao giọng, chậm hơn sẽ trầm giọng"}
               </Typography>
             </Box>
           }

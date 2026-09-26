@@ -55,7 +55,7 @@ export default function ScoutResults({
     if (result?.platform === "news") {
       try {
         await http.post("/api/news/save", { article_ids: [id] })
-        showSnackbar("Saving article to Library...", "success")
+        showSnackbar("Đang lưu bài viết vào Thư viện...", "success")
       } catch (err) {
         showSnackbar(err.response?.data?.detail || err.message, "error")
       }
@@ -63,7 +63,7 @@ export default function ScoutResults({
     }
     try {
       await http.post("/api/scout/download", { scout_result_ids: [id] })
-      showSnackbar("Downloading & analyzing video...", "success")
+      showSnackbar("Đang tải và phân tích video...", "success")
     } catch (err) {
       showSnackbar(err.response?.data?.detail || err.message, "error")
     }
@@ -72,7 +72,7 @@ export default function ScoutResults({
   const handleDeleteOne = async (id) => {
     try {
       await http.delete(`/api/scout/results/${id}`)
-      showSnackbar("Deleted", "success")
+      showSnackbar("Đã xóa", "success")
       selectedIds.delete(id)
       setSelectedIds(new Set(selectedIds))
       if (selectedResult?.id === id) setSelectedResult(null)
@@ -88,7 +88,7 @@ export default function ScoutResults({
     try {
       const ids = [...selectedIds]
       await Promise.all(ids.map((id) => http.delete(`/api/scout/results/${id}`)))
-      showSnackbar(`Deleted ${ids.length} result${ids.length > 1 ? "s" : ""}`, "success")
+      showSnackbar(`Đã xóa ${ids.length} kết quả`, "success")
       setSelectedIds(new Set())
       if (selectedResult && ids.includes(selectedResult.id)) setSelectedResult(null)
       onRefresh?.()
@@ -104,8 +104,8 @@ export default function ScoutResults({
       {/* Toolbar */}
       <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ mb: 2 }}>
         <ButtonGroup size="small" variant="outlined">
-          <Button onClick={() => setView("cards")} variant={view === "cards" ? "contained" : "outlined"} startIcon={<GridViewIcon />}>Cards</Button>
-          <Button onClick={() => setView("table")} variant={view === "table" ? "contained" : "outlined"} startIcon={<TableRowsIcon />}>Table</Button>
+          <Button onClick={() => setView("cards")} variant={view === "cards" ? "contained" : "outlined"} startIcon={<GridViewIcon />}>Thẻ</Button>
+          <Button onClick={() => setView("table")} variant={view === "table" ? "contained" : "outlined"} startIcon={<TableRowsIcon />}>Bảng</Button>
         </ButtonGroup>
 
         <Box sx={{ flex: 1 }} />
@@ -139,10 +139,10 @@ export default function ScoutResults({
 
       {/* Delete confirmation dialog */}
       <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>Delete {selectedIds.size} result{selectedIds.size > 1 ? "s" : ""}?</DialogTitle>
-        <DialogContent><Typography>This will permanently remove the selected scout results.</Typography></DialogContent>
+        <DialogTitle>Xóa {selectedIds.size} kết quả?</DialogTitle>
+        <DialogContent><Typography>Thao tác này sẽ xóa vĩnh viễn các kết quả quét đã chọn.</Typography></DialogContent>
         <DialogActions>
-          <Button onClick={() => setConfirmOpen(false)}>Cancel</Button>
+          <Button onClick={() => setConfirmOpen(false)}>Hủy</Button>
           <Button color="error" variant="contained" disabled={deleting} onClick={() => { setConfirmOpen(false); handleBatchDelete() }}>
             {deleting ? "Deleting..." : "Delete"}
           </Button>
@@ -157,7 +157,7 @@ export default function ScoutResults({
               <Typography variant="h6">{selectedResult.title}</Typography>
               {selectedResult.platform === "news" ? (
                 <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.5 }}>
-                  <Chip icon={<NewspaperIcon />} label="NEWS" size="small" variant="outlined" color="warning" />
+                  <Chip icon={<NewspaperIcon />} label="TIN" size="small" variant="outlined" color="warning" />
                   <Typography variant="body2" sx={{ color: "text.secondary" }}>
                     {selectedResult.author} · Score: {selectedResult.virality_score}
                     {selectedResult.upload_date && ` · ${new Date(selectedResult.upload_date).toLocaleDateString()}`}
@@ -190,19 +190,19 @@ export default function ScoutResults({
                     )}
                     {desc.hook && (
                       <Box>
-                        <Typography variant="caption" sx={{ fontWeight: 700, color: "text.secondary" }}>Video Hook</Typography>
+                        <Typography variant="caption" sx={{ fontWeight: 700, color: "text.secondary" }}>Hook video</Typography>
                         <Typography variant="body2">{desc.hook}</Typography>
                       </Box>
                     )}
                     {desc.suggested_angle && (
                       <Box>
-                        <Typography variant="caption" sx={{ fontWeight: 700, color: "text.secondary" }}>Suggested Angle</Typography>
+                        <Typography variant="caption" sx={{ fontWeight: 700, color: "text.secondary" }}>Góc đề xuất</Typography>
                         <Typography variant="body2">{desc.suggested_angle}</Typography>
                       </Box>
                     )}
                     {desc.talking_points?.length > 0 && (
                       <Box>
-                        <Typography variant="caption" sx={{ fontWeight: 700, color: "text.secondary" }}>Talking Points</Typography>
+                        <Typography variant="caption" sx={{ fontWeight: 700, color: "text.secondary" }}>Ý chính</Typography>
                         {desc.talking_points.map((pt, i) => (
                           <Typography key={i} variant="body2" sx={{ pl: 1 }}>• {pt}</Typography>
                         ))}

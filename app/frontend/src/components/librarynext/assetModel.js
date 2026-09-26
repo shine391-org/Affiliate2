@@ -35,8 +35,8 @@ import { toDate } from "../../utils/format.js"
 // without reading a single word.
 export const ORIGINS = {
   created: {
-    label: "Created",
-    hint: "Made in ViralMint from a prompt, script or brief",
+    label: "Đã tạo",
+    hint: "Được tạo trong ViralMint từ prompt, kịch bản hoặc brief",
     light: "#c96442",   // brand terracotta — the app's own act of making
     // Text-only step-down. Decoration and text have different contrast floors
     // — 3:1 vs 4.5:1 — and the brand terracotta falls between them: measured
@@ -51,14 +51,14 @@ export const ORIGINS = {
     // The word was wrong — the bucket is overwhelmingly videos downloaded from
     // links, so "Imported" read as a claim about the handful of disk imports.
     // "Sources" covers all three and matches the "By source" grouping.
-    label: "Sources",
-    hint: "Raw material that came from outside — downloaded from a link, imported from your disk, or uploaded",
+    label: "Nguồn",
+    hint: "Tư liệu từ bên ngoài — tải từ liên kết, nhập từ máy hoặc tải lên",
     light: "#0e7490",
     dark: "#22b8cf",
   },
   edited: {
-    label: "Edited",
-    hint: "Made from something already in your library — a clip, a reframe, burned captions, extracted audio",
+    label: "Đã chỉnh sửa",
+    hint: "Được tạo từ nội dung đã có trong thư viện — cắt clip, đổi khung, chèn phụ đề hoặc tách âm thanh",
     light: "#6d5bd0",
     dark: "#a78bfa",
   },
@@ -90,10 +90,10 @@ export function originTextColor(origin, isDark) {
 
 // ── The media axis ──────────────────────────────────────────────────────────
 export const MEDIA = {
-  video: { label: "Video", plural: "videos" },
-  image: { label: "Image", plural: "images" },
-  audio: { label: "Audio", plural: "audio files" },
-  doc: { label: "Files", plural: "files" },
+  video: { label: "Video", plural: "video" },
+  image: { label: "Ảnh", plural: "ảnh" },
+  audio: { label: "Âm thanh", plural: "tệp âm thanh" },
+  doc: { label: "Tệp", plural: "tệp" },
 }
 
 export const MEDIA_KEYS = ["video", "image", "audio", "doc"]
@@ -106,46 +106,46 @@ export const MEDIA_KEYS = ["video", "image", "audio", "doc"]
 // another.
 export const PRODUCERS = {
   // generated_videos.source_type — the studios.
-  smart_video: { label: "Stock Video", media: "video", origin: "created" },
-  motion_graphics: { label: "Motion Graphics", media: "video", origin: "created" },
+  smart_video: { label: "Video kho", media: "video", origin: "created" },
+  motion_graphics: { label: "Đồ họa chuyển động", media: "video", origin: "created" },
   // A clip is cut FROM a source you own — derived, not created. Filing it under
   // "Generated" is why a clip and the video it came from could never be seen
   // together.
-  clip_extraction: { label: "Clipper", media: "video", origin: "edited" },
+  clip_extraction: { label: "Cắt clip", media: "video", origin: "edited" },
   // Canonical Studio derivatives. Smart Cut is live through the existing
   // Clipper renderer; Creative Remake remains reserved. Both use
   // source_downloaded_video_id so Library lineage needs no second asset model.
-  smart_cut: { label: "Smart Cut", media: "video", origin: "edited" },
-  creative_remake: { label: "Creative Remake", media: "video", origin: "edited" },
+  smart_cut: { label: "Cắt thông minh", media: "video", origin: "edited" },
+  creative_remake: { label: "Làm lại sáng tạo", media: "video", origin: "edited" },
 
   // Made here from nothing you already owned.
-  "tool:voiceover": { label: "Voice-over", media: "audio", origin: "created" },
+  "tool:voiceover": { label: "Lồng tiếng", media: "audio", origin: "created" },
 
   // Editors — every one of these is EDITED from something you already own, and
   // not one of them appeared anywhere before the Library index existed.
-  "tool:captions": { label: "Captions", media: "video", origin: "edited" },
-  "tool:reframe": { label: "Reframe", media: "video", origin: "edited" },
-  "tool:trim": { label: "Trim", media: "video", origin: "edited" },
-  "tool:speed": { label: "Speed", media: "video", origin: "edited" },
-  "tool:transform": { label: "Transform", media: "video", origin: "edited" },
-  "tool:merge_clips": { label: "Merge", media: "video", origin: "edited" },
+  "tool:captions": { label: "Phụ đề", media: "video", origin: "edited" },
+  "tool:reframe": { label: "Đổi khung", media: "video", origin: "edited" },
+  "tool:trim": { label: "Cắt đoạn", media: "video", origin: "edited" },
+  "tool:speed": { label: "Tốc độ", media: "video", origin: "edited" },
+  "tool:transform": { label: "Biến đổi", media: "video", origin: "edited" },
+  "tool:merge_clips": { label: "Ghép", media: "video", origin: "edited" },
   "tool:watermark": { label: "Watermark", media: "video", origin: "edited" },
-  "tool:auto_zoom": { label: "Auto zoom", media: "video", origin: "edited" },
-  "tool:remove_silence": { label: "Silence cut", media: "video", origin: "edited" },
-  "tool:compress": { label: "Compress", media: "video", origin: "edited" },
-  "tool:crop": { label: "Crop", media: "video", origin: "edited" },
-  "tool:translate": { label: "Translate", media: "video", origin: "edited" },
-  "tool:music_visualizer": { label: "Visualizer", media: "video", origin: "edited" },
-  "tool:audio_enhance": { label: "Enhanced", media: "video", origin: "edited" },
+  "tool:auto_zoom": { label: "Tự động zoom", media: "video", origin: "edited" },
+  "tool:remove_silence": { label: "Cắt khoảng lặng", media: "video", origin: "edited" },
+  "tool:compress": { label: "Nén", media: "video", origin: "edited" },
+  "tool:crop": { label: "Cắt khung", media: "video", origin: "edited" },
+  "tool:translate": { label: "Dịch", media: "video", origin: "edited" },
+  "tool:music_visualizer": { label: "Trực quan hóa", media: "video", origin: "edited" },
+  "tool:audio_enhance": { label: "Đã cải thiện", media: "video", origin: "edited" },
   "tool:gif": { label: "GIF", media: "image", origin: "edited" },
-  "tool:subtitle_export": { label: "Subtitles", media: "doc", origin: "edited" },
-  "tool:auto_chapters": { label: "Chapters", media: "doc", origin: "edited" },
-  "tool:metadata": { label: "Metadata", media: "doc", origin: "edited" },
+  "tool:subtitle_export": { label: "Phụ đề", media: "doc", origin: "edited" },
+  "tool:auto_chapters": { label: "Chương", media: "doc", origin: "edited" },
+  "tool:metadata": { label: "Siêu dữ liệu", media: "doc", origin: "edited" },
 
   // Things that came from outside.
-  download: { label: "Download", media: "video", origin: "imported" },
-  import: { label: "Import", media: "video", origin: "imported" },
-  music_upload: { label: "Upload", media: "audio", origin: "imported" },
+  download: { label: "Tải xuống", media: "video", origin: "imported" },
+  import: { label: "Nhập", media: "video", origin: "imported" },
+  music_upload: { label: "Tải lên", media: "audio", origin: "imported" },
 }
 
 /** Classify a stored row. `mediaOverride` covers the one case the key can't
@@ -153,7 +153,7 @@ export const PRODUCERS = {
 export function classify(producerKey, mediaOverride) {
   const key = normalizeProducerKey(producerKey)
   const p = PRODUCERS[key]
-  if (!p) return { label: key || "Unknown", media: mediaOverride || "video", origin: "created", unmapped: true }
+  if (!p) return { label: key || "Không xác định", media: mediaOverride || "video", origin: "created", unmapped: true }
   return { ...p, media: mediaOverride || p.media }
 }
 
@@ -228,16 +228,16 @@ export function normalizeProducerKey(raw) {
 // in the library", and these have no file.
 export const JOB_ONLY_LABELS = {
   scout: "Scout",
-  news_scout: "News scout",
-  news_save: "Saved article",
-  analyze: "Analysis",
-  channel_analysis: "Channel analysis",
+  news_scout: "Quét tin",
+  news_save: "Bài viết đã lưu",
+  analyze: "Phân tích",
+  channel_analysis: "Phân tích kênh",
   generate: "Stock Video",
   extract_clips: "Clipper",
-  motion_render: "Motion render",
+  motion_render: "Kết xuất chuyển động",
   motion_compose: "AI Compose",
-  upload: "Upload",
-  "tool:hook_analysis": "Hook analysis",
+  upload: "Tải lên",
+  "tool:hook_analysis": "Phân tích hook",
   // NOT here: tool:metadata (.json) and tool:podcast_series (.zip). Both write
   // a durable file the user can download, both are producers in the map above,
   // and listing them here told Activity the opposite — so neither earned a
@@ -294,20 +294,20 @@ export function jobDetail(job, input) {
     if (p.url) return _trunc(p.url)
     if (Array.isArray(p.batch_urls)) {
       const n = p.count || p.batch_urls.length
-      return `${n} video${n === 1 ? "" : "s"}`
+      return `${n} video`
     }
     if (Array.isArray(p.scout_result_ids)) {
       const n = p.scout_result_ids.length
-      return `${n} scouted video${n === 1 ? "" : "s"}`
+      return `${n} video đã quét`
     }
-    if (p.channel_download) return `Channel${p.max_videos ? ` · top ${p.max_videos}` : ""}`
+    if (p.channel_download) return `Kênh${p.max_videos ? ` · top ${p.max_videos}` : ""}`
     return ""
   }
   if (t === "analyze") {
     if (p.type === "channel_analysis" && p.url) return `Channel · ${_trunc(p.url, 50)}`
     if (Array.isArray(p.video_ids)) {
       const n = p.video_ids.length
-      return `${n} video${n === 1 ? "" : "s"}`
+      return `${n} video`
     }
     if (p.url) return _trunc(p.url)
     return ""
@@ -318,14 +318,14 @@ export function jobDetail(job, input) {
       if (p.max_clips) bits.push(
         p.type === "smart_cut"
           ? `${p.max_clips} approved cut${p.max_clips === 1 ? "" : "s"}`
-          : `up to ${p.max_clips} clips`
+          : `tối đa ${p.max_clips} clip`
       )
       if (p.mode && p.mode !== "auto") bits.push(String(p.mode))
       return bits.join(" · ")
     }
     if (p.topic) return _trunc(p.topic)
     if (p.custom_script) return _trunc(p.custom_script, 60)
-    if (p.downloaded_video_id) return "From a downloaded video"
+    if (p.downloaded_video_id) return "Từ video đã tải"
     return ""
   }
   if (t === "news_scout") {
@@ -335,13 +335,13 @@ export function jobDetail(job, input) {
     // Surface the most salient param(s) the tool was run with.
     const bits = []
     if (p.format) bits.push(String(p.format).toUpperCase())
-    if (p.density) bits.push(`${p.density} density`)
+    if (p.density) bits.push(`mật độ ${p.density}`)
     if (p.speed) bits.push(`${p.speed}×`)
     if (p.style) bits.push(String(p.style))
-    if (p.transition === "crossfade") bits.push("crossfade")
+    if (p.transition === "crossfade") bits.push("chuyển mờ")
     if (p.target_aspect && p.target_aspect !== "auto") bits.push(p.target_aspect)
-    if (p.clip_count) bits.push(`${p.clip_count} clips`)
-    if (p.target_count) bits.push(`${p.target_count} chapters`)
+    if (p.clip_count) bits.push(`${p.clip_count} clip`)
+    if (p.target_count) bits.push(`${p.target_count} chương`)
     if (p.zoom_factor) bits.push(`${Math.round((p.zoom_factor - 1) * 100)}% zoom`)
     if (p.start_seconds != null && p.end_seconds != null) bits.push(`${p.start_seconds}s–${p.end_seconds}s`)
     if (p.mode) bits.push(String(p.mode))
@@ -386,7 +386,7 @@ export function activityFromJob(job) {
   // which Studio workflow owns the output.
   if (norm === "generate" && ["clip_extraction", "smart_cut"].includes(input?.type)) {
     p = classify(input.type) || p
-    label = p?.label || (input.type === "smart_cut" ? "Smart Cut" : "Clipper")
+    label = p?.label || (input.type === "smart_cut" ? "Cắt thông minh" : "Cắt clip")
     bound = true
   }
   // Headline precedence matches the old Jobs tab: the stored title, else what
@@ -399,7 +399,7 @@ export function activityFromJob(job) {
     label: job.title || detail || label,
     where: label,
     percent: job.progress_pct != null ? Math.round(job.progress_pct) : null,
-    step: job.current_step || "Working\u2026",
+    step: job.current_step || "Đang xử lý\u2026",
     error: job.error_message || null,
     at: job.completed_at || job.started_at || job.created_at,
     // Raw pair for "done in 2m 14s" — the panel formats it with the shared

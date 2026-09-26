@@ -29,7 +29,7 @@ import useDocumentTitle from "../hooks/useDocumentTitle"
  * store on every visit.
  */
 export default function MotionGraphics() {
-  useDocumentTitle("Motion Graphics")
+  useDocumentTitle("Đồ họa chuyển động")
   const theme = useTheme()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -83,7 +83,7 @@ export default function MotionGraphics() {
         const { data } = await http.post("/api/generate/motion/studio/sync-renders")
         if (data?.imported > 0) {
           showSnackbar(
-            `${data.imported} video${data.imported > 1 ? "s" : ""} added to your Library`,
+            `${data.imported} video đã được thêm vào Thư viện`,
             "success")
         }
       } catch { /* the next tick retries; a toast here would be noise */ }
@@ -107,8 +107,8 @@ export default function MotionGraphics() {
   const hero = (
     <PageHero
       icon={<MovieFilterIcon sx={{ fontSize: 22 }} />}
-      title="Motion Graphics"
-      subtitle="Design animated compositions — kinetic type, stat cards, lower thirds — and render them locally"
+      title="Đồ họa chuyển động"
+      subtitle="Thiết kế bố cục động — chữ động, thẻ số liệu, thanh tiêu đề dưới — và kết xuất ngay trên máy"
       dense
       actions={
         (installed || sourceId) ? (
@@ -163,18 +163,18 @@ export default function MotionGraphics() {
         <Stack alignItems="center" justifyContent="center" spacing={1.5}
           sx={{ height: "100%", color: "text.secondary" }}>
           <CircularProgress />
-          <Typography variant="body2">Starting the studio…</Typography>
+          <Typography variant="body2">Đang khởi động studio…</Typography>
         </Stack>
       )}
       {startError && !starting && (
         <Stack alignItems="center" justifyContent="center" spacing={1}
           sx={{ height: "100%", color: "text.secondary" }}>
-          <Typography variant="body2">Couldn’t start the studio: {startError}</Typography>
-          <Button size="small" onClick={() => window.location.reload()}>Retry</Button>
+          <Typography variant="body2">Không thể khởi động studio: {startError}</Typography>
+          <Button size="small" onClick={() => window.location.reload()}>Thử lại</Button>
         </Stack>
       )}
       {studioUrl && (
-        <iframe key={reloadKey} src={studioUrl} title="Motion Studio"
+        <iframe key={reloadKey} src={studioUrl} title="Studio chuyển động"
           style={{ width: "100%", height: "100%", border: 0, display: "block" }} />
       )}
 

@@ -14,25 +14,27 @@ import useDocumentTitle from "../hooks/useDocumentTitle"
 import useAppStore from "../store/appStore"
 
 const terminal = (status) => ["success", "failed", "cancelled"].includes(status)
+const STATUS_LABELS = { ready: "Sẵn sàng", uploaded: "Đã tải lên", pending: "Đang chờ", running: "Đang chạy", success: "Hoàn tất", failed: "Thất bại", cancelled: "Đã hủy" }
+const SOURCE_LABELS = { generated: "Đã tạo", smart_video: "Video thông minh", clip_extraction: "Clip", smart_cut: "Cắt thông minh", motion_graphics: "Đồ họa chuyển động" }
 
 function PlatformCard({ name, connected, connectLabel, onConnect, onPublish, busy, published, hint }) {
   return (
     <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
       <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
         <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>{name}</Typography>
-        <Chip size="small" label={connected ? "CONNECTED" : "NOT CONNECTED"} color={connected ? "success" : "default"} />
-        {published && <Chip size="small" label="PUBLISHED" color="success" variant="outlined" />}
+        <Chip size="small" label={connected ? "ĐÃ KẾT NỐI" : "CHƯA KẾT NỐI"} color={connected ? "success" : "default"} />
+        {published && <Chip size="small" label="ĐÃ XUẤT BẢN" color="success" variant="outlined" />}
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>{hint}</Typography>
       <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 1.25 }}>
         {!connected && onConnect && (
           <Button variant="outlined" startIcon={<OpenInNewOutlinedIcon />} onClick={onConnect}>
-            {connectLabel || "Connect"}
+            {connectLabel || "Kết nối"}
           </Button>
         )}
         <Button variant="contained" startIcon={<CloudUploadOutlinedIcon />}
           disabled={!connected || busy || published} onClick={onPublish}>
-          {published ? "Published" : "Publish"}
+          {published ? "Đã xuất bản" : "Xuất bản"}
         </Button>
       </Stack>
     </Paper>
@@ -40,7 +42,7 @@ function PlatformCard({ name, connected, connectLabel, onConnect, onPublish, bus
 }
 
 export default function Publish() {
-  useDocumentTitle("Publish")
+  useDocumentTitle("Xuất bản")
   const showSnackbar = useAppStore((s) => s.showSnackbar)
   const [params, setParams] = useSearchParams()
   const [videos, setVideos] = useState([])
@@ -85,15 +87,15 @@ export default function Publish() {
           const publishable = ["ready", "uploaded"].includes(requestedVideo?.status) && requestedVideo?.video_path
           if (!publishable) {
             setVideos(eligible)
-            setError("That video is not a finished publishable output.")
+            setError("Video này chưa phải đầu ra hoàn tất có thể xuất bản.")
             return
           }
           eligible = [requestedVideo, ...eligible]
         } catch (e) {
           setVideos(eligible)
           setError(e.response?.status === 404
-            ? "That requested video no longer exists."
-            : (e.response?.data?.detail || "Could not load the requested video."))
+            ? "Video được yêu cầu không còn tồn tại."
+            : (e.response?.data?.detail || "Không thể tải video được yêu cầu."))
           return
         }
       }
@@ -107,7 +109,7 @@ export default function Publish() {
         }, { replace: true })
       }
     } catch (e) {
-      setError(e.response?.data?.detail || "Could not load publish workspace.")
+      setError(e.response?.data?.detail || "Không thể tải không gian Xuất bản.")
     } finally {
       setLoading(false)
     }
@@ -156,9 +158,9 @@ export default function Publish() {
     try {
       await http.post(`/api/videos/${selected.id}/publish-approval`, { approved })
       await load()
-      showSnackbar(approved ? "Approved for publishing" : "Publish approval revoked", approved ? "success" : "info")
+      showSnackbar(approved ? "Đã duyệt để xuất bản" : "Đã thu hồi duyệt xuất bản", approved ? "success" : "info")
     } catch (e) {
-      setError(e.response?.data?.detail || "Could not update publish approval.")
+      setError(e.response?.data?.detail || "Không thể cập nhật trạng thái duyệt xuất bản.")
     }
   }
 
@@ -179,7 +181,7 @@ export default function Publish() {
         if (terminal(data.status)) {
           pollRef.current = null
           await load()
-          if (data.status === "success") showSnackbar("Publish job completed", "success")
+          if (data.status === "success") showSnackbar("Tác vụ xuất bản đã hoàn tất", "success")
           return
         }
       } catch {
@@ -194,14 +196,14 @@ export default function Publish() {
   const publish = async (platform) => {
     if (!selected) return
     if (!selected.publish_approved) {
-      setError("Approve this exact video before publishing.")
+      setError("Hãy duyệt đúng video này trước khi xuất bản.")
       return
     }
     if (!title.trim()) {
-      setError("Title is required before publishing.")
+      setError("Cần có tiêu đề trước khi xuất bản.")
       return
     }
-    if (!window.confirm(`Publish this approved video to ${platform === "youtube" ? "YouTube" : "TikTok"} now?`)) return
+    if (!window.confirm(`Xuất bản video đã duyệt này lên ${platform === "youtube" ? "YouTube" : "TikTok"} ngay bây giờ?`)) return
 
     setError("")
     try {
@@ -210,10 +212,10 @@ export default function Publish() {
         : { tiktok_title: title.trim(), tiktok_description: caption.trim() }
       await http.patch(`/api/videos/${selected.id}`, patch)
       const { data } = await http.post(`/api/videos/${selected.id}/upload`, { platforms: [platform] })
-      setJob({ id: data.job_id, status: "pending", current_step: "Queued", progress_pct: 0 })
+      setJob({ id: data.job_id, status: "pending", current_step: "Đã xếp hàng", progress_pct: 0 })
       pollJob(data.job_id)
     } catch (e) {
-      setError(e.response?.data?.detail || `Could not publish to ${platform}.`)
+      setError(e.response?.data?.detail || `Không thể xuất bản lên ${platform}.`)
     }
   }
 
@@ -224,9 +226,9 @@ export default function Publish() {
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <PageHero
         icon={<CloudUploadOutlinedIcon sx={{ fontSize: 22 }} />}
-        title="Publish"
-        subtitle="One native owner for human-approved outputs and platform delivery"
-        actions={<Button size="small" variant="outlined" startIcon={<RefreshOutlinedIcon />} onClick={load} disabled={loading}>Refresh</Button>}
+        title="Xuất bản"
+        subtitle="Một luồng chuẩn cho đầu ra đã được người dùng duyệt và phân phối lên nền tảng"
+        actions={<Button size="small" variant="outlined" startIcon={<RefreshOutlinedIcon />} onClick={load} disabled={loading}>Làm mới</Button>}
       />
 
       {error && <Alert severity="error" sx={{ mx: { xs: 1.5, md: 2.5 }, mt: 1 }}>{error}</Alert>}
@@ -237,11 +239,11 @@ export default function Publish() {
         gridTemplateRows: { xs: "minmax(180px, 36%) minmax(0, 1fr)", md: "minmax(0, 1fr)" },
       }}>
         <Box sx={{ overflow: "auto", p: 2, borderRight: { md: 1 }, borderBottom: { xs: 1, md: 0 }, borderColor: "divider" }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1 }}>Finished outputs</Typography>
+          <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1 }}>Đầu ra đã hoàn tất</Typography>
           {loading && !videos.length ? (
             <Stack alignItems="center" sx={{ py: 5 }}><CircularProgress size={28} /></Stack>
           ) : videos.length === 0 ? (
-            <Alert severity="info">No rendered output is ready for publishing yet.</Alert>
+            <Alert severity="info">Chưa có đầu ra đã kết xuất nào sẵn sàng để xuất bản.</Alert>
           ) : (
             <Stack spacing={1}>
               {videos.map((video) => (
@@ -253,9 +255,9 @@ export default function Publish() {
                   }}>
                   <Stack direction="row" spacing={0.75} alignItems="center">
                     <Typography variant="body2" sx={{ fontWeight: 800, flex: 1 }} noWrap>
-                      {video.title || "Untitled"}
+                      {video.title || "Chưa đặt tên"}
                     </Typography>
-                    {video.publish_approved && <Chip size="small" color="success" label="APPROVED" />}
+                    {video.publish_approved && <Chip size="small" color="success" label="ĐÃ DUYỆT" />}
                   </Stack>
                   <Typography variant="caption" color="text.secondary">
                     {video.source_type || video.gen_tier || "generated"} · {video.aspect_ratio || "—"}
@@ -273,7 +275,7 @@ export default function Publish() {
 
         <Box sx={{ overflow: "auto", p: { xs: 1.5, md: 2.5 } }}>
           {!selected ? (
-            <Alert severity="info">Select a finished output.</Alert>
+            <Alert severity="info">Chọn một đầu ra đã hoàn tất.</Alert>
           ) : (
             <Stack spacing={2}>
               <Stack direction={{ xs: "column", lg: "row" }} spacing={2}>
@@ -292,32 +294,32 @@ export default function Publish() {
                 </Box>
 
                 <Stack spacing={1.25} sx={{ flex: 1, minWidth: 0 }}>
-                  <Typography variant="h6" sx={{ fontWeight: 800 }}>{selected.title || "Untitled"}</Typography>
+                  <Typography variant="h6" sx={{ fontWeight: 800 }}>{selected.title || "Chưa đặt tên"}</Typography>
                   <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
-                    <Chip size="small" label={selected.status} />
-                    <Chip size="small" variant="outlined" label={selected.source_type || "generated"} />
+                    <Chip size="small" label={STATUS_LABELS[selected.status] || selected.status} />
+                    <Chip size="small" variant="outlined" label={SOURCE_LABELS[selected.source_type] || selected.source_type || "Đã tạo"} />
                     {selected.publish_approved
-                      ? <Chip size="small" color="success" label="Human approved" />
-                      : <Chip size="small" color="warning" label="Approval required" />}
+                      ? <Chip size="small" color="success" label="Đã được người dùng duyệt" />
+                      : <Chip size="small" color="warning" label="Cần duyệt" />}
                   </Stack>
 
                   <Alert severity={selected.publish_approved ? "success" : "warning"} variant="outlined">
                     {selected.publish_approved
-                      ? "Approval is recorded. Publishing still requires a separate platform button and confirmation."
-                      : "Publishing is blocked until you explicitly approve this exact rendered file."}
+                      ? "Đã ghi nhận phê duyệt. Việc xuất bản vẫn cần bấm nút nền tảng riêng và xác nhận."
+                      : "Xuất bản bị khóa cho đến khi bạn duyệt rõ ràng đúng tệp đã kết xuất này."}
                   </Alert>
 
                   <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
                     <Button variant={selected.publish_approved ? "outlined" : "contained"}
                       color={selected.publish_approved ? "inherit" : "success"}
                       onClick={() => approve(!selected.publish_approved)}>
-                      {selected.publish_approved ? "Revoke approval" : "Approve for publishing"}
+                      {selected.publish_approved ? "Thu hồi duyệt" : "Duyệt để xuất bản"}
                     </Button>
                   </Stack>
 
-                  <TextField label="Publish title" value={title} onChange={(e) => setTitle(e.target.value)}
+                  <TextField label="Tiêu đề xuất bản" value={title} onChange={(e) => setTitle(e.target.value)}
                     inputProps={{ maxLength: 150 }} helperText={`${title.length}/150`} fullWidth />
-                  <TextField label="Caption / description" value={caption} onChange={(e) => setCaption(e.target.value)}
+                  <TextField label="Nội dung mô tả" value={caption} onChange={(e) => setCaption(e.target.value)}
                     multiline minRows={4} inputProps={{ maxLength: 5000 }} helperText={`${caption.length}/5000`} fullWidth />
                 </Stack>
               </Stack>
@@ -325,10 +327,10 @@ export default function Publish() {
               {job && (
                 <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>
                   <Stack direction="row" spacing={1} alignItems="center">
-                    <Chip size="small" label={String(job.status || "").toUpperCase()}
+                    <Chip size="small" label={STATUS_LABELS[job.status] || String(job.status || "").toUpperCase()}
                       color={job.status === "success" ? "success" : job.status === "failed" ? "error" : "info"} />
                     <Typography variant="body2" color="text.secondary">
-                      {job.current_step || job.error_message || "Working…"}
+                      {job.current_step || job.error_message || "Đang xử lý…"}
                     </Typography>
                   </Stack>
                   {active && <LinearProgress variant={job.progress_pct ? "determinate" : "indeterminate"}
@@ -339,32 +341,32 @@ export default function Publish() {
 
               <Divider />
 
-              <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>Destinations</Typography>
+              <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>Nền tảng đích</Typography>
               <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "1fr 1fr" }, gap: 1.5 }}>
                 <PlatformCard
                   name="TikTok"
                   connected={Boolean(settings?.tiktok_upload_connected)}
-                  connectLabel="Connect TikTok"
+                  connectLabel="Kết nối TikTok"
                   onConnect={() => connect("/api/settings/tiktok-upload-auth")}
                   onPublish={() => publish("tiktok")}
                   busy={Boolean(active) || !selected.publish_approved}
                   published={uploaded.has("tiktok")}
-                  hint="Uses the canonical UploadAgent. OAuth is preferred; any legacy cookie fallback remains upload-only and does not own discovery."
+                  hint="Dùng UploadAgent chuẩn. Ưu tiên OAuth; fallback cookie cũ chỉ phục vụ tải lên và không phụ trách khám phá."
                 />
                 <PlatformCard
                   name="YouTube"
                   connected={Boolean(settings?.youtube_connected)}
-                  connectLabel="Connect YouTube"
+                  connectLabel="Kết nối YouTube"
                   onConnect={() => connect("/api/settings/youtube-auth")}
                   onPublish={() => publish("youtube")}
                   busy={Boolean(active) || !selected.publish_approved}
                   published={uploaded.has("youtube")}
-                  hint="Uses the existing YouTube uploader and the encrypted account connection in Settings."
+                  hint="Dùng uploader YouTube hiện có và kết nối tài khoản đã mã hóa trong Cài đặt."
                 />
               </Box>
 
               <Alert severity="info" variant="outlined">
-                Facebook/Instagram and legacy overlay publication history are not being faked into this page. They stay transitional until their native adapters are migrated in Phase F.
+                Lịch sử xuất bản Facebook/Instagram và overlay cũ không được giả lập vào trang này. Chúng vẫn ở trạng thái chuyển tiếp cho đến khi adapter gốc được chuyển đổi.
               </Alert>
             </Stack>
           )}

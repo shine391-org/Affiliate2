@@ -12,17 +12,17 @@ def test_localization_profiles_ui_exposes_editable_guardrails_and_locked_protoco
         / "LocalizationProfilesSection.jsx"
     ).read_text(encoding="utf-8")
 
-    assert 'label="Translation instructions"' in ui
-    assert 'label="C7 rewrite instructions"' in ui
-    assert 'label="C6 semantic guardrails"' in ui
-    assert 'label="C7 semantic guardrails"' in ui
+    assert 'label="Hướng dẫn dịch"' in ui
+    assert 'label="Hướng dẫn viết lại C7"' in ui
+    assert 'label="Quy tắc ngữ nghĩa C6"' in ui
+    assert 'label="Quy tắc ngữ nghĩa C7"' in ui
 
     assert 'draft.translation_guardrails || ""' in ui
     assert 'draft.rewrite_guardrails || ""' in ui
     assert 'patch("translation_guardrails"' in ui
     assert 'patch("rewrite_guardrails"' in ui
 
-    assert "Reset C6 default" in ui
-    assert "Reset C7 default" in ui
-    assert "Prompt Guardrails (Advanced)" in ui
-    assert "stable IDs/order and JSON output protocol stay locked" in ui
+    assert "Đặt lại mặc định C6" in ui
+    assert "Đặt lại mặc định C7" in ui
+    assert "Quy tắc bảo vệ prompt (Nâng cao)" in ui
+    assert "ID/thứ tự ổn định và giao thức đầu ra JSON vẫn bị khóa" in ui

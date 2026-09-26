@@ -9,24 +9,24 @@ import useDocumentTitle from "../../hooks/useDocumentTitle"
 // helper does the work. Works standalone; pairs well right after Captions.
 
 const INTENSITY = [
-  { v: 1.08, label: "Subtle" },
-  { v: 1.15, label: "Default" },
-  { v: 1.25, label: "Punchy" },
-  { v: 1.4, label: "Max" },
+  { v: 1.08, label: "Nhẹ" },
+  { v: 1.15, label: "Mặc định" },
+  { v: 1.25, label: "Mạnh" },
+  { v: 1.4, label: "Tối đa" },
 ]
 
 export default function ToolAutoZoom() {
-  useDocumentTitle("Auto-Zoom")
+  useDocumentTitle("Tự động zoom")
   const [zoom, setZoom] = useState(1.15)
   const [wordsPerGroup, setWordsPerGroup] = useState(3)
 
   return (
     <ToolRunner
-      title="Auto-Zoom"
-      description="Add subtle zoom punch-ins on spoken words for extra energy"
+      title="Tự động zoom"
+      description="Tự zoom nhẹ theo lời nói để video có nhịp hơn"
       icon={<ZoomInMapOutlinedIcon fontSize="large" />}
       endpoint="/api/tools/auto-zoom"
-      processLabel="Add zoom pulses"
+      processLabel="Thêm nhịp zoom"
       fieldBuilder={() => ({ zoom_factor: zoom, words_per_group: wordsPerGroup })}
     >
       <Stack spacing={2.5}>
@@ -68,7 +68,7 @@ export default function ToolAutoZoom() {
         <Alert severity="info" sx={{ fontSize: "0.82rem" }}>
           Needs clear speech (word timings drive the pulses). A clip with no
           detectable speech is returned unchanged. Run this{" "}
-          <strong>after</strong> Add Captions for a synced caption + zoom combo.
+          <strong>sau</strong> bước Thêm phụ đề để đồng bộ phụ đề và hiệu ứng zoom.
         </Alert>
       </Stack>
     </ToolRunner>

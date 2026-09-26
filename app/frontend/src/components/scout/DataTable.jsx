@@ -48,16 +48,16 @@ export default function DataTable({
   }
 
   const columns = [
-    { key: "title", label: "Title", width: "30%" },
-    { key: "platform", label: "Platform", width: "8%" },
-    { key: "views", label: "Views", width: "10%" },
-    { key: "likes", label: "Likes", width: "8%" },
-    { key: "comments", label: "Comments", width: "8%" },
+    { key: "title", label: "Tiêu đề", width: "30%" },
+    { key: "platform", label: "Nền tảng", width: "8%" },
+    { key: "views", label: "Lượt xem", width: "10%" },
+    { key: "likes", label: "Lượt thích", width: "8%" },
+    { key: "comments", label: "Bình luận", width: "8%" },
     { key: "virality_score", label: "Viral", width: "7%" },
     { key: "radar_score", label: "Radar", width: "7%" },
-    ...(showCandidateStatus ? [{ key: "_status", label: "Status", width: "8%", sortable: false }] : []),
-    { key: "upload_date", label: "Uploaded", width: "10%" },
-    { key: "_actions", label: "Actions", width: "18%", sortable: false },
+    ...(showCandidateStatus ? [{ key: "_status", label: "Trạng thái", width: "8%", sortable: false }] : []),
+    { key: "upload_date", label: "Đã tải lên", width: "10%" },
+    { key: "_actions", label: "Thao tác", width: "18%", sortable: false },
   ]
 
   return (
@@ -119,7 +119,7 @@ export default function DataTable({
               </TableCell>
               <TableCell>
                 {r.radar_score == null ? "—" : (
-                  <Tooltip title={`Radar confidence: ${Math.round((r.radar_confidence || 0) * 100)}%`} arrow>
+                  <Tooltip title={`Độ tin cậy Radar: ${Math.round((r.radar_confidence || 0) * 100)}%`} arrow>
                     <Chip
                       label={Number(r.radar_score).toFixed(1)}
                       size="small"
@@ -155,7 +155,7 @@ export default function DataTable({
                   </Button>
                 )}
                 {downloadedIndex?.has(r.id) && onOpenStudio && (
-                  <Tooltip title="Open local asset in Studio" arrow>
+                  <Tooltip title="Mở nội dung cục bộ trong Studio" arrow>
                     <IconButton size="small" onClick={(e) => { e.stopPropagation(); onOpenStudio(r) }}
                       sx={{ color: "text.secondary", "&:hover": { color: "primary.main" } }}>
                       <ContentCutIcon sx={{ fontSize: "1.1rem" }} />
@@ -163,14 +163,14 @@ export default function DataTable({
                   </Tooltip>
                 )}
                 {r.video_url && (
-                  <Tooltip title="Open original" arrow>
+                  <Tooltip title="Mở bản gốc" arrow>
                     <IconButton size="small" onClick={(e) => { e.stopPropagation(); window.open(r.video_url, "_blank", "noopener") }}
                       sx={{ color: "text.secondary", "&:hover": { color: "primary.main" } }}>
                       <LaunchIcon sx={{ fontSize: "1.1rem" }} />
                     </IconButton>
                   </Tooltip>
                 )}
-                <Tooltip title="Delete" arrow>
+                <Tooltip title="Xóa" arrow>
                   <IconButton size="small" onClick={(e) => { e.stopPropagation(); onDelete(r.id) }}
                     sx={{ color: "text.secondary", "&:hover": { color: "error.main" } }}>
                     <DeleteOutlineIcon sx={{ fontSize: "1.1rem" }} />

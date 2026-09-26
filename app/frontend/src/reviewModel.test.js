@@ -81,7 +81,7 @@ test("review category matching uses real reason categories", () => {
 test("structured QC issues are summarized without dumping raw JSON", () => {
   assert.equal(
     formatReviewIssue({ code: "high_speech_speed", count: 2, issues: [{ chunk_id: 3 }, { chunk_id: 5 }] }),
-    "high speech speed · 2 affected items",
+    "high speech speed · 2 mục bị ảnh hưởng",
   )
   assert.equal(
     formatReviewIssue({ code: "preview_tts_provider", provider: "edge_tts", message: "Human approval required." }),
