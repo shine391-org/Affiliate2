@@ -14,6 +14,7 @@ import ChevronLeftIcon from "@mui/icons-material/ChevronLeft"
 import WarningAmberIcon from "@mui/icons-material/WarningAmber"
 import http from "../../api/http"
 import useAppStore from "../../store/appStore"
+import { localizeUiMessage } from "../../utils/localizeUiMessage"
 import { toolJobTypeFor } from "./toolJobType"
 import ToolInputContext from "./ToolInputContext"
 import PageHero from "../PageHero"
@@ -565,7 +566,7 @@ export default function ToolRunner({
               </Alert>
               <GlassPanel sx={{ p: 2.5 }}>
                 <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
-                  {job.step || "Đang xử lý…"}
+                  {localizeUiMessage(job.step || "Đang xử lý…")}
                 </Typography>
                 <LinearProgress variant="determinate" value={job.percent || 0} sx={{ borderRadius: 1, height: 8 }} />
                 <Typography variant="caption" sx={{ color: "text.secondary", mt: 0.5, display: "block" }}>
@@ -582,7 +583,7 @@ export default function ToolRunner({
           {/* Failed */}
           {jobFailed && (
             <Alert severity="error" action={<Button size="small" onClick={reset}>Thử lại</Button>}>
-              {job?.step || terminal?.step || "Tác vụ thất bại"}
+              {localizeUiMessage(job?.step || terminal?.step || "Tác vụ thất bại")}
             </Alert>
           )}
         </Box>
