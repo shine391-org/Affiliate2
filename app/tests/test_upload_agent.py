@@ -263,6 +263,28 @@ class TestSuccessfulUploads:
         assert any(m.get("type") == "upload_complete" and m.get("platform") == "youtube"
                    for m in ws["sent"])
 
+    def test_notification_failure_does_not_corrupt_published_state(
+            self, ws, providers, monkeypatch):
+        async def fail_notification(*args, **kwargs):
+            raise RuntimeError("websocket unavailable")
+
+        async def run():
+            from backend.core.ws_manager import ws_manager
+            monkeypatch.setattr(ws_manager, "send", fail_notification)
+            await _make_settings(
+                youtube_credentials_json_encrypted=encrypt('{"token":"t"}'))
+            vid = await _make_video()
+            jid = await _job()
+            await UploadAgent().run(jid, vid, ["youtube"])
+            return await _job_row(jid), await _video_row(vid), await _publication_rows(vid)
+
+        job, video, publications = asyncio.run(run())
+        assert job.status == "success"
+        assert json.loads(video.uploaded_platforms_json) == ["youtube"]
+        assert len(publications) == 1
+        assert publications[0].status == "PUBLISHED"
+        assert publications[0].public_content_id == "yt1"
+
     def test_a_video_without_drafted_metadata_falls_back_to_its_title(
             self, ws, providers):
         async def run():
