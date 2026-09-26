@@ -589,10 +589,10 @@ export default function ClipStudio({ workflow = "manual" }) {
       await http.post(`/api/downloaded/${videoId}/extract-clips`, payload)
       showSnackbar(
         smartCut
-          ? `Rendering ${opts.time_ranges?.length || "your"} approved Smart Cut${opts.time_ranges?.length !== 1 ? "s" : ""}`
+          ? `Đang kết xuất ${opts.time_ranges?.length || "các"} đoạn Cắt thông minh đã duyệt`
           : isManual
-            ? `Cutting ${opts.time_ranges?.length || "your"} clip${opts.time_ranges?.length !== 1 ? "s" : ""} at the times you picked`
-            : "Extracting viral clips — AI will find the best moments",
+            ? `Đang cắt ${opts.time_ranges?.length || "các"} clip theo mốc thời gian bạn đã chọn`
+            : "Đang tách clip viral — AI sẽ tìm những khoảnh khắc tốt nhất",
         "success",
       )
     } catch (e) {
