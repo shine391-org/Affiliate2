@@ -401,8 +401,9 @@ class TestTikTokUpload:
             _R(status=401, payload={"error": {"code": "access_token_invalid", "message": "expired"}})
         ])
         monkeypatch.setattr(TT.httpx, "AsyncClient", c)
-        with pytest.raises(UploadOutcomeUncertainError, match="Check TikTok before retrying"):
+        with pytest.raises(UploadOutcomeUncertainError, match="Check TikTok before retrying") as exc:
             await TT.upload_to_tiktok(str(video), "t", access_token="TOK")
+        assert exc.value.provider_result == {"publish_id": "pub_1"}
 
     async def test_a_publish_failure_surfaces_tiktoks_reason(self, video, monkeypatch):
         from backend.services import tiktok_uploader as TT
@@ -428,8 +429,9 @@ class TestTikTokUpload:
         from backend.services import tiktok_uploader as TT
         c = _TTClient(statuses=[_R(payload={"data": {"status": "PROCESSING_UPLOAD"}})] * 40)
         monkeypatch.setattr(TT.httpx, "AsyncClient", c)
-        with pytest.raises(UploadError, match="timed out"):
+        with pytest.raises(UploadOutcomeUncertainError, match="timed out") as exc:
             await TT.upload_to_tiktok(str(video), "t", access_token="TOK")
+        assert exc.value.provider_result == {"publish_id": "pub_1"}
 
 
 class TestTikTokCookieFallback:
