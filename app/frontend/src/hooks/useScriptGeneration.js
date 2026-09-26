@@ -25,7 +25,7 @@ export default function useScriptGeneration() {
         })
       } else {
         if (!scriptInstructions.trim()) {
-          showSnackbar("Enter a topic or instructions for the AI to generate a script", "warning")
+          showSnackbar("Nhập chủ đề hoặc hướng dẫn để AI tạo kịch bản", "warning")
           setScriptLoading(false)
           return
         }
@@ -37,7 +37,7 @@ export default function useScriptGeneration() {
       setScript(res.data.script || "")
       setScriptGenerated(true)
     } catch (err) {
-      showSnackbar(err.response?.data?.detail || "Script generation failed", "error")
+      showSnackbar(err.response?.data?.detail || "Tạo kịch bản thất bại", "error")
     } finally {
       setScriptLoading(false)
     }
@@ -45,16 +45,16 @@ export default function useScriptGeneration() {
 
   const handlePolishScript = async () => {
     if (!script.trim()) {
-      showSnackbar("Write a script first before polishing", "warning")
+      showSnackbar("Hãy viết kịch bản trước khi cải thiện", "warning")
       return
     }
     setScriptLoading(true)
     try {
       const res = await http.post("/api/downloaded/polish-script", { script: script.trim() })
       setScript(res.data.script || script)
-      showSnackbar("Script polished successfully", "success")
+      showSnackbar("Đã cải thiện kịch bản", "success")
     } catch (err) {
-      showSnackbar(err.response?.data?.detail || "Script polishing failed", "error")
+      showSnackbar(err.response?.data?.detail || "Cải thiện kịch bản thất bại", "error")
     } finally {
       setScriptLoading(false)
     }
@@ -62,7 +62,7 @@ export default function useScriptGeneration() {
 
   const splitIntoScenes = async (mode, aspectRatio = "9:16", sourceId = null) => {
     if (!script.trim()) {
-      showSnackbar("Write a script first before splitting into scenes", "warning")
+      showSnackbar("Hãy viết kịch bản trước khi chia cảnh", "warning")
       return null
     }
     setScriptLoading(true)
@@ -75,7 +75,7 @@ export default function useScriptGeneration() {
       })
       return res.data.scenes || []
     } catch (err) {
-      showSnackbar(err.response?.data?.detail || "Scene splitting failed", "error")
+      showSnackbar(err.response?.data?.detail || "Chia cảnh thất bại", "error")
       return null
     } finally {
       setScriptLoading(false)
