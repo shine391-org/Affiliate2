@@ -4,6 +4,7 @@ import CancelIcon from "@mui/icons-material/Cancel"
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore"
 import ExpandLessIcon from "@mui/icons-material/ExpandLess"
 import useAppStore from "../../store/appStore"
+import { localizeUiMessage } from "../../utils/localizeUiMessage"
 
 /**
  * Shared active-jobs progress banner used across all video/clip pages.
@@ -74,7 +75,7 @@ function JobCard({ job, fallbackLabel, onCancel }) {
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 0.5 }}>
             <Typography variant="body2" noWrap sx={{ fontWeight: 600, fontSize: "0.85rem", flex: 1, minWidth: 0, mr: 1 }}>
-              {job.step || job.message || fallbackLabel}
+              {localizeUiMessage(job.step || job.message || fallbackLabel)}
             </Typography>
             <Stack direction="row" spacing={0.5} alignItems="center" sx={{ flexShrink: 0 }}>
               <Typography variant="caption" sx={{ color: "primary.main", fontWeight: 700 }}>
