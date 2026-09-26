@@ -18,7 +18,7 @@ export default function EstimatedCost({ ttsProvider, script }) {
       </Typography>
       {estVideoSeconds > 0 && (
         <Typography variant="caption" sx={{ color: "text.secondary", display: "block", mt: 0.25 }}>
-          ~{estVideoSeconds}s video from {wordCount} words
+          ~{estVideoSeconds}s video từ {wordCount} từ
         </Typography>
       )}
     </Alert>
