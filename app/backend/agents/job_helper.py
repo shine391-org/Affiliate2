@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (c) 2025-2026 ViralMint Contributors
 """Utility for creating job records in the database."""
+import asyncio
 import json
 import logging
 
@@ -37,6 +38,7 @@ _EVENT_DATA_KEYS = (
 )
 
 _TERMINAL = {"success", "failed", "cancelled"}
+_ACTIVE_JOB_DEDUPE_LOCK = asyncio.Lock()
 
 async def _notify_phase_f_job(job_type: str, status: str, user_id: str,
                               job_id: str, input_json: str | None,
@@ -116,6 +118,61 @@ async def create_job(job_type: str, user_id: str = "local", input_data: dict = N
         await db.commit()
         await db.refresh(job)
         return job
+
+
+async def create_or_reuse_active_job(
+    job_type: str,
+    user_id: str = "local",
+    input_data: dict | None = None,
+    *,
+    dedupe_key: str | None = None,
+) -> tuple[Job, bool]:
+    """Create one active job per deterministic request signature.
+
+    Rapid duplicate requests in the same backend process are serialized by the
+    lock. The persisted _dedupe_key also lets a later request reuse an active
+    row after a frontend refresh instead of starting another heavy pipeline.
+
+    Returns (job, reused). Terminal jobs never block a fresh run.
+    """
+    if not dedupe_key:
+        return await create_job(job_type, user_id, input_data), False
+
+    payload = dict(input_data or {})
+    payload["_dedupe_key"] = dedupe_key
+
+    async with _ACTIVE_JOB_DEDUPE_LOCK:
+        async with AsyncSessionLocal() as db:
+            from sqlalchemy import select
+
+            active = (await db.execute(
+                select(Job)
+                .where(
+                    Job.user_id == user_id,
+                    Job.job_type == job_type,
+                    Job.status.in_(("pending", "running")),
+                )
+                .order_by(Job.created_at.desc())
+            )).scalars().all()
+
+            for existing in active:
+                try:
+                    submitted = json.loads(existing.input_json or "{}")
+                except (TypeError, ValueError):
+                    continue
+                if isinstance(submitted, dict) and submitted.get("_dedupe_key") == dedupe_key:
+                    return existing, True
+
+            job = Job(
+                user_id=user_id,
+                job_type=job_type,
+                status="pending",
+                input_json=json.dumps(payload),
+            )
+            db.add(job)
+            await db.commit()
+            await db.refresh(job)
+            return job, False
 
 
 async def update_job_status(
