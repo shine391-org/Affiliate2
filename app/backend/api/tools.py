@@ -15,10 +15,12 @@ user's own AI key via backend.core.ai_provider; TTS uses local Edge TTS;
 ffmpeg/whisper tools run locally. Media-gen tools (AI image/music/video/SFX/
 thumbnail) are NOT ported — they need cloud media-gen providers OSS lacks.
 """
+import hashlib
 import json
 import logging
 from pathlib import Path
 from typing import Literal, Optional
+from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
@@ -361,6 +363,54 @@ async def _resolve_translate_source(
     return await save_upload(file, job_id, VIDEO_EXTS, VIDEO_MAX_BYTES)
 
 
+async def _stage_translate_upload(file: UploadFile | None) -> tuple[Path, str, str]:
+    """Validate, hash and stage a direct upload before claiming an idempotent job.
+
+    The content hash is the source identity. Filename/size/content-type are not
+    sufficient because two different videos can legitimately share all three.
+    Streaming to a temporary file also means invalid input never leaves behind
+    a pending reusable Job row.
+    """
+    if not file or not file.filename:
+        raise HTTPException(
+            400, "Provide exactly one translation source: file or downloaded_video_id"
+        )
+
+    ext = Path(file.filename).suffix.lower()
+    if ext not in VIDEO_EXTS:
+        raise HTTPException(400, f"Unsupported format {ext}. Use: {sorted(VIDEO_EXTS)}")
+
+    stage_dir = tools_in_dir() / ".staging"
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    staged = stage_dir / f"{uuid4().hex}{ext}"
+    digest = hashlib.sha256()
+    total = 0
+
+    try:
+        with staged.open("wb") as out:
+            while True:
+                chunk = await file.read(1 << 20)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > VIDEO_MAX_BYTES:
+                    raise HTTPException(
+                        413,
+                        f"File too large (max {VIDEO_MAX_BYTES // 1024 // 1024} MB)",
+                    )
+                digest.update(chunk)
+                out.write(chunk)
+    except Exception:
+        staged.unlink(missing_ok=True)
+        raise
+
+    if not total:
+        staged.unlink(missing_ok=True)
+        raise HTTPException(400, "Uploaded file is empty")
+
+    return staged, f"upload:sha256:{digest.hexdigest()}", ext
+
+
 @router.post("/translate")
 async def translate_tool(
     file: Optional[UploadFile] = File(None),
@@ -386,22 +436,69 @@ async def translate_tool(
     if not (target_language or "").strip():
         raise HTTPException(400, "target_language is required")
 
-    from backend.agents.job_helper import create_job
+    from backend.agents.job_helper import create_or_reuse_active_job
     from backend.core.task_runner import dispatch
     from backend.core.tool_runners import run_tool_translate
-    job = await create_job("tool:translate", "local", {
-        "target_language": target_language,
+
+    stripped_source_id = (downloaded_video_id or "").strip()
+    staged_upload: Path | None = None
+    staged_ext = ""
+    if stripped_source_id:
+        persisted_source_path = await _downloaded_video_path(stripped_source_id)
+        source_signature = f"downloaded:{stripped_source_id}"
+    else:
+        persisted_source_path = None
+        staged_upload, source_signature, staged_ext = await _stage_translate_upload(file)
+    request_signature = json.dumps({
+        "source": source_signature,
+        "target_language": target_language.strip().lower(),
         "mode": mode,
-        "voice_id": voice_id if mode == "full_dub" else None,
+        "voice_id": voice_id if mode == "full_dub" else "",
         "caption_style": caption_style,
-        "target_aspect": target_aspect,
-        "profile_id": profile_id,
+        "emoji_style": emoji_style,
+        "target_aspect": target_aspect or "",
+        "profile_id": profile_id or "",
         "review_translation": bool(review_translation),
-        "downloaded_video_id": downloaded_video_id,
-    })
-    in_path = await _resolve_translate_source(
-        file=file, downloaded_video_id=downloaded_video_id, job_id=job.id,
+    }, sort_keys=True, separators=(",", ":"))
+
+    job, reused = await create_or_reuse_active_job(
+        "tool:translate",
+        "local",
+        {
+            "target_language": target_language,
+            "mode": mode,
+            "voice_id": voice_id if mode == "full_dub" else None,
+            "caption_style": caption_style,
+            "emoji_style": emoji_style,
+            "target_aspect": target_aspect,
+            "profile_id": profile_id,
+            "review_translation": bool(review_translation),
+            "downloaded_video_id": stripped_source_id or None,
+        },
+        dedupe_key=request_signature,
     )
+    if reused:
+        if staged_upload is not None:
+            staged_upload.unlink(missing_ok=True)
+        return {"job_id": job.id, "reused": True}
+
+    if persisted_source_path is not None:
+        in_path = persisted_source_path
+    else:
+        from backend.agents.job_helper import update_job_status
+
+        in_path = tools_in_dir() / f"{job.id}{staged_ext}"
+        try:
+            staged_upload.replace(in_path)
+        except Exception as exc:
+            staged_upload.unlink(missing_ok=True)
+            await update_job_status(
+                job.id,
+                "failed",
+                error_message=f"Could not persist translation source: {exc}",
+            )
+            raise HTTPException(500, "Could not persist translation source") from exc
+
     dispatch(run_tool_translate(
         job.id, in_path, target_language.strip(), mode,
         voice_id, caption_style, emoji_style,
@@ -409,7 +506,7 @@ async def translate_tool(
         profile_id=profile_id,
         review_translation=bool(review_translation),
     ))
-    return {"job_id": job.id}
+    return {"job_id": job.id, "reused": False}
 
 
 @router.post("/hook-analysis")

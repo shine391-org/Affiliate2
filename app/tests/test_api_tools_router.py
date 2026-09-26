@@ -370,6 +370,48 @@ class TestMultiFileAndTextRoutes:
                         data={"target_language": "es", "mode": "telepathy"})
         assert r.status_code == 422
 
+    def test_translate_reuses_the_same_active_direct_upload(self, client):
+        payload = b"A" * 4096
+        data = {"target_language": "vi", "mode": "captions_only"}
+        first = client.post(
+            "/api/tools/translate",
+            files={"file": ("same.mp4", io.BytesIO(payload), "video/mp4")},
+            data=data,
+        )
+        second = client.post(
+            "/api/tools/translate",
+            files={"file": ("same.mp4", io.BytesIO(payload), "video/mp4")},
+            data=data,
+        )
+        assert first.status_code == 200 and second.status_code == 200
+        assert first.json()["job_id"] == second.json()["job_id"]
+        assert first.json()["reused"] is False
+        assert second.json()["reused"] is True
+
+    def test_translate_does_not_conflate_same_metadata_with_different_bytes(self, client):
+        data = {"target_language": "ja", "mode": "captions_only"}
+        first = client.post(
+            "/api/tools/translate",
+            files={"file": ("collision.mp4", io.BytesIO(b"A" * 4096), "video/mp4")},
+            data=data,
+        )
+        second = client.post(
+            "/api/tools/translate",
+            files={"file": ("collision.mp4", io.BytesIO(b"B" * 4096), "video/mp4")},
+            data=data,
+        )
+        assert first.status_code == 200 and second.status_code == 200
+        assert first.json()["job_id"] != second.json()["job_id"]
+        assert second.json()["reused"] is False
+
+    def test_translate_invalid_direct_upload_fails_before_job_claim(self, client):
+        r = client.post(
+            "/api/tools/translate",
+            files={"file": ("bad.txt", io.BytesIO(b"not video"), "text/plain")},
+            data={"target_language": "ko", "mode": "captions_only"},
+        )
+        assert r.status_code == 400
+
     def test_subtitles_offers_all_three_formats(self, client):
         for fmt in ("srt", "vtt", "txt"):
             r = client.post("/api/tools/subtitles", files=_mp4(),

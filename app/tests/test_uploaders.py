@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.core.exceptions import UploadAuthError, UploadError
+from backend.core.exceptions import UploadAuthError, UploadError, UploadOutcomeUncertainError
 
 
 @pytest.fixture()
@@ -280,7 +280,16 @@ class _R:
 class _TTClient:
     """Scripted httpx.AsyncClient for the TikTok 3-step publish flow."""
 
-    def __init__(self, init=None, chunk=None, statuses=None):
+    def __init__(self, init=None, chunk=None, statuses=None, creator=None):
+        self.creator = creator or _R(payload={"data": {
+            "creator_username": "tester",
+            "creator_nickname": "Tester",
+            "privacy_level_options": ["PUBLIC_TO_EVERYONE", "SELF_ONLY"],
+            "comment_disabled": False,
+            "duet_disabled": False,
+            "stitch_disabled": False,
+            "max_video_post_duration_sec": 300,
+        }})
         self.init = init or _R(payload={"data": {"publish_id": "pub_1",
                                                  "upload_url": "https://up.tiktok/x"}})
         self.chunk = chunk or _R(status=201)
@@ -299,7 +308,9 @@ class _TTClient:
 
     async def post(self, url, headers=None, json=None, data=None):
         self.posts.append((url, json or data))
-        if "init" in url:
+        if "creator_info/query" in url:
+            return self.creator
+        if "video/init" in url:
             return self.init
         if "status/fetch" in url:
             return self.statuses.pop(0) if self.statuses else _R(status=500)
@@ -313,7 +324,7 @@ class _TTClient:
 class TestTikTokUpload:
     async def test_neither_token_nor_cookie_is_an_AUTH_error(self, video):
         from backend.services.tiktok_uploader import upload_to_tiktok
-        with pytest.raises(UploadAuthError, match="OAuth access token or session cookie"):
+        with pytest.raises(UploadAuthError, match="OAuth"):
             await upload_to_tiktok(str(video), "t")
 
     async def test_a_missing_file_is_caught_first(self):
@@ -325,8 +336,14 @@ class TestTikTokUpload:
         from backend.services import tiktok_uploader as TT
         c = _TTClient()
         monkeypatch.setattr(TT.httpx, "AsyncClient", c)
-        assert await TT.upload_to_tiktok(str(video), "t", access_token="TOK") == {
-            "publish_id": "pub_1"}
+        out = await TT.upload_to_tiktok(str(video), "t", access_token="TOK")
+        assert out["publish_id"] == "pub_1"
+        assert out["privacy_level"] == "PUBLIC_TO_EVERYONE"
+        assert out["creator_username"] == "tester"
+        urls = [url for url, _ in c.posts]
+        assert urls[0].endswith("/post/publish/creator_info/query/")
+        assert urls[1].endswith("/post/publish/video/init/")
+        assert all("/inbox/video/init/" not in url for url in urls)
 
     async def test_the_whole_file_is_uploaded_in_content_range_chunks(
             self, tmp_path, monkeypatch):
@@ -342,12 +359,30 @@ class TestTikTokUpload:
         assert c.puts[0]["headers"]["Content-Range"] == "bytes 0-1499/1500"
         assert c.puts[0]["len"] == 1500
 
+    async def test_chunk_count_uses_floor_and_final_chunk_absorbs_remainder(
+            self, tmp_path, monkeypatch):
+        from backend.services import tiktok_uploader as TT
+        media = tmp_path / "remainder.mp4"
+        media.write_bytes(b"x" * 2501)
+        monkeypatch.setattr(TT, "CHUNK_SIZE", 1000)
+        c = _TTClient()
+        monkeypatch.setattr(TT.httpx, "AsyncClient", c)
+
+        await TT.upload_to_tiktok(str(media), "t", access_token="TOK")
+
+        init_body = next(body for url, body in c.posts if "video/init" in url)
+        assert init_body["source_info"]["chunk_size"] == 1000
+        assert init_body["source_info"]["total_chunk_count"] == 2
+        assert [put["len"] for put in c.puts] == [1000, 1501]
+        assert c.puts[-1]["headers"]["Content-Range"] == "bytes 1000-2500/2501"
+
     async def test_the_title_is_capped_at_the_api_limit(self, video, monkeypatch):
         from backend.services import tiktok_uploader as TT
         c = _TTClient()
         monkeypatch.setattr(TT.httpx, "AsyncClient", c)
-        await TT.upload_to_tiktok(str(video), "T" * 400, access_token="TOK")
-        assert len(c.posts[0][1]["post_info"]["title"]) == 150
+        await TT.upload_to_tiktok(str(video), "T" * 3000, access_token="TOK")
+        init_body = next(body for url, body in c.posts if "video/init" in url)
+        assert len(init_body["post_info"]["title"]) == 2200
 
     async def test_a_401_on_init_is_an_AUTH_error(self, video, monkeypatch):
         from backend.services import tiktok_uploader as TT
@@ -377,6 +412,16 @@ class TestTikTokUpload:
         with pytest.raises(UploadError, match="chunk upload failed"):
             await TT.upload_to_tiktok(str(video), "t", access_token="TOK")
 
+    async def test_post_upload_status_contract_error_is_uncertain(self, video, monkeypatch):
+        from backend.services import tiktok_uploader as TT
+        c = _TTClient(statuses=[
+            _R(status=401, payload={"error": {"code": "access_token_invalid", "message": "expired"}})
+        ])
+        monkeypatch.setattr(TT.httpx, "AsyncClient", c)
+        with pytest.raises(UploadOutcomeUncertainError, match="Check TikTok before retrying") as exc:
+            await TT.upload_to_tiktok(str(video), "t", access_token="TOK")
+        assert exc.value.provider_result == {"publish_id": "pub_1"}
+
     async def test_a_publish_failure_surfaces_tiktoks_reason(self, video, monkeypatch):
         from backend.services import tiktok_uploader as TT
         c = _TTClient(statuses=[_R(payload={"data": {"status": "FAILED",
@@ -401,45 +446,16 @@ class TestTikTokUpload:
         from backend.services import tiktok_uploader as TT
         c = _TTClient(statuses=[_R(payload={"data": {"status": "PROCESSING_UPLOAD"}})] * 40)
         monkeypatch.setattr(TT.httpx, "AsyncClient", c)
-        with pytest.raises(UploadError, match="timed out"):
+        with pytest.raises(UploadOutcomeUncertainError, match="timed out") as exc:
             await TT.upload_to_tiktok(str(video), "t", access_token="TOK")
+        assert exc.value.provider_result == {"publish_id": "pub_1"}
 
 
 class TestTikTokCookieFallback:
-    async def test_it_routes_to_the_cookie_path_when_only_a_cookie_is_given(
-            self, video, monkeypatch):
+    async def test_cookie_only_connection_is_rejected_as_unverifiable(self, video):
         from backend.services import tiktok_uploader as TT
-        calls = {}
-        mod = types.ModuleType("tiktok_uploader.upload")
-
-        def fake_upload(filename, description, cookies):
-            calls["file"] = filename
-            calls["desc"] = description
-            calls["cookie_file"] = cookies
-            assert Path(cookies).exists(), "the cookie file must exist during upload"
-            return True
-        mod.upload_video = fake_upload
-        monkeypatch.setitem(sys.modules, "tiktok_uploader", types.ModuleType("tiktok_uploader"))
-        monkeypatch.setitem(sys.modules, "tiktok_uploader.upload", mod)
-
-        out = await TT.upload_to_tiktok(str(video), "hello", cookie_sessionid="SESSION")
-        assert out["publish_id"].startswith("cookie_upload_")
-        assert calls["desc"] == "hello"
-        assert not Path(calls["cookie_file"]).exists(), (
-            "the session cookie must be deleted after the upload, not left on disk"
-        )
-
-    async def test_a_library_failure_becomes_an_upload_error(self, video, monkeypatch):
-        from backend.services import tiktok_uploader as TT
-        mod = types.ModuleType("tiktok_uploader.upload")
-
-        def boom(**kw):
-            raise RuntimeError("selenium exploded")
-        mod.upload_video = boom
-        monkeypatch.setitem(sys.modules, "tiktok_uploader", types.ModuleType("tiktok_uploader"))
-        monkeypatch.setitem(sys.modules, "tiktok_uploader.upload", mod)
-        with pytest.raises(UploadError, match="cookie upload failed"):
-            await TT.upload_to_tiktok(str(video), "t", cookie_sessionid="S")
+        with pytest.raises(UploadAuthError, match="legacy cookie"):
+            await TT.upload_to_tiktok(str(video), "hello", cookie_sessionid="SESSION")
 
 
 class TestTikTokOAuth:
@@ -447,7 +463,8 @@ class TestTikTokOAuth:
         from backend.services.tiktok_uploader import build_tiktok_auth_url
         url = build_tiktok_auth_url()
         assert url.startswith("https://www.tiktok.com/v2/auth/authorize/?")
-        assert "video.upload" in url and "video.publish" in url
+        assert "video.publish" in url
+        assert "video.upload" not in url
         assert "response_type=code" in url
 
     async def test_a_successful_exchange_returns_both_tokens(self, monkeypatch):

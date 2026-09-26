@@ -18,7 +18,7 @@ from backend.models.user_settings import UserSettings
 from backend.core.crypto import decrypt, DecryptionError
 from backend.core.ws_manager import ws_manager
 from backend.agents.job_helper import update_job_status
-from backend.core.exceptions import UploadAuthError, safe_json_loads
+from backend.core.exceptions import UploadAuthError, UploadOutcomeUncertainError, safe_json_loads
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +82,9 @@ def disconnected_destinations(settings: UserSettings | None, platforms: list[str
     """Cheap pre-queue check; UploadAgent still validates/decrypts at execution."""
     fields = {
         "youtube": ("youtube_credentials_json_encrypted",),
-        "tiktok": ("tiktok_upload_token_encrypted", "tiktok_cookie_encrypted"),
+        # Canonical Publish requires provider-verifiable OAuth Direct Post.
+        # A legacy session cookie is deliberately not considered connected.
+        "tiktok": ("tiktok_upload_token_encrypted",),
         "instagram": ("instagram_access_token_encrypted",),
     }
     return [p for p in platforms if not settings or not any(
@@ -101,7 +103,7 @@ async def uncertain_publication_destinations(video_id: str) -> set[str]:
     async with AsyncSessionLocal() as db:
         rows = (await db.execute(select(PublicationRecord.platform).where(
             PublicationRecord.generated_video_id == video_id,
-            PublicationRecord.status.in_(["PUBLISHING", "PERSISTENCE_ERROR"]),
+            PublicationRecord.status.in_(["PUBLISHING", "PERSISTENCE_ERROR", "OUTCOME_UNKNOWN"]),
         ))).scalars().all()
     return {str(platform) for platform in rows if platform}
 
@@ -110,6 +112,7 @@ def _publication_metadata(
     video: GeneratedVideo,
     platform: str,
     user_settings: UserSettings | None,
+    platform_options: dict | None = None,
 ) -> tuple[str | None, str | None, str | None]:
     """Return the exact title/caption/privacy semantics sent to a provider."""
     if platform == "youtube":
@@ -120,10 +123,14 @@ def _publication_metadata(
         )
     if platform == "tiktok":
         title = video.tiktok_title or video.title or "Untitled"
+        platform_options = platform_options if isinstance(platform_options, dict) else {}
         privacy = (
-            user_settings.tiktok_default_privacy
-            if user_settings and user_settings.tiktok_default_privacy
-            else "PUBLIC_TO_EVERYONE"
+            platform_options.get("privacy_level")
+            or (
+                user_settings.tiktok_default_privacy
+                if user_settings and user_settings.tiktok_default_privacy
+                else "PUBLIC_TO_EVERYONE"
+            )
         )
         return title, title, privacy
     if platform == "instagram":
@@ -144,7 +151,14 @@ def _publication_result_fields(platform: str, result: dict | None) -> tuple[str 
         external_url = result.get("url")
     elif platform == "tiktok":
         provider_transaction_id = result.get("publish_id")
-        identifier_kind = "upload_transaction_id" if provider_transaction_id else None
+        public_content_id = result.get("post_id")
+        identifier_kind = (
+            "public_video_id" if public_content_id
+            else "publish_transaction_id" if provider_transaction_id
+            else None
+        )
+        if public_content_id:
+            external_url = f"https://www.tiktok.com/video/{public_content_id}"
     elif platform == "instagram":
         public_content_id = result.get("media_id")
         identifier_kind = "public_media_id" if public_content_id else None
@@ -170,6 +184,7 @@ class UploadAgent:
         generated_video_id: str,
         platforms: list[str],
         user_id: str = "local",
+        publish_options: dict | None = None,
     ):
         """Upload a generated video to specified platforms."""
         await update_job_status(job_id, "running", progress_pct=0, current_step="Preparing upload...")
@@ -247,16 +262,20 @@ class UploadAgent:
             )
             user_settings = result.scalar_one_or_none()
 
+        publish_options = publish_options if isinstance(publish_options, dict) else {}
         uploaded = []
         errors = []
         total_platforms = len(platforms)
 
         for i, platform in enumerate(platforms):
+            platform_options = publish_options.get(platform, {})
+            if not isinstance(platform_options, dict):
+                platform_options = {}
             pct = int((i / total_platforms) * 80) + 10
             await ws_manager.send_progress(job_id, pct, f"Uploading to {platform}...", user_id)
 
             publication_id = await self._create_publication_record(
-                video, job_id, platform, user_settings
+                video, job_id, platform, user_settings, platform_options
             )
             provider_result = None
             try:
@@ -280,7 +299,9 @@ class UploadAgent:
                     }, user_id)
 
                 elif platform == "tiktok":
-                    result = await self._upload_tiktok(video, user_settings)
+                    result = await self._upload_tiktok(
+                        video, user_settings, platform_options
+                    )
                     provider_result = result
                     await self._finalize_successful_publication(
                         publication_id,
@@ -295,6 +316,7 @@ class UploadAgent:
                         "type": "upload_complete",
                         "platform": "tiktok",
                         "publish_id": result.get("publish_id"),
+                        "post_id": result.get("post_id"),
                     }, user_id)
 
                 elif platform == "instagram":
@@ -332,6 +354,20 @@ class UploadAgent:
                     severity="error",
                     wizard_id=f"{platform}_auth" if platform == "youtube" else f"{platform}_upload_auth",
                     user_id=user_id,
+                )
+            except UploadOutcomeUncertainError as e:
+                message = (
+                    f"{platform}: provider outcome is unknown: {e}. "
+                    "Do not retry automatically; verify the provider first."
+                )
+                logger.warning(message)
+                errors.append(message)
+                await self._finish_publication_record(
+                    publication_id,
+                    platform,
+                    "OUTCOME_UNKNOWN",
+                    result=e.provider_result,
+                    error_message=str(e),
                 )
             except Exception as e:
                 if provider_result is not None:
@@ -448,8 +484,11 @@ class UploadAgent:
         job_id: str,
         platform: str,
         user_settings: UserSettings | None,
+        platform_options: dict | None = None,
     ) -> str:
-        title, caption, privacy = _publication_metadata(video, platform, user_settings)
+        title, caption, privacy = _publication_metadata(
+            video, platform, user_settings, platform_options
+        )
         record = PublicationRecord(
             generated_video_id=video.id,
             platform=platform,
@@ -543,31 +582,49 @@ class UploadAgent:
             ig_user_id=ig_user_id,
         )
 
-    async def _upload_tiktok(self, video: GeneratedVideo, user_settings) -> dict:
-        """Upload to TikTok via OAuth or cookie fallback."""
+    async def _upload_tiktok(
+        self,
+        video: GeneratedVideo,
+        user_settings,
+        platform_options: dict | None = None,
+    ) -> dict:
+        """Direct-post to TikTok through the official OAuth Content Posting API."""
         access_token = ""
-        cookie_sessionid = ""
+        legacy_cookie_present = False
 
         if user_settings:
             try:
                 if user_settings.tiktok_upload_token_encrypted:
                     access_token = decrypt(user_settings.tiktok_upload_token_encrypted)
-                if not access_token and user_settings.tiktok_cookie_encrypted:
-                    cookie_sessionid = decrypt(user_settings.tiktok_cookie_encrypted)
+                legacy_cookie_present = bool(user_settings.tiktok_cookie_encrypted)
             except DecryptionError:
-                raise UploadAuthError("TikTok credentials corrupted — please reconnect TikTok in Settings.")
+                raise UploadAuthError(
+                    "TikTok credentials corrupted — please reconnect TikTok in Settings."
+                )
 
-        if not access_token and not cookie_sessionid:
-            raise UploadAuthError("TikTok not connected. Set up TikTok upload in Settings.")
+        if not access_token:
+            if legacy_cookie_present:
+                raise UploadAuthError(
+                    "TikTok only has a legacy cookie connection. Reconnect with "
+                    "TikTok OAuth before using canonical Publish."
+                )
+            raise UploadAuthError(
+                "TikTok OAuth is not connected. Reconnect TikTok in Settings before publishing."
+            )
 
         from backend.services.tiktok_uploader import upload_to_tiktok
 
-        title, _, privacy = _publication_metadata(video, "tiktok", user_settings)
+        options = platform_options if isinstance(platform_options, dict) else {}
+        title, _, privacy = _publication_metadata(
+            video, "tiktok", user_settings, options
+        )
 
         return await upload_to_tiktok(
             video_path=video.video_path,
             title=title,
             access_token=access_token,
             privacy=privacy,
-            cookie_sessionid=cookie_sessionid,
+            disable_duet=bool(options.get("disable_duet", False)),
+            disable_comment=bool(options.get("disable_comment", False)),
+            disable_stitch=bool(options.get("disable_stitch", False)),
         )

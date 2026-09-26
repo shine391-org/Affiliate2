@@ -246,6 +246,25 @@ async def upload_video(video_id: str, body: dict, db: AsyncSession = Depends(get
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    raw_publish_options = body.get("publish_options") or {}
+    if not isinstance(raw_publish_options, dict):
+        raise HTTPException(status_code=400, detail="publish_options must be an object")
+    publish_options: dict[str, dict] = {}
+    if "tiktok" in platforms:
+        raw_tiktok = raw_publish_options.get("tiktok") or {}
+        if not isinstance(raw_tiktok, dict):
+            raise HTTPException(status_code=400, detail="publish_options.tiktok must be an object")
+        tiktok_options = {
+            "privacy_level": str(raw_tiktok.get("privacy_level") or "").strip() or None,
+            "disable_duet": bool(raw_tiktok.get("disable_duet", False)),
+            "disable_comment": bool(raw_tiktok.get("disable_comment", False)),
+            "disable_stitch": bool(raw_tiktok.get("disable_stitch", False)),
+        }
+        publish_options["tiktok"] = {
+            key: value for key, value in tiktok_options.items()
+            if value is not None
+        }
+
     async with _publish_queue_lock:
         video = await db.get(GeneratedVideo, video_id)
         if not video:
@@ -297,10 +316,16 @@ async def upload_video(video_id: str, body: dict, db: AsyncSession = Depends(get
                 raise HTTPException(status_code=409,
                                     detail=f"Publish job already pending/running: {existing.id}")
         job = await create_job("upload", user_id, {
-            "generated_video_id": video_id, "platforms": platforms,
+            "generated_video_id": video_id,
+            "platforms": platforms,
+            "publish_options": publish_options,
         })
         dispatch(task_upload(
-            job_id=job.id, generated_video_id=video_id, platforms=platforms, user_id=user_id,
+            job_id=job.id,
+            generated_video_id=video_id,
+            platforms=platforms,
+            user_id=user_id,
+            publish_options=publish_options,
         ))
     return {"job_id": job.id}
 

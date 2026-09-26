@@ -179,7 +179,43 @@ async def _dispatch_existing_run(run: LocalizationRun):
 
 @router.get("/jobs/{job_id}")
 async def localization_job_detail(job_id: str):
-    return _job_detail(_load_run(job_id))
+    from sqlalchemy import select
+    from backend.database import AsyncSessionLocal
+    from backend.models.job import Job
+
+    async with AsyncSessionLocal() as db:
+        job = (await db.execute(
+            select(Job).where(Job.id == job_id)
+        )).scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Localization job not found")
+
+    try:
+        run = LocalizationRun.load(job_id)
+    except ValueError:
+        # A runner can fail before it creates a manifest (profile resolution,
+        # source materialization, etc.). The canonical Job row still owns
+        # lifecycle state, so return it instead of making Studio believe the
+        # job is perpetually loading/active.
+        return {
+            "manifest": None,
+            "transcript": None,
+            "plan": [],
+            "chunks": [],
+            "qc": None,
+            "translation_review_pending": False,
+            "job_status": job.status,
+            "job_current_step": job.current_step,
+            "job_error_message": job.error_message,
+        }
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    detail = _job_detail(run)
+    detail["job_status"] = job.status
+    detail["job_current_step"] = job.current_step
+    detail["job_error_message"] = job.error_message
+    return detail
 
 
 @router.get("/exceptions")

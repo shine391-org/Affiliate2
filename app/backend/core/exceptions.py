@@ -86,6 +86,17 @@ class UploadAuthError(UploadError):
     pass
 
 
+class UploadOutcomeUncertainError(UploadError):
+    """Provider may have accepted a publish but final confirmation is unknown.
+
+    provider_result carries any transaction identifier already issued by the
+    provider so reconciliation remains possible while automatic retry is blocked.
+    """
+    def __init__(self, message: str, provider_result: dict | None = None):
+        super().__init__(message)
+        self.provider_result = provider_result or {}
+
+
 # ── AI errors ─────────────────────────────────────────────────────────────────
 class AIProviderError(ViralMintError):
     pass

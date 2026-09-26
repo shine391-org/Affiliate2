@@ -306,7 +306,8 @@ class TestSuccessfulUploads:
             return await _video_row(vid), await _publication_rows(vid)
         video, publications = asyncio.run(run())
         call = providers["calls"]["tiktok"]
-        assert call["access_token"] == "TOK" and call["cookie_sessionid"] == ""
+        assert call["access_token"] == "TOK"
+        assert "cookie_sessionid" not in call
         assert call["privacy"] == "SELF_ONLY"
         assert call["title"] == "tok title"
         assert video.tiktok_publish_id == "tt1"
@@ -314,16 +315,44 @@ class TestSuccessfulUploads:
         assert publications[0].provider_transaction_id == "tt1"
         assert publications[0].public_content_id is None
 
-    def test_tiktok_falls_back_to_the_session_cookie(self, ws, providers):
+    def test_tiktok_cookie_only_connection_is_not_canonical_publish(self, ws, providers):
         async def run():
             await _make_settings(tiktok_upload_token_encrypted=None,
                                  tiktok_cookie_encrypted=encrypt("SESSION"),
                                  tiktok_default_privacy=None)
-            await UploadAgent().run(await _job(), await _make_video(), ["tiktok"])
+            jid = await _job()
+            await UploadAgent().run(jid, await _make_video(), ["tiktok"])
+            return await _job_row(jid)
+        job = asyncio.run(run())
+        assert job.status == "failed"
+        assert "tiktok" not in providers["calls"]
+        assert "legacy cookie" in ws["warnings"][0]["message"].lower()
+
+    def test_tiktok_explicit_publish_options_override_saved_privacy(self, ws, providers):
+        async def run():
+            await _make_settings(
+                tiktok_upload_token_encrypted=encrypt("TOK"),
+                tiktok_default_privacy="SELF_ONLY",
+            )
+            await UploadAgent().run(
+                await _job(),
+                await _make_video(tiktok_title="tok title"),
+                ["tiktok"],
+                publish_options={
+                    "tiktok": {
+                        "privacy_level": "MUTUAL_FOLLOW_FRIENDS",
+                        "disable_comment": True,
+                        "disable_duet": True,
+                        "disable_stitch": False,
+                    }
+                },
+            )
         asyncio.run(run())
         call = providers["calls"]["tiktok"]
-        assert call["cookie_sessionid"] == "SESSION" and call["access_token"] == ""
-        assert call["privacy"] == "PUBLIC_TO_EVERYONE", "the default privacy"
+        assert call["privacy"] == "MUTUAL_FOLLOW_FRIENDS"
+        assert call["disable_comment"] is True
+        assert call["disable_duet"] is True
+        assert call["disable_stitch"] is False
 
     def test_instagram_reuses_the_tiktok_caption(self, ws, providers):
         async def run():
@@ -501,6 +530,37 @@ class TestAuthFailures:
 
 
 class TestPersistence:
+    def test_uncertain_provider_outcome_is_persisted_and_blocks_retry(
+            self, ws, providers):
+        from backend.core.exceptions import UploadOutcomeUncertainError
+        providers["outcomes"]["tiktok"] = UploadOutcomeUncertainError(
+            "provider accepted bytes but final status timed out",
+            provider_result={"publish_id": "tt-uncertain-1"},
+        )
+
+        async def run():
+            await _make_settings(
+                tiktok_upload_token_encrypted=encrypt("TOK"),
+                tiktok_default_privacy="SELF_ONLY",
+            )
+            vid = await _make_video()
+            jid = await _job()
+            await UploadAgent().run(jid, vid, ["tiktok"])
+            job = await _job_row(jid)
+            publications = await _publication_rows(vid)
+            from backend.agents.uploader import uncertain_publication_destinations
+            uncertain = await uncertain_publication_destinations(vid)
+            return job, publications, uncertain
+
+        job, publications, uncertain = asyncio.run(run())
+        assert job.status == "failed"
+        assert "outcome is unknown" in (job.error_message or "").lower()
+        assert len(publications) == 1
+        assert publications[0].status == "OUTCOME_UNKNOWN"
+        assert publications[0].provider_transaction_id == "tt-uncertain-1"
+        assert publications[0].published_at is None
+        assert "tiktok" in uncertain
+
     def test_provider_success_with_local_commit_failure_is_not_safe_to_retry(
             self, ws, providers, monkeypatch):
         async def fail_finalize(*args, **kwargs):

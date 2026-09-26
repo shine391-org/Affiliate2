@@ -83,7 +83,7 @@ async def test_a_tool_output_is_a_library_item():
         assert item is not None, "a successful tool output is missing from the index"
         assert item["media"] == "video"
         assert item["origin"] == "edited"
-        assert item["producer"] == "Captions"
+        assert item["producer"] == "Phụ đề"
     finally:
         await _cleanup(db)
         f.unlink(missing_ok=True)
@@ -233,7 +233,7 @@ async def test_smart_cut_derivative_keeps_source_lineage_and_label():
         items = await library_index.gather(db)
         item = _by_key(items, f"gv:{PREFIX}smart-gv")
         assert item is not None
-        assert item["producer"] == "Smart Cut"
+        assert item["producer"] == "Cắt thông minh"
         assert item["origin"] == "edited"
         assert item["parent_key"] == f"dl:{PREFIX}smart-dl"
 

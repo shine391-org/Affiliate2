@@ -83,8 +83,8 @@ def test_translate_uses_profile_or_free_form_voice_override():
     """
     text = (FRONTEND / "pages/tools/Translate.jsx").read_text()
     assert "DUB_VOICES" not in text
-    assert "Localization profile" in text
-    assert "Voice override (optional)" in text
+    assert "Hồ sơ bản địa hóa" in text
+    assert "Ghi đè giọng đọc (tùy chọn)" in text
 
 
 # ── OpenAI TTS ──────────────────────────────────────────────────────────────
