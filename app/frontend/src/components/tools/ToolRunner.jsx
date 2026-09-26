@@ -114,7 +114,7 @@ export default function ToolRunner({
   canSubmit = true,
   children,            // tool-specific config UI
   onJobComplete,       // optional — (jobId) => void
-  processLabel = "Process",
+  processLabel = "Xử lý",
   // Optional cost / usage hint string (e.g. "Free", "BYOK"). Rendered as a
   // muted caption in the PageHero secondary row. ToolRunner just forwards the
   // value through.
@@ -560,12 +560,12 @@ export default function ToolRunner({
                 icon={<WarningAmberIcon />}
                 sx={{ "& .MuiAlert-message": { fontWeight: 500 } }}
               >
-                Don't leave or refresh this page — the job is in progress.
-                Closing the page will interrupt it and you'll need to start over.
+                Đừng rời hoặc tải lại trang khi tác vụ đang chạy.
+                Đóng trang sẽ làm gián đoạn và bạn sẽ phải bắt đầu lại.
               </Alert>
               <GlassPanel sx={{ p: 2.5 }}>
                 <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
-                  {job.step || "Working…"}
+                  {job.step || "Đang xử lý…"}
                 </Typography>
                 <LinearProgress variant="determinate" value={job.percent || 0} sx={{ borderRadius: 1, height: 8 }} />
                 <Typography variant="caption" sx={{ color: "text.secondary", mt: 0.5, display: "block" }}>
