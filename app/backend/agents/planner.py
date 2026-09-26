@@ -859,18 +859,12 @@ class PlannerAgent:
 
     async def _dispatch_action(self, action: dict, user_settings, user_id: str):
         if not isinstance(action, dict):
-            await self._followup(
-                user_id,
-                "Action AI không hợp lệ: backend yêu cầu một object JSON. Không có thao tác nào được thực hiện.",
-            )
+            logger.warning("Ignoring non-object planner action: %r", action)
             return
         action_type = action.get("type")
         logger.info("DISPATCH action=%s | user=%s | payload=%s", action_type, user_id, json.dumps(action, ensure_ascii=False)[:200])
         if action_type not in PLANNER_ACTION_TYPES:
-            await self._followup(
-                user_id,
-                f"Affiliate2 không có action backend '{action_type}'. Không có thao tác nào được thực hiện.",
-            )
+            logger.warning("Ignoring unsupported planner action type: %r", action_type)
             return
         if action_type in FACTUAL_ACTIONS:
             await self._show_native_fact(action_type, action, user_id)
