@@ -18,13 +18,13 @@
  */
 export const CAPTION_STYLES = [
   { value: "viral", label: "Viral", description: "Tô vàng, cụm khoảng 6 từ" },
-  { value: "classic", label: "Classic", description: "Cả câu, không tô sáng" },
-  { value: "bold", label: "Bold", description: "Tô xanh, cụm khoảng 4 từ" },
+  { value: "classic", label: "Cổ điển", description: "Cả câu, không tô sáng" },
+  { value: "bold", label: "Đậm", description: "Tô xanh, cụm khoảng 4 từ" },
   { value: "neon", label: "Neon", description: "Chữ hồng, tô vàng, khoảng 6 từ" },
-  { value: "minimal", label: "Minimal", description: "Arial đơn giản, dòng dài, không tô sáng" },
+  { value: "minimal", label: "Tối giản", description: "Arial đơn giản, dòng dài, không tô sáng" },
   { value: "karaoke", label: "Karaoke", description: "Chữ xám sáng dần từng từ" },
-  { value: "glow", label: "Glow", description: "Phát sáng cam nhẹ, cụm khoảng 6 từ" },
-  { value: "urban", label: "Urban đậm", description: "Arial Black, nhịp mạnh khoảng 3 từ" },
+  { value: "glow", label: "Phát sáng", description: "Phát sáng cam nhẹ, cụm khoảng 6 từ" },
+  { value: "urban", label: "Đô thị đậm", description: "Arial Black, nhịp mạnh khoảng 3 từ" },
   { value: "warm", label: "Ánh sáng ấm", description: "Georgia serif, tông kem ấm" },
   { value: "mono", label: "Đơn sắc", description: "Verdana, tô xám, nhẹ nhàng" },
 ]
