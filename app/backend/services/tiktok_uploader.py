@@ -9,7 +9,6 @@ provider-verifiable publication result and previously fabricated a local
 """
 import asyncio
 import logging
-import math
 from pathlib import Path
 
 import httpx
