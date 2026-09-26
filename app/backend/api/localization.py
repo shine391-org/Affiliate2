@@ -179,7 +179,18 @@ async def _dispatch_existing_run(run: LocalizationRun):
 
 @router.get("/jobs/{job_id}")
 async def localization_job_detail(job_id: str):
-    return _job_detail(_load_run(job_id))
+    from sqlalchemy import select
+    from backend.database import AsyncSessionLocal
+    from backend.models.job import Job
+
+    detail = _job_detail(_load_run(job_id))
+    async with AsyncSessionLocal() as db:
+        job = (await db.execute(
+            select(Job).where(Job.id == job_id)
+        )).scalar_one_or_none()
+    detail["job_status"] = job.status if job else None
+    detail["job_current_step"] = job.current_step if job else None
+    return detail
 
 
 @router.get("/exceptions")
