@@ -18,7 +18,7 @@ from backend.models.user_settings import UserSettings
 from backend.core.crypto import decrypt, DecryptionError
 from backend.core.ws_manager import ws_manager
 from backend.agents.job_helper import update_job_status
-from backend.core.exceptions import UploadAuthError, safe_json_loads
+from backend.core.exceptions import UploadAuthError, UploadOutcomeUncertainError, safe_json_loads
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,7 @@ async def uncertain_publication_destinations(video_id: str) -> set[str]:
     async with AsyncSessionLocal() as db:
         rows = (await db.execute(select(PublicationRecord.platform).where(
             PublicationRecord.generated_video_id == video_id,
-            PublicationRecord.status.in_(["PUBLISHING", "PERSISTENCE_ERROR"]),
+            PublicationRecord.status.in_(["PUBLISHING", "PERSISTENCE_ERROR", "OUTCOME_UNKNOWN"]),
         ))).scalars().all()
     return {str(platform) for platform in rows if platform}
 
@@ -354,6 +354,19 @@ class UploadAgent:
                     severity="error",
                     wizard_id=f"{platform}_auth" if platform == "youtube" else f"{platform}_upload_auth",
                     user_id=user_id,
+                )
+            except UploadOutcomeUncertainError as e:
+                message = (
+                    f"{platform}: provider outcome is unknown: {e}. "
+                    "Do not retry automatically; verify the provider first."
+                )
+                logger.warning(message)
+                errors.append(message)
+                await self._finish_publication_record(
+                    publication_id,
+                    platform,
+                    "OUTCOME_UNKNOWN",
+                    error_message=str(e),
                 )
             except Exception as e:
                 if provider_result is not None:
