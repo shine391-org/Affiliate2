@@ -228,6 +228,23 @@ def test_local_preset_never_reuses_stored_cloud_secret():
     assert base_url == "http://localhost:11434/v1"
 
 
+def test_env_named_gemini_uses_gemini_key_and_compatible_runtime():
+    with patch.multiple(
+        ap.settings,
+        AI_PROVIDER="gemini",
+        AI_MODEL="gemini-3.8-flash",
+        GEMINI_API_KEY="AIza-env",
+        ANTHROPIC_API_KEY="",
+        OPENAI_API_KEY="",
+        OPENROUTER_API_KEY="",
+    ):
+        c = get_ai_client(None)
+    assert c.provider == AIProvider.COMPATIBLE
+    assert c.api_key == "AIza-env"
+    assert c.model == "gemini-3.8-flash"
+    assert c.base_url == "https://generativelanguage.googleapis.com/v1beta/openai"
+
+
 def test_env_compatible_local_can_run_without_api_key():
     with patch.multiple(
         ap.settings,
