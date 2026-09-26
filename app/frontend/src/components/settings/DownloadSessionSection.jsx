@@ -112,9 +112,19 @@ export default function DownloadSessionSection({ settings, updateSettings }) {
           />
         </Stack>
 
+        <TextField
+          size="small"
+          fullWidth
+          label="Douyin CDP URL"
+          value={cdpUrl}
+          onChange={(event) => { setCdpUrl(event.target.value); setProbe(null) }}
+          placeholder="http://127.0.0.1:9222"
+          helperText="Endpoint DevTools local của Edge/Chrome đã mở bằng --remote-debugging-port. Chỉ localhost được chấp nhận."
+        />
+
         <Alert severity="info" variant="outlined">
-          Test session checks only whether yt-dlp can read the local browser cookie store.
-          A failed test can still allow Douyin downloads through the authenticated CDP browser; TikTok still requires a readable browser-cookie session.
+          Kiểm tra đầy đủ tách riêng browser-cookie, kết nối CDP và trạng thái đăng nhập Douyin.
+          TikTok vẫn cần cookie đúng domain; Douyin dùng cookie hoặc CDP authenticated fallback.
         </Alert>
 
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1} flexWrap="wrap" useFlexGap>
@@ -122,7 +132,7 @@ export default function DownloadSessionSection({ settings, updateSettings }) {
             {saving ? "Saving…" : "Save"}
           </Button>
           <Button variant="outlined" startIcon={<RefreshOutlinedIcon />} onClick={test} disabled={testing}>
-            {testing ? "Testing…" : "Test session"}
+            {testing ? "Đang kiểm tra…" : "Kiểm tra đầy đủ"}
           </Button>
           <Button variant="text" startIcon={<LoginOutlinedIcon />} href="https://www.douyin.com/" target="_blank" rel="noreferrer">
             Open Douyin
