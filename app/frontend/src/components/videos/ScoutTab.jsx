@@ -20,7 +20,7 @@ export default function ScoutTab({ jobs, scoutResults, scoutTotal = 0, onFetchRe
           {scoutJobs.slice(0, 8).map(j => (
             <Chip
               key={j.id}
-              label={`${j.created_at ? new Date(j.created_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : j.id.slice(0, 8)}${j.status === "success" ? " ✓" : j.status === "failed" ? " ✗" : ""}`}
+              label={`${j.created_at ? new Date(j.created_at).toLocaleString("vi-VN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : j.id.slice(0, 8)}${j.status === "success" ? " ✓" : j.status === "failed" ? " ✗" : ""}`}
               onClick={() => { setSelectedJobId(j.id); onFetchResults(j.id, 0, rowsPerPage) }}
               color={selectedJobId === j.id ? "primary" : "default"}
               variant={selectedJobId === j.id ? "filled" : "outlined"}
