@@ -359,6 +359,23 @@ class TestTikTokUpload:
         assert c.puts[0]["headers"]["Content-Range"] == "bytes 0-1499/1500"
         assert c.puts[0]["len"] == 1500
 
+    async def test_chunk_count_uses_floor_and_final_chunk_absorbs_remainder(
+            self, tmp_path, monkeypatch):
+        from backend.services import tiktok_uploader as TT
+        media = tmp_path / "remainder.mp4"
+        media.write_bytes(b"x" * 2501)
+        monkeypatch.setattr(TT, "CHUNK_SIZE", 1000)
+        c = _TTClient()
+        monkeypatch.setattr(TT.httpx, "AsyncClient", c)
+
+        await TT.upload_to_tiktok(str(media), "t", access_token="TOK")
+
+        init_body = next(body for url, body in c.posts if "video/init" in url)
+        assert init_body["source_info"]["chunk_size"] == 1000
+        assert init_body["source_info"]["total_chunk_count"] == 2
+        assert [put["len"] for put in c.puts] == [1000, 1501]
+        assert c.puts[-1]["headers"]["Content-Range"] == "bytes 1000-2500/2501"
+
     async def test_the_title_is_capped_at_the_api_limit(self, video, monkeypatch):
         from backend.services import tiktok_uploader as TT
         c = _TTClient()
