@@ -12,6 +12,7 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircleOutline"
 import YouTubeIcon from "@mui/icons-material/YouTube"
 import HubOutlinedIcon from "@mui/icons-material/HubOutlined"
 import useAppStore from "../../store/appStore"
+import http from "../../api/http"
 import DownloadSessionSection from "./DownloadSessionSection"
 
 /**
@@ -226,10 +227,157 @@ function ServiceKeyRow({ service, settings, updateSettings }) {
   )
 }
 
+function MetaPublishSection({ settings, updateSettings }) {
+  const showSnackbar = useAppStore((s) => s.showSnackbar)
+  const [pageId, setPageId] = useState(settings?.meta_page_id || "")
+  const [token, setToken] = useState("")
+  const [showToken, setShowToken] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [probe, setProbe] = useState(null)
+
+  useEffect(() => {
+    setPageId(settings?.meta_page_id || "")
+  }, [settings?.meta_page_id])
+
+  const verify = async () => {
+    if (!pageId.trim()) {
+      showSnackbar("Nhập Facebook Page ID trước", "warning")
+      return
+    }
+    if (!token.trim() && !settings?.meta_page_access_token_set) {
+      showSnackbar("Dán Page access token trước", "warning")
+      return
+    }
+
+    setTesting(true)
+    setProbe(null)
+    try {
+      if (token.trim() || pageId.trim() !== (settings?.meta_page_id || "")) {
+        await updateSettings({
+          meta_page_id: pageId.trim(),
+          ...(token.trim() ? { meta_page_access_token: token.trim() } : {}),
+        })
+      }
+      const { data } = await http.post("/api/settings/meta/test", {
+        page_id: pageId.trim(),
+      })
+      setProbe(data)
+      setToken("")
+      showSnackbar(
+        data.instagram_ready
+          ? "Meta Page + Instagram Professional đã sẵn sàng"
+          : "Facebook Page đã sẵn sàng; chưa có Instagram Professional liên kết",
+        data.instagram_ready ? "success" : "info",
+      )
+    } catch (e) {
+      const message = e.response?.data?.detail || "Kiểm tra Meta Publish thất bại"
+      setProbe({ ok: false, error: message })
+      showSnackbar(message, "error")
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  const clear = async () => {
+    await updateSettings({
+      meta_page_access_token: "",
+      meta_page_id: "",
+    })
+    setToken("")
+    setPageId("")
+    setProbe(null)
+    showSnackbar("Đã xóa kết nối Meta Publish", "info")
+  }
+
+  const ready = Boolean(
+    settings?.facebook_page_connected
+    || probe?.facebook_ready
+    || settings?.meta_page_access_token_set
+  )
+
+  return (
+    <Box sx={{ p: 2, border: 1, borderColor: "divider", borderRadius: 2, mb: 2 }}>
+      <Stack spacing={1.5}>
+        <Box>
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Meta Publish</Typography>
+            {ready && <Chip size="small" color="success" variant="outlined" label="đã cấu hình" />}
+          </Stack>
+          <Typography variant="caption" color="text.secondary">
+            Canonical scope: Facebook Page Reels + Instagram Professional (Business/Creator) gắn với Page.
+            Không hỗ trợ Facebook profile cá nhân. Video được upload trực tiếp lên Meta, không qua file host tạm.
+          </Typography>
+        </Box>
+
+        <TextField
+          size="small"
+          fullWidth
+          label="Facebook Page ID"
+          value={pageId}
+          onChange={(e) => { setPageId(e.target.value); setProbe(null) }}
+          placeholder="123456789012345"
+          disabled={testing}
+        />
+
+        <TextField
+          size="small"
+          fullWidth
+          label={settings?.meta_page_access_token_set ? "Page access token mới (để trống để giữ token hiện tại)" : "Page access token"}
+          type={showToken ? "text" : "password"}
+          value={token}
+          onChange={(e) => { setToken(e.target.value); setProbe(null) }}
+          disabled={testing}
+          InputProps={{
+            endAdornment: (
+              <InputAdornment position="end">
+                <IconButton onClick={() => setShowToken((v) => !v)} edge="end" size="small">
+                  {showToken ? <VisibilityOffIcon /> : <VisibilityIcon />}
+                </IconButton>
+              </InputAdornment>
+            ),
+          }}
+        />
+
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+          <Button variant="contained" onClick={verify} disabled={testing || !pageId.trim()}>
+            {testing ? "Đang xác minh…" : "Lưu & xác minh Meta"}
+          </Button>
+          {settings?.meta_page_access_token_set && (
+            <Button variant="outlined" color="error" onClick={clear} disabled={testing}>
+              Xóa kết nối
+            </Button>
+          )}
+        </Stack>
+
+        {(probe || settings?.facebook_page_connected) && (
+          <Alert severity={(probe?.facebook_ready || settings?.facebook_page_connected) ? "success" : "warning"} variant="outlined">
+            {probe?.error ? probe.error : (
+              <Stack spacing={0.5}>
+                <Typography variant="body2">
+                  Facebook Page: <strong>{probe?.page_name || settings?.meta_page_name || pageId || "đã xác minh"}</strong>
+                </Typography>
+                <Typography variant="caption">
+                  Instagram Professional: {
+                    probe?.instagram_ready || settings?.instagram_connected
+                      ? `READY · ${probe?.instagram_user_id || settings?.instagram_user_id || ""}`
+                      : "chưa phát hiện tài khoản Business/Creator liên kết"
+                  }
+                </Typography>
+              </Stack>
+            )}
+          </Alert>
+        )}
+      </Stack>
+    </Box>
+  )
+}
+
+
 export default function ServiceKeysSection({ settings, updateSettings }) {
   return (
     <Stack spacing={0}>
       <DownloadSessionSection settings={settings} updateSettings={updateSettings} />
+      <MetaPublishSection settings={settings} updateSettings={updateSettings} />
       <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Khóa dịch vụ / phụ thuộc tùy chọn</Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         API keys below are separate from browser login. They are encrypted before storage.
