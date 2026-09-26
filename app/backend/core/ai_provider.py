@@ -341,6 +341,25 @@ def describe_effective_ai(user_settings=None) -> dict:
         getattr(settings, "AI_PROVIDER", "")
         or os.getenv("AI_PROVIDER", "")
     ).lower().strip()
+    if configured_provider == "gemini":
+        api_key = (
+            getattr(settings, "GEMINI_API_KEY", "")
+            or os.getenv("GEMINI_API_KEY", "")
+        ).strip()
+        model = (
+            getattr(user_settings, "ai_model", None) if user_settings else None
+        ) or (
+            getattr(settings, "AI_MODEL", "")
+            or os.getenv("AI_MODEL", "")
+        ).strip() or "gemini-3.8-flash"
+        return {
+            "configured": bool(api_key),
+            "source": "environment",
+            "provider": "gemini",
+            "runtime_provider": "compatible",
+            "model": model,
+            "base_url": compatible_base_url("gemini"),
+        }
     if configured_provider == "compatible":
         base_url = (
             getattr(settings, "AI_BASE_URL", "")
@@ -419,6 +438,25 @@ def get_ai_client(user_settings=None, **_kwargs) -> AIClient:
 
     # 2. Check AI_PROVIDER from env/settings
     configured_provider = (getattr(settings, "AI_PROVIDER", "") or os.getenv("AI_PROVIDER", "")).lower().strip()
+    if configured_provider == "gemini":
+        api_key = (
+            getattr(settings, "GEMINI_API_KEY", "")
+            or os.getenv("GEMINI_API_KEY", "")
+        ).strip()
+        if not api_key:
+            raise AIKeyMissingError("GEMINI_API_KEY is required when AI_PROVIDER=gemini.")
+        model = (
+            user_model
+            or getattr(settings, "AI_MODEL", "")
+            or os.getenv("AI_MODEL", "")
+            or "gemini-3.8-flash"
+        ).strip()
+        return make_ai_client(
+            "gemini",
+            api_key=api_key,
+            model=model,
+            base_url=compatible_base_url("gemini"),
+        )
     if configured_provider == AIProvider.COMPATIBLE or configured_provider == "compatible":
         api_key = (
             getattr(settings, "AI_API_KEY", "")
