@@ -81,7 +81,7 @@ const JOB_ICONS = {
 }
 
 const JOB_LABELS = {
-  scout: "Scouting", download: "Downloading", generate: "Generating", upload: "Uploading",
+  scout: "Đang quét", download: "Đang tải xuống", generate: "Đang tạo", upload: "Đang tải lên",
 }
 
 function ActiveJobsPanel() {
@@ -164,13 +164,13 @@ const STARTER_SUGGESTIONS = [
     icon: <AnalyticsIcon sx={{ fontSize: 28, color: "primary.main" }} />,
     title: "Tải & phân tích",
     description: "Chép lời nội dung đối thủ và rút ra insight viral",
-    message: "Download and analyze a video",
+    message: "Tải xuống và phân tích một video",
   },
   {
     icon: <AutoAwesomeIcon sx={{ fontSize: 28, color: "primary.main" }} />,
     title: "Tạo video AI",
     description: "Tạo video mới bằng giọng AI và hình ảnh",
-    message: "Generate an original video",
+    message: "Tạo một video nguyên bản",
   },
   {
     icon: <NewspaperIcon sx={{ fontSize: 28, color: "primary.main" }} />,
