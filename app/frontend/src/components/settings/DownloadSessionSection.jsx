@@ -21,6 +21,7 @@ export default function DownloadSessionSection({ settings, updateSettings }) {
   const showSnackbar = useAppStore((s) => s.showSnackbar)
   const [browser, setBrowser] = useState(settings?.download_cookie_browser || "auto")
   const [profile, setProfile] = useState(settings?.download_cookie_profile || "")
+  const [cdpUrl, setCdpUrl] = useState(settings?.douyin_cdp_url || "http://127.0.0.1:9222")
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
   const [probe, setProbe] = useState(null)
@@ -28,7 +29,8 @@ export default function DownloadSessionSection({ settings, updateSettings }) {
   useEffect(() => {
     setBrowser(settings?.download_cookie_browser || "auto")
     setProfile(settings?.download_cookie_profile || "")
-  }, [settings?.download_cookie_browser, settings?.download_cookie_profile])
+    setCdpUrl(settings?.douyin_cdp_url || "http://127.0.0.1:9222")
+  }, [settings?.download_cookie_browser, settings?.download_cookie_profile, settings?.douyin_cdp_url])
 
   const save = async () => {
     setSaving(true)
@@ -36,6 +38,7 @@ export default function DownloadSessionSection({ settings, updateSettings }) {
       await updateSettings({
         download_cookie_browser: browser,
         download_cookie_profile: profile,
+        douyin_cdp_url: cdpUrl,
       })
       showSnackbar("Đã lưu phiên trình duyệt để tải xuống", "success")
     } finally {
