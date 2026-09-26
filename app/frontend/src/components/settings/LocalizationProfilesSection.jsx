@@ -542,7 +542,7 @@ export default function LocalizationProfilesSection({ settings }) {
         {!isDefault && <Button variant="text" onClick={makeDefault} disabled={busy}>Đặt mặc định</Button>}
         {store.profiles.length > 1 && <Button color="error" variant="outlined" startIcon={<DeleteOutlineOutlinedIcon />} onClick={remove} disabled={busy}>Xóa</Button>}
         <Button variant="contained" startIcon={<SaveOutlinedIcon />} onClick={save} disabled={busy}>
-          {busy ? "Saving…" : "Save profile"}
+          {busy ? "Đang lưu…" : "Lưu hồ sơ"}
         </Button>
       </Stack>
     </Stack>
