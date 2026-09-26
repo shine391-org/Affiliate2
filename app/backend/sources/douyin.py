@@ -27,6 +27,8 @@ from backend.services.douyin_browser_session import (
 from .base import ProviderStatus, SourceProviderResult
 
 DOUYIN_SEARCH_PATH = "/aweme/v1/web/general/search/single/"
+DOUYIN_PROFILE_PATH = "/aweme/v1/web/user/profile/other/"
+DOUYIN_CREATOR_POSTS_PATH = "/aweme/v1/web/aweme/post/"
 
 _ACCESS_HTTP = {401, 403, 412, 429}
 _ACCESS_API_STATUS = {-1, 8, 2483, 10000}
@@ -119,6 +121,272 @@ class DouyinProvider:
         if ms_token:
             params["msToken"] = str(ms_token)
         return params
+
+    async def _request_json(
+        self,
+        context,
+        page,
+        path: str,
+        params: dict[str, str],
+        *,
+        referer: str,
+    ) -> dict:
+        """Issue one authenticated Douyin web request through the CDP context."""
+        query = urllib.parse.urlencode({
+            **params,
+            **self._common_params(params.get("msToken")),
+        })
+        url = f"{DOUYIN_HOST}{path}?{query}"
+        user_agent = await page.evaluate("() => navigator.userAgent")
+        headers = {
+            "Accept": "application/json, text/plain, */*",
+            "User-Agent": user_agent,
+            "Referer": referer,
+            "Origin": DOUYIN_HOST,
+            "x-tt-argus": "1",
+        }
+        response = await context.request.get(url, headers=headers, timeout=45_000)
+        status = response.status
+        text = await response.text()
+
+        if status in _ACCESS_HTTP:
+            raise PermissionError(
+                f"Douyin HTTP {status}: access/session restriction"
+            )
+        if "Blocked by ArgusSecurityPlugin" in text or text.strip().lower() == "blocked":
+            raise PermissionError(f"Douyin access blocked: {text[:180]}")
+        if status < 200 or status >= 300:
+            raise RuntimeError(f"Douyin HTTP {status}: {text[:180]}")
+
+        try:
+            payload = await response.json()
+        except Exception as exc:
+            raise RuntimeError(
+                f"Douyin returned non-JSON response: {text[:180]}"
+            ) from exc
+
+        status_code = payload.get("status_code")
+        if status_code not in (None, 0):
+            message = (
+                payload.get("status_msg")
+                or payload.get("message")
+                or "Douyin API error"
+            )
+            if status_code in _ACCESS_API_STATUS:
+                raise PermissionError(
+                    f"Douyin API status {status_code}: {message}"
+                )
+            raise RuntimeError(
+                f"Douyin API status {status_code}: {message}"
+            )
+        return payload
+
+    async def _fetch_creator_profile(
+        self,
+        context,
+        page,
+        ms_token: str | None,
+        creator_id: str,
+    ) -> dict:
+        params = {
+            "sec_user_id": creator_id,
+            "publish_video_strategy_type": "2",
+            "personal_center_strategy": "1",
+        }
+        if ms_token:
+            params["msToken"] = str(ms_token)
+        return await self._request_json(
+            context,
+            page,
+            DOUYIN_PROFILE_PATH,
+            params,
+            referer=f"{DOUYIN_HOST}/user/{creator_id}",
+        )
+
+    async def _fetch_creator_posts(
+        self,
+        context,
+        page,
+        ms_token: str | None,
+        creator_id: str,
+        max_cursor: str,
+        count: int,
+    ) -> dict:
+        params = {
+            "sec_user_id": creator_id,
+            "max_cursor": str(max_cursor or "0"),
+            "count": str(count),
+            "locate_query": "false",
+            "publish_video_strategy_type": "2",
+        }
+        if ms_token:
+            params["msToken"] = str(ms_token)
+        return await self._request_json(
+            context,
+            page,
+            DOUYIN_CREATOR_POSTS_PATH,
+            params,
+            referer=f"{DOUYIN_HOST}/user/{creator_id}",
+        )
+
+    @staticmethod
+    def creator_id_from_url(profile_url: str) -> str:
+        value = str(profile_url or "").strip()
+        try:
+            parsed = urllib.parse.urlparse(value)
+        except Exception:
+            return ""
+        if not parsed.hostname or "douyin.com" not in parsed.hostname.lower():
+            return ""
+        parts = [part for part in parsed.path.split("/") if part]
+        if len(parts) >= 2 and parts[0] == "user":
+            return urllib.parse.unquote(parts[1]).strip()
+        return ""
+
+    async def creator_info(self, creator_id: str) -> dict:
+        """Fetch one Douyin creator profile through the authenticated CDP session."""
+        creator_id = str(creator_id or "").strip()
+        if not creator_id:
+            raise ValueError("Douyin creator_id is required")
+
+        async with open_douyin_cdp_session(self.cdp_url) as session:
+            payload = await self._fetch_creator_profile(
+                session.context,
+                session.page,
+                session.ms_token,
+                creator_id,
+            )
+
+        user = (
+            payload.get("user")
+            or (payload.get("user_info") or {}).get("user")
+            or payload.get("user_info")
+            or {}
+        )
+        stats = (
+            payload.get("stats")
+            or (payload.get("user_info") or {}).get("stats")
+            or {}
+        )
+        if not isinstance(user, dict):
+            user = {}
+        if not isinstance(stats, dict):
+            stats = {}
+
+        return {
+            "creator_id": creator_id,
+            "display_name": str(
+                user.get("nickname")
+                or user.get("unique_id")
+                or user.get("short_id")
+                or creator_id
+            ),
+            "avatar_url": (
+                _first_url(user.get("avatar_larger"))
+                or _first_url(user.get("avatar_medium"))
+                or _first_url(user.get("avatar_thumb"))
+            ),
+            "follower_count": _optional_metric(
+                stats.get("follower_count")
+                if "follower_count" in stats
+                else stats.get("followerCount")
+            ) or 0,
+            "video_count": _optional_metric(
+                stats.get("aweme_count")
+                if "aweme_count" in stats
+                else stats.get("videoCount")
+            ) or 0,
+        }
+
+    async def creator_history(
+        self,
+        creator_id: str,
+        *,
+        creator_name: str = "",
+        limit: int = 30,
+    ) -> SourceProviderResult:
+        """Fetch recent videos for one Douyin creator, never TikTok aliases."""
+        creator_id = str(creator_id or "").strip()
+        query = f"creator:{creator_id}"
+        if not creator_id or limit <= 0:
+            return SourceProviderResult(
+                platform=self.platform,
+                query=query,
+                status=ProviderStatus.EMPTY,
+                provider=self.name,
+            )
+
+        raw_awemes: list[dict] = []
+        try:
+            async with open_douyin_cdp_session(self.cdp_url) as session:
+                cursor = "0"
+                page_size = max(1, min(limit, 18))
+                seen_cursor: set[str] = set()
+
+                while len(raw_awemes) < limit:
+                    payload = await self._fetch_creator_posts(
+                        session.context,
+                        session.page,
+                        session.ms_token,
+                        creator_id,
+                        cursor,
+                        page_size,
+                    )
+                    page_items = payload.get("aweme_list") or []
+                    if not isinstance(page_items, list) or not page_items:
+                        break
+                    raw_awemes.extend(
+                        item for item in page_items if isinstance(item, dict)
+                    )
+                    if not payload.get("has_more"):
+                        break
+                    next_cursor = str(payload.get("max_cursor") or "")
+                    if not next_cursor or next_cursor in seen_cursor:
+                        break
+                    seen_cursor.add(next_cursor)
+                    cursor = next_cursor
+                    if len(raw_awemes) < limit:
+                        await asyncio.sleep(0.4)
+
+        except PermissionError as exc:
+            return SourceProviderResult(
+                platform=self.platform,
+                query=query,
+                status=ProviderStatus.AUTH_REQUIRED,
+                error=str(exc),
+                provider=self.name,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return SourceProviderResult(
+                platform=self.platform,
+                query=query,
+                status=ProviderStatus.ERROR,
+                error=f"{type(exc).__name__}: {exc}",
+                provider=self.name,
+            )
+
+        items: list[dict] = []
+        seen: set[str] = set()
+        for aweme in raw_awemes:
+            row = self._normalize_aweme(aweme, query)
+            if not row or row["video_id"] in seen:
+                continue
+            seen.add(row["video_id"])
+            row["creator_id"] = creator_id
+            row["author_url"] = f"{DOUYIN_HOST}/user/{creator_id}"
+            if creator_name and not row.get("author"):
+                row["author"] = creator_name
+            items.append(row)
+            if len(items) >= limit:
+                break
+
+        return SourceProviderResult(
+            platform=self.platform,
+            query=query,
+            status=ProviderStatus.SUCCESS if items else ProviderStatus.EMPTY,
+            items=items,
+            provider=self.name,
+        )
 
     async def _fetch_search_page(
         self,
