@@ -386,7 +386,7 @@ export function activityFromJob(job) {
   // which Studio workflow owns the output.
   if (norm === "generate" && ["clip_extraction", "smart_cut"].includes(input?.type)) {
     p = classify(input.type) || p
-    label = p?.label || (input.type === "smart_cut" ? "Smart Cut" : "Clipper")
+    label = p?.label || (input.type === "smart_cut" ? "Cắt thông minh" : "Cắt clip")
     bound = true
   }
   // Headline precedence matches the old Jobs tab: the stored title, else what
