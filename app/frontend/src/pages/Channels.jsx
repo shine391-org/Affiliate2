@@ -443,8 +443,8 @@ function ChannelDetail({ channel, onBack }) {
           { label: "Avg Views", value: formatCount(avgViews) },
           { label: "Median Views", value: formatCount(medianViews) },
           { label: "Engagement", value: `${engagementRate}%` },
-          { label: "Last 30d", value: `${recentVideos.length} videos` },
-          { label: "Top Video", value: formatCount(topPerformer?.view_count || 0) + " views" },
+          { label: "30 ngày qua", value: `${recentVideos.length} video` },
+          { label: "Video nổi bật", value: formatCount(topPerformer?.view_count || 0) + " lượt xem" },
         ]
 
         return (
