@@ -105,45 +105,45 @@ PRODUCERS: dict[str, Producer] = {
     # Made here, from nothing you already owned.
     # `smart_video` is the fallback for a GeneratedVideo with no source_type —
     # the Stock Video pipeline predates the column.
-    "smart_video": _p("smart_video", "Stock Video", MEDIA_VIDEO, ORIGIN_CREATED),
-    "motion_graphics": _p("motion_graphics", "Motion Graphics", MEDIA_VIDEO, ORIGIN_CREATED),
-    "tool:voiceover": _p("tool:voiceover", "Voice-over", MEDIA_AUDIO, ORIGIN_CREATED),
+    "smart_video": _p("smart_video", "Video kho", MEDIA_VIDEO, ORIGIN_CREATED),
+    "motion_graphics": _p("motion_graphics", "Đồ họa chuyển động", MEDIA_VIDEO, ORIGIN_CREATED),
+    "tool:voiceover": _p("tool:voiceover", "Lồng tiếng", MEDIA_AUDIO, ORIGIN_CREATED),
 
     # Made FROM something you already had. A clip is the clearest case: it is
     # not a new video, it is a piece of one you downloaded.
-    "clip_extraction": _p("clip_extraction", "Clipper", MEDIA_VIDEO, ORIGIN_EDITED),
+    "clip_extraction": _p("clip_extraction", "Cắt clip", MEDIA_VIDEO, ORIGIN_EDITED),
     # Canonical Studio derivative identities. Smart Cut is live through the
     # shared Clipper renderer; Creative Remake remains reserved for Phase E.
-    "smart_cut": _p("smart_cut", "Smart Cut", MEDIA_VIDEO, ORIGIN_EDITED),
-    "creative_remake": _p("creative_remake", "Creative Remake", MEDIA_VIDEO, ORIGIN_EDITED),
-    "tool:captions": _p("tool:captions", "Captions", MEDIA_VIDEO, ORIGIN_EDITED),
-    "tool:reframe": _p("tool:reframe", "Reframe", MEDIA_VIDEO, ORIGIN_EDITED),
-    "tool:trim": _p("tool:trim", "Trim", MEDIA_VIDEO, ORIGIN_EDITED),
-    "tool:speed": _p("tool:speed", "Speed", MEDIA_VIDEO, ORIGIN_EDITED),
-    "tool:transform": _p("tool:transform", "Transform", MEDIA_VIDEO, ORIGIN_EDITED),
-    "tool:merge_clips": _p("tool:merge_clips", "Merge", MEDIA_VIDEO, ORIGIN_EDITED),
+    "smart_cut": _p("smart_cut", "Cắt thông minh", MEDIA_VIDEO, ORIGIN_EDITED),
+    "creative_remake": _p("creative_remake", "Làm lại sáng tạo", MEDIA_VIDEO, ORIGIN_EDITED),
+    "tool:captions": _p("tool:captions", "Phụ đề", MEDIA_VIDEO, ORIGIN_EDITED),
+    "tool:reframe": _p("tool:reframe", "Đổi khung", MEDIA_VIDEO, ORIGIN_EDITED),
+    "tool:trim": _p("tool:trim", "Cắt đoạn", MEDIA_VIDEO, ORIGIN_EDITED),
+    "tool:speed": _p("tool:speed", "Tốc độ", MEDIA_VIDEO, ORIGIN_EDITED),
+    "tool:transform": _p("tool:transform", "Biến đổi", MEDIA_VIDEO, ORIGIN_EDITED),
+    "tool:merge_clips": _p("tool:merge_clips", "Ghép", MEDIA_VIDEO, ORIGIN_EDITED),
     "tool:watermark": _p("tool:watermark", "Watermark", MEDIA_VIDEO, ORIGIN_EDITED),
-    "tool:auto_zoom": _p("tool:auto_zoom", "Auto zoom", MEDIA_VIDEO, ORIGIN_EDITED),
-    "tool:remove_silence": _p("tool:remove_silence", "Silence cut", MEDIA_VIDEO, ORIGIN_EDITED),
-    "tool:compress": _p("tool:compress", "Compress", MEDIA_VIDEO, ORIGIN_EDITED),
-    "tool:crop": _p("tool:crop", "Crop", MEDIA_VIDEO, ORIGIN_EDITED),
-    "tool:translate": _p("tool:translate", "Translate", MEDIA_VIDEO, ORIGIN_EDITED),
-    "tool:music_visualizer": _p("tool:music_visualizer", "Visualizer", MEDIA_VIDEO, ORIGIN_EDITED),
+    "tool:auto_zoom": _p("tool:auto_zoom", "Tự động zoom", MEDIA_VIDEO, ORIGIN_EDITED),
+    "tool:remove_silence": _p("tool:remove_silence", "Cắt khoảng lặng", MEDIA_VIDEO, ORIGIN_EDITED),
+    "tool:compress": _p("tool:compress", "Nén", MEDIA_VIDEO, ORIGIN_EDITED),
+    "tool:crop": _p("tool:crop", "Cắt khung", MEDIA_VIDEO, ORIGIN_EDITED),
+    "tool:translate": _p("tool:translate", "Dịch", MEDIA_VIDEO, ORIGIN_EDITED),
+    "tool:music_visualizer": _p("tool:music_visualizer", "Trực quan hóa", MEDIA_VIDEO, ORIGIN_EDITED),
     # Audio Enhance returns an mp3 for a bare audio input and an mp4 when the
     # input carried a picture. The index lets the file extension win over this
     # declaration for exactly that reason; `video` is the common case.
-    "tool:audio_enhance": _p("tool:audio_enhance", "Enhanced", MEDIA_VIDEO, ORIGIN_EDITED),
+    "tool:audio_enhance": _p("tool:audio_enhance", "Đã cải thiện", MEDIA_VIDEO, ORIGIN_EDITED),
     "tool:gif": _p("tool:gif", "GIF", MEDIA_IMAGE, ORIGIN_EDITED),
-    "tool:subtitle_export": _p("tool:subtitle_export", "Subtitles", MEDIA_DOC, ORIGIN_EDITED),
-    "tool:auto_chapters": _p("tool:auto_chapters", "Chapters", MEDIA_DOC, ORIGIN_EDITED),
-    "tool:metadata": _p("tool:metadata", "Metadata", MEDIA_DOC, ORIGIN_EDITED),
+    "tool:subtitle_export": _p("tool:subtitle_export", "Phụ đề", MEDIA_DOC, ORIGIN_EDITED),
+    "tool:auto_chapters": _p("tool:auto_chapters", "Chương", MEDIA_DOC, ORIGIN_EDITED),
+    "tool:metadata": _p("tool:metadata", "Siêu dữ liệu", MEDIA_DOC, ORIGIN_EDITED),
 
     # Came from outside. `download` / `import` describe DownloadedVideo rows
     # (the download JOB is the act; the row is the file), and `music_upload` is
     # a file sitting in the music library directory.
-    "download": _p("download", "Download", MEDIA_VIDEO, ORIGIN_IMPORTED),
-    "import": _p("import", "Import", MEDIA_VIDEO, ORIGIN_IMPORTED),
-    "music_upload": _p("music_upload", "Upload", MEDIA_AUDIO, ORIGIN_IMPORTED),
+    "download": _p("download", "Tải xuống", MEDIA_VIDEO, ORIGIN_IMPORTED),
+    "import": _p("import", "Nhập", MEDIA_VIDEO, ORIGIN_IMPORTED),
+    "music_upload": _p("music_upload", "Tải lên", MEDIA_AUDIO, ORIGIN_IMPORTED),
 }
 
 # Producer keys that describe a DownloadedVideo row rather than a job.
