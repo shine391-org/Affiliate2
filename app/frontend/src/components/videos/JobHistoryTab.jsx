@@ -8,6 +8,7 @@ import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline"
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline"
 import CancelIcon from "@mui/icons-material/Close"
 import { JOB_STATUS_COLOR, jobTypeLabel } from "./constants"
+import { localizeUiMessage } from "../../utils/localizeUiMessage"
 
 const JOB_STATUS_LABEL = { running: "Đang chạy", pending: "Đang chờ", success: "Hoàn tất", failed: "Thất bại", cancelled: "Đã hủy" }
 
@@ -92,8 +93,8 @@ export default function JobHistoryTab({ jobs, jobTotal, onDelete, onBulkDelete, 
                   <Chip label={JOB_STATUS_LABEL[j.status] || j.status} size="small" color={JOB_STATUS_COLOR[j.status] || "default"} sx={{ height: 20, fontSize: "0.65rem" }} />
                   {j.title && <Typography variant="body2" sx={{ fontWeight: 500, flex: 1 }} noWrap>{j.title}</Typography>}
                 </Stack>
-                {j.current_step && <Typography variant="caption" sx={{ color: "text.secondary" }}>{j.current_step}</Typography>}
-                {j.error_message && <Typography variant="caption" sx={{ color: "error.main" }}>{j.error_message}</Typography>}
+                {j.current_step && <Typography variant="caption" sx={{ color: "text.secondary" }}>{localizeUiMessage(j.current_step)}</Typography>}
+                {j.error_message && <Typography variant="caption" sx={{ color: "error.main" }}>{localizeUiMessage(j.error_message)}</Typography>}
               </Box>
               <Typography variant="caption" sx={{ color: "text.disabled", whiteSpace: "nowrap" }}>
                 {j.created_at ? new Date(j.created_at).toLocaleString("vi-VN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : ""}
