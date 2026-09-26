@@ -37,7 +37,7 @@ export default function ToolTrim() {
       description="Chỉ giữ đoạn cần dùng — đặt điểm bắt đầu và kết thúc, bỏ phần còn lại"
       icon={<ContentCutIcon fontSize="large" />}
       endpoint="/api/tools/trim"
-      processLabel="Trim"
+      processLabel="Cắt đoạn"
       canSubmit={rangeOk}
       disabledReason={
         !endOk ? "Set an end time" : tooShort ? "Range must be at least 0.5s" : "Set a start before the end"
