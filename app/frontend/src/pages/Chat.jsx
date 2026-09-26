@@ -223,7 +223,14 @@ export default function Chat() {
       if (capabilityResult.status === "fulfilled") setCapabilities(capabilityResult.value.data || null)
     })
 
-    const savedSessionId = sessionStorage.getItem("vm_active_session")
+    const savedSessionId = (
+      sessionStorage.getItem("affiliate2_active_session")
+      || sessionStorage.getItem("vm_active_session")
+    )
+    if (savedSessionId && !sessionStorage.getItem("affiliate2_active_session")) {
+      sessionStorage.setItem("affiliate2_active_session", savedSessionId)
+      sessionStorage.removeItem("vm_active_session")
+    }
     if (savedSessionId && !activeSessionId && messages.length === 0) {
       // Restore the session that was active before refresh
       setActiveSessionId(savedSessionId)
@@ -240,6 +247,7 @@ export default function Chat() {
         setSuggestions([])  // clear again after messages load, in case smart_suggestions arrived
       }).catch((err) => {
         console.error("Failed to restore session messages:", err)
+        sessionStorage.removeItem("affiliate2_active_session")
         sessionStorage.removeItem("vm_active_session")
         setActiveSessionId(null)
         setSuggestions(STARTER_SUGGESTIONS)
