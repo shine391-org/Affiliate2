@@ -146,6 +146,7 @@ export default function StudioLocalize({ source, sourcesLoading }) {
           width: maskBox.width,
           height: maskBox.height,
           mode: maskMode,
+          normalized: true,
         }))
       }
       form.append("review_translation", String(mode === "full_dub" && reviewTranslation))
@@ -176,7 +177,7 @@ export default function StudioLocalize({ source, sourcesLoading }) {
         {source ? (
           <Stack spacing={1.25}>
             <Box sx={{ position: "relative", width: "100%", maxHeight: 460, bgcolor: "#000", borderRadius: 1.5, overflow: "hidden", display: "flex", justifyContent: "center", alignItems: "center" }}>
-              <Box sx={{ position: "relative", width: "100%", height: "100%", maxHeight: 460, aspectRatio: previewAspect, bgcolor: "#050505", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <Box sx={{ position: "relative", width: "auto", height: 460, maxHeight: 460, maxWidth: "100%", aspectRatio: previewAspect, bgcolor: "#050505", display: "flex", alignItems: "center", justifyContent: "center" }}>
                 <Box component="video" controls preload="metadata" src={`/api/downloaded/${source.id}/stream`} sx={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} />
                 {enableMask && (
                   <Box

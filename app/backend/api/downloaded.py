@@ -1717,6 +1717,9 @@ def _repair_missing_downloaded_from_snapshot(
                 continue
 
             cand_hash = _compute_sha256(source_cand)
+            manifest_ident = data.get("source_identity") or {}
+            manifest_hash = str(manifest_ident.get("sha256") or "").lower()
+
             if expected_sha256:
                 if cand_hash.lower() != expected_sha256.lower():
                     logger.warning(
@@ -1724,15 +1727,31 @@ def _repair_missing_downloaded_from_snapshot(
                         video_id, expected_sha256, source_cand, cand_hash,
                     )
                     continue
+                if manifest_hash and manifest_hash != expected_sha256.lower():
+                    logger.warning(
+                        "Manifest hash mismatch for video %s: expected %s, manifest has %s",
+                        video_id, expected_sha256, manifest_hash,
+                    )
+                    continue
             else:
-                manifest_ident = data.get("source_identity") or {}
-                manifest_hash = manifest_ident.get("sha256")
-                if not manifest_hash or cand_hash.lower() != str(manifest_hash).lower():
+                if not manifest_hash or cand_hash.lower() != manifest_hash:
                     logger.warning(
                         "Snapshot lacks verified identity match for video %s: %s",
                         video_id, source_cand,
                     )
                     continue
+
+            expected_size = manifest_ident.get("size_bytes")
+            if expected_size is not None:
+                try:
+                    if source_cand.stat().st_size != int(expected_size):
+                        logger.warning(
+                            "Snapshot size mismatch for video %s: expected %s, actual %d",
+                            video_id, expected_size, source_cand.stat().st_size,
+                        )
+                        continue
+                except (ValueError, TypeError):
+                    pass
 
             if target_path.exists():
                 return False

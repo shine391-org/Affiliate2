@@ -478,10 +478,16 @@ async def translate_transcript(
 
         fb_provider_raw = (getattr(profile, "translation_fallback_provider", None) or "").strip().lower()
         primary_provider_val = getattr(getattr(ai, "provider", None), "value", str(getattr(ai, "provider", ""))).strip().lower()
+        user_prov_val = (getattr(user_settings, "ai_provider", None) or "").strip().lower()
 
-        if not fb_provider_raw or fb_provider_raw == primary_provider_val or (
-            fb_provider_raw == "compatible" and ai.provider == AIProvider.COMPATIBLE
-        ):
+        is_same_provider = (
+            not fb_provider_raw
+            or fb_provider_raw == primary_provider_val
+            or (user_prov_val and fb_provider_raw == user_prov_val)
+            or (fb_provider_raw == "compatible" and ai.provider == AIProvider.COMPATIBLE)
+        )
+
+        if is_same_provider:
             fallback_ai = AIClient(
                 provider=ai.provider,
                 api_key=ai.api_key,
@@ -493,6 +499,8 @@ async def translate_transcript(
             try:
                 if fb_provider_raw in COMPATIBLE_PRESETS or fb_provider_raw == AIProvider.COMPATIBLE.value:
                     resolved_base = compatible_base_url(fb_provider_raw)
+                    if not resolved_base:
+                        raise ValueError(f"Base URL is required for OpenAI-compatible fallback provider '{fb_provider_raw}'")
                     if fb_provider_raw == "gemini":
                         key = (getattr(app_settings, "GEMINI_API_KEY", "") or os.getenv("GEMINI_API_KEY", "")).strip()
                         if not key:

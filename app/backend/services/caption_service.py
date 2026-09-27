@@ -1012,7 +1012,12 @@ def parse_and_validate_mask_box(
             return None
 
         EPS = 1e-4
-        if bx < 1.0 and by < 1.0 and bw <= 1.0 + EPS and bh <= 1.0 + EPS:
+        is_explicit_normalized = bool(mask_box.get("normalized")) or str(mask_box.get("unit", "")).lower() == "normalized"
+        is_normalized = is_explicit_normalized or (bx < 1.0 and by < 1.0)
+
+        if is_normalized:
+            if bw <= 0.0 or bh <= 0.0 or bw > 1.0 + EPS or bh > 1.0 + EPS:
+                return None
             if (bx + bw) > 1.0 + EPS or (by + bh) > 1.0 + EPS:
                 return None
             eff_w = min(bw, 1.0 - bx)
@@ -1026,11 +1031,13 @@ def parse_and_validate_mask_box(
             px_y = int(round(by / 100.0 * out_h))
             px_w = int(round(bw / 100.0 * out_w))
             px_h = int(round(bh / 100.0 * out_h))
-        else:
+        elif bx < out_w and by < out_h and (bx + bw) <= out_w and (by + bh) <= out_h:
             px_x = int(round(bx))
             px_y = int(round(by))
             px_w = int(round(bw))
             px_h = int(round(bh))
+        else:
+            return None
 
         if px_w <= 0 or px_h <= 0 or px_x >= out_w or px_y >= out_h:
             return None

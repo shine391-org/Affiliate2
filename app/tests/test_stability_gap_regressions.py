@@ -299,6 +299,119 @@ async def test_fallback_ai_called_when_primary_exhausted(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_gemini_429_retry_and_400_no_retry(monkeypatch):
+    monkeypatch.setattr(asyncio, "sleep", AsyncMock())
+
+    # 1. 429 status code retries
+    class Mock429AI:
+        def __init__(self):
+            self.attempts = 0
+            self.provider = AIProvider.COMPATIBLE
+            self.model = "gemini-2.5-flash"
+        async def chat(self, messages, **kwargs):
+            self.attempts += 1
+            if self.attempts == 1:
+                err = RuntimeError("429 Too Many Requests: Rate limit exceeded")
+                err.status_code = 429
+                raise err
+            return json.dumps([{"id": "s1", "text": "Đoạn sau retry"}], ensure_ascii=False)
+
+    ai_429 = Mock429AI()
+    resp = await ls._call_ai_chat_resilient(ai_429, fallback_ai=None, messages=[{"role": "user", "content": "hi"}], max_attempts=2)
+    assert "Đoạn sau retry" in resp
+    assert ai_429.attempts == 2
+
+    # 2. 400 status code fails immediately without retry
+    class Mock400AI:
+        def __init__(self):
+            self.attempts = 0
+            self.provider = AIProvider.COMPATIBLE
+            self.model = "gemini-2.5-flash"
+        async def chat(self, messages, **kwargs):
+            self.attempts += 1
+            err = RuntimeError("400 Bad Request: Invalid prompt payload")
+            err.status_code = 400
+            raise err
+
+    ai_400 = Mock400AI()
+    with pytest.raises(RuntimeError, match="400 Bad Request"):
+        await ls._call_ai_chat_resilient(ai_400, fallback_ai=None, messages=[{"role": "user", "content": "hi"}], max_attempts=3)
+    assert ai_400.attempts == 1, "Non-transient 400 error should fail immediately without retry!"
+
+
+@pytest.mark.asyncio
+async def test_fallback_provider_missing_credentials_fails_closed(tmp_path):
+    transcript = LocalizationTranscript(
+        language="en",
+        segments=[LocalizationSegment(id="s1", source_text="Hello", source_start_ms=0, source_end_ms=1000)],
+    )
+    profile = LocalizationProfile(
+        id="p-fb-bad",
+        name="Bad Fallback Profile",
+        translation_fallback_model="claude-sonnet-4-6",
+        translation_fallback_provider="anthropic",
+    )
+    mock_ai = SimpleNamespace(provider=AIProvider.COMPATIBLE, model="gemini-2.5-flash", api_key="dummy", base_url=None)
+    with patch.object(ls, "_profile_ai_client", return_value=mock_ai):
+        with pytest.raises(ValueError, match="Invalid fallback AI provider configuration"):
+            await ls.translate_transcript(
+                transcript,
+                target_language="vi",
+                profile=profile,
+                user_settings=SimpleNamespace(ai_provider="compatible"),
+                for_dub=False,
+            )
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_invalidated_on_config_change(tmp_path, monkeypatch):
+    trans_dir = tmp_path / "translation"
+    trans_dir.mkdir(parents=True)
+    segments = [LocalizationSegment(id="s0", source_text="Sentence 0", source_start_ms=0, source_end_ms=1000)]
+    transcript = LocalizationTranscript(text="Sentence 0", language="en", segments=segments)
+    profile = LocalizationProfile(id="p1", name="Profile 1", translation_preset="natural_vietnamese")
+
+    checkpoint_file = trans_dir / "checkpoint.json"
+    checkpoint_data = {
+        "semantic_hash": "different-hash",
+        "target_language": "vi",
+        "provider": "compatible",
+        "model": "gemini-2.5-flash",
+        "preset": "natural_vietnamese",
+        "instructions": "",
+        "guardrails": profile.translation_guardrails.strip(),
+        "glossary_hash": ls.hashlib.sha256(b"{}").hexdigest()[:16],
+        "batches": {
+            "0": {
+                "texts": ["Stale translation"],
+                "failed": [],
+            }
+        }
+    }
+    checkpoint_file.write_text(json.dumps(checkpoint_data, ensure_ascii=False), encoding="utf-8")
+
+    called_batches = []
+    async def mock_batch_translate(ai, batch, **kwargs):
+        called_batches.append(batch[0].id)
+        return ["Fresh translation"], set()
+
+    with patch.object(ls, "_translate_batch_resilient", side_effect=mock_batch_translate):
+        mock_ai = SimpleNamespace(provider=AIProvider.COMPATIBLE, model="gemini-2.5-flash")
+        with patch.object(ls, "_profile_ai_client", return_value=mock_ai):
+            out = await ls.translate_transcript(
+                transcript,
+                target_language="vi",
+                profile=profile,
+                user_settings=SimpleNamespace(ai_provider="compatible"),
+                for_dub=False,
+                checkpoint_dir=trans_dir,
+            )
+
+    assert "s0" in called_batches, "Incompatible checkpoint must be discarded and retranslated!"
+    assert out.segments[0].translated_text == "Fresh translation"
+
+
+@pytest.mark.asyncio
 async def test_rerun_preserves_translation_checkpoint_and_skips_finished_batches(tmp_path, monkeypatch):
     storage_root = tmp_path / "storage"
     monkeypatch.setattr(Settings, "STORAGE_ROOT", property(lambda self: storage_root))
@@ -427,6 +540,45 @@ def test_nvenc_detection_and_args(monkeypatch):
     assert "libx264" in args_cpu
 
 
+@pytest.mark.asyncio
+async def test_burn_captions_nvenc_failure_falls_back_to_libx264(tmp_path, monkeypatch):
+    video = tmp_path / "in.mp4"
+    video.write_bytes(b"dummy-mp4")
+    ass = tmp_path / "subs.ass"
+    ass.write_text("[Script Info]\nTitle: Test\n", encoding="utf-8")
+    out = tmp_path / "out.mp4"
+
+    monkeypatch.setattr(cs, "_ffmpeg_has_ass", True)
+    monkeypatch.setattr(fs, "has_nvenc_support", lambda: True)
+    monkeypatch.setattr(fs, "_probe_dimensions", AsyncMock(return_value=(1080, 1920)))
+
+    calls = []
+    class FakeProc:
+        def __init__(self, cmd):
+            self.cmd = cmd
+            if "h264_nvenc" in cmd:
+                self.returncode = 1
+                self.stderr = "CUDA out of memory / NVENC device init error"
+            else:
+                self.returncode = 0
+                self.stderr = ""
+                out.write_bytes(b"encoded-mp4")
+
+    def fake_subprocess_run(cmd, *a, **k):
+        calls.append(cmd)
+        return FakeProc(cmd)
+
+    monkeypatch.setattr("subprocess.run", fake_subprocess_run)
+
+    res = await cs.burn_captions(video, ass, output_path=out)
+    assert res == out
+    encode_calls = [c for c in calls if len(c) > 0 and c[0] == "ffmpeg" and ("h264_nvenc" in c or "libx264" in c)]
+    nvenc_attempts = [c for c in encode_calls if "h264_nvenc" in c]
+    cpu_attempts = [c for c in encode_calls if "libx264" in c]
+    assert len(nvenc_attempts) >= 1, "Expected at least one NVENC attempt"
+    assert len(cpu_attempts) >= 1, "Expected at least one libx264 fallback attempt"
+
+
 # ==============================================================================
 # F. Mask validation and parsing
 # ==============================================================================
@@ -449,6 +601,19 @@ def test_mask_box_normalized_and_validation():
     assert cs.parse_and_validate_mask_box({"x": 0.5, "y": 0.5, "width": 0.0, "height": 0.1}, 1080, 1920) is None
     assert cs.parse_and_validate_mask_box({"x": 0.8, "y": 0.5, "width": 0.5, "height": 0.1}, 1080, 1920) is None  # x+w > 1
     assert cs.parse_and_validate_mask_box({"x": 0.1, "y": 0.9, "width": 0.5, "height": 0.3}, 1080, 1920) is None  # y+h > 1
+
+    # 3. Explicit normalized flag and width > 1.0 out of bounds check
+    assert cs.parse_and_validate_mask_box({"x": 0.2, "y": 0.5, "width": 1.2, "height": 0.1, "normalized": True}, 1080, 1920) is None
+    assert cs.parse_and_validate_mask_box({"x": 0.2, "y": 0.5, "width": 1.2, "height": 0.1}, 1080, 1920) is None  # normalized range rejects w > 1
+
+    # 4. Blur mode
+    blur_res = cs.parse_and_validate_mask_box(
+        {"x": 0.05, "y": 0.8, "width": 0.9, "height": 0.1, "mode": "blur"},
+        out_w=1080,
+        out_h=1920,
+    )
+    assert blur_res is not None
+    assert blur_res[4] == "blur"
 
 
 # ==============================================================================
