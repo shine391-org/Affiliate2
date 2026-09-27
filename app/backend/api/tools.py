@@ -423,6 +423,7 @@ async def translate_tool(
     target_aspect: Optional[str] = Form(None),
     profile_id: Optional[str] = Form(None),
     review_translation: bool = Form(False),
+    mask_box: Optional[str] = Form(None),
 ):
     """Translate captions (and optionally dub audio) to another language.
 
@@ -449,6 +450,15 @@ async def translate_tool(
     else:
         persisted_source_path = None
         staged_upload, source_signature, staged_ext = await _stage_translate_upload(file)
+    parsed_mask_box = None
+    if mask_box is not None and not isinstance(mask_box, (str, dict)):
+        mask_box = None
+    if mask_box:
+        try:
+            parsed_mask_box = json.loads(mask_box) if isinstance(mask_box, str) else mask_box
+        except Exception:
+            parsed_mask_box = None
+
     request_signature = json.dumps({
         "source": source_signature,
         "target_language": target_language.strip().lower(),
@@ -459,6 +469,7 @@ async def translate_tool(
         "target_aspect": target_aspect or "",
         "profile_id": profile_id or "",
         "review_translation": bool(review_translation),
+        "mask_box": parsed_mask_box or {},
     }, sort_keys=True, separators=(",", ":"))
 
     job, reused = await create_or_reuse_active_job(
@@ -474,6 +485,7 @@ async def translate_tool(
             "profile_id": profile_id,
             "review_translation": bool(review_translation),
             "downloaded_video_id": stripped_source_id or None,
+            "mask_box": parsed_mask_box,
         },
         dedupe_key=request_signature,
     )
@@ -505,6 +517,8 @@ async def translate_tool(
         target_aspect=target_aspect,
         profile_id=profile_id,
         review_translation=bool(review_translation),
+        cleanup_input=(persisted_source_path is None),
+        mask_box=parsed_mask_box,
     ))
     return {"job_id": job.id, "reused": False}
 

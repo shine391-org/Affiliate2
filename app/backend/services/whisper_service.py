@@ -93,6 +93,17 @@ class WhisperService:
         return base / "hub"
 
     @classmethod
+    def _select_device(cls) -> tuple[str, str]:
+        """Detect whether CUDA is available for ctranslate2."""
+        try:
+            import ctranslate2
+            if ctranslate2.get_cuda_device_count() > 0:
+                return "cuda", "float16"
+        except Exception as e:
+            logger.debug("Whisper CUDA detection failed: %s", e)
+        return "cpu", "int8"
+
+    @classmethod
     def is_model_cached(cls, quality: str = "balanced", model_name: str | None = None) -> bool:
         """Check if the exact Whisper model is already downloaded."""
         model_name = resolve_whisper_model(quality, model_name)
@@ -113,15 +124,33 @@ class WhisperService:
         with cls._lock:
             if cls._model is None or cls._loaded_model_name != resolved_model:
                 from faster_whisper import WhisperModel
-                logger.info("Loading Whisper model: %s (quality=%s)", resolved_model, quality)
-                cls._model = WhisperModel(
-                    resolved_model,
-                    device="cpu",
-                    compute_type="int8",
-                )
+                device, compute_type = cls._select_device()
+                logger.info("Loading Whisper model: %s (quality=%s, device=%s, compute=%s)",
+                            resolved_model, quality, device, compute_type)
+                try:
+                    cls._model = WhisperModel(
+                        resolved_model,
+                        device=device,
+                        compute_type=compute_type,
+                    )
+                    cls._loaded_device = device
+                except Exception as exc:
+                    if device != "cpu":
+                        logger.warning(
+                            "Failed to initialize Whisper on %s (%s): %s. Falling back to CPU int8.",
+                            device, compute_type, exc,
+                        )
+                        cls._model = WhisperModel(
+                            resolved_model,
+                            device="cpu",
+                            compute_type="int8",
+                        )
+                        cls._loaded_device = "cpu"
+                    else:
+                        raise
                 cls._loaded_quality = quality
                 cls._loaded_model_name = resolved_model
-                logger.info("Whisper model '%s' loaded", resolved_model)
+                logger.info("Whisper model '%s' loaded successfully on %s", resolved_model, cls._loaded_device)
             cls._last_used = time.monotonic()
             return cls._model
 
@@ -135,6 +164,7 @@ class WhisperService:
             cls._model = None
             cls._loaded_quality = None
             cls._loaded_model_name = None
+            cls._loaded_device = None
         import gc
         gc.collect()
         logger.info("Whisper model '%s' evicted (idle)", freed)

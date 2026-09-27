@@ -78,6 +78,31 @@ def _openai_request_timeout_seconds(provider: AIProvider, base_url: str | None) 
     return 55.0
 
 
+def is_transient_ai_error(exc: Exception) -> bool:
+    """Classify whether an exception from an AI provider is transient and retryable."""
+    status_code = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+    if status_code in (408, 429, 500, 502, 503, 504):
+        return True
+    if status_code in (400, 401, 403, 404):
+        return False
+    msg = str(exc).lower()
+    for code in ("503", "502", "504", "500", "429", "408"):
+        if code in msg:
+            return True
+    for kw in (
+        "service unavailable", "overloaded", "too many requests",
+        "rate limit", "resource exhausted", "timed out", "timeout",
+        "connection reset", "connection refused", "bad gateway",
+        "gateway timeout",
+    ):
+        if kw in msg:
+            return True
+    name = type(exc).__name__.lower()
+    if any(k in name for k in ("timeout", "connection", "ratelimit", "internalservererror", "badgateway", "serviceunavailable")):
+        return True
+    return False
+
+
 class AIClient:
     """Universal AI client — same interface regardless of underlying provider."""
 
@@ -87,11 +112,13 @@ class AIClient:
         api_key: str,
         model: Optional[str] = None,
         base_url: Optional[str] = None,
+        max_retries: Optional[int] = None,
     ):
         self.provider = provider
         self.api_key = api_key
         self.base_url = base_url
         self.model = model or PROVIDER_DEFAULTS.get(provider, "gpt-4o-mini")
+        self.max_retries = max_retries
 
     async def chat_stream(
         self,
@@ -142,6 +169,8 @@ class AIClient:
             "api_key": self.api_key,
             "timeout": _openai_request_timeout_seconds(self.provider, self.base_url),
         }
+        if self.max_retries is not None:
+            client_kwargs["max_retries"] = self.max_retries
         if self.base_url:
             client_kwargs["base_url"] = self.base_url
         client = openai.AsyncOpenAI(**client_kwargs)

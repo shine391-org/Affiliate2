@@ -367,6 +367,56 @@ def _validate_translation_payload(raw: str, batch: list[LocalizationSegment]) ->
     return [seen[seg_id] for seg_id in expected]
 
 
+async def _call_ai_chat_resilient(
+    ai,
+    fallback_ai,
+    messages: list[dict],
+    max_tokens: int = 3000,
+    max_attempts: int = 3,
+) -> str:
+    """Bounded exponential backoff retry for transient network/503 errors with optional fallback."""
+    import random
+    from backend.core.ai_provider import is_transient_ai_error
+
+    last_error: Exception | None = None
+    # 1. Try primary AI
+    for attempt in range(max_attempts):
+        try:
+            return await ai.chat(messages=messages, max_tokens=max_tokens)
+        except Exception as exc:
+            last_error = exc
+            if not is_transient_ai_error(exc) or attempt == max_attempts - 1:
+                break
+            backoff = min(8.0, (1.5 ** attempt) + random.uniform(0.1, 0.4))
+            logger.warning(
+                "Transient error (%s) on translation AI (attempt %d/%d); retrying in %.2fs: %s",
+                type(exc).__name__, attempt + 1, max_attempts, backoff, exc,
+            )
+            await asyncio.sleep(backoff)
+
+    # 2. Try fallback AI if configured and last_error was transient
+    if fallback_ai is not None and last_error is not None and is_transient_ai_error(last_error):
+        logger.warning(
+            "Primary translation model exhausted %d attempts (%s); switching to fallback model %s",
+            max_attempts, last_error, getattr(fallback_ai, "model", "?"),
+        )
+        for attempt in range(max_attempts):
+            try:
+                return await fallback_ai.chat(messages=messages, max_tokens=max_tokens)
+            except Exception as exc:
+                last_error = exc
+                if not is_transient_ai_error(exc) or attempt == max_attempts - 1:
+                    break
+                backoff = min(8.0, (1.5 ** attempt) + random.uniform(0.1, 0.4))
+                logger.warning(
+                    "Transient error (%s) on fallback AI (attempt %d/%d); retrying in %.2fs: %s",
+                    type(exc).__name__, attempt + 1, max_attempts, backoff, exc,
+                )
+                await asyncio.sleep(backoff)
+
+    raise last_error
+
+
 async def _translate_batch_resilient(
     ai,
     batch: list[LocalizationSegment],
@@ -375,6 +425,7 @@ async def _translate_batch_resilient(
     context: str,
     profile: LocalizationProfile,
     for_dub: bool,
+    fallback_ai=None,
 ) -> tuple[list[str], set[int]]:
     prompt = _translation_prompt(
         target_language=target_language,
@@ -383,7 +434,9 @@ async def _translate_batch_resilient(
         profile=profile,
         for_dub=for_dub,
     )
-    raw = await ai.chat(messages=[{"role": "user", "content": prompt}], max_tokens=3000)
+    raw = await _call_ai_chat_resilient(
+        ai, fallback_ai, messages=[{"role": "user", "content": prompt}], max_tokens=3000
+    )
     try:
         return _validate_translation_payload(raw, batch), set()
     except (json.JSONDecodeError, ValueError) as exc:
@@ -393,11 +446,11 @@ async def _translate_batch_resilient(
         mid = len(batch) // 2
         left, lf = await _translate_batch_resilient(
             ai, batch[:mid], target_language=target_language, context=context,
-            profile=profile, for_dub=for_dub,
+            profile=profile, for_dub=for_dub, fallback_ai=fallback_ai,
         )
         right, rf = await _translate_batch_resilient(
             ai, batch[mid:], target_language=target_language, context=context,
-            profile=profile, for_dub=for_dub,
+            profile=profile, for_dub=for_dub, fallback_ai=fallback_ai,
         )
         return left + right, lf | {mid + i for i in rf}
 
@@ -409,21 +462,83 @@ async def translate_transcript(
     profile: LocalizationProfile,
     user_settings,
     for_dub: bool,
+    checkpoint_dir: Path | None = None,
 ) -> LocalizationTranscript:
+    import hashlib
     ai = _profile_ai_client(user_settings, profile)
+    if hasattr(ai, "max_retries"):
+        ai.max_retries = 0
+
+    fallback_ai = None
+    if getattr(profile, "translation_fallback_model", None):
+        try:
+            from backend.core.ai_provider import get_ai_client
+            fallback_ai = get_ai_client(user_settings)
+            fallback_ai.model = profile.translation_fallback_model
+            if getattr(profile, "translation_fallback_provider", None):
+                fallback_ai.provider = profile.translation_fallback_provider
+            fallback_ai.max_retries = 0
+        except Exception as fb_exc:
+            logger.warning("Could not initialize fallback translation AI: %s", fb_exc)
+            fallback_ai = None
+
     out = transcript.model_copy(deep=True)
     context = _translation_context(transcript)
     failed_total = 0
 
+    checkpoint_file = (checkpoint_dir / "checkpoint.json") if checkpoint_dir else None
+    semantic_sig = hashlib.sha256(
+        "".join(f"{s.id}:{s.source_text}" for s in transcript.segments).encode("utf-8")
+    ).hexdigest()[:16]
+    checkpoint_meta = {
+        "semantic_hash": semantic_sig,
+        "target_language": target_language,
+        "model": getattr(ai, "model", ""),
+        "preset": profile.translation_preset,
+    }
+    completed_batches: dict[str, dict] = {}
+    if checkpoint_file and checkpoint_file.exists():
+        try:
+            cp_data = json.loads(checkpoint_file.read_text(encoding="utf-8"))
+            if all(cp_data.get(k) == v for k, v in checkpoint_meta.items()):
+                completed_batches = cp_data.get("batches", {})
+                logger.info(
+                    "Resuming translation from checkpoint (%d completed batches)",
+                    len(completed_batches),
+                )
+            else:
+                logger.info("Translation configuration changed; invalidating incompatible checkpoint")
+        except Exception as cp_err:
+            logger.warning("Could not read translation checkpoint: %s", cp_err)
+
     for start in range(0, len(out.segments), _TRANSLATION_BATCH_SIZE):
         batch = out.segments[start:start + _TRANSLATION_BATCH_SIZE]
-        texts, failed = await _translate_batch_resilient(
-            ai, batch,
-            target_language=target_language,
-            context=context,
-            profile=profile,
-            for_dub=for_dub,
-        )
+        batch_key = str(start)
+        if batch_key in completed_batches:
+            texts = completed_batches[batch_key]["texts"]
+            failed = set(completed_batches[batch_key]["failed"])
+        else:
+            texts, failed = await _translate_batch_resilient(
+                ai, batch,
+                target_language=target_language,
+                context=context,
+                profile=profile,
+                for_dub=for_dub,
+                fallback_ai=fallback_ai,
+            )
+            completed_batches[batch_key] = {"texts": texts, "failed": list(failed)}
+            if checkpoint_file:
+                try:
+                    checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
+                    tmp_cp = checkpoint_file.with_suffix(".tmp")
+                    tmp_cp.write_text(
+                        json.dumps({**checkpoint_meta, "batches": completed_batches}, ensure_ascii=False) + "\n",
+                        encoding="utf-8",
+                    )
+                    tmp_cp.replace(checkpoint_file)
+                except Exception as cp_save_err:
+                    logger.warning("Could not persist translation batch checkpoint: %s", cp_save_err)
+
         failed_total += len(failed)
         for idx, (seg, text) in enumerate(zip(batch, texts)):
             seg.translated_text = text

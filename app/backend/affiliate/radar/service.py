@@ -22,20 +22,41 @@ WEIGHTS = {
 }
 
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+def _now_canonical() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
 
 
-def _publish_timestamp(value) -> int | None:
-    if value is None:
+def _publish_datetime_str(value) -> str | None:
+    if value is None or value == "":
         return None
     if isinstance(value, datetime):
-        if value.tzinfo is None:
-            value = value.replace(tzinfo=timezone.utc)
-        return int(value.timestamp())
+        dt = value
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt.strftime("%Y-%m-%d %H:%M:%S.%f")
+    if isinstance(value, (int, float)):
+        try:
+            ts = float(value)
+            if ts > 1e11:
+                ts /= 1000.0
+            dt = datetime.fromtimestamp(ts, tz=timezone.utc).replace(tzinfo=None)
+            return dt.strftime("%Y-%m-%d %H:%M:%S.%f")
+        except (ValueError, OSError):
+            return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.isdigit() or (text.replace(".", "", 1).isdigit() and "." in text):
+        try:
+            return _publish_datetime_str(float(text))
+        except ValueError:
+            pass
     try:
-        return int(value)
-    except (TypeError, ValueError):
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt.strftime("%Y-%m-%d %H:%M:%S.%f")
+    except Exception:
         return None
 
 
@@ -149,7 +170,7 @@ def record_source_run(
     """Persist provider EMPTY/AUTH_REQUIRED/ERROR in the application DB."""
     own_conn = conn is None
     conn = conn or get_conn()
-    now = _now_iso()
+    now = _now_canonical()
     try:
         conn.execute(
             """INSERT INTO radar_source_runs
@@ -187,7 +208,7 @@ def observe_scout_rows(
     """Upsert the current Scout projection and append immutable observations."""
     own_conn = conn is None
     conn = conn or get_conn()
-    captured_at = _now_iso()
+    captured_at = _now_canonical()
     seen: set[tuple[str, str]] = set()
     per_source: dict[tuple[str, str], dict[str, int]] = {}
 
@@ -216,7 +237,7 @@ def observe_scout_rows(
                 row.get("author"),
                 row.get("title"),
                 row.get("description"),
-                _publish_timestamp(row.get("upload_date")),
+                _publish_datetime_str(row.get("upload_date")),
                 source_keyword,
             )
             if existing is None:

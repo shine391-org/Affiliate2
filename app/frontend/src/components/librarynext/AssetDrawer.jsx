@@ -86,19 +86,19 @@ export default function AssetDrawer({
     if (!item) return []
     const rows = [
       ["Loại", MEDIA[item.media]?.label],
-      ["Origin", ORIGINS[item.origin]?.hint],
-      ["Made by", item.producer],
-      ["Added", fmtDayLong(item.created_at)],
-      ["Duration", formatClock(item.duration_seconds)],
-      ["Aspect", item.aspect],
-      ["File", item.ext ? `.${item.ext}` : null],
-      ["Size", fmtSize(item.size_mb)],
-      ["Status", item.status ? item.status[0].toUpperCase() + item.status.slice(1) : null],
-      ["Platform", item.platform],
-      ["Genre", item.genre],
-      ["Niche", item.niche],
-      ["Hook score", item.hook_score != null ? `${item.hook_score} / 10` : null],
-      ["Virality", item.virality_score != null ? `${item.virality_score} / 10` : null],
+      ["Nguồn gốc", ORIGINS[item.origin]?.hint],
+      ["Người tạo", item.producer],
+      ["Ngày thêm", fmtDayLong(item.created_at)],
+      ["Thời lượng", formatClock(item.duration_seconds)],
+      ["Tỷ lệ", item.aspect],
+      ["Định dạng", item.ext ? `.${item.ext}` : null],
+      ["Dung lượng", fmtSize(item.size_mb)],
+      ["Trạng thái", item.status ? item.status[0].toUpperCase() + item.status.slice(1) : null],
+      ["Nền tảng", item.platform],
+      ["Thể loại", item.genre],
+      ["Chủ đề", item.niche],
+      ["Điểm Hook", item.hook_score != null ? `${item.hook_score} / 10` : null],
+      ["Điểm Viral", item.virality_score != null ? `${item.virality_score} / 10` : null],
     ]
     return rows.filter(([, v]) => v != null && v !== "")
   }, [item])
@@ -252,20 +252,11 @@ export default function AssetDrawer({
           {item.source === "downloaded" && item.media === "video" && (
             <Box sx={{ px: 2, pt: 1.25, flexShrink: 0 }}>
               <Typography sx={{ fontSize: "0.68rem", fontWeight: 800, letterSpacing: "0.07em", textTransform: "uppercase", color: "text.disabled", mb: 0.75 }}>
-                Open in Studio
+                Mở trong Studio
               </Typography>
               <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
                 <Button size="small" variant="contained" onClick={() => { onClose?.(); navigate(`/studio/localize?source=${encodeURIComponent(item.id)}`) }}>
-                  Localize
-                </Button>
-                <Button size="small" variant="outlined" onClick={() => { onClose?.(); navigate(`/studio/manual?source=${encodeURIComponent(item.id)}`) }}>
-                  Manual Edit
-                </Button>
-                <Button size="small" variant="outlined" onClick={() => { onClose?.(); navigate(`/studio/smart-cut?source=${encodeURIComponent(item.id)}`) }}>
-                  Smart Cut · Phase D
-                </Button>
-                <Button size="small" variant="outlined" onClick={() => { onClose?.(); navigate(`/studio/remake?source=${encodeURIComponent(item.id)}`) }}>
-                  Creative Remake · Phase E
+                  Bản địa hóa
                 </Button>
               </Stack>
             </Box>
@@ -304,8 +295,7 @@ export default function AssetDrawer({
                   )
                 ) : (
                   <Typography sx={{ fontSize: "0.84rem", color: "text.secondary" }}>
-                    Couldn't load the full record. Everything the library knows about it is in the
-                    header above.
+                    Không thể tải toàn bộ bản ghi. Mọi thông tin hiện có đã hiển thị ở phần trên.
                   </Typography>
                 )
               ) : (
@@ -331,7 +321,7 @@ export default function AssetDrawer({
               <Stack spacing={1.25}>
                 {!hasLineage && (
                   <Typography sx={{ fontSize: "0.82rem", color: "text.secondary" }}>
-                    Nothing links to this yet. Edits you make from it will show up here.
+                    Chưa có liên kết nào. Các video tạo từ nguồn này sẽ hiển thị ở đây.
                   </Typography>
                 )}
                 {ancestors.length > 0 && (

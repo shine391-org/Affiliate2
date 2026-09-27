@@ -174,6 +174,8 @@ async def _dispatch_existing_run(run: LocalizationRun):
         profile_id=req.get("profile_id"),
         profile_override=run.effective_profile,
         review_translation=bool(req.get("review_translation")),
+        cleanup_input=False,
+        mask_box=req.get("mask_box"),
     ))
 
 

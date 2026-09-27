@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Alert, Box, Button, Chip, CircularProgress, FormControl, InputLabel, MenuItem, Paper, Select, Stack, TextField, ToggleButton, ToggleButtonGroup, Typography } from "@mui/material"
+import { Alert, Box, Button, Chip, CircularProgress, FormControl, InputLabel, MenuItem, Paper, Select, Stack, TextField, Typography } from "@mui/material"
 import MovieCreationOutlinedIcon from "@mui/icons-material/MovieCreationOutlined"
 import FolderOpenOutlinedIcon from "@mui/icons-material/FolderOpenOutlined"
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom"
@@ -8,7 +8,7 @@ import useAppStore from "../store/appStore"
 import useDocumentTitle from "../hooks/useDocumentTitle"
 import ClipStudio from "./ClipStudio"
 import StudioLocalize from "./StudioLocalize"
-import { STUDIO_MODES, buildStudioModeHref, studioModeForPath } from "../studioModel"
+import { studioModeForPath } from "../studioModel"
 import {
   STUDIO_ASSET_PROVIDERS,
   STUDIO_READINESS,
@@ -36,7 +36,7 @@ function CreativeRemakeReserved({ source, context, navigate }) {
         </Alert>
 
         {!source ? (
-          <Alert severity="warning">Hãy chọn nguồn từ Thư viện trước. Phase {contract.phase} phải dùng lại ID nguồn đã lưu thay vì tải lên/nhập lại.</Alert>
+          <Alert severity="warning">Hãy chọn nguồn từ Thư viện trước.</Alert>
         ) : (
           <>
             <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
@@ -96,7 +96,7 @@ function CreativeRemakeReserved({ source, context, navigate }) {
 }
 
 export default function Studio() {
-  useDocumentTitle("Studio")
+  useDocumentTitle("Studio · Bản địa hóa")
   const location = useLocation()
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
@@ -202,8 +202,7 @@ export default function Studio() {
           showSnackbar(data?.error_message || "Tải nguồn thất bại", "error")
         }
       } catch {
-        // Keep the bounded poll alive; transient API failures should not make
-        // the source bar forget a real background download.
+        // Keep bounded poll alive
       }
     }
     poll()
@@ -211,29 +210,14 @@ export default function Studio() {
     return () => { alive = false; clearInterval(timer) }
   }, [sourceDownloadJobId, loadSources, showSnackbar])
 
-  const changeMode = (_, nextMode) => {
-    if (!nextMode) return
-    navigate(buildStudioModeHref(nextMode, location.search))
-  }
-
   return (
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <Box sx={{ px: { xs: 2, md: 3 }, py: 1.5, borderBottom: 1, borderColor: "divider", bgcolor: "background.paper", flexShrink: 0 }}>
         <Stack direction={{ xs: "column", lg: "row" }} spacing={1.5} alignItems={{ lg: "center" }}>
           <Box sx={{ minWidth: 180 }}>
             <Typography variant="h5" sx={{ fontWeight: 800 }}>Studio</Typography>
-            <Typography variant="caption" color="text.secondary">Một nguồn, một ngữ cảnh dự án, nhiều quy trình</Typography>
+            <Typography variant="caption" color="text.secondary">Bản địa hóa AI chuẩn ngữ cảnh</Typography>
           </Box>
-          <ToggleButtonGroup
-            exclusive value={mode} onChange={changeMode} size="small"
-            sx={{ overflowX: "auto", maxWidth: "100%", "& .MuiToggleButton-root": { textTransform: "none", whiteSpace: "nowrap", px: 1.5 } }}
-          >
-            {STUDIO_MODES.map((item) => (
-              <ToggleButton key={item.value} value={item.value}>
-                {item.label}{!item.active && <Chip label={`Phase ${item.phase}`} size="small" sx={{ ml: 0.75, height: 18, fontSize: "0.62rem" }} />}
-              </ToggleButton>
-            ))}
-          </ToggleButtonGroup>
           <Box sx={{ flex: 1 }} />
           <Button size="small" variant="outlined" onClick={openActivity}>Hoạt động</Button>
         </Stack>

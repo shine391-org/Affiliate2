@@ -11,14 +11,14 @@ import http from "../../api/http"
 import useAppStore from "../../store/appStore"
 
 const STAGE_LABELS = {
-  separation: "Separation",
-  asr: "ASR / alignment",
-  semantic: "Semantic cues",
-  translation: "Translation",
-  dubbing: "Dubbing",
-  audio_mix: "Audio mix",
-  final_render: "Final render",
-  qc: "QC",
+  separation: "Tách âm thanh",
+  asr: "ASR / Căn chỉnh",
+  semantic: "Phân đoạn ngữ nghĩa",
+  translation: "Dịch thuật",
+  dubbing: "Lồng tiếng",
+  audio_mix: "Trộn âm thanh",
+  final_render: "Kết xuất video",
+  qc: "Kiểm định (QC)",
 }
 
 const qcColor = (status) => (
@@ -57,7 +57,7 @@ function SegmentEditor({ segment, onSave, busy }) {
     <Stack spacing={1.25}>
       <Typography variant="caption" color="text.secondary">
         {(segment.speaker_id ? segment.speaker_id + " · " : "") +
-          "source " + segment.source_start_ms + "–" + segment.source_end_ms + " ms"}
+          "nguồn " + segment.source_start_ms + "–" + segment.source_end_ms + " ms"}
       </Typography>
       <Typography variant="body2">{segment.source_text}</Typography>
       <TextField
@@ -86,7 +86,7 @@ function SegmentEditor({ segment, onSave, busy }) {
         onClick={save}
         disabled={busy || !text.trim()}
       >
-        Save + rerun downstream
+        Lưu & chạy lại các bước sau
       </Button>
     </Stack>
   )
@@ -137,7 +137,7 @@ export default function LocalizationExpertPanel({ jobId }) {
       showSnackbar("Đang chạy lại từ " + (STAGE_LABELS[stage] || stage), "info")
       const status = await pollUntilTerminal()
       showSnackbar(
-        status === "success" ? "Localization rerun complete" : "Rerun ended: " + status,
+        status === "success" ? "Chạy lại bản địa hóa hoàn tất" : "Tác vụ chạy lại kết thúc: " + status,
         status === "success" ? "success" : "warning",
       )
     } catch (err) {
@@ -215,11 +215,11 @@ export default function LocalizationExpertPanel({ jobId }) {
           severity="warning"
           action={
             <Button color="inherit" size="small" onClick={continueAfterTranslation} disabled={busy}>
-              Continue dubbing
+              Tiếp tục lồng tiếng
             </Button>
           }
         >
-          Translation review is required before TTS. Compare every source line with the Vietnamese target below; edit anything inaccurate, then continue the same job from C7.
+          Bản dịch cần được kiểm tra trước khi lồng tiếng TTS. Đối chiếu từng dòng gốc với bản dịch tiếng Việt bên dưới; chỉnh sửa các câu chưa chuẩn rồi bấm tiếp tục tác vụ từ bước C7.
         </Alert>
       )}
 
@@ -231,9 +231,9 @@ export default function LocalizationExpertPanel({ jobId }) {
 
       {qc && ((qc.failures?.length || 0) > 0 || (qc.warnings?.length || 0) > 0) && (
         <Alert severity={qc.status === "FAILED" ? "error" : "warning"}>
-          {(qc.failures?.length || 0) + " failures · " + (qc.warnings?.length || 0) + " warnings"}
+          {(qc.failures?.length || 0) + " lỗi · " + (qc.warnings?.length || 0) + " cảnh báo"}
           {qc.metrics?.speech_coverage_ratio != null
-            ? " · speech coverage " + Math.round(qc.metrics.speech_coverage_ratio * 100) + "%"
+            ? " · tỷ lệ giọng đọc " + Math.round(qc.metrics.speech_coverage_ratio * 100) + "%"
             : ""}
         </Alert>
       )}
@@ -256,7 +256,7 @@ export default function LocalizationExpertPanel({ jobId }) {
       <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
         {["translation", "dubbing", "final_render", "qc"].map((stage) => (
           <Button key={stage} size="small" variant="outlined" startIcon={<ReplayOutlinedIcon />} onClick={() => rerun(stage)} disabled={busy}>
-            {"Rerun " + STAGE_LABELS[stage]}
+            {"Chạy lại " + STAGE_LABELS[stage]}
           </Button>
         ))}
       </Stack>

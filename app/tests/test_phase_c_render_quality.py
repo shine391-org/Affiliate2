@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-only
+from pathlib import Path
 import pytest
 
 from backend.services.ffmpeg_service import RENDER_PROFILES, video_encode_args
@@ -14,10 +14,18 @@ def test_hq_uses_lower_crf_than_balanced_and_draft():
 
 
 def test_encode_args_are_compatible_h264():
-    args = video_encode_args("hq")
+    args = video_encode_args("hq", prefer_nvenc=False)
     assert args[:2] == ["-c:v", "libx264"]
     assert "-crf" in args and args[args.index("-crf") + 1] == "18"
     assert args[-2:] == ["-pix_fmt", "yuv420p"]
+
+
+def test_encode_args_nvenc_when_supported():
+    from backend.services.ffmpeg_service import has_nvenc_support
+    if has_nvenc_support():
+        args = video_encode_args("hq", prefer_nvenc=True)
+        assert args[:2] == ["-c:v", "h264_nvenc"]
+        assert "-cq" in args and args[args.index("-cq") + 1] == "19"
 
 
 def test_unknown_render_profile_fails_loudly():
@@ -65,7 +73,7 @@ async def test_final_caption_reframe_is_one_video_encode(monkeypatch, tmp_path):
     assert "-filter_complex" in command
     assert "ass=" in command
     assert "1080:1920" in command
-    assert "-crf 18" in command
+    assert ("-crf 18" in command) or ("-cq 19" in command)
 
 
 @pytest.mark.asyncio
@@ -113,4 +121,53 @@ async def test_final_retime_external_audio_reframe_caption_share_one_encode(monk
     assert "ass=" in command
     assert "1080:1920" in command
     assert "-map 1:a:0" in command
-    assert "-crf 18" in command
+    assert ("-crf 18" in command) or ("-cq 19" in command)
+
+
+@pytest.mark.asyncio
+async def test_burn_captions_with_mask_box_solid_and_blur(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from backend.services import caption_service
+
+    video = tmp_path / "source.mp4"
+    ass = tmp_path / "captions.ass"
+    out1 = tmp_path / "out1.mp4"
+    out2 = tmp_path / "out2.mp4"
+    video.write_bytes(b"video")
+    ass.write_text("[Script Info]\n", encoding="utf-8")
+
+    monkeypatch.setattr(caption_service, "_ffmpeg_has_ass", True)
+    monkeypatch.setattr("backend.services.video_utils.probe_duration", lambda *a, **k: 10.0)
+
+    async def fake_dims(_):
+        return (1080, 1920)
+    monkeypatch.setattr("backend.services.ffmpeg_service._probe_dimensions", fake_dims)
+
+    calls = []
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        target = Path(cmd[-1])
+        target.write_bytes(b"rendered")
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(caption_service.subprocess, "run", fake_run)
+
+    # Test solid mask
+    await caption_service.burn_captions(
+        video, ass, out1,
+        mask_box={"x": 0.1, "y": 0.7, "width": 0.8, "height": 0.15, "mode": "solid"},
+    )
+    cmd1 = " ".join(calls[0])
+    assert "drawbox=" in cmd1
+    assert "color=black@1.0:t=fill" in cmd1
+
+    # Test blur mask
+    calls.clear()
+    await caption_service.burn_captions(
+        video, ass, out2,
+        mask_box={"x": 0.1, "y": 0.7, "width": 0.8, "height": 0.15, "mode": "blur"},
+    )
+    cmd2 = " ".join(calls[0])
+    assert "boxblur=" in cmd2
+    assert "crop=" in cmd2
+    assert "overlay=" in cmd2

@@ -85,7 +85,20 @@ def _cleanup_paths(*paths: Path):
         if not p:
             continue
         try:
-            Path(p).unlink(missing_ok=True)
+            resolved = Path(p).resolve()
+            from backend.config import settings
+            storage_root = settings.STORAGE_ROOT.resolve()
+            protected = [
+                storage_root / "downloads",
+                storage_root / "videos",
+                storage_root / "localization_jobs",
+            ]
+            if hasattr(settings, "DATA_DIR"):
+                protected.append((settings.DATA_DIR / "data" / "samples").resolve())
+            if any(resolved == pr or resolved.is_relative_to(pr) for pr in protected):
+                logger.warning("Prevented deletion of protected media asset: %s", resolved)
+                continue
+            resolved.unlink(missing_ok=True)
         except Exception:
             pass
 
@@ -872,6 +885,8 @@ async def run_tool_translate(
     profile_id: str | None = None,
     profile_override: dict | None = None,
     review_translation: bool | None = None,
+    cleanup_input: bool | None = None,
+    mask_box: dict | None = None,
 ):
     """Canonical resumable Phase-C localization runner.
 
@@ -913,14 +928,27 @@ async def run_tool_translate(
         "target_aspect": target_aspect,
         "profile_id": profile_id,
         "review_translation": bool(review_translation),
+        "cleanup_input": cleanup_input,
+        "mask_box": mask_box,
     }
     logger.info(
-        "TASK START tool:translate | job=%s target=%s mode=%s profile=%s",
-        job_id[:8], target_language, mode, profile_id or "default",
+        "TASK START tool:translate | job=%s target=%s mode=%s profile=%s aspect=%s",
+        job_id[:8], target_language, mode, profile_id or "default", target_aspect or "default",
     )
 
     original_input = Path(in_path)
-    cleanup: list[Path] = [original_input]
+    cleanup: list[Path] = []
+    if cleanup_input is True:
+        cleanup.append(original_input)
+    elif cleanup_input is None:
+        # Safe by default: only treat as ephemeral scratch if inside tools/in or tools/staging
+        try:
+            from backend.api.tools import tools_in_dir, tools_staging_dir
+            res_orig = original_input.resolve()
+            if res_orig.is_relative_to(tools_in_dir().resolve()) or res_orig.is_relative_to(tools_staging_dir().resolve()):
+                cleanup.append(original_input)
+        except Exception:
+            pass
     current_stage = "separation"
     run = None
 
@@ -943,19 +971,19 @@ async def run_tool_translate(
         else:
             profile = resolve_localization_profile(user_settings, profile_id)
 
-            # Manual tool controls are job-level overrides on the saved profile.
-            updates = {}
-            if voice_id:
-                updates["tts_voice"] = voice_id
-            if caption_style:
-                updates["caption_style"] = caption_style
-            if target_aspect:
-                updates["target_aspect"] = target_aspect
-            if updates:
-                profile = LocalizationProfile.model_validate({
-                    **profile.model_dump(),
-                    **updates,
-                })
+        # Manual tool controls are job-level overrides on the resolved profile.
+        updates = {}
+        if voice_id:
+            updates["tts_voice"] = voice_id
+        if caption_style:
+            updates["caption_style"] = caption_style
+        if target_aspect:
+            updates["target_aspect"] = target_aspect
+        if updates:
+            profile = LocalizationProfile.model_validate({
+                **profile.model_dump(),
+                **updates,
+            })
 
         if run is None:
             profile = materialize_localization_profile(
@@ -1117,6 +1145,7 @@ async def run_tool_translate(
                     profile=profile,
                     user_settings=user_settings,
                     for_dub=is_dub,
+                    checkpoint_dir=run.stage_dir("translation"),
                 )
                 path = run.save_json(
                     "translation", "transcript.json", localized.model_dump()
@@ -1397,6 +1426,7 @@ async def run_tool_translate(
                     reframe_method="auto",
                     external_audio=mixed_audio,
                     video_slowdown=video_slowdown if is_dub else 1.0,
+                    mask_box=mask_box,
                 )
                 if rendered != out_path or not out_path.exists():
                     raise RuntimeError("Final localization render failed.")

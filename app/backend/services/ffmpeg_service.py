@@ -34,9 +34,52 @@ RENDER_PROFILES = {
     "hq": {"preset": "medium", "crf": 18},
 }
 
+NVENC_PROFILES = {
+    "draft": {"preset": "p2", "cq": 26},
+    "balanced": {"preset": "p4", "cq": 22},
+    "hq": {"preset": "p6", "cq": 19},
+}
 
-def video_encode_args(render_profile: str = "balanced") -> list[str]:
-    """FFmpeg H.264 args for a named quality profile."""
+_has_nvenc: bool | None = None
+
+
+def has_nvenc_support() -> bool:
+    """Check whether FFmpeg has working h264_nvenc encoder at runtime."""
+    global _has_nvenc
+    if _has_nvenc is not None:
+        return _has_nvenc
+    try:
+        r = subprocess.run(
+            [
+                "ffmpeg", "-v", "error",
+                "-f", "lavfi", "-i", "color=c=black:s=256x256:d=0.04",
+                "-c:v", "h264_nvenc",
+                "-f", "null", "-",
+            ],
+            capture_output=True,
+            timeout=5,
+        )
+        _has_nvenc = (r.returncode == 0)
+    except Exception as exc:
+        logger.debug("NVENC probe failed: %s", exc)
+        _has_nvenc = False
+    return _has_nvenc
+
+
+def video_encode_args(render_profile: str = "balanced", prefer_nvenc: bool = True) -> list[str]:
+    """FFmpeg H.264 args for a named quality profile, with NVENC acceleration when available."""
+    if prefer_nvenc and has_nvenc_support():
+        cfg = NVENC_PROFILES.get(render_profile)
+        if cfg is None:
+            raise ValueError(f"Unknown render profile: {render_profile}")
+        return [
+            "-c:v", "h264_nvenc",
+            "-rc", "vbr",
+            "-cq", str(cfg["cq"]),
+            "-preset", cfg["preset"],
+            "-pix_fmt", "yuv420p",
+        ]
+
     cfg = RENDER_PROFILES.get(render_profile)
     if cfg is None:
         raise ValueError(f"Unknown render profile: {render_profile}")

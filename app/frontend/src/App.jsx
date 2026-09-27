@@ -117,9 +117,9 @@ export default function App() {
               <Route path="library" element={<Library />} />
               <Route path="studio" element={<Studio />} />
               <Route path="studio/localize" element={<Studio />} />
-              <Route path="studio/manual" element={<Studio />} />
-              <Route path="studio/smart-cut" element={<Studio />} />
-              <Route path="studio/remake" element={<Studio />} />
+              <Route path="studio/manual" element={<LegacyRedirect to="/studio/localize" />} />
+              <Route path="studio/smart-cut" element={<LegacyRedirect to="/studio/localize" />} />
+              <Route path="studio/remake" element={<LegacyRedirect to="/studio/localize" />} />
               <Route path="review" element={<LocalizationReview />} />
               <Route path="publish" element={<Publish />} />
               <Route path="performance" element={<Performance />} />
@@ -164,7 +164,7 @@ export default function App() {
               {/* Bookmark compatibility. Redirects preserve query/hash. */}
               <Route path="scout" element={<LegacyRedirect to="/discover/spy" />} />
               <Route path="channels" element={<LegacyRedirect to="/discover/channels" />} />
-              <Route path="clips" element={<LegacyRedirect to="/studio/manual" />} />
+              <Route path="clips" element={<LegacyRedirect to="/studio/localize" />} />
               <Route path="videos" element={<LegacyRedirect to="/library" />} />
               <Route path="tools/translate" element={<LegacyRedirect to="/studio/localize" />} />
               <Route path="tools/localization-batch" element={<LegacyRedirect to="/studio/localize" suffix="?batch=1" />} />

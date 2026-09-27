@@ -137,6 +137,14 @@ async def _run_phase_g_data_migration_if_needed() -> None:
 
 async def init_db():
     """Create all tables. Called once at startup from run.py."""
+    import asyncio
+    from backend.config import DATA_DIR
+    from backend.migrations.repair_datetime_types import repair_database_datetimes
+
+    canonical = DATA_DIR / "viralmint.db"
+    if canonical.is_file():
+        await asyncio.to_thread(repair_database_datetimes, canonical)
+
     await _run_phase_g_data_migration_if_needed()
 
     # Import all models so Base knows about them

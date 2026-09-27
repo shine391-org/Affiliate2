@@ -1658,6 +1658,42 @@ async def get_downloaded_segments(video_id: str, limit: int = Query(1500, ge=1, 
     }
 
 
+def _repair_missing_downloaded_from_snapshot(video_id: str, target_path: Path) -> bool:
+    try:
+        from backend.config import settings as app_settings
+        import shutil
+        jobs_dir = app_settings.STORAGE_ROOT / "localization_jobs"
+        if not jobs_dir.exists():
+            return False
+        for job_folder in jobs_dir.iterdir():
+            if not job_folder.is_dir():
+                continue
+            manifest = job_folder / "manifest.json"
+            if not manifest.exists():
+                continue
+            try:
+                data = json.loads(manifest.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            req = data.get("request") or {}
+            if req.get("downloaded_video_id") == video_id or str(data.get("source_path", "")).endswith(target_path.name):
+                source_cand = job_folder / f"source{target_path.suffix.lower()}"
+                if not source_cand.exists():
+                    for s in job_folder.glob("source.*"):
+                        if s.is_file() and s.stat().st_size > 0:
+                            source_cand = s
+                            break
+                if source_cand.exists() and source_cand.stat().st_size > 0:
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    if not target_path.exists():
+                        shutil.copy2(source_cand, target_path)
+                        logger.info("Repaired missing downloaded video %s from localization snapshot %s", video_id, source_cand)
+                        return True
+    except Exception as exc:
+        logger.warning("Could not repair missing downloaded video from snapshot: %s", exc)
+    return False
+
+
 @router.get("/downloaded/{video_id}/stream")
 async def stream_downloaded(video_id: str, request: Request):
     """Stream a downloaded video with Range support for seeking.
@@ -1680,6 +1716,8 @@ async def stream_downloaded(video_id: str, request: Request):
     path = Path(video.video_path).resolve()
     if not path.is_relative_to(app_settings.STORAGE_ROOT.resolve()):
         raise HTTPException(status_code=403, detail="Access denied")
+    if not path.exists():
+        _repair_missing_downloaded_from_snapshot(video_id, path)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Video file not found on disk")
 

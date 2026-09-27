@@ -152,7 +152,7 @@ export default function DownloadedDetail({ video, onUseAsInspiration, onClose, o
                 startIcon={reanalyzing ? <CircularProgress size={16} /> : <AutoFixHighIcon />}
                 disabled={reanalyzing}
                 onClick={(e) => setReanalyzeAnchor(e.currentTarget)}>
-                {reanalyzing ? "Re-analyzing..." : "Re-analyze"}
+                {reanalyzing ? "Đang phân tích lại…" : "Phân tích lại"}
               </Button>
               <Menu anchorEl={reanalyzeAnchor} open={Boolean(reanalyzeAnchor)}
                 onClose={() => setReanalyzeAnchor(null)}>
@@ -174,18 +174,18 @@ export default function DownloadedDetail({ video, onUseAsInspiration, onClose, o
                   } catch (e) { showSnackbar(e.response?.data?.detail || e.message, "error") }
                 }}
                 sx={{ fontWeight: 700 }}>
-                Quick Stock Video
+                Tạo video nhanh
               </Button>
               <Button variant="outlined" size="small"
                 startIcon={<ContentCutIcon />}
                 component={NavLink} to="/studio">
-                Clip Studio
+                Mở Studio
               </Button>
             </>
           )}
           <Button variant="contained" startIcon={<MovieCreationIcon />}
             onClick={(e) => onUseAsInspiration(video.id, e)}>
-            {video.platform === "news" ? "Create Video from Article" : "Use as Inspiration"}
+            {video.platform === "news" ? "Tạo video từ bài viết" : "Dùng làm cảm hứng"}
           </Button>
         </Stack>
         <IconButton size="small" onClick={onClose} sx={{ ml: 1 }}><CloseIcon fontSize="small" /></IconButton>
@@ -220,7 +220,7 @@ export default function DownloadedDetail({ video, onUseAsInspiration, onClose, o
                 {video.source_url && (
                   <Button size="small" variant="outlined" href={video.source_url} target="_blank" rel="noopener"
                     startIcon={<LinkIcon />} sx={{ textTransform: "none", fontSize: "0.78rem", mb: 1.5 }}>
-                    Read original article
+                    Đọc bài viết gốc
                   </Button>
                 )}
                 {/* Show AI analysis summary if available */}
@@ -281,8 +281,8 @@ export default function DownloadedDetail({ video, onUseAsInspiration, onClose, o
               )}
               <Chip
                 label={video.platform === "news"
-                  ? (video.insights ? "Analyzed" : "Saved")
-                  : (video.insights ? "Analyzed" : video.transcript ? "Transcribed" : "Downloaded")}
+                  ? (video.insights ? "Đã phân tích" : "Đã lưu")
+                  : (video.insights ? "Đã phân tích" : video.transcript ? "Đã chép lời" : "Đã tải về")}
                 size="small"
                 color={video.insights ? "success" : video.transcript ? "warning" : "default"}
               />
@@ -310,7 +310,7 @@ export default function DownloadedDetail({ video, onUseAsInspiration, onClose, o
               {/* ── AI Action Buttons (Notion-style inline refinement) ────── */}
               <Divider sx={{ my: 2 }} />
               <Typography variant="overline" sx={{ color: "text.secondary", mb: 1, display: "block" }}>
-                Refine with AI
+                Tinh chỉnh bằng AI
               </Typography>
               <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ gap: 0.75 }}>
                 <AIActionButton

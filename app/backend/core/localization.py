@@ -46,6 +46,8 @@ class LocalizationProfile(BaseModel):
     translation_provider: str | None = None
     translation_model: str | None = None
     translation_base_url: str | None = None
+    translation_fallback_provider: str | None = None
+    translation_fallback_model: str | None = None
     translation_preset: Literal[
         "natural_vietnamese", "affiliate_conversational", "literal", "custom"
     ] = "natural_vietnamese"

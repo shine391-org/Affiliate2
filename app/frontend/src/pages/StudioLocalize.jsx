@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   Alert, Box, Button, Checkbox, Chip, Dialog, DialogContent, DialogTitle, Drawer,
   FormControl, FormControlLabel, InputLabel, MenuItem, Paper, Radio, RadioGroup,
-  Select, Stack, Step, StepButton, Stepper, Typography,
+  Select, Slider, Stack, Step, StepButton, Stepper, Typography,
 } from "@mui/material"
 import BatchPredictionOutlinedIcon from "@mui/icons-material/BatchPredictionOutlined"
 import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined"
@@ -45,6 +45,12 @@ export default function StudioLocalize({ source, sourcesLoading }) {
     ? requestedStep
     : localizeStepForDetail(detail)
 
+  const [targetAspect, setTargetAspect] = useState("9:16")
+  const [aspectOverridden, setAspectOverridden] = useState(false)
+  const [enableMask, setEnableMask] = useState(false)
+  const [maskMode, setMaskMode] = useState("blur")
+  const [maskBox, setMaskBox] = useState({ x: 0.05, y: 0.72, width: 0.9, height: 0.15 })
+
   useEffect(() => {
     let alive = true
     http.get("/api/settings/localization-profiles").then(({ data }) => {
@@ -54,6 +60,24 @@ export default function StudioLocalize({ source, sourcesLoading }) {
     }).catch(() => {})
     return () => { alive = false }
   }, [])
+
+  const selectedProfile = useMemo(() => profiles.find((item) => item.id === profileId) || null, [profiles, profileId])
+
+  useEffect(() => {
+    if (!aspectOverridden && selectedProfile?.target_aspect) {
+      setTargetAspect(selectedProfile.target_aspect)
+    }
+  }, [selectedProfile, aspectOverridden])
+
+  const setMaskPreset = (preset) => {
+    if (preset === "bottom") {
+      setMaskBox({ x: 0.05, y: 0.72, width: 0.9, height: 0.15 })
+    } else if (preset === "bottom-full") {
+      setMaskBox({ x: 0.0, y: 0.72, width: 1.0, height: 0.22 })
+    } else if (preset === "top") {
+      setMaskBox({ x: 0.05, y: 0.08, width: 0.9, height: 0.14 })
+    }
+  }
 
   useEffect(() => {
     if (!jobId) { setDetail(null); setDetailError("") }
@@ -79,7 +103,6 @@ export default function StudioLocalize({ source, sourcesLoading }) {
     return () => { alive = false; clearInterval(timer) }
   }, [jobId, loadDetail])
 
-  const selectedProfile = useMemo(() => profiles.find((item) => item.id === profileId) || null, [profiles, profileId])
   const effective = detail?.manifest?.effective_profile || selectedProfile || {}
   const stages = detail?.manifest?.stages || {}
   const segments = detail?.transcript?.segments || []
@@ -103,6 +126,18 @@ export default function StudioLocalize({ source, sourcesLoading }) {
       form.append("target_language", target)
       form.append("mode", mode)
       form.append("profile_id", profileId)
+      if (targetAspect) {
+        form.append("target_aspect", targetAspect)
+      }
+      if (enableMask) {
+        form.append("mask_box", JSON.stringify({
+          x: maskBox.x,
+          y: maskBox.y,
+          width: maskBox.width,
+          height: maskBox.height,
+          mode: maskMode,
+        }))
+      }
       form.append("review_translation", String(mode === "full_dub" && reviewTranslation))
       const { data } = await http.post("/api/tools/translate", form, { headers: { "Content-Type": "multipart/form-data" }, timeout: 120000 })
       startJob(data.job_id, "tool:translate", "Đang bắt đầu bản địa hóa HQ…")
@@ -126,11 +161,38 @@ export default function StudioLocalize({ source, sourcesLoading }) {
   }
 
   const sourcePanel = (
-    <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "minmax(0, 1.4fr) minmax(300px, .6fr)" }, gap: 2 }}>
+    <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "minmax(0, 1.4fr) minmax(320px, .6fr)" }, gap: 2 }}>
       <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
         {source ? (
           <Stack spacing={1.25}>
-            <Box component="video" controls preload="metadata" src={`/api/downloaded/${source.id}/stream`} sx={{ width: "100%", maxHeight: 460, bgcolor: "#000", borderRadius: 1.5 }} />
+            <Box sx={{ position: "relative", width: "100%", maxHeight: 460, bgcolor: "#000", borderRadius: 1.5, overflow: "hidden" }}>
+              <Box component="video" controls preload="metadata" src={`/api/downloaded/${source.id}/stream`} sx={{ width: "100%", maxHeight: 460, display: "block" }} />
+              {enableMask && (
+                <Box
+                  sx={{
+                    position: "absolute",
+                    left: `${(maskBox.x * 100).toFixed(1)}%`,
+                    top: `${(maskBox.y * 100).toFixed(1)}%`,
+                    width: `${(maskBox.width * 100).toFixed(1)}%`,
+                    height: `${(maskBox.height * 100).toFixed(1)}%`,
+                    border: "2px dashed #f59e0b",
+                    bgcolor: maskMode === "solid" ? "rgba(0,0,0,0.85)" : "rgba(245, 158, 11, 0.35)",
+                    backdropFilter: maskMode === "blur" ? "blur(6px)" : "none",
+                    pointerEvents: "none",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#fff",
+                    fontSize: "0.75rem",
+                    fontWeight: 700,
+                    textShadow: "0 1px 2px rgba(0,0,0,0.8)",
+                    zIndex: 2,
+                  }}
+                >
+                  [Vùng che chữ: {maskMode === "solid" ? "Hộp đen" : "Làm mờ"}]
+                </Box>
+              )}
+            </Box>
             <Typography variant="h6" sx={{ fontWeight: 700 }}>{source.title || source.id}</Typography>
             <Typography variant="body2" color="text.secondary">
               {[source.platform, source.duration_seconds ? `${source.duration_seconds}s` : null, source.media_metadata?.width ? `${source.media_metadata.width}×${source.media_metadata.height}` : null].filter(Boolean).join(" · ")}
@@ -144,10 +206,80 @@ export default function StudioLocalize({ source, sourcesLoading }) {
       <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
         <Stack spacing={2}>
           <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Cấu hình tác vụ</Typography>
-          <FormControl size="small" fullWidth><InputLabel>Hồ sơ bản địa hóa</InputLabel><Select value={profileId} label="Hồ sơ bản địa hóa" onChange={(e) => setProfileId(e.target.value)}>{profiles.map((item) => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}</Select></FormControl>
-          <FormControl size="small" fullWidth><InputLabel>Ngôn ngữ đích</InputLabel><Select value={target} label="Ngôn ngữ đích" onChange={(e) => setTarget(e.target.value)}><MenuItem value="vi">Tiếng Việt</MenuItem><MenuItem value="en">Tiếng Anh</MenuItem><MenuItem value="zh">Tiếng Trung</MenuItem><MenuItem value="ja">Tiếng Nhật</MenuItem><MenuItem value="ko">Tiếng Hàn</MenuItem></Select></FormControl>
-          <RadioGroup value={mode} onChange={(e) => setMode(e.target.value)}><FormControlLabel value="full_dub" control={<Radio size="small" />} label="Lồng tiếng HQ đầy đủ" /><FormControlLabel value="captions_only" control={<Radio size="small" />} label="Chỉ phụ đề đã dịch" /></RadioGroup>
-          {mode === "full_dub" && <FormControlLabel control={<Checkbox checked={reviewTranslation} onChange={(e) => setReviewTranslation(e.target.checked)} />} label="Tạm dừng sau C6 để duyệt bản dịch" />}
+          <FormControl size="small" fullWidth>
+            <InputLabel>Hồ sơ bản địa hóa</InputLabel>
+            <Select value={profileId} label="Hồ sơ bản địa hóa" onChange={(e) => setProfileId(e.target.value)}>
+              {profiles.map((item) => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}
+            </Select>
+          </FormControl>
+          <FormControl size="small" fullWidth>
+            <InputLabel>Tỷ lệ khung hình</InputLabel>
+            <Select
+              value={targetAspect}
+              label="Tỷ lệ khung hình"
+              onChange={(e) => {
+                setTargetAspect(e.target.value)
+                setAspectOverridden(true)
+              }}
+            >
+              <MenuItem value="9:16">Dọc (9:16 — TikTok / Reels / Shorts)</MenuItem>
+              <MenuItem value="16:9">Ngang (16:9 — YouTube ngang)</MenuItem>
+              <MenuItem value="1:1">Vuông (1:1 — Feed)</MenuItem>
+              <MenuItem value="source">Giữ nguyên nguồn (Source)</MenuItem>
+            </Select>
+          </FormControl>
+          <FormControl size="small" fullWidth>
+            <InputLabel>Ngôn ngữ đích</InputLabel>
+            <Select value={target} label="Ngôn ngữ đích" onChange={(e) => setTarget(e.target.value)}>
+              <MenuItem value="vi">Tiếng Việt</MenuItem>
+              <MenuItem value="en">Tiếng Anh</MenuItem>
+              <MenuItem value="zh">Tiếng Trung</MenuItem>
+              <MenuItem value="ja">Tiếng Nhật</MenuItem>
+              <MenuItem value="ko">Tiếng Hàn</MenuItem>
+            </Select>
+          </FormControl>
+          <RadioGroup value={mode} onChange={(e) => setMode(e.target.value)}>
+            <FormControlLabel value="full_dub" control={<Radio size="small" />} label="Lồng tiếng HQ đầy đủ" />
+            <FormControlLabel value="captions_only" control={<Radio size="small" />} label="Chỉ phụ đề đã dịch" />
+          </RadioGroup>
+          {mode === "full_dub" && (
+            <FormControlLabel control={<Checkbox checked={reviewTranslation} onChange={(e) => setReviewTranslation(e.target.checked)} />} label="Tạm dừng sau C6 để duyệt bản dịch" />
+          )}
+
+          <Divider sx={{ my: 0.5 }} />
+
+          <Box>
+            <FormControlLabel
+              control={<Checkbox checked={enableMask} onChange={(e) => setEnableMask(e.target.checked)} />}
+              label={<Typography sx={{ fontWeight: 600, fontSize: "0.9rem" }}>Che chữ / phụ đề gốc trong video</Typography>}
+            />
+            {enableMask && (
+              <Stack spacing={1.5} sx={{ mt: 1, p: 1.5, bgcolor: "action.hover", borderRadius: 1.5 }}>
+                <RadioGroup row value={maskMode} onChange={(e) => setMaskMode(e.target.value)}>
+                  <FormControlLabel value="blur" control={<Radio size="small" />} label="Làm mờ (Blur)" />
+                  <FormControlLabel value="solid" control={<Radio size="small" />} label="Hộp tối (Solid)" />
+                </RadioGroup>
+                <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                  <Button size="small" variant="outlined" onClick={() => setMaskPreset("bottom")}>Dưới</Button>
+                  <Button size="small" variant="outlined" onClick={() => setMaskPreset("bottom-full")}>Dưới toàn dải</Button>
+                  <Button size="small" variant="outlined" onClick={() => setMaskPreset("top")}>Trên</Button>
+                </Stack>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">Vị trí dọc (Y): {Math.round(maskBox.y * 100)}%</Typography>
+                  <Slider size="small" min={0} max={90} value={Math.round(maskBox.y * 100)} onChange={(_, val) => setMaskBox((prev) => ({ ...prev, y: val / 100 }))} />
+                </Box>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">Chiều cao (Height): {Math.round(maskBox.height * 100)}%</Typography>
+                  <Slider size="small" min={4} max={50} value={Math.round(maskBox.height * 100)} onChange={(_, val) => setMaskBox((prev) => ({ ...prev, height: val / 100 }))} />
+                </Box>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">Chiều rộng (Width): {Math.round(maskBox.width * 100)}%</Typography>
+                  <Slider size="small" min={20} max={100} value={Math.round(maskBox.width * 100)} onChange={(_, val) => setMaskBox((prev) => ({ ...prev, width: val / 100 }))} />
+                </Box>
+              </Stack>
+            )}
+          </Box>
+
           {selectedProfile && <Alert severity="info" variant="outlined">C6 <strong>{selectedProfile.translation_model || "mặc định kết nối"}</strong> · C7 <strong>{selectedProfile.rewrite_model || "mặc định kết nối"}</strong>. Đây là hai mô hình độc lập.</Alert>}
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
             <Button variant="outlined" onClick={() => navigate("/settings?section=localization")}>Quản lý hồ sơ</Button>
@@ -174,7 +306,7 @@ export default function StudioLocalize({ source, sourcesLoading }) {
       </Box>
       {jobId && (
         <Button variant="outlined" startIcon={<TuneOutlinedIcon />} onClick={() => setExpertOpen(true)} sx={{ alignSelf: "flex-start" }}>
-          Review / edit translation
+          Xem & chỉnh sửa bản dịch
         </Button>
       )}
     </Stack>

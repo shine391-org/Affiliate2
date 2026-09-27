@@ -84,7 +84,7 @@ export default function Publish() {
         http.get("/api/settings"),
       ])
       let eligible = (videoRes.data?.videos || []).filter((video) =>
-        ["ready", "uploaded"].includes(video.status) && video.video_path
+        ["ready", "uploaded"].includes(video.status) && video.video_path && !video.artifact_missing
       )
       setSettings(settingsRes.data || {})
       const requested = selectedId
@@ -95,7 +95,7 @@ export default function Publish() {
       if (requested && !eligible.some((video) => video.id === requested)) {
         try {
           const { data: requestedVideo } = await http.get(`/api/videos/${requested}`)
-          const publishable = ["ready", "uploaded"].includes(requestedVideo?.status) && requestedVideo?.video_path
+          const publishable = ["ready", "uploaded"].includes(requestedVideo?.status) && requestedVideo?.video_path && !requestedVideo?.artifact_missing
           if (!publishable) {
             setVideos(eligible)
             setError("Video này chưa phải đầu ra hoàn tất có thể xuất bản.")
@@ -238,6 +238,23 @@ export default function Publish() {
     pollRef.current = setTimeout(tick, 800)
   }
 
+  const deleteVideo = async () => {
+    if (!selected) return
+    if (!window.confirm(`Bạn có chắc chắn muốn xóa video "${selected.title || selected.id}" không? Thao tác này không thể hoàn tác.`)) return
+    try {
+      await http.delete(`/api/videos/${selected.id}`)
+      showSnackbar("Đã xóa video thành công.", "success")
+      setParams((prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete("video")
+        return next
+      })
+      await load()
+    } catch (e) {
+      showSnackbar(e.response?.data?.detail || "Không thể xóa video", "error")
+    }
+  }
+
   const publish = async (platform) => {
     if (!selected) return
     if (!selected.publish_approved) {
@@ -377,7 +394,7 @@ export default function Publish() {
                   </Box>
                   <Button component="a" href={`/api/videos/${selected.id}/stream`} download
                     fullWidth sx={{ mt: 1 }} variant="outlined" startIcon={<DownloadOutlinedIcon />}>
-                    Download
+                    Tải về
                   </Button>
                 </Box>
 
@@ -402,6 +419,9 @@ export default function Publish() {
                       color={selected.publish_approved ? "inherit" : "success"}
                       onClick={() => approve(!selected.publish_approved)}>
                       {selected.publish_approved ? "Thu hồi duyệt" : "Duyệt để xuất bản"}
+                    </Button>
+                    <Button variant="outlined" color="error" onClick={deleteVideo}>
+                      Xóa video
                     </Button>
                   </Stack>
 

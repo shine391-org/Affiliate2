@@ -998,12 +998,13 @@ async def burn_captions(
     reframe_method: str = "auto",
     external_audio: Path | None = None,
     video_slowdown: float = 1.0,
+    mask_box: dict | None = None,
 ) -> Path:
-    """One final visual generation: optional retime + reframe + ASS captions.
+    """One final visual generation: optional retime + reframe + text masking + ASS captions.
 
     Phase C may supply an externally mixed dub track. The source picture is
-    never pre-encoded for audio work or bounded slowdown; setpts, geometry and
-    captions share this single H.264 encode.
+    never pre-encoded for audio work or bounded slowdown; setpts, geometry,
+    optional source text masking and captions share this single H.264 encode.
     """
     global _ffmpeg_has_ass
 
@@ -1025,17 +1026,20 @@ async def burn_captions(
     duration = await asyncio.to_thread(probe_duration, video_path, 0.0)
     timeout_s = int(min(max(duration * video_slowdown * 3, 600), 5400))
 
+    from backend.services.ffmpeg_service import (
+        ASPECT_DIMS, _probe_dimensions, labeled_reframe_filters,
+        pick_reframe_method, video_encode_args, has_nvenc_support,
+    )
+
+    src_w, src_h = await _probe_dimensions(video_path)
     target_dims = None
     method = reframe_method
     if target_aspect and target_aspect != "source":
-        from backend.services.ffmpeg_service import (
-            ASPECT_DIMS, _probe_dimensions, labeled_reframe_filters,
-            pick_reframe_method,
-        )
-        target_dims = ASPECT_DIMS[target_aspect]
-        if method == "auto":
-            src_w, src_h = await _probe_dimensions(video_path)
+        target_dims = ASPECT_DIMS.get(target_aspect)
+        if target_dims and method == "auto" and src_w and src_h:
             method = pick_reframe_method(src_w, src_h, target_aspect)
+
+    out_w, out_h = target_dims if target_dims else (src_w or 1080, src_h or 1920)
 
     def _burn():
         escaped_ass = (
@@ -1065,46 +1069,97 @@ async def burn_captions(
             )
             current = "[framed]"
 
+        if mask_box and isinstance(mask_box, dict):
+            try:
+                bx = float(mask_box.get("x", 0))
+                by = float(mask_box.get("y", 0))
+                bw = float(mask_box.get("width", 0))
+                bh = float(mask_box.get("height", 0))
+                mode = str(mask_box.get("mode", "blur")).lower()
+
+                if 0 < bx <= 1.0 and 0 < bw <= 1.0:
+                    px_x = int(round(bx * out_w))
+                    px_y = int(round(by * out_h))
+                    px_w = int(round(bw * out_w))
+                    px_h = int(round(bh * out_h))
+                elif bx > 1.0 or bw > 1.0:
+                    if bw <= 100 and bh <= 100 and (bx + bw) <= 100 and (by + bh) <= 100:
+                        px_x = int(round(bx / 100.0 * out_w))
+                        px_y = int(round(by / 100.0 * out_h))
+                        px_w = int(round(bw / 100.0 * out_w))
+                        px_h = int(round(bh / 100.0 * out_h))
+                    else:
+                        px_x = int(round(bx))
+                        px_y = int(round(by))
+                        px_w = int(round(bw))
+                        px_h = int(round(bh))
+                else:
+                    px_x, px_y, px_w, px_h = 0, 0, 0, 0
+
+                if px_w > 0 and px_h > 0 and px_x < out_w and px_y < out_h:
+                    px_x = max(0, min(px_x, out_w - 4))
+                    px_y = max(0, min(px_y, out_h - 4))
+                    px_w = max(4, min(px_w, out_w - px_x))
+                    px_h = max(4, min(px_h, out_h - px_y))
+                    px_w = (px_w // 2) * 2
+                    px_h = (px_h // 2) * 2
+
+                    if mode == "solid":
+                        filters.append(f"{current}drawbox=x={px_x}:y={px_y}:w={px_w}:h={px_h}:color=black@1.0:t=fill[masked]")
+                        current = "[masked]"
+                    else:
+                        filters.append(f"{current}split[mbase][mcrop]")
+                        filters.append(f"[mcrop]crop={px_w}:{px_h}:{px_x}:{px_y},boxblur=12:6[mblur]")
+                        filters.append(f"[mbase][mblur]overlay={px_x}:{px_y}[masked]")
+                        current = "[masked]"
+            except Exception as mask_err:
+                logger.warning("Failed to construct video mask filter: %s", mask_err)
+
         filters.append(f"{current}ass='{escaped_ass}'[vout]")
 
-        cmd = ["ffmpeg", "-y", "-i", str(video_path)]
-        if external_audio is not None:
-            cmd += ["-i", str(external_audio)]
-        cmd += ["-filter_complex", ";".join(filters), "-map", "[vout]"]
-
-        from backend.services.ffmpeg_service import video_encode_args
-        cmd += video_encode_args(render_profile)
-
-        if external_audio is not None:
-            attempts = [[
-                *cmd,
-                "-map", "1:a:0",
-                "-af", "apad",
-                "-c:a", "aac", "-b:a", "192k",
-                "-shortest",
-            ]]
-        else:
-            cmd += ["-map", "0:a?"]
-            attempts = [
-                [*cmd, "-c:a", "copy"],
-                [*cmd, "-c:a", "aac", "-b:a", "192k"],
-            ]
-
+        nvenc_ok = has_nvenc_support()
+        encoder_variants = [True, False] if nvenc_ok else [False]
         last_err = ""
-        for base in attempts:
-            full = base + ["-movflags", "+faststart", str(output_path)]
-            try:
-                result = subprocess.run(
-                    full, capture_output=True, text=True, timeout=timeout_s
-                )
-            except subprocess.TimeoutExpired:
-                logger.error("Final localization render timed out after %ds", timeout_s)
-                return video_path
-            if result.returncode == 0 and output_path.exists():
-                logger.info("Final localization render succeeded: %s", output_path)
-                return output_path
-            last_err = (result.stderr or "")[-700:]
-            output_path.unlink(missing_ok=True)
+
+        for use_nvenc in encoder_variants:
+            v_args = video_encode_args(render_profile, prefer_nvenc=use_nvenc)
+            cmd = ["ffmpeg", "-y", "-i", str(video_path)]
+            if external_audio is not None:
+                cmd += ["-i", str(external_audio)]
+            cmd += ["-filter_complex", ";".join(filters), "-map", "[vout]"] + v_args
+
+            if external_audio is not None:
+                attempts = [[
+                    *cmd,
+                    "-map", "1:a:0",
+                    "-af", "apad",
+                    "-c:a", "aac", "-b:a", "192k",
+                    "-shortest",
+                ]]
+            else:
+                cmd += ["-map", "0:a?"]
+                attempts = [
+                    [*cmd, "-c:a", "copy"],
+                    [*cmd, "-c:a", "aac", "-b:a", "192k"],
+                ]
+
+            for base in attempts:
+                full = base + ["-movflags", "+faststart", str(output_path)]
+                try:
+                    result = subprocess.run(
+                        full, capture_output=True, text=True, timeout=timeout_s
+                    )
+                except subprocess.TimeoutExpired:
+                    logger.error("Final localization render timed out after %ds", timeout_s)
+                    return video_path
+                if result.returncode == 0 and output_path.exists():
+                    logger.info("Final localization render succeeded (nvenc=%s): %s", use_nvenc, output_path)
+                    return output_path
+                last_err = (result.stderr or "")[-700:]
+                output_path.unlink(missing_ok=True)
+
+            if use_nvenc:
+                logger.warning("NVENC render attempt failed; falling back to libx264: %s", last_err[:200])
 
         logger.error("Final localization render FFmpeg error: %s", last_err)
         return video_path
