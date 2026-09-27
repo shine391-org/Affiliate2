@@ -322,12 +322,7 @@ class LocalizationRun:
         self._check_stage(stage)
         index = STAGES.index(stage)
         invalidated = list(STAGES[index:])
-        if preserve_files is not None:
-            preserved_names = set(preserve_files)
-        elif stage == "translation":
-            preserved_names = {"checkpoint.json"}
-        else:
-            preserved_names = set()
+        preserved_names = set(preserve_files or ())
 
         for name in invalidated:
             record = self.record(name)

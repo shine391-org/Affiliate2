@@ -198,6 +198,34 @@ def test_datetime_repair_types_and_safety(tmp_path):
     assert res2["repaired_rows"] == 0
 
 
+def test_datetime_repair_backup_is_wal_safe_sqlite_snapshot(tmp_path):
+    db_file = tmp_path / "test_wal_snapshot.db"
+    conn = sqlite3.connect(str(db_file))
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA wal_autocheckpoint=0")
+    conn.execute("CREATE TABLE items (id TEXT PRIMARY KEY, created_at DATETIME)")
+    conn.execute("INSERT INTO items VALUES ('wal-row', 1700000000)")
+    conn.commit()
+
+    assert db_file.with_name(f"{db_file.name}-wal").exists()
+
+    result = repair_database_datetimes(db_file, backup=True)
+    assert result["repaired_rows"] == 1
+
+    backups = list(tmp_path.glob(f"{db_file.name}.backup_before_repair_*") )
+    assert len(backups) == 1
+    backup_conn = sqlite3.connect(str(backups[0]))
+    try:
+        row = backup_conn.execute(
+            "SELECT id, created_at, typeof(created_at) FROM items WHERE id='wal-row'"
+        ).fetchone()
+    finally:
+        backup_conn.close()
+        conn.close()
+
+    assert row == ("wal-row", 1700000000, "integer")
+
+
 def test_datetime_repair_malformed_not_null_fails_closed(tmp_path):
     db_file = tmp_path / "test_not_null_fail.db"
     conn = sqlite3.connect(str(db_file))
@@ -225,11 +253,12 @@ def test_datetime_repair_backup_failure_aborts(tmp_path, monkeypatch):
     conn.commit()
     conn.close()
 
-    import shutil
-    def fail_copy(*a, **k):
+    from backend.migrations import repair_datetime_types as repair_module
+
+    def fail_backup(*a, **k):
         raise OSError("Disk full simulation on backup")
 
-    monkeypatch.setattr(shutil, "copy2", fail_copy)
+    monkeypatch.setattr(repair_module, "_backup_sqlite_database", fail_backup)
 
     with pytest.raises(RuntimeError, match="Database backup failed before datetime repair"):
         repair_database_datetimes(db_file, backup=True)
@@ -412,6 +441,126 @@ async def test_checkpoint_invalidated_on_config_change(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_checkpoint_records_only_successful_batches_and_retries_failed_batch(tmp_path, monkeypatch):
+    trans_dir = tmp_path / "translation"
+    transcript = LocalizationTranscript(
+        text="Sentence 0 Sentence 1",
+        language="en",
+        segments=[
+            LocalizationSegment(id="s0", source_text="Sentence 0", source_start_ms=0, source_end_ms=1000),
+            LocalizationSegment(id="s1", source_text="Sentence 1", source_start_ms=1000, source_end_ms=2000),
+        ],
+    )
+    profile = LocalizationProfile(id="p1", name="Profile 1", qc_profile="standard")
+    mock_ai = SimpleNamespace(
+        provider=AIProvider.COMPATIBLE,
+        model="gemini-2.5-flash",
+        base_url="https://primary.example/v1",
+    )
+    monkeypatch.setattr(ls, "_TRANSLATION_BATCH_SIZE", 1)
+    monkeypatch.setattr(ls, "_profile_ai_client", lambda *args: mock_ai)
+
+    first_calls = []
+
+    async def first_attempt(ai, batch, **kwargs):
+        first_calls.append(batch[0].id)
+        if batch[0].id == "s1":
+            return [batch[0].source_text], {0}
+        return ["Dịch 0"], set()
+
+    monkeypatch.setattr(ls, "_translate_batch_resilient", first_attempt)
+    await ls.translate_transcript(
+        transcript,
+        target_language="vi",
+        profile=profile,
+        user_settings=SimpleNamespace(ai_provider="compatible"),
+        for_dub=False,
+        checkpoint_dir=trans_dir,
+    )
+
+    checkpoint = json.loads((trans_dir / "checkpoint.json").read_text(encoding="utf-8"))
+    assert first_calls == ["s0", "s1"]
+    assert set(checkpoint["batches"]) == {"0"}
+
+    retry_calls = []
+
+    async def retry_attempt(ai, batch, **kwargs):
+        retry_calls.append(batch[0].id)
+        return ["Dịch 1"], set()
+
+    monkeypatch.setattr(ls, "_translate_batch_resilient", retry_attempt)
+    retried = await ls.translate_transcript(
+        transcript,
+        target_language="vi",
+        profile=profile,
+        user_settings=SimpleNamespace(ai_provider="compatible"),
+        for_dub=False,
+        checkpoint_dir=trans_dir,
+    )
+
+    assert retry_calls == ["s1"]
+    assert retried.segments[0].translated_text == "Dịch 0"
+    assert retried.segments[1].translated_text == "Dịch 1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changed_config", ["primary_base_url", "fallback_model"])
+async def test_checkpoint_identity_binds_endpoint_and_fallback_config(tmp_path, monkeypatch, changed_config):
+    trans_dir = tmp_path / "translation"
+    transcript = LocalizationTranscript(
+        text="Sentence 0",
+        language="en",
+        segments=[LocalizationSegment(id="s0", source_text="Sentence 0", source_start_ms=0, source_end_ms=1000)],
+    )
+    profile = LocalizationProfile(
+        id="p1",
+        name="Profile 1",
+        qc_profile="standard",
+        translation_fallback_provider="lmstudio",
+        translation_fallback_model="fallback-a",
+    )
+    primary = SimpleNamespace(
+        provider=AIProvider.COMPATIBLE,
+        model="primary-model",
+        base_url="https://primary-a.example/v1",
+    )
+    monkeypatch.setattr(ls, "_profile_ai_client", lambda *args: primary)
+
+    calls = []
+
+    async def translate(ai, batch, **kwargs):
+        calls.append(batch[0].id)
+        return [f"Dịch {len(calls)}"], set()
+
+    monkeypatch.setattr(ls, "_translate_batch_resilient", translate)
+    await ls.translate_transcript(
+        transcript,
+        target_language="vi",
+        profile=profile,
+        user_settings=SimpleNamespace(ai_provider="compatible"),
+        for_dub=False,
+        checkpoint_dir=trans_dir,
+    )
+    assert calls == ["s0"]
+
+    if changed_config == "primary_base_url":
+        primary.base_url = "https://primary-b.example/v1"
+    else:
+        profile = profile.model_copy(update={"translation_fallback_model": "fallback-b"})
+
+    await ls.translate_transcript(
+        transcript,
+        target_language="vi",
+        profile=profile,
+        user_settings=SimpleNamespace(ai_provider="compatible"),
+        for_dub=False,
+        checkpoint_dir=trans_dir,
+    )
+
+    assert calls == ["s0", "s0"]
+
+
+@pytest.mark.asyncio
 async def test_rerun_preserves_translation_checkpoint_and_skips_finished_batches(tmp_path, monkeypatch):
     storage_root = tmp_path / "storage"
     monkeypatch.setattr(Settings, "STORAGE_ROOT", property(lambda self: storage_root))
@@ -441,10 +590,14 @@ async def test_rerun_preserves_translation_checkpoint_and_skips_finished_batches
         "target_language": "vi",
         "provider": "compatible",
         "model": "gemini-2.5-flash",
+        "base_url": "",
         "preset": "natural_vietnamese",
         "instructions": "",
         "guardrails": profile.translation_guardrails.strip(),
         "glossary_hash": ls.hashlib.sha256(b"{}").hexdigest()[:16],
+        "fallback_provider": "",
+        "fallback_model": "",
+        "fallback_base_url": "",
         "batches": {
             "0": {
                 "texts": [f"Dịch {i}" for i in range(12)],
@@ -457,7 +610,11 @@ async def test_rerun_preserves_translation_checkpoint_and_skips_finished_batches
     final_tr.write_text("{}", encoding="utf-8")
 
     run = lss.LocalizationRun("job-resilience", source_path=str(tmp_path / "src.mp4"))
-    run.invalidate_from("translation", delete_artifacts=True)
+    run.invalidate_from(
+        "translation",
+        delete_artifacts=True,
+        preserve_files={"checkpoint.json"},
+    )
 
     # Verification: final transcript.json deleted, but checkpoint.json preserved!
     assert not final_tr.exists(), "Final transcript.json should have been deleted!"

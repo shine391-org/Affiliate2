@@ -2,7 +2,6 @@
 # Copyright (c) 2025-2026 ViralMint Contributors
 import logging
 import re
-import shutil
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +13,15 @@ CANONICAL_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
 
 # Strict pattern for canonical format: YYYY-MM-DD HH:MM:SS.ffffff
 _CANONICAL_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{6}$")
+
+
+def _backup_sqlite_database(source: sqlite3.Connection, destination: Path) -> None:
+    """Create a transactionally consistent SQLite snapshot, including WAL data."""
+    backup_conn = sqlite3.connect(str(destination))
+    try:
+        source.backup(backup_conn)
+    finally:
+        backup_conn.close()
 
 
 def to_canonical_datetime_str(value: Any) -> str | None:
@@ -152,7 +160,7 @@ def repair_database_datetimes(db_path: Path | str, backup: bool = True) -> dict[
             ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
             backup_path = db_path.with_name(f"{db_path.name}.backup_before_repair_{ts}")
             try:
-                shutil.copy2(db_path, backup_path)
+                _backup_sqlite_database(conn, backup_path)
                 logger.info("Created safety backup before datetime repair: %s", backup_path)
             except Exception as exc:
                 logger.error("Failed to create database backup before repair: %s", exc)

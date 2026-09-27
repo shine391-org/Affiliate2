@@ -547,15 +547,24 @@ async def translate_transcript(
     glossary_str = json.dumps(getattr(profile, "glossary", {}) or {}, sort_keys=True, ensure_ascii=False)
     glossary_hash = hashlib.sha256(glossary_str.encode("utf-8")).hexdigest()[:16]
     provider_name = getattr(getattr(ai, "provider", None), "value", str(getattr(ai, "provider", "")))
+    fallback_provider_name = getattr(
+        getattr(fallback_ai, "provider", None),
+        "value",
+        str(getattr(fallback_ai, "provider", "")),
+    ) if fallback_ai else ""
     checkpoint_meta = {
         "semantic_hash": semantic_sig,
         "target_language": target_language,
         "provider": provider_name,
         "model": getattr(ai, "model", ""),
+        "base_url": str(getattr(ai, "base_url", "") or "").rstrip("/"),
         "preset": profile.translation_preset,
         "instructions": (getattr(profile, "translation_instructions", "") or "").strip(),
         "guardrails": (getattr(profile, "translation_guardrails", "") or "").strip(),
         "glossary_hash": glossary_hash,
+        "fallback_provider": fallback_provider_name,
+        "fallback_model": getattr(fallback_ai, "model", "") if fallback_ai else "",
+        "fallback_base_url": str(getattr(fallback_ai, "base_url", "") or "").rstrip("/") if fallback_ai else "",
     }
     completed_batches: dict[str, dict] = {}
     if checkpoint_file and checkpoint_file.exists():
@@ -587,7 +596,10 @@ async def translate_transcript(
                 for_dub=for_dub,
                 fallback_ai=fallback_ai,
             )
-            completed_batches[batch_key] = {"texts": texts, "failed": list(failed)}
+            if failed:
+                completed_batches.pop(batch_key, None)
+            else:
+                completed_batches[batch_key] = {"texts": texts, "failed": []}
             if checkpoint_file:
                 try:
                     checkpoint_file.parent.mkdir(parents=True, exist_ok=True)

@@ -43,6 +43,12 @@ class RerunRequest(BaseModel):
     ] | None = None
 
 
+class RenderRerunRequest(BaseModel):
+    target_aspect: Literal["source", "9:16", "16:9", "1:1"] | None = None
+    mask_box: dict[str, Any] | None = None
+    caption_placement: dict[str, Any] | None = None
+
+
 _ASR_KEYS = {
     "asr_provider", "asr_model", "asr_quality",
     "alignment_mode", "diarization_mode", "diarization_speakers",
@@ -162,20 +168,22 @@ async def _dispatch_existing_run(run: LocalizationRun):
         )
 
     req = run.request
+    effective = run.effective_profile
     dispatch(run_tool_translate(
         run.job_id,
         run.source_path,
         str(req.get("target_language") or "Vietnamese"),
         str(req.get("mode") or "full_dub"),
         str(req.get("voice_id") or ""),
-        str(req.get("caption_style") or "viral"),
+        str(effective.get("caption_style") or req.get("caption_style") or "viral"),
         str(req.get("emoji_style") or "moderate"),
-        target_aspect=req.get("target_aspect"),
+        target_aspect=effective.get("target_aspect") or req.get("target_aspect"),
         profile_id=req.get("profile_id"),
-        profile_override=run.effective_profile,
+        profile_override=effective,
         review_translation=bool(req.get("review_translation")),
         cleanup_input=False,
         mask_box=req.get("mask_box"),
+        caption_placement=req.get("caption_placement"),
         downloaded_video_id=req.get("downloaded_video_id"),
     ))
 
@@ -415,7 +423,8 @@ async def rerun_localization_job(job_id: str, body: RerunRequest):
     await _assert_job_inactive(job_id)
     run = _load_run(job_id)
     stage = body.from_stage or run.first_incomplete_stage() or "qc"
-    run.invalidate_from(stage, delete_artifacts=True)
+    preserve_files = {"checkpoint.json"} if body.from_stage is None and stage == "translation" else set()
+    run.invalidate_from(stage, delete_artifacts=True, preserve_files=preserve_files)
     if stage == "separation":
         # This is the explicit recovery path for an intentionally replaced
         # source. All source-derived artifacts were invalidated above, so the
@@ -423,6 +432,70 @@ async def rerun_localization_job(job_id: str, body: RerunRequest):
         run.refresh_source_identity()
     await _dispatch_existing_run(run)
     return {"ok": True, "job_id": job_id, "from_stage": stage}
+
+
+@router.post("/jobs/{job_id}/rerender")
+async def rerender_localization_job(job_id: str, body: RenderRerunRequest):
+    await _assert_job_inactive(job_id)
+
+    provided = body.model_fields_set
+    explicit_mask = body.mask_box if "mask_box" in provided else None
+    if explicit_mask is not None:
+        if explicit_mask.get("normalized") is not True:
+            raise HTTPException(status_code=400, detail="Mask box must explicitly set normalized=true")
+        from backend.services.caption_service import parse_and_validate_mask_box
+
+        if parse_and_validate_mask_box(explicit_mask, 1000, 1000) is None:
+            raise HTTPException(status_code=400, detail="Mask box geometry is invalid")
+
+    run = _load_run(job_id)
+    mask_box = (
+        body.mask_box
+        if "mask_box" in provided
+        else run.request.get("mask_box")
+    )
+    if mask_box is not None and "mask_box" not in provided:
+        if mask_box.get("normalized") is not True:
+            raise HTTPException(status_code=400, detail="Mask box must explicitly set normalized=true")
+        from backend.services.caption_service import parse_and_validate_mask_box
+
+        if parse_and_validate_mask_box(mask_box, 1000, 1000) is None:
+            raise HTTPException(status_code=400, detail="Mask box geometry is invalid")
+
+    placement = dict(
+        body.caption_placement
+        if "caption_placement" in provided
+        else run.request.get("caption_placement") or {}
+    )
+    mode = str(placement.get("mode") or "default").strip().lower()
+    if mode not in {"default", "mask_region"}:
+        raise HTTPException(status_code=400, detail="Caption placement mode is invalid")
+    try:
+        vertical_offset = float(placement.get("vertical_offset", 0.0))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Caption vertical offset must be numeric") from exc
+    if not -0.25 <= vertical_offset <= 0.25:
+        raise HTTPException(status_code=400, detail="Caption vertical offset must be between -0.25 and 0.25")
+    if mode == "mask_region" and mask_box is None:
+        raise HTTPException(status_code=400, detail="Mask-region caption placement requires an enabled mask")
+    placement = {"mode": mode, "vertical_offset": vertical_offset}
+
+    request = dict(run.request)
+    if "mask_box" in provided:
+        request["mask_box"] = mask_box
+    if "caption_placement" in provided:
+        request["caption_placement"] = placement
+    if "target_aspect" in provided and body.target_aspect:
+        request["target_aspect"] = body.target_aspect
+    run.update_request(request)
+    if "target_aspect" in provided and body.target_aspect:
+        run.update_effective_profile({
+            **run.effective_profile,
+            "target_aspect": body.target_aspect,
+        })
+    run.invalidate_from("final_render", delete_artifacts=True, preserve_files=set())
+    await _dispatch_existing_run(run)
+    return {"ok": True, "job_id": job_id, "from_stage": "final_render"}
 
 
 async def _run_localization_batch_sequential(specs: list[dict]) -> None:

@@ -740,6 +740,13 @@ class TestTranslate:
                 "metrics": {},
             }
         )
+        mask_box = {
+            "x": 0.05, "y": 0.72, "width": 0.9, "height": 0.15,
+            "mode": "blur", "normalized": True,
+        }
+        caption_placement = {"mode": "mask_region", "vertical_offset": -0.05}
+        ass_mock = AsyncMock(side_effect=_ass)
+        burn_mock = AsyncMock(side_effect=_burn)
 
         with patch.object(trun, "_load_user_settings", new=AsyncMock(return_value=None)), \
              patch("backend.services.localization_service.transcribe_for_localization",
@@ -750,17 +757,22 @@ class TestTranslate:
                    new=AsyncMock(return_value=localized)), \
              patch.object(trun, "_probe_aspect_ratio", new=AsyncMock(return_value="9:16")), \
              patch("backend.services.caption_service.generate_captions_ass",
-                   new=AsyncMock(side_effect=_ass)), \
+                   new=ass_mock), \
              patch("backend.services.caption_service.burn_captions",
-                   new=AsyncMock(side_effect=_burn)), \
+                   new=burn_mock), \
              patch("backend.services.localization_qc_service.evaluate_localization_qc",
                    return_value=qc_report), \
              patch("backend.services.video_utils.probe_duration", return_value=1.0):
             await trun.run_tool_translate(
-                "j1", source_path, "Spanish", "captions_only", "", "viral", "auto"
+                "j1", source_path, "Spanish", "captions_only", "", "viral", "auto",
+                mask_box=mask_box,
+                caption_placement=caption_placement,
             )
 
         terminal_spies["success"].assert_awaited()
+        assert ass_mock.await_args.kwargs["mask_box"] == mask_box
+        assert ass_mock.await_args.kwargs["caption_placement"] == caption_placement
+        assert burn_mock.await_args.kwargs["mask_box"] == mask_box
         manifest_path = out_dir / "localization_jobs" / "j1" / "manifest.json"
         assert manifest_path.exists()
         import json

@@ -903,6 +903,7 @@ async def run_tool_translate(
     review_translation: bool | None = None,
     cleanup_input: bool | None = None,
     mask_box: dict | None = None,
+    caption_placement: dict | None = None,
     downloaded_video_id: str | None = None,
 ):
     """Canonical resumable Phase-C localization runner.
@@ -947,6 +948,7 @@ async def run_tool_translate(
         "review_translation": bool(review_translation),
         "cleanup_input": cleanup_input,
         "mask_box": mask_box,
+        "caption_placement": caption_placement,
         "downloaded_video_id": downloaded_video_id,
     }
     logger.info(
@@ -1456,6 +1458,8 @@ async def run_tool_translate(
                         aspect_ratio=caption_aspect,
                         emoji_style=emoji_style,
                         output_path=ass_path,
+                        mask_box=mask_box,
+                        caption_placement=caption_placement,
                     )
                     out_path = tool_out_path(job_id, ".mp4")
                     rendered = await burn_captions(

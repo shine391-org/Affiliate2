@@ -171,3 +171,72 @@ async def test_burn_captions_with_mask_box_solid_and_blur(monkeypatch, tmp_path)
     assert "boxblur=" in cmd2
     assert "crop=" in cmd2
     assert "overlay=" in cmd2
+
+
+@pytest.mark.asyncio
+async def test_generate_ass_places_vietsub_inside_mask_region_with_vertical_offset(tmp_path):
+    from backend.services import caption_service
+
+    segments = [{"start": 0.0, "end": 1.0, "text": "Phụ đề tiếng Việt"}]
+    mask = {
+        "x": 0.05,
+        "y": 0.72,
+        "width": 0.9,
+        "height": 0.15,
+        "mode": "blur",
+        "normalized": True,
+    }
+
+    centered = tmp_path / "centered.ass"
+    shifted = tmp_path / "shifted.ass"
+    default = tmp_path / "default.ass"
+    await caption_service.generate_captions_ass(
+        segments,
+        aspect_ratio="9:16",
+        output_path=centered,
+        emoji_style="none",
+        mask_box=mask,
+        caption_placement={"mode": "mask_region", "vertical_offset": 0.0},
+    )
+    await caption_service.generate_captions_ass(
+        segments,
+        aspect_ratio="9:16",
+        output_path=shifted,
+        emoji_style="none",
+        mask_box=mask,
+        caption_placement={"mode": "mask_region", "vertical_offset": -0.05},
+    )
+    await caption_service.generate_captions_ass(
+        segments,
+        aspect_ratio="9:16",
+        output_path=default,
+        emoji_style="none",
+    )
+
+    centered_text = centered.read_text(encoding="utf-8")
+    shifted_text = shifted.read_text(encoding="utf-8")
+    default_text = default.read_text(encoding="utf-8")
+    assert "\\an5\\pos(540,1526)" in centered_text
+    assert "\\an5\\pos(540,1430)" in shifted_text
+    assert "\\pos(" not in default_text
+
+
+@pytest.mark.asyncio
+async def test_generate_ass_rejects_mask_region_too_small_for_caption(tmp_path):
+    from backend.services import caption_service
+
+    with pytest.raises(ValueError, match="too small"):
+        await caption_service.generate_captions_ass(
+            [{"start": 0.0, "end": 1.0, "text": "Phụ đề tiếng Việt"}],
+            aspect_ratio="9:16",
+            output_path=tmp_path / "small.ass",
+            emoji_style="none",
+            mask_box={
+                "x": 0.4,
+                "y": 0.8,
+                "width": 0.05,
+                "height": 0.02,
+                "normalized": True,
+            },
+            caption_placement={"mode": "mask_region", "vertical_offset": 0.0},
+        )

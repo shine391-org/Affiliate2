@@ -370,6 +370,27 @@ class TestMultiFileAndTextRoutes:
                         data={"target_language": "es", "mode": "telepathy"})
         assert r.status_code == 422
 
+    @pytest.mark.parametrize(
+        "mask_box",
+        [
+            "not-json",
+            '{"x":0,"y":72,"width":100,"height":22,"mode":"blur"}',
+            '{"x":0.8,"y":0.7,"width":0.5,"height":0.2,"mode":"blur","normalized":true}',
+        ],
+    )
+    def test_translate_rejects_malformed_or_invalid_new_mask_payload(self, client, mask_box):
+        r = client.post(
+            "/api/tools/translate",
+            files=_mp4(),
+            data={
+                "target_language": "vi",
+                "mode": "captions_only",
+                "mask_box": mask_box,
+                "caption_placement": '{"mode":"mask_region","vertical_offset":0}',
+            },
+        )
+        assert r.status_code == 400, r.text
+
     def test_translate_reuses_the_same_active_direct_upload(self, client):
         payload = b"A" * 4096
         data = {"target_language": "vi", "mode": "captions_only"}

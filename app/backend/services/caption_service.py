@@ -827,7 +827,11 @@ def _group_words_into_lines(
     return merged
 
 
-def _generate_ass_events(words: list[dict], style: dict) -> str:
+def _generate_ass_events(
+    words: list[dict],
+    style: dict,
+    position: tuple[int, int] | None = None,
+) -> str:
     """
     Generate ASS dialogue events with word-by-word highlighting over
     phrase-length lines. The full line stays on screen for its whole
@@ -878,11 +882,57 @@ def _generate_ass_events(words: list[dict], style: dict) -> str:
                     parts.append(w["text"])
 
             text = " ".join(parts)
+            if position is not None:
+                text = f"{{\\an5\\pos({position[0]},{position[1]})}}{text}"
             start_ts = _format_ass_time(seg_start)
             end_ts = _format_ass_time(seg_end)
             events.append(f"Dialogue: 0,{start_ts},{end_ts},Default,,0,0,0,,{text}")
 
     return "\n".join(events)
+
+
+def _caption_position_for_mask(
+    mask_box: dict | None,
+    caption_placement: dict | None,
+    resolution: tuple[int, int],
+    style_config: dict,
+    aspect_ratio: str,
+) -> tuple[int, int] | None:
+    placement = caption_placement or {}
+    mode = str(placement.get("mode") or "default").strip().lower()
+    if mode == "default":
+        return None
+    if mode != "mask_region":
+        raise ValueError("Unsupported caption placement mode")
+    if not isinstance(mask_box, dict):
+        raise ValueError("Mask-region caption placement requires a mask box")
+
+    width, height = resolution
+    parsed = parse_and_validate_mask_box(mask_box, width, height)
+    if parsed is None:
+        raise ValueError("Invalid mask box for caption placement")
+    px_x, px_y, px_w, px_h, _ = parsed
+    is_portrait = aspect_ratio == "9:16"
+    font_size = int(
+        style_config["font_size_portrait"] if is_portrait
+        else style_config["font_size_landscape"]
+    )
+    if px_w < font_size * 4 or px_h < int(font_size * 1.5):
+        raise ValueError("Mask region is too small for caption placement")
+
+    try:
+        vertical_offset = float(placement.get("vertical_offset", 0.0))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Caption vertical offset must be numeric") from exc
+    if not -0.25 <= vertical_offset <= 0.25:
+        raise ValueError("Caption vertical offset must be between -0.25 and 0.25")
+
+    center_x = int(round(px_x + px_w / 2))
+    center_y = int(round(px_y + px_h / 2 + vertical_offset * height))
+    safe_pad = max(font_size, 12)
+    center_x = max(safe_pad, min(center_x, width - safe_pad))
+    center_y = max(safe_pad, min(center_y, height - safe_pad))
+    return center_x, center_y
 
 
 async def generate_captions_ass(
@@ -895,6 +945,8 @@ async def generate_captions_ass(
     hook_duration: float = 2.5,
     platform: str | None = None,
     respect_safe_zone: bool = True,
+    mask_box: dict | None = None,
+    caption_placement: dict | None = None,
 ) -> Path:
     """
     Generate ASS subtitle file with word-by-word animation.
@@ -961,7 +1013,14 @@ async def generate_captions_ass(
         include_hook_style=bool(hook_event),
         platform=platform, respect_safe_zone=respect_safe_zone,
     )
-    events = _generate_ass_events(words, style_config) if words else ""
+    position = _caption_position_for_mask(
+        mask_box,
+        caption_placement,
+        resolution,
+        style_config,
+        aspect_ratio,
+    )
+    events = _generate_ass_events(words, style_config, position=position) if words else ""
 
     content = header + hook_event + events + "\n"
     output_path.write_text(content, encoding="utf-8")

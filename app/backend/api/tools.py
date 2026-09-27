@@ -424,6 +424,7 @@ async def translate_tool(
     profile_id: Optional[str] = Form(None),
     review_translation: bool = Form(False),
     mask_box: Optional[str] = Form(None),
+    caption_placement: Optional[str] = Form(None),
 ):
     """Translate captions (and optionally dub audio) to another language.
 
@@ -441,6 +442,47 @@ async def translate_tool(
     from backend.core.task_runner import dispatch
     from backend.core.tool_runners import run_tool_translate
 
+    parsed_mask_box = None
+    if mask_box:
+        try:
+            parsed_mask_box = json.loads(mask_box)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise HTTPException(400, "mask_box must be valid JSON") from exc
+        if not isinstance(parsed_mask_box, dict):
+            raise HTTPException(400, "mask_box must be an object")
+        if parsed_mask_box.get("normalized") is not True:
+            raise HTTPException(400, "mask_box must explicitly set normalized=true")
+        if str(parsed_mask_box.get("mode") or "").strip().lower() not in {"blur", "solid"}:
+            raise HTTPException(400, "mask_box mode must be blur or solid")
+        from backend.services.caption_service import parse_and_validate_mask_box
+
+        if parse_and_validate_mask_box(parsed_mask_box, 1000, 1000) is None:
+            raise HTTPException(400, "mask_box geometry is invalid")
+
+    parsed_caption_placement = {"mode": "default", "vertical_offset": 0.0}
+    if caption_placement:
+        try:
+            raw_placement = json.loads(caption_placement)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise HTTPException(400, "caption_placement must be valid JSON") from exc
+        if not isinstance(raw_placement, dict):
+            raise HTTPException(400, "caption_placement must be an object")
+        placement_mode = str(raw_placement.get("mode") or "default").strip().lower()
+        if placement_mode not in {"default", "mask_region"}:
+            raise HTTPException(400, "caption_placement mode is invalid")
+        try:
+            vertical_offset = float(raw_placement.get("vertical_offset", 0.0))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(400, "caption_placement vertical_offset must be numeric") from exc
+        if not -0.25 <= vertical_offset <= 0.25:
+            raise HTTPException(400, "caption_placement vertical_offset must be between -0.25 and 0.25")
+        if placement_mode == "mask_region" and parsed_mask_box is None:
+            raise HTTPException(400, "mask_region caption placement requires mask_box")
+        parsed_caption_placement = {
+            "mode": placement_mode,
+            "vertical_offset": vertical_offset,
+        }
+
     stripped_source_id = (downloaded_video_id or "").strip()
     staged_upload: Path | None = None
     staged_ext = ""
@@ -450,15 +492,6 @@ async def translate_tool(
     else:
         persisted_source_path = None
         staged_upload, source_signature, staged_ext = await _stage_translate_upload(file)
-    parsed_mask_box = None
-    if mask_box is not None and not isinstance(mask_box, (str, dict)):
-        mask_box = None
-    if mask_box:
-        try:
-            parsed_mask_box = json.loads(mask_box) if isinstance(mask_box, str) else mask_box
-        except Exception:
-            parsed_mask_box = None
-
     request_signature = json.dumps({
         "source": source_signature,
         "target_language": target_language.strip().lower(),
@@ -470,6 +503,7 @@ async def translate_tool(
         "profile_id": profile_id or "",
         "review_translation": bool(review_translation),
         "mask_box": parsed_mask_box or {},
+        "caption_placement": parsed_caption_placement or {},
     }, sort_keys=True, separators=(",", ":"))
 
     job, reused = await create_or_reuse_active_job(
@@ -486,6 +520,7 @@ async def translate_tool(
             "review_translation": bool(review_translation),
             "downloaded_video_id": stripped_source_id or None,
             "mask_box": parsed_mask_box,
+            "caption_placement": parsed_caption_placement,
         },
         dedupe_key=request_signature,
     )
@@ -519,6 +554,7 @@ async def translate_tool(
         review_translation=bool(review_translation),
         cleanup_input=(persisted_source_path is None),
         mask_box=parsed_mask_box,
+        caption_placement=parsed_caption_placement,
         downloaded_video_id=stripped_source_id or None,
     ))
     return {"job_id": job.id, "reused": False}

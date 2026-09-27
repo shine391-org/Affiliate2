@@ -13,6 +13,13 @@ import useAppStore from "../store/appStore"
 import LocalizationExpertPanel from "../components/tools/LocalizationExpertPanel"
 import LocalizationBatch from "./LocalizationBatch"
 import { LOCALIZE_STEPS, localizeStepForDetail } from "../studioModel"
+import {
+  buildLocalizationRenderPayload,
+  captionPreviewStyle,
+  maskPreset,
+  pickPreviewReframeMethod,
+  previewObjectFit,
+} from "../localizationPreview"
 
 const stepIndex = (value) => Math.max(0, LOCALIZE_STEPS.findIndex((item) => item.value === value))
 const STAGE_STATUS_LABELS = { pending: "đang chờ", running: "đang chạy", complete: "hoàn tất", failed: "thất bại", skipped: "đã bỏ qua" }
@@ -49,7 +56,11 @@ export default function StudioLocalize({ source, sourcesLoading }) {
   const [aspectOverridden, setAspectOverridden] = useState(false)
   const [enableMask, setEnableMask] = useState(false)
   const [maskMode, setMaskMode] = useState("blur")
-  const [maskBox, setMaskBox] = useState({ x: 0.05, y: 0.72, width: 0.9, height: 0.15 })
+  const [maskBox, setMaskBox] = useState(() => maskPreset("bottom"))
+  const [captionPlacementMode, setCaptionPlacementMode] = useState("mask_region")
+  const [captionVerticalOffset, setCaptionVerticalOffset] = useState(0)
+  const [rerendering, setRerendering] = useState(false)
+  const [hydratedJobId, setHydratedJobId] = useState("")
 
   useEffect(() => {
     let alive = true
@@ -79,15 +90,7 @@ export default function StudioLocalize({ source, sourcesLoading }) {
     return "16 / 9"
   }, [targetAspect, source])
 
-  const setMaskPreset = (preset) => {
-    if (preset === "bottom") {
-      setMaskBox({ x: 0.05, y: 0.72, width: 0.9, height: 0.15 })
-    } else if (preset === "bottom-full") {
-      setMaskBox({ x: 0.0, y: 0.72, width: 1.0, height: 0.22 })
-    } else if (preset === "top") {
-      setMaskBox({ x: 0.05, y: 0.08, width: 0.9, height: 0.14 })
-    }
-  }
+  const applyMaskPreset = (preset) => setMaskBox(maskPreset(preset))
 
   useEffect(() => {
     if (!jobId) { setDetail(null); setDetailError("") }
@@ -121,6 +124,49 @@ export default function StudioLocalize({ source, sourcesLoading }) {
   const activeLocalization = Boolean(jobId)
     && ["pending", "running"].includes(detail?.job_status)
 
+  useEffect(() => {
+    if (!jobId || hydratedJobId === jobId || !detail?.manifest) return
+    const request = detail.manifest.request || {}
+    const savedMask = request.mask_box
+    const placement = request.caption_placement || {}
+    setTargetAspect(request.target_aspect || detail.manifest.effective_profile?.target_aspect || "9:16")
+    setEnableMask(Boolean(savedMask))
+    if (savedMask) {
+      setMaskBox({
+        x: Number(savedMask.x),
+        y: Number(savedMask.y),
+        width: Number(savedMask.width),
+        height: Number(savedMask.height),
+      })
+      setMaskMode(savedMask.mode === "solid" ? "solid" : "blur")
+    }
+    setCaptionPlacementMode(placement.mode === "mask_region" ? "mask_region" : "default")
+    setCaptionVerticalOffset(Number(placement.vertical_offset || 0))
+    setHydratedJobId(jobId)
+  }, [detail, hydratedJobId, jobId])
+
+  const previewMethod = useMemo(() => pickPreviewReframeMethod(
+    source?.media_metadata?.width,
+    source?.media_metadata?.height,
+    targetAspect,
+  ), [source, targetAspect])
+  const captionPlacement = useMemo(() => ({
+    mode: enableMask ? captionPlacementMode : "default",
+    vertical_offset: captionVerticalOffset,
+  }), [captionPlacementMode, captionVerticalOffset, enableMask])
+  const captionSampleStyle = useMemo(
+    () => captionPreviewStyle(maskBox, captionPlacement),
+    [captionPlacement, maskBox],
+  )
+  const renderPayload = useMemo(() => buildLocalizationRenderPayload({
+    enableMask,
+    maskBox,
+    maskMode,
+    captionPlacementMode,
+    captionVerticalOffset,
+    targetAspect,
+  }), [captionPlacementMode, captionVerticalOffset, enableMask, maskBox, maskMode, targetAspect])
+
   const setStep = (value) => setParams((previous) => {
     const next = new URLSearchParams(previous)
     next.set("step", value)
@@ -139,16 +185,8 @@ export default function StudioLocalize({ source, sourcesLoading }) {
       if (targetAspect) {
         form.append("target_aspect", targetAspect)
       }
-      if (enableMask) {
-        form.append("mask_box", JSON.stringify({
-          x: maskBox.x,
-          y: maskBox.y,
-          width: maskBox.width,
-          height: maskBox.height,
-          mode: maskMode,
-          normalized: true,
-        }))
-      }
+      if (renderPayload.mask_box) form.append("mask_box", JSON.stringify(renderPayload.mask_box))
+      form.append("caption_placement", JSON.stringify(renderPayload.caption_placement))
       form.append("review_translation", String(mode === "full_dub" && reviewTranslation))
       const { data } = await http.post("/api/tools/translate", form, { headers: { "Content-Type": "multipart/form-data" }, timeout: 120000 })
       startJob(data.job_id, "tool:translate", "Đang bắt đầu bản địa hóa HQ…")
@@ -171,14 +209,32 @@ export default function StudioLocalize({ source, sourcesLoading }) {
     }
   }
 
+  const rerender = async () => {
+    if (!jobId) return
+    setRerendering(true)
+    try {
+      await http.post(`/api/localization/jobs/${jobId}/rerender`, renderPayload)
+      startJob(jobId, "tool:translate", "Đang kết xuất lại video và QC…")
+      showSnackbar("Đã cập nhật vùng che/Vietsub; chỉ chạy lại Kết xuất cuối và QC", "info")
+      await loadDetail()
+    } catch (error) {
+      showSnackbar(error.response?.data?.detail || "Không thể kết xuất lại video", "error")
+    } finally {
+      setRerendering(false)
+    }
+  }
+
   const sourcePanel = (
     <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "minmax(0, 1.4fr) minmax(320px, .6fr)" }, gap: 2 }}>
       <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
         {source ? (
           <Stack spacing={1.25}>
             <Box sx={{ position: "relative", width: "100%", maxHeight: 460, bgcolor: "#000", borderRadius: 1.5, overflow: "hidden", display: "flex", justifyContent: "center", alignItems: "center" }}>
-              <Box sx={{ position: "relative", width: "auto", height: 460, maxHeight: 460, maxWidth: "100%", aspectRatio: previewAspect, bgcolor: "#050505", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <Box component="video" controls preload="metadata" src={`/api/downloaded/${source.id}/stream`} sx={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} />
+              <Box sx={{ position: "relative", width: "auto", height: 460, maxHeight: 460, maxWidth: "100%", aspectRatio: previewAspect, bgcolor: "#050505", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+                {previewMethod === "blur_fill" && (
+                  <Box component="video" muted preload="metadata" src={`/api/downloaded/${source.id}/stream`} sx={{ position: "absolute", inset: -12, width: "calc(100% + 24px)", height: "calc(100% + 24px)", objectFit: "cover", filter: "blur(18px) brightness(.65)", display: "block" }} />
+                )}
+                <Box component="video" controls preload="metadata" src={`/api/downloaded/${source.id}/stream`} sx={{ position: "relative", width: "100%", height: "100%", objectFit: previewObjectFit(previewMethod), display: "block", zIndex: 1 }} />
                 {enableMask && (
                   <Box
                     sx={{
@@ -202,6 +258,11 @@ export default function StudioLocalize({ source, sourcesLoading }) {
                     }}
                   >
                     [Vùng che chữ: {maskMode === "solid" ? "Hộp đen" : "Làm mờ"}]
+                  </Box>
+                )}
+                {captionSampleStyle && (
+                  <Box sx={{ position: "absolute", ...captionSampleStyle, zIndex: 3, color: "#fff", fontWeight: 900, fontSize: "clamp(.7rem, 2vw, 1.05rem)", textAlign: "center", textShadow: "0 2px 3px #000, 0 0 5px #000", pointerEvents: "none" }}>
+                    Phụ đề tiếng Việt
                   </Box>
                 )}
               </Box>
@@ -235,8 +296,8 @@ export default function StudioLocalize({ source, sourcesLoading }) {
                 setTargetAspect(nextVal)
                 setAspectOverridden(true)
                 if (enableMask) {
-                  setMaskPreset("bottom")
-                  showSnackbar("Đã chuyển tỷ lệ khung hình và đặt lại vùng che chữ cho phù hợp", "info")
+                  applyMaskPreset("bottom")
+                  showSnackbar("Đã đổi tỷ lệ khung hình, vui lòng kiểm tra lại vùng che chữ.", "info")
                 }
               }}
             >
@@ -278,9 +339,9 @@ export default function StudioLocalize({ source, sourcesLoading }) {
                   <FormControlLabel value="solid" control={<Radio size="small" />} label="Hộp tối (Solid)" />
                 </RadioGroup>
                 <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
-                  <Button size="small" variant="outlined" onClick={() => setMaskPreset("bottom")}>Dưới</Button>
-                  <Button size="small" variant="outlined" onClick={() => setMaskPreset("bottom-full")}>Dưới toàn dải</Button>
-                  <Button size="small" variant="outlined" onClick={() => setMaskPreset("top")}>Trên</Button>
+                  <Button size="small" variant="outlined" onClick={() => applyMaskPreset("bottom")}>Dưới</Button>
+                  <Button size="small" variant="outlined" onClick={() => applyMaskPreset("bottom-full")}>Dưới toàn dải</Button>
+                  <Button size="small" variant="outlined" onClick={() => applyMaskPreset("top")}>Trên</Button>
                 </Stack>
                 <Box>
                   <Typography variant="caption" color="text.secondary">Vị trí ngang (X): {Math.round(maskBox.x * 100)}%</Typography>
@@ -338,6 +399,20 @@ export default function StudioLocalize({ source, sourcesLoading }) {
                     })}
                   />
                 </Box>
+                <Divider />
+                <Box>
+                  <Typography variant="caption" sx={{ fontWeight: 700 }}>Vị trí Vietsub</Typography>
+                  <RadioGroup value={captionPlacementMode} onChange={(e) => setCaptionPlacementMode(e.target.value)}>
+                    <FormControlLabel value="mask_region" control={<Radio size="small" />} label="Theo vùng chữ gốc" />
+                    <FormControlLabel value="default" control={<Radio size="small" />} label="Theo kiểu phụ đề mặc định" />
+                  </RadioGroup>
+                </Box>
+                {captionPlacementMode === "mask_region" && (
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">Dịch Vietsub lên / xuống: {Math.round(captionVerticalOffset * 100)}%</Typography>
+                    <Slider size="small" min={-25} max={25} value={Math.round(captionVerticalOffset * 100)} onChange={(_, val) => setCaptionVerticalOffset(val / 100)} />
+                  </Box>
+                )}
               </Stack>
             )}
           </Box>
@@ -378,7 +453,7 @@ export default function StudioLocalize({ source, sourcesLoading }) {
     <Stack spacing={2}><Alert severity="info" variant="outlined">Mô hình viết lại thời lượng C7 <strong>{effective.rewrite_model || "mặc định kết nối"}</strong> tách biệt với mô hình dịch C6.</Alert><Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(3, 1fr)" }, gap: 1.5 }}><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Giọng đọc</Typography><Typography variant="body2">{effective.tts_provider || "mặc định nhà cung cấp"} · {effective.tts_voice || "giọng của hồ sơ"}</Typography></Paper><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Giới hạn nhịp</Typography><Typography variant="body2">Ưu tiên {effective.dub_speed_accept || 1.15}× · tối đa {effective.dub_speed_max || 1.3}×</Typography></Paper><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Viết lại</Typography><Typography variant="body2">{effective.dub_rewrite_attempts ?? 2} lần thử</Typography></Paper></Box>{chunks.length > 0 && <Stack spacing={1}>{chunks.map((chunk) => <Paper variant="outlined" key={chunk.id} sx={{ p: 1.25 }}><Typography variant="body2">Đoạn {chunk.id} · {chunk.speaker_id || "người nói —"} · tốc độ {Number(chunk.speed_factor || 1).toFixed(2)}×</Typography></Paper>)}</Stack>}{jobId && <Button variant="outlined" startIcon={<TuneOutlinedIcon />} onClick={() => setExpertOpen(true)} sx={{ alignSelf: "flex-start" }}>Nhịp / giọng nâng cao</Button>}</Stack>
   )
 
-  const renderPanel = <Stack spacing={2}><Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(2, 1fr)" }, gap: 1.5 }}><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Âm thanh</Typography><Typography variant="body2">Chế độ: {effective.audio_mode || "mặc định hồ sơ"}</Typography><Typography variant="body2">Nền: {effective.preserve_background === false ? "thay thế" : "giữ lại"}</Typography><Typography variant="body2">Giọng: {effective.tts_voice || "giọng của hồ sơ"}</Typography></Paper><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Hình ảnh & phụ đề</Typography><Typography variant="body2">Kiểu: {effective.caption_style || "viral"}</Typography><Typography variant="body2">Tỷ lệ: {effective.target_aspect || "nguồn"}</Typography><Typography variant="body2">Kết xuất: {effective.render_profile || "hq"}</Typography></Paper></Box><Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap><StageChip name="Trộn âm thanh" record={stages.audio_mix} /><StageChip name="Kết xuất cuối" record={stages.final_render} /></Stack>{jobId && <Button variant="outlined" startIcon={<TuneOutlinedIcon />} onClick={() => setExpertOpen(true)} sx={{ alignSelf: "flex-start" }}>Điều khiển kết xuất nâng cao</Button>}</Stack>
+  const renderPanel = <Stack spacing={2}><Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(2, 1fr)" }, gap: 1.5 }}><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Âm thanh</Typography><Typography variant="body2">Chế độ: {effective.audio_mode || "mặc định hồ sơ"}</Typography><Typography variant="body2">Nền: {effective.preserve_background === false ? "thay thế" : "giữ lại"}</Typography><Typography variant="body2">Giọng: {effective.tts_voice || "giọng của hồ sơ"}</Typography></Paper><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Hình ảnh & phụ đề</Typography><Typography variant="body2">Kiểu: {effective.caption_style || "viral"}</Typography><Typography variant="body2">Tỷ lệ: {targetAspect || effective.target_aspect || "nguồn"}</Typography><Typography variant="body2">Vùng che: {enableMask ? (maskMode === "solid" ? "Hộp tối" : "Làm mờ") : "Tắt"}</Typography><Typography variant="body2">Vietsub: {captionPlacementMode === "mask_region" && enableMask ? "Theo vùng chữ gốc" : "Vị trí mặc định"}</Typography></Paper></Box><Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap><StageChip name="Trộn âm thanh" record={stages.audio_mix} /><StageChip name="Kết xuất cuối" record={stages.final_render} /></Stack>{jobId && <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap><Button variant="contained" onClick={rerender} disabled={activeLocalization || rerendering}>{rerendering ? "Đang kết xuất…" : "Kết xuất lại video"}</Button><Button variant="outlined" startIcon={<TuneOutlinedIcon />} onClick={() => setExpertOpen(true)}>Điều khiển kết xuất nâng cao</Button></Stack>}</Stack>
 
   const qcPanel = <Stack spacing={2}>{qc ? <Alert severity={qc.status === "READY" ? "success" : qc.status === "FAILED" ? "error" : "warning"}><strong>{QC_STATUS_LABELS[qc.status] || qc.status}</strong> · {(qc.failures || []).length} lỗi · {(qc.warnings || []).length} cảnh báo</Alert> : <Alert severity="info">QC chưa hoàn tất.</Alert>}{qc && [...(qc.failures || []), ...(qc.warnings || [])].map((issue, index) => <Paper key={index} variant="outlined" sx={{ p: 1.5 }}><Typography variant="body2">{typeof issue === "string" ? issue : issue.message || JSON.stringify(issue)}</Typography></Paper>)}<Stack direction={{ xs: "column", sm: "row" }} spacing={1}>{qc?.status === "READY" && <Button variant="contained" onClick={() => navigate("/library")}>Mở đầu ra cuối trong Thư viện</Button>}{qc?.status && qc.status !== "READY" && <Button variant="contained" color="warning" startIcon={<FactCheckOutlinedIcon />} onClick={() => navigate(`/review?job=${encodeURIComponent(jobId)}`)}>Mở trong Duyệt</Button>}</Stack>{jobId && <Button variant="outlined" startIcon={<TuneOutlinedIcon />} onClick={() => setExpertOpen(true)} sx={{ alignSelf: "flex-start" }}>Mở duyệt nâng cao</Button>}</Stack>
 
