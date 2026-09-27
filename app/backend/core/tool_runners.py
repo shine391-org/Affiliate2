@@ -79,6 +79,22 @@ async def _is_already_vertical(video_path: Path) -> bool:
     return await asyncio.to_thread(_is_already_vertical_sync, video_path)
 
 
+# GPU concurrency gate (concurrency = 1) for heavy local localization workloads
+# (Demucs separation, Faster-Whisper / WhisperX, and NVENC render) on 8GB VRAM
+from contextlib import asynccontextmanager
+
+_LOCALIZATION_GPU_GATE = asyncio.Semaphore(1)
+
+
+@asynccontextmanager
+async def localization_gpu_gate():
+    await _LOCALIZATION_GPU_GATE.acquire()
+    try:
+        yield
+    finally:
+        _LOCALIZATION_GPU_GATE.release()
+
+
 def _cleanup_paths(*paths: Path):
     """Best-effort delete of scratch files. Never raises."""
     for p in paths:
@@ -887,6 +903,7 @@ async def run_tool_translate(
     review_translation: bool | None = None,
     cleanup_input: bool | None = None,
     mask_box: dict | None = None,
+    downloaded_video_id: str | None = None,
 ):
     """Canonical resumable Phase-C localization runner.
 
@@ -930,6 +947,7 @@ async def run_tool_translate(
         "review_translation": bool(review_translation),
         "cleanup_input": cleanup_input,
         "mask_box": mask_box,
+        "downloaded_video_id": downloaded_video_id,
     }
     logger.info(
         "TASK START tool:translate | job=%s target=%s mode=%s profile=%s aspect=%s",
@@ -1000,12 +1018,15 @@ async def run_tool_translate(
             )
             source_path = run.ensure_source_copy(original_input)
         else:
-            # Preserve the original review choice on resume/rerun unless the
+            # Preserve the original review choice and downloaded source on resume/rerun unless the
             # caller explicitly supplied one.
             if review_translation is None:
                 request_snapshot["review_translation"] = bool(
                     run.request.get("review_translation")
                 )
+            if not downloaded_video_id and run.request.get("downloaded_video_id"):
+                downloaded_video_id = run.request.get("downloaded_video_id")
+                request_snapshot["downloaded_video_id"] = downloaded_video_id
             source_path = run.source_path
             if not source_path.exists():
                 raise RuntimeError(
@@ -1027,75 +1048,94 @@ async def run_tool_translate(
             if path.resolve() != source_path.resolve()
         ]
 
-        # ── C8 separation ────────────────────────────────────────────────
+        # ── C8 separation & C5 ASR (GPU gate protected) ───────────────────
+        needs_separation = (
+            is_dub
+            and profile.audio_mode == "hq_clean"
+            and not run.is_complete("separation", ("vocals", "background"))
+        )
+        needs_asr = not run.is_complete("asr", ("transcript",))
+
         background_file = None
+        vocals_file = None
         asr_input = source_path
-        current_stage = "separation"
-        if is_dub and profile.audio_mode == "hq_clean":
-            if run.is_complete("separation", ("vocals", "background")):
-                vocals_file = run.artifact("separation", "vocals")
-                background_file = run.artifact("separation", "background")
+        transcript = None
+
+        async def _run_gpu_audio_pipeline():
+            nonlocal background_file, vocals_file, asr_input, transcript, current_stage
+            current_stage = "separation"
+            if is_dub and profile.audio_mode == "hq_clean":
+                if run.is_complete("separation", ("vocals", "background")):
+                    vocals_file = run.artifact("separation", "vocals")
+                    background_file = run.artifact("separation", "background")
+                else:
+                    await _tool_progress(
+                        job_id, 6,
+                        "Separating vocals/background for HQ clean dub...",
+                        user_id,
+                    )
+                    run.start("separation")
+                    try:
+                        from backend.services.audio_separation_service import (
+                            separate_vocals_background,
+                        )
+                        vocals_file, background_file = await separate_vocals_background(
+                            source_path,
+                            run.stage_dir("separation"),
+                        )
+                        run.complete(
+                            "separation",
+                            artifacts={
+                                "vocals": vocals_file,
+                                "background": background_file,
+                            },
+                            metadata={"model": "htdemucs_ft"},
+                        )
+                    except Exception as exc:
+                        run.fail("separation", exc)
+                        raise
+                asr_input = vocals_file
+            elif not run.is_complete("separation"):
+                run.mark_complete_without_artifacts(
+                    "separation",
+                    metadata={"skipped": True, "reason": "clean_separation_not_required"},
+                )
+
+            # ── C5 ASR + WhisperX alignment/diarization ─────────────────────
+            current_stage = "asr"
+            if run.is_complete("asr", ("transcript",)):
+                transcript = LocalizationTranscript.model_validate(
+                    run.load_json("asr", "transcript")
+                )
             else:
                 await _tool_progress(
-                    job_id, 6,
-                    "Separating vocals/background for HQ clean dub...",
+                    job_id, 16,
+                    f"Transcribing/alignment with {profile.asr_model or profile.asr_quality}...",
                     user_id,
                 )
-                run.start("separation")
+                run.start("asr")
                 try:
-                    from backend.services.audio_separation_service import (
-                        separate_vocals_background,
+                    transcript = await transcribe_for_localization(
+                        asr_input,
+                        profile,
+                        user_settings=user_settings,
                     )
-                    vocals_file, background_file = await separate_vocals_background(
-                        source_path,
-                        run.stage_dir("separation"),
-                    )
+                    path = run.save_json("asr", "transcript.json", transcript.model_dump())
                     run.complete(
-                        "separation",
-                        artifacts={
-                            "vocals": vocals_file,
-                            "background": background_file,
-                        },
-                        metadata={"model": "htdemucs_ft"},
+                        "asr",
+                        artifacts={"transcript": path},
+                        metadata=transcript.metadata,
                     )
                 except Exception as exc:
-                    run.fail("separation", exc)
+                    run.fail("asr", exc)
                     raise
-            asr_input = vocals_file
-        elif not run.is_complete("separation"):
-            run.mark_complete_without_artifacts(
-                "separation",
-                metadata={"skipped": True, "reason": "clean_separation_not_required"},
-            )
 
-        # ── C5 ASR + WhisperX alignment/diarization ─────────────────────
-        current_stage = "asr"
-        if run.is_complete("asr", ("transcript",)):
-            transcript = LocalizationTranscript.model_validate(
-                run.load_json("asr", "transcript")
-            )
+        if needs_separation or needs_asr:
+            async with localization_gpu_gate():
+                await _run_gpu_audio_pipeline()
         else:
-            await _tool_progress(
-                job_id, 16,
-                f"Transcribing/alignment with {profile.asr_model or profile.asr_quality}...",
-                user_id,
-            )
-            run.start("asr")
-            try:
-                transcript = await transcribe_for_localization(
-                    asr_input,
-                    profile,
-                    user_settings=user_settings,
-                )
-                path = run.save_json("asr", "transcript.json", transcript.model_dump())
-                run.complete(
-                    "asr",
-                    artifacts={"transcript": path},
-                    metadata=transcript.metadata,
-                )
-            except Exception as exc:
-                run.fail("asr", exc)
-                raise
+            await _run_gpu_audio_pipeline()
+
         source_segment_count = len(transcript.segments)
 
         # ── C6 semantic segmentation ────────────────────────────────────
@@ -1400,50 +1440,51 @@ async def run_tool_translate(
             if persisted_final.resolve() != out_path.resolve():
                 shutil.copy2(persisted_final, out_path)
         else:
-            await _tool_progress(job_id, 84, "Rendering final localized video...", user_id)
-            run.start("final_render")
-            try:
-                caption_aspect = (
-                    effective_aspect
-                    if effective_aspect and effective_aspect != "source"
-                    else await _probe_aspect_ratio(source_path)
-                )
-                ass_path = run.artifact_path("final_render", "captions.ass")
-                await generate_captions_ass(
-                    render_segments,
-                    style=profile.caption_style,
-                    aspect_ratio=caption_aspect,
-                    emoji_style=emoji_style,
-                    output_path=ass_path,
-                )
-                out_path = tool_out_path(job_id, ".mp4")
-                rendered = await burn_captions(
-                    source_path,
-                    ass_path,
-                    out_path,
-                    render_profile=profile.render_profile,
-                    target_aspect=effective_aspect,
-                    reframe_method="auto",
-                    external_audio=mixed_audio,
-                    video_slowdown=video_slowdown if is_dub else 1.0,
-                    mask_box=mask_box,
-                )
-                if rendered != out_path or not out_path.exists():
-                    raise RuntimeError("Final localization render failed.")
-                run.complete(
-                    "final_render",
-                    artifacts={
-                        "final_video": out_path,
-                        "captions": ass_path,
-                    },
-                    metadata={
-                        "video_slowdown": video_slowdown if is_dub else 1.0,
-                        "render_profile": profile.render_profile,
-                    },
-                )
-            except Exception as exc:
-                run.fail("final_render", exc)
-                raise
+            async with localization_gpu_gate():
+                await _tool_progress(job_id, 84, "Rendering final localized video...", user_id)
+                run.start("final_render")
+                try:
+                    caption_aspect = (
+                        effective_aspect
+                        if effective_aspect and effective_aspect != "source"
+                        else await _probe_aspect_ratio(source_path)
+                    )
+                    ass_path = run.artifact_path("final_render", "captions.ass")
+                    await generate_captions_ass(
+                        render_segments,
+                        style=profile.caption_style,
+                        aspect_ratio=caption_aspect,
+                        emoji_style=emoji_style,
+                        output_path=ass_path,
+                    )
+                    out_path = tool_out_path(job_id, ".mp4")
+                    rendered = await burn_captions(
+                        source_path,
+                        ass_path,
+                        out_path,
+                        render_profile=profile.render_profile,
+                        target_aspect=effective_aspect,
+                        reframe_method="auto",
+                        external_audio=mixed_audio,
+                        video_slowdown=video_slowdown if is_dub else 1.0,
+                        mask_box=mask_box,
+                    )
+                    if rendered != out_path or not out_path.exists():
+                        raise RuntimeError("Final localization render failed.")
+                    run.complete(
+                        "final_render",
+                        artifacts={
+                            "final_video": out_path,
+                            "captions": ass_path,
+                        },
+                        metadata={
+                            "video_slowdown": video_slowdown if is_dub else 1.0,
+                            "render_profile": profile.render_profile,
+                        },
+                    )
+                except Exception as exc:
+                    run.fail("final_render", exc)
+                    raise
 
         # ── C10 automatic QC + exception gate ───────────────────────────
         current_stage = "qc"

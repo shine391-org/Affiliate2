@@ -176,6 +176,7 @@ async def _dispatch_existing_run(run: LocalizationRun):
         review_translation=bool(req.get("review_translation")),
         cleanup_input=False,
         mask_box=req.get("mask_box"),
+        downloaded_video_id=req.get("downloaded_video_id"),
     ))
 
 

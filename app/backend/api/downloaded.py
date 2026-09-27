@@ -1658,13 +1658,40 @@ async def get_downloaded_segments(video_id: str, limit: int = Query(1500, ge=1, 
     }
 
 
-def _repair_missing_downloaded_from_snapshot(video_id: str, target_path: Path) -> bool:
+def _compute_sha256(path: Path) -> str:
+    import hashlib
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        while chunk := f.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _repair_missing_downloaded_from_snapshot(
+    video_id: str,
+    target_path: Path,
+    expected_sha256: str | None = None,
+) -> bool:
+    """Safely restore a missing library source video from an immutable localization snapshot.
+
+    Only repairs when:
+      1. target_path does NOT already exist (never overwrite).
+      2. manifest.request.downloaded_video_id matches video_id.
+      3. snapshot SHA-256 matches expected_sha256 (if known) or manifest source_identity.sha256.
+    Loose filename heuristics without identity verification are rejected.
+    """
+    if target_path.exists():
+        return False
+
     try:
         from backend.config import settings as app_settings
         import shutil
+        from uuid import uuid4
+
         jobs_dir = app_settings.STORAGE_ROOT / "localization_jobs"
         if not jobs_dir.exists():
             return False
+
         for job_folder in jobs_dir.iterdir():
             if not job_folder.is_dir():
                 continue
@@ -1675,20 +1702,54 @@ def _repair_missing_downloaded_from_snapshot(video_id: str, target_path: Path) -
                 data = json.loads(manifest.read_text(encoding="utf-8"))
             except Exception:
                 continue
+
             req = data.get("request") or {}
-            if req.get("downloaded_video_id") == video_id or str(data.get("source_path", "")).endswith(target_path.name):
-                source_cand = job_folder / f"source{target_path.suffix.lower()}"
-                if not source_cand.exists():
-                    for s in job_folder.glob("source.*"):
-                        if s.is_file() and s.stat().st_size > 0:
-                            source_cand = s
-                            break
-                if source_cand.exists() and source_cand.stat().st_size > 0:
-                    target_path.parent.mkdir(parents=True, exist_ok=True)
-                    if not target_path.exists():
-                        shutil.copy2(source_cand, target_path)
-                        logger.info("Repaired missing downloaded video %s from localization snapshot %s", video_id, source_cand)
-                        return True
+            if req.get("downloaded_video_id") != video_id:
+                continue
+
+            source_cand = job_folder / f"source{target_path.suffix.lower()}"
+            if not source_cand.exists():
+                for s in job_folder.glob("source.*"):
+                    if s.is_file() and s.stat().st_size > 0:
+                        source_cand = s
+                        break
+            if not source_cand.exists() or source_cand.stat().st_size <= 0:
+                continue
+
+            cand_hash = _compute_sha256(source_cand)
+            if expected_sha256:
+                if cand_hash.lower() != expected_sha256.lower():
+                    logger.warning(
+                        "Snapshot hash mismatch for video %s: expected %s, candidate %s has %s",
+                        video_id, expected_sha256, source_cand, cand_hash,
+                    )
+                    continue
+            else:
+                manifest_ident = data.get("source_identity") or {}
+                manifest_hash = manifest_ident.get("sha256")
+                if not manifest_hash or cand_hash.lower() != str(manifest_hash).lower():
+                    logger.warning(
+                        "Snapshot lacks verified identity match for video %s: %s",
+                        video_id, source_cand,
+                    )
+                    continue
+
+            if target_path.exists():
+                return False
+
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = target_path.with_suffix(target_path.suffix + f".repair_{uuid4().hex[:8]}.tmp")
+            try:
+                shutil.copy2(source_cand, tmp_path)
+                tmp_path.replace(target_path)
+                logger.info(
+                    "Repaired missing downloaded video %s at %s from verified localization snapshot %s (sha256=%s)",
+                    video_id, target_path, source_cand, cand_hash,
+                )
+                return True
+            except Exception as copy_err:
+                tmp_path.unlink(missing_ok=True)
+                logger.error("Failed to copy snapshot during repair: %s", copy_err)
     except Exception as exc:
         logger.warning("Could not repair missing downloaded video from snapshot: %s", exc)
     return False
@@ -1717,7 +1778,7 @@ async def stream_downloaded(video_id: str, request: Request):
     if not path.is_relative_to(app_settings.STORAGE_ROOT.resolve()):
         raise HTTPException(status_code=403, detail="Access denied")
     if not path.exists():
-        _repair_missing_downloaded_from_snapshot(video_id, path)
+        _repair_missing_downloaded_from_snapshot(video_id, path, expected_sha256=video.source_sha256)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Video file not found on disk")
 

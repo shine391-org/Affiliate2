@@ -470,17 +470,63 @@ async def translate_transcript(
         ai.max_retries = 0
 
     fallback_ai = None
-    if getattr(profile, "translation_fallback_model", None):
-        try:
-            from backend.core.ai_provider import get_ai_client
-            fallback_ai = get_ai_client(user_settings)
-            fallback_ai.model = profile.translation_fallback_model
-            if getattr(profile, "translation_fallback_provider", None):
-                fallback_ai.provider = profile.translation_fallback_provider
-            fallback_ai.max_retries = 0
-        except Exception as fb_exc:
-            logger.warning("Could not initialize fallback translation AI: %s", fb_exc)
-            fallback_ai = None
+    fb_model = getattr(profile, "translation_fallback_model", None)
+    if fb_model:
+        from backend.core.ai_provider import AIClient, AIProvider, COMPATIBLE_PRESETS, compatible_base_url
+        from backend.config import settings as app_settings
+        import os
+
+        fb_provider_raw = (getattr(profile, "translation_fallback_provider", None) or "").strip().lower()
+        primary_provider_val = getattr(getattr(ai, "provider", None), "value", str(getattr(ai, "provider", ""))).strip().lower()
+
+        if not fb_provider_raw or fb_provider_raw == primary_provider_val or (
+            fb_provider_raw == "compatible" and ai.provider == AIProvider.COMPATIBLE
+        ):
+            fallback_ai = AIClient(
+                provider=ai.provider,
+                api_key=ai.api_key,
+                model=fb_model,
+                base_url=ai.base_url,
+                max_retries=0,
+            )
+        else:
+            try:
+                if fb_provider_raw in COMPATIBLE_PRESETS or fb_provider_raw == AIProvider.COMPATIBLE.value:
+                    resolved_base = compatible_base_url(fb_provider_raw)
+                    if fb_provider_raw == "gemini":
+                        key = (getattr(app_settings, "GEMINI_API_KEY", "") or os.getenv("GEMINI_API_KEY", "")).strip()
+                        if not key:
+                            raise ValueError("Google Gemini API key is missing for fallback provider")
+                        fallback_ai = AIClient(
+                            provider=AIProvider.COMPATIBLE,
+                            api_key=key,
+                            model=fb_model,
+                            base_url=resolved_base,
+                            max_retries=0,
+                        )
+                    else:
+                        fallback_ai = AIClient(
+                            provider=AIProvider.COMPATIBLE,
+                            api_key="local",
+                            model=fb_model,
+                            base_url=resolved_base,
+                            max_retries=0,
+                        )
+                else:
+                    prov_enum = AIProvider(fb_provider_raw)
+                    env_key_name = f"{prov_enum.value.upper()}_API_KEY"
+                    key = (getattr(app_settings, env_key_name, "") or os.getenv(env_key_name, "")).strip()
+                    if not key:
+                        raise ValueError(f"Missing API key for fallback provider '{fb_provider_raw}' ({env_key_name})")
+                    fallback_ai = AIClient(
+                        provider=prov_enum,
+                        api_key=key,
+                        model=fb_model,
+                        max_retries=0,
+                    )
+            except Exception as fb_exc:
+                logger.error("Invalid fallback AI configuration: %s", fb_exc)
+                raise ValueError(f"Invalid fallback AI provider configuration: {fb_exc}") from fb_exc
 
     out = transcript.model_copy(deep=True)
     context = _translation_context(transcript)
@@ -490,11 +536,18 @@ async def translate_transcript(
     semantic_sig = hashlib.sha256(
         "".join(f"{s.id}:{s.source_text}" for s in transcript.segments).encode("utf-8")
     ).hexdigest()[:16]
+    glossary_str = json.dumps(getattr(profile, "glossary", {}) or {}, sort_keys=True, ensure_ascii=False)
+    glossary_hash = hashlib.sha256(glossary_str.encode("utf-8")).hexdigest()[:16]
+    provider_name = getattr(getattr(ai, "provider", None), "value", str(getattr(ai, "provider", "")))
     checkpoint_meta = {
         "semantic_hash": semantic_sig,
         "target_language": target_language,
+        "provider": provider_name,
         "model": getattr(ai, "model", ""),
         "preset": profile.translation_preset,
+        "instructions": (getattr(profile, "translation_instructions", "") or "").strip(),
+        "guardrails": (getattr(profile, "translation_guardrails", "") or "").strip(),
+        "glossary_hash": glossary_hash,
     }
     completed_batches: dict[str, dict] = {}
     if checkpoint_file and checkpoint_file.exists():
@@ -514,9 +567,9 @@ async def translate_transcript(
     for start in range(0, len(out.segments), _TRANSLATION_BATCH_SIZE):
         batch = out.segments[start:start + _TRANSLATION_BATCH_SIZE]
         batch_key = str(start)
-        if batch_key in completed_batches:
+        if batch_key in completed_batches and not completed_batches[batch_key].get("failed"):
             texts = completed_batches[batch_key]["texts"]
-            failed = set(completed_batches[batch_key]["failed"])
+            failed = set()
         else:
             texts, failed = await _translate_batch_resilient(
                 ai, batch,

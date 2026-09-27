@@ -312,16 +312,41 @@ class LocalizationRun:
         )
         self._write()
 
-    def invalidate_from(self, stage: str, *, delete_artifacts: bool = True) -> list[str]:
+    def invalidate_from(
+        self,
+        stage: str,
+        *,
+        delete_artifacts: bool = True,
+        preserve_files: set[str] | list[str] | None = None,
+    ) -> list[str]:
         self._check_stage(stage)
         index = STAGES.index(stage)
         invalidated = list(STAGES[index:])
+        if preserve_files is not None:
+            preserved_names = set(preserve_files)
+        elif stage == "translation":
+            preserved_names = {"checkpoint.json"}
+        else:
+            preserved_names = set()
+
         for name in invalidated:
             record = self.record(name)
             if delete_artifacts:
                 directory = self.root / name
                 if directory.exists():
-                    shutil.rmtree(directory, ignore_errors=True)
+                    if name == "translation" and "checkpoint.json" in preserved_names:
+                        for item in list(directory.iterdir()):
+                            if item.name in preserved_names:
+                                continue
+                            if item.is_dir():
+                                shutil.rmtree(item, ignore_errors=True)
+                            else:
+                                try:
+                                    item.unlink(missing_ok=True)
+                                except Exception:
+                                    pass
+                    else:
+                        shutil.rmtree(directory, ignore_errors=True)
             record.update(
                 status="invalidated",
                 started_at=None,

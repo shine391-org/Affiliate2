@@ -519,6 +519,7 @@ async def translate_tool(
         review_translation=bool(review_translation),
         cleanup_input=(persisted_source_path is None),
         mask_box=parsed_mask_box,
+        downloaded_video_id=stripped_source_id or None,
     ))
     return {"job_id": job.id, "reused": False}
 

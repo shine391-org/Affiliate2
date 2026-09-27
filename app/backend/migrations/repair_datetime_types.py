@@ -116,8 +116,17 @@ def repair_database_datetimes(db_path: Path | str, backup: bool = True) -> dict[
                     continue
                 if col_typeof in ("integer", "real"):
                     canonical = to_canonical_datetime_str(val)
-                    if not canonical and notnull:
-                        canonical = datetime.fromtimestamp(0, tz=timezone.utc).replace(tzinfo=None).strftime(CANONICAL_DATETIME_FORMAT)
+                    if canonical is None:
+                        if notnull:
+                            raise ValueError(
+                                f"Malformed non-null datetime in table '{table}', column '{col_name}', "
+                                f"rowid={rowid}: raw value={val!r}"
+                            )
+                        logger.warning(
+                            "Converting unparseable nullable datetime to NULL in table '%s', column '%s', rowid=%s (raw value: %r)",
+                            table, col_name, rowid, val,
+                        )
+                        canonical = None
                     rows_to_update.append((table, col_name, rowid, canonical))
                 elif col_typeof == "text":
                     text_val = str(val).strip()
@@ -125,9 +134,15 @@ def repair_database_datetimes(db_path: Path | str, backup: bool = True) -> dict[
                         canonical = to_canonical_datetime_str(text_val)
                         if canonical is None:
                             if notnull:
-                                canonical = datetime.fromtimestamp(0, tz=timezone.utc).replace(tzinfo=None).strftime(CANONICAL_DATETIME_FORMAT)
-                            else:
-                                canonical = None
+                                raise ValueError(
+                                    f"Malformed non-null datetime in table '{table}', column '{col_name}', "
+                                    f"rowid={rowid}: raw value={val!r}"
+                                )
+                            logger.warning(
+                                "Converting unparseable nullable datetime to NULL in table '%s', column '%s', rowid=%s (raw value: %r)",
+                                table, col_name, rowid, val,
+                            )
+                            canonical = None
                         rows_to_update.append((table, col_name, rowid, canonical))
 
         if not rows_to_update:
@@ -140,12 +155,18 @@ def repair_database_datetimes(db_path: Path | str, backup: bool = True) -> dict[
                 shutil.copy2(db_path, backup_path)
                 logger.info("Created safety backup before datetime repair: %s", backup_path)
             except Exception as exc:
-                logger.warning("Could not create DB backup before repair: %s", exc)
+                logger.error("Failed to create database backup before repair: %s", exc)
+                raise RuntimeError(f"Database backup failed before datetime repair: {exc}") from exc
 
-        for table, col_name, rowid, canonical in rows_to_update:
-            cur.execute(f"UPDATE {table} SET {col_name} = ? WHERE rowid = ?", (canonical, rowid))
+        try:
+            cur.execute("BEGIN TRANSACTION")
+            for table, col_name, rowid, canonical in rows_to_update:
+                cur.execute(f"UPDATE {table} SET {col_name} = ? WHERE rowid = ?", (canonical, rowid))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
-        conn.commit()
         logger.info("Repaired %d datetime rows across %d tables in %s", len(rows_to_update), len(tables), db_path)
         return {"repaired_rows": len(rows_to_update), "tables_scanned": len(tables)}
     finally:

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
-  Alert, Box, Button, Checkbox, Chip, Dialog, DialogContent, DialogTitle, Drawer,
+  Alert, Box, Button, Checkbox, Chip, Dialog, DialogContent, DialogTitle, Divider, Drawer,
   FormControl, FormControlLabel, InputLabel, MenuItem, Paper, Radio, RadioGroup,
   Select, Slider, Stack, Step, StepButton, Stepper, Typography,
 } from "@mui/material"
@@ -68,6 +68,16 @@ export default function StudioLocalize({ source, sourcesLoading }) {
       setTargetAspect(selectedProfile.target_aspect)
     }
   }, [selectedProfile, aspectOverridden])
+
+  const previewAspect = useMemo(() => {
+    if (targetAspect === "9:16") return "9 / 16"
+    if (targetAspect === "16:9") return "16 / 9"
+    if (targetAspect === "1:1") return "1 / 1"
+    if (source?.media_metadata?.width && source?.media_metadata?.height) {
+      return `${source.media_metadata.width} / ${source.media_metadata.height}`
+    }
+    return "16 / 9"
+  }, [targetAspect, source])
 
   const setMaskPreset = (preset) => {
     if (preset === "bottom") {
@@ -165,33 +175,35 @@ export default function StudioLocalize({ source, sourcesLoading }) {
       <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
         {source ? (
           <Stack spacing={1.25}>
-            <Box sx={{ position: "relative", width: "100%", maxHeight: 460, bgcolor: "#000", borderRadius: 1.5, overflow: "hidden" }}>
-              <Box component="video" controls preload="metadata" src={`/api/downloaded/${source.id}/stream`} sx={{ width: "100%", maxHeight: 460, display: "block" }} />
-              {enableMask && (
-                <Box
-                  sx={{
-                    position: "absolute",
-                    left: `${(maskBox.x * 100).toFixed(1)}%`,
-                    top: `${(maskBox.y * 100).toFixed(1)}%`,
-                    width: `${(maskBox.width * 100).toFixed(1)}%`,
-                    height: `${(maskBox.height * 100).toFixed(1)}%`,
-                    border: "2px dashed #f59e0b",
-                    bgcolor: maskMode === "solid" ? "rgba(0,0,0,0.85)" : "rgba(245, 158, 11, 0.35)",
-                    backdropFilter: maskMode === "blur" ? "blur(6px)" : "none",
-                    pointerEvents: "none",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: "#fff",
-                    fontSize: "0.75rem",
-                    fontWeight: 700,
-                    textShadow: "0 1px 2px rgba(0,0,0,0.8)",
-                    zIndex: 2,
-                  }}
-                >
-                  [Vùng che chữ: {maskMode === "solid" ? "Hộp đen" : "Làm mờ"}]
-                </Box>
-              )}
+            <Box sx={{ position: "relative", width: "100%", maxHeight: 460, bgcolor: "#000", borderRadius: 1.5, overflow: "hidden", display: "flex", justifyContent: "center", alignItems: "center" }}>
+              <Box sx={{ position: "relative", width: "100%", height: "100%", maxHeight: 460, aspectRatio: previewAspect, bgcolor: "#050505", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <Box component="video" controls preload="metadata" src={`/api/downloaded/${source.id}/stream`} sx={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} />
+                {enableMask && (
+                  <Box
+                    sx={{
+                      position: "absolute",
+                      left: `${(maskBox.x * 100).toFixed(1)}%`,
+                      top: `${(maskBox.y * 100).toFixed(1)}%`,
+                      width: `${(maskBox.width * 100).toFixed(1)}%`,
+                      height: `${(maskBox.height * 100).toFixed(1)}%`,
+                      border: "2px dashed #f59e0b",
+                      bgcolor: maskMode === "solid" ? "rgba(0,0,0,0.85)" : "rgba(245, 158, 11, 0.35)",
+                      backdropFilter: maskMode === "blur" ? "blur(6px)" : "none",
+                      pointerEvents: "none",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "#fff",
+                      fontSize: "0.75rem",
+                      fontWeight: 700,
+                      textShadow: "0 1px 2px rgba(0,0,0,0.8)",
+                      zIndex: 2,
+                    }}
+                  >
+                    [Vùng che chữ: {maskMode === "solid" ? "Hộp đen" : "Làm mờ"}]
+                  </Box>
+                )}
+              </Box>
             </Box>
             <Typography variant="h6" sx={{ fontWeight: 700 }}>{source.title || source.id}</Typography>
             <Typography variant="body2" color="text.secondary">
@@ -218,8 +230,13 @@ export default function StudioLocalize({ source, sourcesLoading }) {
               value={targetAspect}
               label="Tỷ lệ khung hình"
               onChange={(e) => {
-                setTargetAspect(e.target.value)
+                const nextVal = e.target.value
+                setTargetAspect(nextVal)
                 setAspectOverridden(true)
+                if (enableMask) {
+                  setMaskPreset("bottom")
+                  showSnackbar("Đã chuyển tỷ lệ khung hình và đặt lại vùng che chữ cho phù hợp", "info")
+                }
               }}
             >
               <MenuItem value="9:16">Dọc (9:16 — TikTok / Reels / Shorts)</MenuItem>
@@ -265,16 +282,60 @@ export default function StudioLocalize({ source, sourcesLoading }) {
                   <Button size="small" variant="outlined" onClick={() => setMaskPreset("top")}>Trên</Button>
                 </Stack>
                 <Box>
+                  <Typography variant="caption" color="text.secondary">Vị trí ngang (X): {Math.round(maskBox.x * 100)}%</Typography>
+                  <Slider
+                    size="small"
+                    min={0}
+                    max={90}
+                    value={Math.round(maskBox.x * 100)}
+                    onChange={(_, val) => setMaskBox((prev) => {
+                      const newX = val / 100
+                      const newW = (newX + prev.width > 1.0) ? Math.max(0.04, 1.0 - newX) : prev.width
+                      return { ...prev, x: newX, width: newW }
+                    })}
+                  />
+                </Box>
+                <Box>
                   <Typography variant="caption" color="text.secondary">Vị trí dọc (Y): {Math.round(maskBox.y * 100)}%</Typography>
-                  <Slider size="small" min={0} max={90} value={Math.round(maskBox.y * 100)} onChange={(_, val) => setMaskBox((prev) => ({ ...prev, y: val / 100 }))} />
+                  <Slider
+                    size="small"
+                    min={0}
+                    max={90}
+                    value={Math.round(maskBox.y * 100)}
+                    onChange={(_, val) => setMaskBox((prev) => {
+                      const newY = val / 100
+                      const newH = (newY + prev.height > 1.0) ? Math.max(0.04, 1.0 - newY) : prev.height
+                      return { ...prev, y: newY, height: newH }
+                    })}
+                  />
                 </Box>
                 <Box>
                   <Typography variant="caption" color="text.secondary">Chiều cao (Height): {Math.round(maskBox.height * 100)}%</Typography>
-                  <Slider size="small" min={4} max={50} value={Math.round(maskBox.height * 100)} onChange={(_, val) => setMaskBox((prev) => ({ ...prev, height: val / 100 }))} />
+                  <Slider
+                    size="small"
+                    min={4}
+                    max={50}
+                    value={Math.round(maskBox.height * 100)}
+                    onChange={(_, val) => setMaskBox((prev) => {
+                      const newH = val / 100
+                      const newY = (prev.y + newH > 1.0) ? Math.max(0, 1.0 - newH) : prev.y
+                      return { ...prev, height: newH, y: newY }
+                    })}
+                  />
                 </Box>
                 <Box>
                   <Typography variant="caption" color="text.secondary">Chiều rộng (Width): {Math.round(maskBox.width * 100)}%</Typography>
-                  <Slider size="small" min={20} max={100} value={Math.round(maskBox.width * 100)} onChange={(_, val) => setMaskBox((prev) => ({ ...prev, width: val / 100 }))} />
+                  <Slider
+                    size="small"
+                    min={4}
+                    max={100}
+                    value={Math.round(maskBox.width * 100)}
+                    onChange={(_, val) => setMaskBox((prev) => {
+                      const newW = val / 100
+                      const newX = (prev.x + newW > 1.0) ? Math.max(0, 1.0 - newW) : prev.x
+                      return { ...prev, width: newW, x: newX }
+                    })}
+                  />
                 </Box>
               </Stack>
             )}

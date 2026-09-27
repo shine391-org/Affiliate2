@@ -985,6 +985,68 @@ def _check_ffmpeg_ass_support() -> bool:
         return False
 
 
+def parse_and_validate_mask_box(
+    mask_box: dict,
+    out_w: int,
+    out_h: int,
+) -> tuple[int, int, int, int, str] | None:
+    """Validate and convert mask_box coordinates to pixel dimensions.
+
+    Accepts normalized bbox (0 <= x < 1, 0 <= y < 1, 0 < width <= 1, 0 < height <= 1,
+    x + width <= 1, y + height <= 1) with slight floating tolerance.
+    Supports explicit legacy percent (0-100) or pixel fallback.
+    Returns (px_x, px_y, px_w, px_h, mode) or None if invalid.
+    """
+    if not isinstance(mask_box, dict):
+        return None
+    try:
+        bx = float(mask_box.get("x", 0.0))
+        by = float(mask_box.get("y", 0.0))
+        bw = float(mask_box.get("width", 0.0))
+        bh = float(mask_box.get("height", 0.0))
+        mode = str(mask_box.get("mode", "blur")).lower().strip()
+        if mode not in ("solid", "blur"):
+            mode = "blur"
+
+        if bx < 0.0 or by < 0.0 or bw <= 0.0 or bh <= 0.0:
+            return None
+
+        EPS = 1e-4
+        if bx < 1.0 and by < 1.0 and bw <= 1.0 + EPS and bh <= 1.0 + EPS:
+            if (bx + bw) > 1.0 + EPS or (by + bh) > 1.0 + EPS:
+                return None
+            eff_w = min(bw, 1.0 - bx)
+            eff_h = min(bh, 1.0 - by)
+            px_x = int(round(bx * out_w))
+            px_y = int(round(by * out_h))
+            px_w = int(round(eff_w * out_w))
+            px_h = int(round(eff_h * out_h))
+        elif bw <= 100.0 and bh <= 100.0 and (bx + bw) <= 100.0 + EPS and (by + bh) <= 100.0 + EPS:
+            px_x = int(round(bx / 100.0 * out_w))
+            px_y = int(round(by / 100.0 * out_h))
+            px_w = int(round(bw / 100.0 * out_w))
+            px_h = int(round(bh / 100.0 * out_h))
+        else:
+            px_x = int(round(bx))
+            px_y = int(round(by))
+            px_w = int(round(bw))
+            px_h = int(round(bh))
+
+        if px_w <= 0 or px_h <= 0 or px_x >= out_w or px_y >= out_h:
+            return None
+
+        px_x = max(0, min(px_x, out_w - 4))
+        px_y = max(0, min(px_y, out_h - 4))
+        px_w = max(4, min(px_w, out_w - px_x))
+        px_h = max(4, min(px_h, out_h - px_y))
+        px_w = (px_w // 2) * 2
+        px_h = (px_h // 2) * 2
+        return px_x, px_y, px_w, px_h, mode
+    except Exception as exc:
+        logger.warning("Failed to validate mask_box: %s", exc)
+        return None
+
+
 # Cache the check — FFmpeg build doesn't change during runtime
 _ffmpeg_has_ass: bool | None = None
 
@@ -1071,39 +1133,9 @@ async def burn_captions(
 
         if mask_box and isinstance(mask_box, dict):
             try:
-                bx = float(mask_box.get("x", 0))
-                by = float(mask_box.get("y", 0))
-                bw = float(mask_box.get("width", 0))
-                bh = float(mask_box.get("height", 0))
-                mode = str(mask_box.get("mode", "blur")).lower()
-
-                if 0 < bx <= 1.0 and 0 < bw <= 1.0:
-                    px_x = int(round(bx * out_w))
-                    px_y = int(round(by * out_h))
-                    px_w = int(round(bw * out_w))
-                    px_h = int(round(bh * out_h))
-                elif bx > 1.0 or bw > 1.0:
-                    if bw <= 100 and bh <= 100 and (bx + bw) <= 100 and (by + bh) <= 100:
-                        px_x = int(round(bx / 100.0 * out_w))
-                        px_y = int(round(by / 100.0 * out_h))
-                        px_w = int(round(bw / 100.0 * out_w))
-                        px_h = int(round(bh / 100.0 * out_h))
-                    else:
-                        px_x = int(round(bx))
-                        px_y = int(round(by))
-                        px_w = int(round(bw))
-                        px_h = int(round(bh))
-                else:
-                    px_x, px_y, px_w, px_h = 0, 0, 0, 0
-
-                if px_w > 0 and px_h > 0 and px_x < out_w and px_y < out_h:
-                    px_x = max(0, min(px_x, out_w - 4))
-                    px_y = max(0, min(px_y, out_h - 4))
-                    px_w = max(4, min(px_w, out_w - px_x))
-                    px_h = max(4, min(px_h, out_h - px_y))
-                    px_w = (px_w // 2) * 2
-                    px_h = (px_h // 2) * 2
-
+                parsed = parse_and_validate_mask_box(mask_box, out_w, out_h)
+                if parsed:
+                    px_x, px_y, px_w, px_h, mode = parsed
                     if mode == "solid":
                         filters.append(f"{current}drawbox=x={px_x}:y={px_y}:w={px_w}:h={px_h}:color=black@1.0:t=fill[masked]")
                         current = "[masked]"
