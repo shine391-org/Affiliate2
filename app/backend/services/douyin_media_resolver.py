@@ -10,7 +10,9 @@ subprocess is involved.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
+
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from backend.services.douyin_browser_session import open_douyin_cdp_session
 
@@ -32,14 +34,25 @@ def _is_http_media_url(value: str | None) -> bool:
     return "uuu_265" not in lowered
 
 
-def _candidate_score(url: str, content_length: int = 0) -> tuple[int, int]:
-    """Prefer known Douyin video CDNs, then the largest observed response."""
-    host = (urlsplit(url).hostname or "").lower()
+def _candidate_score(
+    url: str,
+    content_length: int = 0,
+    source_video_id: str | None = None,
+) -> tuple[int, int, int]:
+    """Prefer the requested video, then known Douyin CDNs, then response size."""
+    parsed = urlsplit(url)
+    host = (parsed.hostname or "").lower()
+    candidate_video_ids = parse_qs(parsed.query).get("__vid", [])
+    source_match = bool(source_video_id and source_video_id in candidate_video_ids)
     strong = any(
         marker in host
         for marker in ("douyinvod", "zjcdn", "bytecdn", "byteoversea", "aweme")
     )
-    return (1 if strong else 0, max(int(content_length or 0), 0))
+    return (
+        1 if source_match else 0,
+        1 if strong else 0,
+        max(int(content_length or 0), 0),
+    )
 
 
 async def resolve_douyin_media(
@@ -47,7 +60,7 @@ async def resolve_douyin_media(
     *,
     cdp_url: str | None = None,
     navigation_timeout_ms: int = 20_000,
-    media_wait_timeout_ms: int = 5_000,
+    media_wait_timeout_ms: int = 15_000,
 ) -> ResolvedDouyinMedia:
     """Resolve one Douyin video page using the already-running CDP browser.
 
@@ -58,6 +71,8 @@ async def resolve_douyin_media(
     source_url = str(source_url or "").strip()
     if "douyin.com/" not in source_url.lower() and "iesdouyin.com/" not in source_url.lower():
         raise ValueError("Douyin media resolver only accepts Douyin URLs")
+    source_path_id = urlsplit(source_url).path.rstrip("/").rsplit("/", 1)[-1]
+    source_video_id = source_path_id if source_path_id.isdigit() else None
 
     async with open_douyin_cdp_session(cdp_url) as session:
         # If the shared session had to create a probe page, reuse that page
@@ -93,11 +108,17 @@ async def resolve_douyin_media(
         await page.route("**/*", _lightweight_route)
 
         try:
-            await page.goto(
-                source_url,
-                wait_until="domcontentloaded",
-                timeout=navigation_timeout_ms,
-            )
+            try:
+                await page.goto(
+                    source_url,
+                    wait_until="domcontentloaded",
+                    timeout=navigation_timeout_ms,
+                )
+            except PlaywrightTimeoutError:
+                # Douyin can keep domcontentloaded pending while the visible
+                # video and signed media URL are already usable.
+                pass
+
             async def _dom_media_urls():
                 return await page.evaluate(
                     """() => Array.from(document.querySelectorAll('video')).flatMap(v => {
@@ -117,18 +138,11 @@ async def resolve_douyin_media(
                     source_url=source_url,
                 )
 
-            # Fast path: domcontentloaded often already exposed either a real
-            # video src or the first media response. Do not burn the full wait
-            # budget when we already have a usable signed URL.
+            # Prefer the page's own video element. Network traffic may already
+            # contain autoplay/recommendation videos for a different Douyin ID.
             for candidate in (await _dom_media_urls()) or []:
                 if _is_http_media_url(candidate):
                     return _resolved(candidate)
-            if network_candidates:
-                candidate, _ = max(
-                    network_candidates,
-                    key=lambda item: _candidate_score(item[0], item[1]),
-                )
-                return _resolved(candidate)
 
             try:
                 await page.wait_for_function(
@@ -146,7 +160,7 @@ async def resolve_douyin_media(
             if network_candidates:
                 candidate, _ = max(
                     network_candidates,
-                    key=lambda item: _candidate_score(item[0], item[1]),
+                    key=lambda item: _candidate_score(item[0], item[1], source_video_id),
                 )
                 return _resolved(candidate)
 

@@ -281,7 +281,7 @@ async def test_a_header_only_vtt_is_rejected(tmp_path):
     from backend.services.output_validator import MIN_TEXT_BYTES, validate_output
 
     empty = tmp_path / "e.vtt"
-    empty.write_text("WEBVTT\n\n", encoding="utf-8")
+    empty.write_bytes(b"WEBVTT\n\n")
     assert empty.stat().st_size == MIN_TEXT_BYTES, (
         "the whole point: this is exactly ON the floor, so a size check "
         "waves it through"

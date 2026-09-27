@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (c) 2025-2026 ViralMint Contributors
 """REST /api/settings — user settings CRUD + credential testing + OAuth callbacks."""
+import asyncio
 import logging
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Query
@@ -30,6 +31,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _validated_browser_override(browser: str, override: str | None) -> str | None:
+    """Use an override only when it still exists and belongs to the selected browser."""
+    if not override:
+        return None
+    from backend.services.download_browser_launcher import resolve_browser_executable
+    resolved = resolve_browser_executable(browser, override=override)
+    return override if resolved.get("found") else None
+
+
 # ── Pydantic schemas ──────────────────────────────────────────────────────────
 
 class SettingsResponse(BaseModel):
@@ -47,6 +57,9 @@ class SettingsResponse(BaseModel):
     # OAuth / browser-session status
     download_cookie_browser: str = "auto"
     download_cookie_profile: Optional[str] = None
+    download_cookie_executable_path: Optional[str] = None
+    douyin_browser: str = "edge"
+    douyin_executable_path: Optional[str] = None
     douyin_cdp_url: str = "http://127.0.0.1:9222"
     youtube_channel_title: Optional[str] = None
     youtube_connected: bool = False
@@ -97,6 +110,9 @@ class SettingsUpdate(BaseModel):
     # request/model; only the local browser/profile selector is persisted.
     download_cookie_browser: Optional[str] = None
     download_cookie_profile: Optional[str] = None
+    download_cookie_executable_path: Optional[str] = None
+    douyin_browser: Optional[str] = None
+    douyin_executable_path: Optional[str] = None
     douyin_cdp_url: Optional[str] = None
 
     # Preferences
@@ -141,6 +157,9 @@ async def get_settings():
         meta_page_access_token_set=bool(getattr(s, "meta_page_access_token_encrypted", None)),
         download_cookie_browser=normalize_download_browser(s.download_cookie_browser),
         download_cookie_profile=normalize_download_profile(s.download_cookie_profile),
+        download_cookie_executable_path=getattr(s, "download_cookie_executable_path", None),
+        douyin_browser=normalize_download_browser(getattr(s, "douyin_browser", None) or "edge"),
+        douyin_executable_path=getattr(s, "douyin_executable_path", None),
         douyin_cdp_url=normalize_douyin_cdp_url(getattr(s, "douyin_cdp_url", None)),
         youtube_channel_title=s.youtube_channel_title,
         youtube_connected=bool(s.youtube_credentials_json_encrypted),
@@ -234,6 +253,38 @@ async def update_settings(update: SettingsUpdate):
                 )
         if update.download_cookie_profile is not None:
             s.download_cookie_profile = normalize_download_profile(update.download_cookie_profile)
+        if update.download_cookie_executable_path is not None:
+            override = update.download_cookie_executable_path.strip() or None
+            if override:
+                from backend.services.download_browser_launcher import resolve_browser_executable
+                selected_cookie_browser = normalize_download_browser(
+                    update.download_cookie_browser or s.download_cookie_browser
+                )
+                if selected_cookie_browser == "auto":
+                    raise HTTPException(status_code=400, detail="Choose a concrete cookie browser before saving an executable override")
+                resolution = resolve_browser_executable(selected_cookie_browser, override)
+                if not resolution["found"]:
+                    raise HTTPException(status_code=400, detail=resolution["error"])
+            s.download_cookie_executable_path = override
+        if update.douyin_browser is not None:
+            try:
+                douyin_browser = normalize_download_browser(update.douyin_browser)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            if douyin_browser not in {"edge", "chrome", "brave"}:
+                raise HTTPException(status_code=400, detail="Douyin browser must be Edge, Chrome, or Brave")
+            s.douyin_browser = douyin_browser
+        if update.douyin_executable_path is not None:
+            override = update.douyin_executable_path.strip() or None
+            if override:
+                from backend.services.download_browser_launcher import resolve_browser_executable
+                selected_douyin_browser = normalize_download_browser(
+                    update.douyin_browser or getattr(s, "douyin_browser", None) or "edge"
+                )
+                resolution = resolve_browser_executable(selected_douyin_browser, override)
+                if not resolution["found"]:
+                    raise HTTPException(status_code=400, detail=resolution["error"])
+            s.douyin_executable_path = override
         if update.douyin_cdp_url is not None:
             try:
                 s.douyin_cdp_url = normalize_douyin_cdp_url(update.douyin_cdp_url)
@@ -641,14 +692,96 @@ class DownloadSessionProbeRequest(BaseModel):
 
 
 class DownloadSessionHealthRequest(BaseModel):
+    # browser/profile are legacy request aliases kept for compatibility.
     browser: Optional[str] = None
     profile: Optional[str] = None
+    douyin_browser: Optional[str] = None
+    cookie_browser: Optional[str] = None
+    cookie_profile: Optional[str] = None
     douyin_cdp_url: Optional[str] = None
 
 
-@router.post("/settings/download-session/health")
-async def download_session_health(body: DownloadSessionHealthRequest):
-    """Report cookie readability and authenticated Douyin CDP readiness separately."""
+class DownloadSessionOpenRequest(BaseModel):
+    browser: Optional[str] = None
+    douyin_browser: Optional[str] = None
+    cookie_browser: Optional[str] = None
+    douyin_cdp_url: Optional[str] = None
+
+
+class CookieBrowserOpenRequest(BaseModel):
+    cookie_browser: Optional[str] = None
+    cookie_profile: Optional[str] = None
+
+
+class DownloadSessionRepairRequest(BaseModel):
+    scope: str = "all"
+
+
+class DownloadSessionResetRequest(BaseModel):
+    confirm: bool = False
+    clear_profile: bool = False
+
+
+class DownloadExecutablePickerRequest(BaseModel):
+    target: str
+    browser: str
+
+
+async def _probe_douyin_cdp(cdp_url: str) -> dict:
+    from backend.services.download_browser_launcher import probe_cdp_endpoint
+
+    endpoint = await asyncio.to_thread(probe_cdp_endpoint, cdp_url)
+    cdp = {
+        "url": cdp_url,
+        "endpoint_reachable": bool(endpoint.get("endpoint_reachable")),
+        "browser_product": endpoint.get("browser_product"),
+        "websocket_connected": False,
+        "page_reachable": False,
+        "connected": False,
+        "authenticated": False,
+        "error": endpoint.get("error"),
+    }
+    try:
+        from backend.services.douyin_browser_session import (
+            DouyinCdpUnavailableError,
+            open_douyin_cdp_session,
+        )
+        async with open_douyin_cdp_session(
+            cdp_url,
+            connect_timeout_ms=4_000,
+            navigation_timeout_ms=8_000,
+        ) as session:
+            page = getattr(session, "page", None)
+            cdp.update({
+                "endpoint_reachable": True,
+                "websocket_connected": True,
+                "page_reachable": "douyin.com" in str(getattr(page, "url", "")),
+                "connected": True,
+                "authenticated": True,
+                "cookie_count": len(session.cookie_dict),
+                "has_ms_token": bool(session.ms_token),
+                "user_agent": session.user_agent[:160] if session.user_agent else "",
+            })
+    except DouyinCdpUnavailableError as exc:
+        cdp["connected"] = False
+        cdp["error"] = str(exc)[:500]
+    except PermissionError as exc:
+        message = str(exc)
+        cdp["websocket_connected"] = True
+        cdp["connected"] = True
+        # This exact error is raised only after inspecting a persistent Douyin
+        # page. A broader "no authenticated session" error can follow a
+        # temporary probe page that has already been closed.
+        cdp["page_reachable"] = "not logged in" in message.lower()
+        cdp["error"] = message[:500]
+    except Exception as exc:
+        cdp["error"] = f"{type(exc).__name__}: {str(exc)[:400]}"
+    return cdp
+
+
+@router.post("/settings/download-session/open-douyin")
+async def open_douyin_download_session(body: DownloadSessionOpenRequest):
+    """Launch/reuse Affiliate2's independent Douyin CDP browser session."""
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             select(UserSettings).where(UserSettings.user_id == "local")
@@ -657,12 +790,90 @@ async def download_session_health(body: DownloadSessionHealthRequest):
 
     try:
         browser = normalize_download_browser(
-            body.browser if body.browser is not None
+            body.douyin_browser if body.douyin_browser is not None
+            else body.browser if body.browser is not None
+            else getattr(row, "douyin_browser", None) or "edge"
+        )
+        cdp_url = normalize_douyin_cdp_url(
+            body.douyin_cdp_url if body.douyin_cdp_url is not None
+            else getattr(row, "douyin_cdp_url", None)
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    from backend.services.download_browser_launcher import launch_douyin_browser_session
+    selected_override = _validated_browser_override(
+        browser,
+        getattr(row, "douyin_executable_path", None),
+    )
+    launch = await launch_douyin_browser_session(
+        cdp_url,
+        browser=browser,
+        executable_override=selected_override,
+    )
+    actual_cdp_url = launch.get("cdp_url") or cdp_url
+    if launch.get("ok"):
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(UserSettings).where(UserSettings.user_id == "local")
+            )
+            target = result.scalar_one_or_none()
+            if not target:
+                target = UserSettings(user_id="local")
+                db.add(target)
+            target.douyin_browser = launch.get("resolved_browser") or browser
+            target.douyin_cdp_url = actual_cdp_url
+            if launch.get("executable"):
+                target.douyin_executable_path = launch["executable"]
+            await db.commit()
+
+    launch.setdefault("authenticated", False)
+    launch.setdefault("auth_required", False)
+    if not launch.get("connected"):
+        return launch
+
+    cdp = await _probe_douyin_cdp(actual_cdp_url)
+    probe_connected = bool(cdp.get("connected"))
+    authenticated = bool(cdp.get("authenticated"))
+    auth_required = bool(probe_connected and not authenticated)
+    launch.update({
+        "connected": bool(launch.get("connected") or probe_connected),
+        "authenticated": authenticated,
+        "auth_required": auth_required,
+        "blocking_reason": None if authenticated else "douyin_login_required" if auth_required else "cdp_unreachable",
+        "cdp_error": cdp.get("error"),
+    })
+    if authenticated:
+        launch["message"] = "Douyin authenticated browser session is ready."
+    elif auth_required:
+        launch["message"] = "Browser opened. Log in to Douyin in that window, then click Check again."
+    return launch
+
+
+@router.post("/settings/download-session/health")
+async def download_session_health(body: DownloadSessionHealthRequest):
+    """Report Douyin CDP and yt-dlp cookie health as independent systems."""
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(UserSettings).where(UserSettings.user_id == "local")
+        )
+        row = result.scalar_one_or_none()
+
+    try:
+        cookie_browser = normalize_download_browser(
+            body.cookie_browser if body.cookie_browser is not None
+            else body.browser if body.browser is not None
             else getattr(row, "download_cookie_browser", None)
         )
-        profile = normalize_download_profile(
-            body.profile if body.browser is not None
+        cookie_profile = normalize_download_profile(
+            body.cookie_profile if body.cookie_profile is not None
+            else body.profile if body.profile is not None
             else getattr(row, "download_cookie_profile", None)
+        )
+        douyin_browser = normalize_download_browser(
+            body.douyin_browser if body.douyin_browser is not None
+            else body.browser if body.browser is not None and getattr(row, "douyin_browser", None) is None
+            else getattr(row, "douyin_browser", None) or "edge"
         )
         cdp_url = normalize_douyin_cdp_url(
             body.douyin_cdp_url if body.douyin_cdp_url is not None
@@ -672,48 +883,291 @@ async def download_session_health(body: DownloadSessionHealthRequest):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     from backend.services.ytdlp_service import probe_browser_session
-    cookie = await probe_browser_session(browser, profile)
+    from backend.services.download_browser_launcher import (
+        describe_douyin_browser_runtime,
+        resolve_browser_executable,
+    )
 
-    cdp = {
-        "url": cdp_url,
-        "connected": False,
-        "authenticated": False,
-        "error": None,
+    cookie = await probe_browser_session(cookie_browser, cookie_profile)
+    cdp = await _probe_douyin_cdp(cdp_url)
+    douyin_override = getattr(row, "douyin_executable_path", None)
+    browser_runtime = (
+        describe_douyin_browser_runtime(douyin_browser, cdp_url, douyin_override)
+        if douyin_override
+        else describe_douyin_browser_runtime(douyin_browser, cdp_url)
+    )
+
+    executable_found = bool(browser_runtime.get("executable_found", browser_runtime.get("executable")))
+    authenticated = bool(cdp.get("authenticated"))
+    if not executable_found:
+        douyin_blocking = "browser_not_found"
+    elif not cdp.get("endpoint_reachable"):
+        douyin_blocking = "cdp_unreachable"
+    elif not cdp.get("websocket_connected"):
+        douyin_blocking = "cdp_websocket_unavailable"
+    elif not cdp.get("page_reachable"):
+        douyin_blocking = "douyin_page_unreachable"
+    elif not authenticated:
+        douyin_blocking = "douyin_login_required"
+    else:
+        douyin_blocking = None
+
+    douyin_session = {
+        "browser": douyin_browser,
+        "executable_found": executable_found,
+        "executable_path": browser_runtime.get("executable"),
+        "detection_source": browser_runtime.get("detection_source"),
+        "profile_path": browser_runtime.get("profile_dir"),
+        "profile_ready": bool(browser_runtime.get("profile_ready")),
+        "process_running": bool(cdp.get("endpoint_reachable")),
+        "cdp_url": cdp_url,
+        "cdp_http_reachable": bool(cdp.get("endpoint_reachable")),
+        "cdp_websocket_connected": bool(cdp.get("websocket_connected")),
+        "page_reachable": bool(cdp.get("page_reachable")),
+        "authenticated": authenticated,
+        "ready": authenticated,
+        "blocking_reason": douyin_blocking,
+        "error": cdp.get("error") or browser_runtime.get("executable_error"),
     }
-    try:
-        from backend.services.douyin_browser_session import open_douyin_cdp_session
-        async with open_douyin_cdp_session(
-            cdp_url,
-            connect_timeout_ms=4_000,
-            navigation_timeout_ms=8_000,
-        ) as session:
-            cdp.update({
-                "connected": True,
-                "authenticated": True,
-                "cookie_count": len(session.cookie_dict),
-                "has_ms_token": bool(session.ms_token),
-                "user_agent": session.user_agent[:160] if session.user_agent else "",
-            })
-    except PermissionError as exc:
-        message = str(exc)
-        cdp["connected"] = "Cannot connect to Douyin CDP" not in message
-        cdp["error"] = message[:500]
-    except Exception as exc:
-        cdp["error"] = f"{type(exc).__name__}: {str(exc)[:400]}"
+
+    resolved_cookie_browser = cookie.get("resolved_browser")
+    cookie_executable = (
+        resolve_browser_executable(
+            resolved_cookie_browser,
+            getattr(row, "download_cookie_executable_path", None),
+        )
+        if resolved_cookie_browser
+        else {"found": False, "executable_path": None, "detection_source": None}
+    )
+    cookie_source = {
+        **cookie,
+        "browser": resolved_cookie_browser or cookie_browser,
+        "selected_browser": cookie_browser,
+        "profile": cookie.get("profile") or cookie_profile,
+        "browser_found": bool(cookie_executable.get("found")),
+        "executable_path": cookie_executable.get("executable_path"),
+        "detection_source": cookie_executable.get("detection_source"),
+        "tiktok_cookie_present": bool(cookie.get("tiktok_cookie_present", int(cookie.get("tiktok_cookie_count") or 0) > 0)),
+        "tiktok_ready": bool(cookie.get("tiktok_ready", cookie.get("ok") and int(cookie.get("tiktok_cookie_count") or 0) > 0)),
+    }
 
     return {
-        "browser": browser,
-        "profile": profile,
-        "cookie": cookie,
+        "douyin_session": douyin_session,
+        "cookie_source": cookie_source,
+        # Compatibility fields for existing clients and tests.
+        "browser": cookie_browser,
+        "profile": cookie_profile,
+        "browser_runtime": browser_runtime,
+        "cookie": cookie_source,
         "douyin_cdp": cdp,
-        "douyin_ready": bool(
-            (cookie.get("ok") and int(cookie.get("douyin_cookie_count") or 0) > 0)
-            or cdp["authenticated"]
-        ),
-        "tiktok_ready": bool(
-            cookie.get("ok") and int(cookie.get("tiktok_cookie_count") or 0) > 0
-        ),
+        "douyin_ready": douyin_session["ready"],
+        "tiktok_ready": cookie_source["tiktok_ready"],
     }
+
+
+@router.post("/settings/download-session/open-tiktok")
+async def open_tiktok_download_session(body: CookieBrowserOpenRequest):
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(UserSettings).where(UserSettings.user_id == "local"))
+        row = result.scalar_one_or_none()
+    try:
+        browser = normalize_download_browser(
+            body.cookie_browser if body.cookie_browser is not None
+            else getattr(row, "download_cookie_browser", None)
+        )
+        profile = normalize_download_profile(
+            body.cookie_profile if body.cookie_profile is not None
+            else getattr(row, "download_cookie_profile", None)
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if browser == "auto":
+        from backend.services.ytdlp_service import probe_browser_session
+        inspected = await probe_browser_session("auto", profile)
+        if not inspected.get("ok"):
+            return {"ok": False, "status": "cookie_source_unavailable", **inspected}
+        browser = inspected["resolved_browser"]
+        profile = inspected.get("profile")
+    elif browser == "firefox" and not profile:
+        from backend.services.download_browser_launcher import discover_firefox_profiles
+        profiles = discover_firefox_profiles()
+        default = next((p for p in profiles if p.get("is_default")), None) or profiles[:1]
+        if default and default.get("path"):
+            profile = default["path"]
+        else:
+            return {
+                "ok": False,
+                "browser": "firefox",
+                "profile": None,
+                "status": "profile_not_found",
+                "message": "No readable Firefox profile found. Open Firefox to create one, or select a different browser.",
+            }
+    from backend.services.download_browser_launcher import open_cookie_source_browser
+    selected_override = _validated_browser_override(
+        browser,
+        getattr(row, "download_cookie_executable_path", None),
+    )
+    return open_cookie_source_browser(
+        browser,
+        profile,
+        executable_override=selected_override,
+    )
+
+
+@router.post("/settings/download-session/repair")
+async def repair_download_session(body: DownloadSessionRepairRequest):
+    scope = (body.scope or "all").strip().lower()
+    if scope not in {"all", "douyin", "cookie"}:
+        raise HTTPException(status_code=400, detail="Repair scope must be all, douyin, or cookie")
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(UserSettings).where(UserSettings.user_id == "local"))
+        row = result.scalar_one_or_none()
+
+    douyin_repair = None
+    cookie_repair = None
+    if scope in {"all", "douyin"}:
+        from backend.services.download_browser_launcher import (
+            launch_douyin_browser_session,
+            resolve_browser_executable,
+        )
+        douyin_browser = normalize_download_browser(getattr(row, "douyin_browser", None) or "edge")
+        cdp_url = normalize_douyin_cdp_url(getattr(row, "douyin_cdp_url", None))
+        override = getattr(row, "douyin_executable_path", None)
+        if override:
+            override_state = resolve_browser_executable(
+                douyin_browser,
+                override=override,
+            )
+            if not override_state.get("found"):
+                override = None
+                async with AsyncSessionLocal() as db:
+                    result = await db.execute(select(UserSettings).where(UserSettings.user_id == "local"))
+                    persisted = result.scalar_one_or_none()
+                    if persisted is not None:
+                        persisted.douyin_executable_path = None
+                        await db.commit()
+        douyin_repair = await launch_douyin_browser_session(
+            cdp_url,
+            browser=douyin_browser,
+            **({"executable_override": override} if override else {}),
+        )
+
+    if scope in {"all", "cookie"}:
+        from backend.services.ytdlp_service import probe_browser_session
+        saved_cookie_browser = normalize_download_browser(getattr(row, "download_cookie_browser", None) or "auto")
+        saved_cookie_profile = normalize_download_profile(getattr(row, "download_cookie_profile", None))
+        repair_browser = saved_cookie_browser if saved_cookie_browser != "auto" else "auto"
+        cookie_repair = await probe_browser_session(repair_browser, saved_cookie_profile)
+        if repair_browser != "auto" and cookie_repair.get("ok"):
+            cookie_repair["resolved_browser"] = repair_browser
+            cookie_repair["selected_browser"] = repair_browser
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(UserSettings).where(UserSettings.user_id == "local"))
+        target = result.scalar_one_or_none()
+        if not target:
+            target = UserSettings(user_id="local")
+            db.add(target)
+        if douyin_repair and douyin_repair.get("ok"):
+            target.douyin_browser = douyin_repair.get("resolved_browser") or "edge"
+            target.douyin_cdp_url = douyin_repair.get("cdp_url") or normalize_douyin_cdp_url(None)
+            if douyin_repair.get("executable"):
+                target.douyin_executable_path = douyin_repair["executable"]
+        if cookie_repair and cookie_repair.get("ok"):
+            if saved_cookie_browser == "auto":
+                target.download_cookie_browser = cookie_repair["resolved_browser"]
+                target.download_cookie_profile = cookie_repair.get("profile")
+            else:
+                target.download_cookie_browser = saved_cookie_browser
+                if cookie_repair.get("profile"):
+                    target.download_cookie_profile = cookie_repair["profile"]
+        await db.commit()
+
+    return {
+        "ok": bool(
+            (douyin_repair is None or douyin_repair.get("ok"))
+            and (cookie_repair is None or cookie_repair.get("ok"))
+        ),
+        "douyin_repair": douyin_repair,
+        "cookie_repair": cookie_repair,
+        "douyin_login_required": bool(douyin_repair and douyin_repair.get("connected") and not douyin_repair.get("authenticated")),
+        "tiktok_login_required": bool(cookie_repair and cookie_repair.get("ok") and not cookie_repair.get("tiktok_ready")),
+    }
+
+
+@router.post("/settings/download-session/reset-douyin")
+async def reset_douyin_download_session(body: DownloadSessionResetRequest):
+    from backend.services.download_browser_launcher import reset_managed_douyin_session
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(UserSettings).where(UserSettings.user_id == "local"))
+        row = result.scalar_one_or_none()
+    browser = normalize_download_browser(getattr(row, "douyin_browser", None) or "edge")
+    if browser == "auto":
+        browser = "edge"
+    return await asyncio.to_thread(
+        reset_managed_douyin_session,
+        confirm=body.confirm,
+        clear_profile=body.clear_profile,
+        browser=browser,
+    )
+
+
+@router.post("/settings/download-session/select-executable")
+async def select_download_browser_executable(body: DownloadExecutablePickerRequest):
+    target = (body.target or "").strip().lower()
+    browser = normalize_download_browser(body.browser)
+    if target not in {"douyin", "cookie"}:
+        raise HTTPException(status_code=400, detail="Target must be douyin or cookie")
+    expected = {
+        "edge": "msedge.exe",
+        "chrome": "chrome.exe",
+        "brave": "brave.exe",
+        "firefox": "firefox.exe",
+    }.get(browser)
+    if not expected:
+        raise HTTPException(status_code=400, detail="Choose a concrete browser before selecting an executable")
+
+    def choose_file() -> str:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            return filedialog.askopenfilename(
+                title=f"Chọn {expected}",
+                filetypes=[("Browser executable", expected), ("Executable", "*.exe")],
+            )
+        finally:
+            root.destroy()
+
+    try:
+        selected_path = await asyncio.to_thread(choose_file)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Native file picker unavailable: {exc}") from exc
+    if not selected_path:
+        return {"ok": False, "status": "cancelled"}
+    from backend.services.download_browser_launcher import resolve_browser_executable
+    resolution = resolve_browser_executable(browser, selected_path)
+    if not resolution["found"]:
+        raise HTTPException(status_code=400, detail=resolution["error"])
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(UserSettings).where(UserSettings.user_id == "local"))
+        row = result.scalar_one_or_none()
+        if not row:
+            row = UserSettings(user_id="local")
+            db.add(row)
+        if target == "douyin":
+            if browser not in {"edge", "chrome", "brave"}:
+                raise HTTPException(status_code=400, detail="Douyin requires Edge, Chrome, or Brave")
+            row.douyin_browser = browser
+            row.douyin_executable_path = selected_path
+        else:
+            row.download_cookie_browser = browser
+            row.download_cookie_executable_path = selected_path
+        await db.commit()
+    return {"ok": True, "target": target, **resolution}
 
 
 @router.post("/settings/download-session/test")

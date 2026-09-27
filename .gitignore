@@ -4,17 +4,35 @@ venv/
 ENV/
 env/
 
-# Python cache
-__pycache__/
+# Python cache & test artifacts
+**/__pycache__/
 *.pyc
 *.pyo
 *.pyd
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+*.full_suite_result.txt
 
-# Node
+# Packaging & build output
+/release/
+/dist/
+/build/
+
+# Node & frontend
 node_modules/
+app/frontend/dist/
+app/frontend/node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Runtime storage & local state
+/storage/
+.runtime/
+launcher-pid.json
+*.pid
 
 # Data & Evidence heavy binaries
 *.mp4
@@ -28,22 +46,23 @@ yarn-error.log*
 .playwright/
 playwright-report/
 
-# Local launcher state
-.runtime/
-
-# OS
+# OS & suspicious junk
 .DS_Store
 Thumbs.db
+NUL
+file:*/
 
 # Databases & runtime local state
 *.db
 *.db-shm
 *.db-wal
 *.log
+*.json.new
 douyin_cookies.txt
 tiktok_cookies.txt
 yt_cookies.txt
 browser_cookies_*.txt
 .env
 data/*profile*/
+
 

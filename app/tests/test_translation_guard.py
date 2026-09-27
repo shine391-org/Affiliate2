@@ -54,7 +54,7 @@ class TestBehaviour:
 
     def _run(self) -> dict:
         script = f"""
-        import {{ installTranslationGuard }} from {json.dumps(str(GUARD))}
+        import {{ installTranslationGuard }} from {json.dumps(str(GUARD.as_uri()))}
 
         // A minimal stand-in for the DOM's Node: the two methods the guard
         // patches, each throwing the way a browser does on a foreign child.

@@ -4,9 +4,9 @@ Affiliate2 intentionally does not require Docker for local development.
 
 ## Prerequisites
 
-- Python 3.11+
-- Node.js 18+
-- FFmpeg on PATH
+- Python 3.11.x
+- Node.js 22+ and npm 10+
+- FFmpeg and ffprobe on PATH
 - ImageMagick recommended/required by some media features
 - Git
 

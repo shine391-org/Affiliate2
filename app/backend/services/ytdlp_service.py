@@ -20,6 +20,7 @@ from backend.services.download_browser_session import (
     normalize_download_browser,
     normalize_download_profile,
 )
+from backend.services.download_browser_launcher import discover_firefox_profiles
 
 logger = logging.getLogger(__name__)
 
@@ -379,6 +380,7 @@ def _check_cooldown() -> float:
 # export an all-sites Netscape cookie jar to disk.
 
 _BROWSER_COOKIE_SOURCE = None
+_BROWSER_COOKIE_PROFILE = None
 # Cookie-store inspection can be surprisingly expensive on Windows when
 # Chromium App-Bound/DPAPI decryption fails. Cache the probe briefly so a
 # batch does not repeat the same failing decryption for every item. The
@@ -422,16 +424,13 @@ def _browser_known_on_machine(name: str) -> bool:
 
 
 def _detect_cookie_browser() -> str | None:
-    """Auto-detect once in the documented Chrome → Brave → Edge → Firefox order."""
+    """Return the last validated source, otherwise prefer Firefox on Windows."""
     global _BROWSER_COOKIE_SOURCE
     if _BROWSER_COOKIE_SOURCE is not None:
         return _BROWSER_COOKIE_SOURCE or None
-    for name in ("chrome", "brave", "edge", "firefox"):
+    for name in ("firefox", "edge", "chrome", "brave"):
         if _browser_known_on_machine(name):
-            _BROWSER_COOKIE_SOURCE = name
-            logger.info("Auto-detected browser for download cookies: %s", name)
             return name
-    _BROWSER_COOKIE_SOURCE = ""
     return None
 
 
@@ -469,18 +468,121 @@ def _remove_legacy_cookie_exports() -> None:
             logger.warning("Could not remove legacy cookie export: %s", path)
 
 
+def _cookie_error_code(exc: Exception) -> str:
+    message = str(exc).lower()
+    if "decrypt" in message or "dpapi" in message or "app-bound" in message:
+        return "decryption_failed"
+    if "profile" in message and ("not found" in message or "does not exist" in message):
+        return "profile_not_found"
+    if "permission" in message or "locked" in message:
+        return "database_unreadable"
+    return "extraction_failed"
+
+
+def _decorate_cookie_health(result: dict) -> dict:
+    decorated = dict(result)
+    decorated.setdefault("profile_found", bool(decorated.get("profile")) or decorated.get("ok", False))
+    decorated.setdefault("database_readable", bool(decorated.get("ok")))
+    decorated.setdefault("extraction_ok", bool(decorated.get("ok")))
+    decorated["tiktok_cookie_present"] = int(decorated.get("tiktok_cookie_count") or 0) > 0
+    decorated["douyin_cookie_present"] = int(decorated.get("douyin_cookie_count") or 0) > 0
+    decorated["tiktok_ready"] = bool(decorated.get("extraction_ok") and decorated["tiktok_cookie_present"])
+    if not decorated.get("profile_found"):
+        decorated["blocking_reason"] = decorated.get("error_code") or "profile_not_found"
+    elif not decorated.get("database_readable"):
+        decorated["blocking_reason"] = decorated.get("error_code") or "cookie_database_unreadable"
+    elif not decorated.get("extraction_ok"):
+        decorated["blocking_reason"] = decorated.get("error_code") or "cookie_extraction_failed"
+    elif not decorated["tiktok_cookie_present"]:
+        decorated["blocking_reason"] = "tiktok_login_required"
+    else:
+        decorated["blocking_reason"] = None
+    return decorated
+
+
+def _inspect_concrete_browser_session(concrete: str, profile: str | None) -> dict:
+    """Run one real yt-dlp browser/profile extraction attempt."""
+    try:
+        import yt_dlp
+        from yt_dlp.cookies import load_cookies
+        with yt_dlp.YoutubeDL({**_yt_dlp_base_opts(), "skip_download": True}) as ydl:
+            jar = load_cookies(
+                None,
+                cookiesfrombrowser_value(concrete, profile),
+                ydl,
+            )
+        counts = _cookie_domain_counts(jar)
+        return {
+            "ok": True,
+            "resolved_browser": concrete,
+            "profile": profile,
+            "profile_found": True,
+            "database_readable": True,
+            "extraction_ok": True,
+            "cookie_count": counts["total"],
+            "douyin_cookie_count": counts["douyin"],
+            "tiktok_cookie_count": counts["tiktok"],
+        }
+    except Exception as exc:
+        error_code = _cookie_error_code(exc)
+        logger.warning("Could not read %s browser cookies (%s)", concrete, error_code)
+        return {
+            "ok": False,
+            "resolved_browser": concrete,
+            "profile": profile,
+            "profile_found": bool(profile is None or Path(profile).exists()),
+            "database_readable": error_code not in {"database_unreadable", "profile_not_found"},
+            "extraction_ok": False,
+            "error_code": error_code,
+            "error": (
+                "Could not read cookies from this browser/profile. "
+                "On Windows, Chromium cookie encryption can prevent yt-dlp from decrypting a session."
+            ),
+            "detail": str(exc)[:300],
+            "cookie_count": 0,
+            "douyin_cookie_count": 0,
+            "tiktok_cookie_count": 0,
+        }
+
+
+def _cookie_source_candidates(selected: str, profile: str | None) -> list[tuple[str, str | None]]:
+    candidates: list[tuple[str, str | None]] = []
+    seen: set[tuple[str, str | None]] = set()
+
+    def add(browser_name: str, profile_name: str | None) -> None:
+        item = (browser_name, normalize_download_profile(profile_name))
+        if item not in seen:
+            seen.add(item)
+            candidates.append(item)
+
+    if selected != "auto":
+        if not _browser_known_on_machine(selected):
+            return []
+        if selected == "firefox" and not profile:
+            for discovered in discover_firefox_profiles():
+                add("firefox", discovered["path"])
+        add(selected, profile)
+        return candidates
+
+    if _BROWSER_COOKIE_SOURCE:
+        add(_BROWSER_COOKIE_SOURCE, _BROWSER_COOKIE_PROFILE)
+    for discovered in discover_firefox_profiles():
+        add("firefox", discovered["path"])
+    for browser_name in ("edge", "chrome", "brave"):
+        if _browser_known_on_machine(browser_name):
+            add(browser_name, None)
+    return candidates
+
+
 def _inspect_browser_session(
     browser: str = "auto",
     profile: str | None = None,
     *,
     force: bool = False,
 ) -> dict:
-    """Read browser cookies locally with yt-dlp; no network request is made.
+    """Find a browser/profile yt-dlp can actually read; no network request is made."""
+    global _BROWSER_COOKIE_SOURCE, _BROWSER_COOKIE_PROFILE
 
-    Results are cached briefly because a failed Chromium decryption can take
-    noticeable time. The explicit Settings Test session action uses force=True
-    so the user always gets a fresh probe.
-    """
     _remove_legacy_cookie_exports()
     selected = normalize_download_browser(browser)
     profile = normalize_download_profile(profile)
@@ -495,58 +597,46 @@ def _inspect_browser_session(
             if now - cached[0] < ttl:
                 return dict(cached_result)
 
-    concrete = _resolve_cookie_browser(selected)
-    if not concrete:
-        result = {
+    candidates = _cookie_source_candidates(selected, profile)
+    if not candidates:
+        result = _decorate_cookie_health({
             "ok": False,
             "browser": selected,
             "resolved_browser": None,
             "profile": profile,
+            "profile_found": False,
+            "database_readable": False,
+            "extraction_ok": False,
+            "error_code": "browser_not_found",
             "error": "Selected browser was not found on this machine.",
             "cookie_count": 0,
             "douyin_cookie_count": 0,
             "tiktok_cookie_count": 0,
-        }
+        })
         _BROWSER_SESSION_CACHE[cache_key] = (now, dict(result))
         return result
 
-    try:
-        import yt_dlp
-        from yt_dlp.cookies import load_cookies
-        with yt_dlp.YoutubeDL({**_yt_dlp_base_opts(), "skip_download": True}) as ydl:
-            jar = load_cookies(
-                None,
-                cookiesfrombrowser_value(concrete, profile),
-                ydl,
-            )
-        counts = _cookie_domain_counts(jar)
-        result = {
-            "ok": True,
-            "browser": selected,
-            "resolved_browser": concrete,
-            "profile": profile,
-            "cookie_count": counts["total"],
-            "douyin_cookie_count": counts["douyin"],
-            "tiktok_cookie_count": counts["tiktok"],
-        }
-    except Exception as exc:
-        logger.warning("Could not read %s browser cookies: %s", concrete, exc)
-        result = {
-            "ok": False,
-            "browser": selected,
-            "resolved_browser": concrete,
-            "profile": profile,
-            "error": (
-                "Could not read cookies from this browser/profile. "
-                "On Windows, close the browser once and retry; Chromium cookie "
-                "encryption can also prevent yt-dlp from decrypting a session."
-            ),
-            "detail": str(exc)[:300],
-            "cookie_count": 0,
-            "douyin_cookie_count": 0,
-            "tiktok_cookie_count": 0,
-        }
+    attempts: list[dict] = []
+    for concrete, candidate_profile in candidates:
+        attempt = _decorate_cookie_health(
+            _inspect_concrete_browser_session(concrete, candidate_profile)
+        )
+        attempt["browser"] = selected
+        attempts.append(attempt)
+        if attempt.get("ok"):
+            _BROWSER_COOKIE_SOURCE = concrete
+            _BROWSER_COOKIE_PROFILE = candidate_profile
+            attempt["attempt_count"] = len(attempts)
+            _BROWSER_SESSION_CACHE[cache_key] = (time.time(), dict(attempt))
+            return attempt
 
+    result = dict(attempts[-1])
+    result["browser"] = selected
+    result["attempt_count"] = len(attempts)
+    result["attempted_sources"] = [
+        {"browser": item.get("resolved_browser"), "profile": item.get("profile"), "error_code": item.get("error_code")}
+        for item in attempts
+    ]
     _BROWSER_SESSION_CACHE[cache_key] = (time.time(), dict(result))
     return result
 
@@ -563,12 +653,18 @@ def _apply_cookies(
     Returning False means the caller should continue anonymously. This prevents
     a broken/locked Edge cookie DB from breaking public downloads.
     """
-    concrete = _resolve_cookie_browser(browser)
+    selected = normalize_download_browser(browser)
+    concrete = _resolve_cookie_browser(selected)
     profile = normalize_download_profile(profile)
+    if selected == "auto" and not profile and _BROWSER_COOKIE_PROFILE:
+        profile = _BROWSER_COOKIE_PROFILE
     if not concrete:
         return False
     if session_ok is None:
-        session_ok = _inspect_browser_session(concrete, profile)["ok"]
+        inspected = _inspect_browser_session(selected, profile)
+        session_ok = bool(inspected["ok"])
+        concrete = inspected.get("resolved_browser") or concrete
+        profile = inspected.get("profile") or profile
     if not session_ok:
         return False
     opts["cookiesfrombrowser"] = cookiesfrombrowser_value(concrete, profile)

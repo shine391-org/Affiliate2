@@ -30,8 +30,11 @@ class UserSettings(Base, TimestampMixin):
     # Non-secret selectors only. Actual cookies stay in the user's browser and
     # are read by yt-dlp on demand.
     download_cookie_browser = Column(String(20), nullable=True)     # auto|edge|chrome|brave|firefox
-    download_cookie_profile = Column(String(200), nullable=True)    # e.g. Default / Profile 1
-    douyin_cdp_url = Column(String(500), nullable=True)          # local DevTools endpoint, e.g. http://127.0.0.1:9222
+    download_cookie_profile = Column(String(500), nullable=True)    # profile name or canonical profile path
+    download_cookie_executable_path = Column(Text, nullable=True)   # validated manual override only
+    douyin_browser = Column(String(20), nullable=True)               # independent CDP browser; defaults to edge
+    douyin_executable_path = Column(Text, nullable=True)             # validated manual override only
+    douyin_cdp_url = Column(String(500), nullable=True)              # actual local DevTools endpoint
 
     # ── YouTube upload OAuth ───────────────────────────
     youtube_credentials_json_encrypted = Column(Text, nullable=True)

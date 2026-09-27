@@ -52,7 +52,7 @@ def _run() -> dict:
     globalThis.WebSocket = FakeWebSocket
     globalThis.window = {{ location: {{ protocol: "http:", host: "127.0.0.1:16888" }} }}
 
-    const mod = await import({json.dumps(str(WS_MODULE))})
+    const mod = await import({json.dumps(str(WS_MODULE.as_uri()))})
     const ws = mod.default || mod.ws || mod.viralmintWS
     const out = {{}}
 

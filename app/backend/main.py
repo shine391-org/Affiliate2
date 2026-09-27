@@ -238,14 +238,27 @@ def create_app() -> FastAPI:
         redoc_url=None,
     )
 
-    # CORS — allow frontend dev server
+    # CORS — allow the local Vite aliases plus any explicitly configured frontend.
+    frontend_origins = {
+        settings.FRONTEND_URL,
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    }
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[settings.FRONTEND_URL, "http://localhost:5173", "http://localhost:3000"],
+        allow_origins=sorted(frontend_origins),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.get("/health", tags=["system"])
+    @app.get("/api/health", tags=["system"])
+    async def health():
+        """Cheap machine-readable readiness probe for launchers and release QA."""
+        return {"status": "ok", "app": "Affiliate2", "version": "1.0.0"}
 
     # CSRF defense: reject state-changing requests whose Origin/Referer is not
     # in the allowlist. Loopback-binding (HOST=127.0.0.1) blocks LAN attacks,
@@ -258,10 +271,7 @@ def create_app() -> FastAPI:
     # same-origin Host used for this request. Cross-site origins remain blocked.
     # Reverse-proxy/custom-domain deployments can use FRONTEND_URL explicitly.
     lan_mode = settings.HOST == "0.0.0.0"
-    allowed_origins = {
-        settings.FRONTEND_URL,
-        "http://localhost:5173",
-        "http://localhost:3000",
+    allowed_origins = frontend_origins | {
         f"http://localhost:{settings.PORT}",
         f"http://127.0.0.1:{settings.PORT}",
     }
@@ -279,22 +289,23 @@ def create_app() -> FastAPI:
             return False
         if origin in allowed_origins:
             return True
+        # The packaged SPA is served by the backend, and its runtime port can
+        # legitimately differ from the persisted Settings.PORT. Trust the
+        # request's exact same origin only for localhost/literal safe IPs. This
+        # fixes stale-port 403s without allowing DNS-rebinding hostnames.
+        request_host = request.headers.get("host", "")
+        if parsed.scheme not in {"http", "https"} or parsed.netloc != request_host:
+            return False
+        host = parsed.hostname or ""
+        try:
+            from ipaddress import ip_address
+            address = ip_address(host)
+        except ValueError:
+            return host == "localhost"
+        if address.is_loopback:
+            return True
         if lan_mode:
-            # The built SPA is served from the backend itself. In 0.0.0.0 mode
-            # the public LAN address is dynamic, but accepting an arbitrary
-            # Origin == Host would permit DNS-rebinding (evil.example resolving
-            # to the LAN machine). Auto-allow only literal local/private IPs;
-            # named hosts/domains must be declared through FRONTEND_URL.
-            request_host = request.headers.get("host", "")
-            if parsed.scheme not in {"http", "https"} or parsed.netloc != request_host:
-                return False
-            try:
-                from ipaddress import ip_address
-                host = parsed.hostname or ""
-                address = ip_address(host)
-            except ValueError:
-                return host == "localhost"
-            return address.is_private or address.is_loopback or address.is_link_local
+            return address.is_private or address.is_link_local
         return False
 
     @app.middleware("http")

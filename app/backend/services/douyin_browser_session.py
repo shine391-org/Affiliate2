@@ -14,13 +14,18 @@ from __future__ import annotations
 
 import os
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Awaitable, Callable
 
 from playwright.async_api import async_playwright
 
 DOUYIN_HOST = "https://www.douyin.com"
 DEFAULT_CDP_URL = "http://127.0.0.1:9222"
+
+
+class DouyinCdpUnavailableError(PermissionError):
+    """The configured CDP endpoint could not be reached at all."""
+
 
 SessionStateReader = Callable[[Any, Any], Awaitable[tuple[bool, dict[str, str], str | None]]]
 
@@ -142,11 +147,11 @@ async def pick_authenticated_context_and_page(
 class DouyinCdpSession:
     context: Any
     page: Any
-    cookie_dict: dict[str, str]
-    ms_token: str | None
-    user_agent: str
-    created_page: bool
-    cdp_url: str
+    cookie_dict: dict[str, str] = field(repr=False)
+    ms_token: str | None = field(repr=False, default=None)
+    user_agent: str = ""
+    created_page: bool = False
+    cdp_url: str = ""
 
 
 @asynccontextmanager
@@ -172,7 +177,7 @@ async def open_douyin_cdp_session(
                 timeout=connect_timeout_ms,
             )
         except Exception as exc:
-            raise PermissionError(
+            raise DouyinCdpUnavailableError(
                 f"Cannot connect to Douyin CDP at {selected_url}: {exc}. "
                 "Start/login the configured Edge/Chrome profile first."
             ) from exc

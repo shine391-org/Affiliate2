@@ -187,3 +187,92 @@ async def test_tiktok_does_not_borrow_douyin_cdp_fallback():
             "https://www.tiktok.com/@u/video/123",
             {"ok": False, "tiktok_cookie_count": 0},
         )
+
+
+def test_auto_cookie_source_tries_working_firefox_profiles_before_chromium(monkeypatch, tmp_path):
+    from backend.services import ytdlp_service as svc
+
+    profile = tmp_path / "abc.default-release"
+    profile.mkdir()
+    (profile / "cookies.sqlite").write_bytes(b"sqlite")
+    attempts = []
+    svc._BROWSER_SESSION_CACHE.clear()
+    monkeypatch.setattr(svc, "_BROWSER_COOKIE_SOURCE", None)
+    monkeypatch.setattr(svc, "_BROWSER_COOKIE_PROFILE", None)
+
+    monkeypatch.setattr(
+        svc,
+        "discover_firefox_profiles",
+        lambda: [{
+            "name": "default-release",
+            "path": str(profile),
+            "cookie_database_found": True,
+            "is_default": True,
+        }],
+    )
+    monkeypatch.setattr(svc, "_browser_known_on_machine", lambda name: name in {"firefox", "edge"})
+
+    def fake_inspect(browser, selected_profile):
+        attempts.append((browser, selected_profile))
+        if browser == "firefox" and selected_profile == str(profile):
+            return {
+                "ok": True,
+                "resolved_browser": "firefox",
+                "profile": str(profile),
+                "cookie_count": 62,
+                "douyin_cookie_count": 0,
+                "tiktok_cookie_count": 0,
+                "database_readable": True,
+                "extraction_ok": True,
+            }
+        return {
+            "ok": False,
+            "resolved_browser": browser,
+            "profile": selected_profile,
+            "cookie_count": 0,
+            "douyin_cookie_count": 0,
+            "tiktok_cookie_count": 0,
+            "database_readable": False,
+            "extraction_ok": False,
+            "error_code": "decryption_failed",
+        }
+
+    monkeypatch.setattr(svc, "_inspect_concrete_browser_session", fake_inspect)
+
+    result = svc._inspect_browser_session("auto", None, force=True)
+
+    assert result["ok"] is True
+    assert result["resolved_browser"] == "firefox"
+    assert result["profile"] == str(profile)
+    assert attempts[0] == ("firefox", str(profile))
+    assert svc._BROWSER_COOKIE_SOURCE == "firefox"
+    assert svc._BROWSER_COOKIE_PROFILE == str(profile)
+
+
+def test_readable_cookie_store_without_tiktok_cookie_is_ready_but_login_required(monkeypatch):
+    from backend.services import ytdlp_service as svc
+
+    monkeypatch.setattr(svc, "_resolve_cookie_browser", lambda browser: "firefox")
+    monkeypatch.setattr(
+        svc,
+        "_inspect_concrete_browser_session",
+        lambda browser, profile: {
+            "ok": True,
+            "resolved_browser": browser,
+            "profile": profile,
+            "profile_found": True,
+            "database_readable": True,
+            "extraction_ok": True,
+            "cookie_count": 62,
+            "douyin_cookie_count": 0,
+            "tiktok_cookie_count": 0,
+        },
+    )
+
+    result = svc._inspect_browser_session("firefox", "profile", force=True)
+
+    assert result["database_readable"] is True
+    assert result["extraction_ok"] is True
+    assert result["tiktok_cookie_present"] is False
+    assert result["tiktok_ready"] is False
+    assert result["blocking_reason"] == "tiktok_login_required"

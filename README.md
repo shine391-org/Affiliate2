@@ -33,11 +33,29 @@ scripts/                 Native Windows launch/setup utilities
 
 Do not develop new runtime features inside `vendor/`.
 
-## Run locally on Windows
+## Install and run Affiliate2 V1 on Windows
 
-Prerequisites: Python 3.11+, Node.js 18+, FFmpeg. ImageMagick is recommended for all media features.
+V1 prerequisites: Windows 11 x64, Python 3.11.x, Node.js 22+, npm 10+, FFmpeg and ffprobe on PATH. ImageMagick is optional for inherited advanced media paths.
 
 First setup:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\setup.ps1
+```
+
+Stable local start and stop:
+
+```powershell
+.\start.ps1
+.\stop.ps1
+```
+
+The stable UI defaults to `http://127.0.0.1:16888`; machine-readable health is at `/api/health`. See `RELEASE.md` for fresh-machine installation, `.env`, local AI, FFmpeg, Douyin/Edge CDP, GPU/CPU and known V1 limitations.
+
+## Development workflow
+
+Bootstrap directly through the development script when needed:
 
 ```powershell
 .\scripts\bootstrap.ps1
