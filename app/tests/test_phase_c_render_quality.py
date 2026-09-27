@@ -188,7 +188,8 @@ async def test_generate_ass_places_vietsub_inside_mask_region_with_vertical_offs
     }
 
     centered = tmp_path / "centered.ass"
-    shifted = tmp_path / "shifted.ass"
+    shifted_up = tmp_path / "shifted-up.ass"
+    shifted_down = tmp_path / "shifted-down.ass"
     default = tmp_path / "default.ass"
     await caption_service.generate_captions_ass(
         segments,
@@ -201,10 +202,18 @@ async def test_generate_ass_places_vietsub_inside_mask_region_with_vertical_offs
     await caption_service.generate_captions_ass(
         segments,
         aspect_ratio="9:16",
-        output_path=shifted,
+        output_path=shifted_up,
         emoji_style="none",
         mask_box=mask,
         caption_placement={"mode": "mask_region", "vertical_offset": -0.05},
+    )
+    await caption_service.generate_captions_ass(
+        segments,
+        aspect_ratio="9:16",
+        output_path=shifted_down,
+        emoji_style="none",
+        mask_box=mask,
+        caption_placement={"mode": "mask_region", "vertical_offset": 0.25},
     )
     await caption_service.generate_captions_ass(
         segments,
@@ -214,11 +223,34 @@ async def test_generate_ass_places_vietsub_inside_mask_region_with_vertical_offs
     )
 
     centered_text = centered.read_text(encoding="utf-8")
-    shifted_text = shifted.read_text(encoding="utf-8")
+    shifted_up_text = shifted_up.read_text(encoding="utf-8")
+    shifted_down_text = shifted_down.read_text(encoding="utf-8")
     default_text = default.read_text(encoding="utf-8")
     assert "\\an5\\pos(540,1526)" in centered_text
-    assert "\\an5\\pos(540,1430)" in shifted_text
+    assert "\\an5\\pos(540,1512)" in shifted_up_text
+    assert "\\an5\\pos(540,1598)" in shifted_down_text
     assert "\\pos(" not in default_text
+
+
+def test_mask_caption_budget_shortens_lines_for_narrow_regions():
+    from backend.services import caption_service
+
+    style = caption_service.CAPTION_STYLES["viral"]
+    full = caption_service._caption_budgets_for_mask(
+        style,
+        (1080, 1920),
+        {"x": 0, "y": 0.72, "width": 1, "height": 0.15, "normalized": True},
+    )
+    narrow = caption_service._caption_budgets_for_mask(
+        style,
+        (1080, 1920),
+        {"x": 0.35, "y": 0.72, "width": 0.3, "height": 0.15, "normalized": True},
+    )
+
+    assert full[0] == style["words_per_group"]
+    assert full[1] >= caption_service._max_chars_for(style) - 2
+    assert narrow[0] < full[0]
+    assert narrow[1] < full[1]
 
 
 @pytest.mark.asyncio

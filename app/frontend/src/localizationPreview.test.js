@@ -3,10 +3,13 @@ import assert from "node:assert/strict"
 
 import {
   buildLocalizationRenderPayload,
+  canRerenderLocalization,
   captionPreviewStyle,
+  hydrateLocalizationJobConfig,
   maskPreset,
   pickPreviewReframeMethod,
   previewObjectFit,
+  resolveProfileTargetAspect,
 } from "./localizationPreview.js"
 
 test("preview reframe mirrors backend auto geometry", () => {
@@ -30,15 +33,66 @@ test("mask-region caption preview uses normalized mask geometry and offset", () 
   assert.deepEqual(
     captionPreviewStyle(
       { x: 0.05, y: 0.72, width: 0.9, height: 0.15 },
-      { mode: "mask_region", vertical_offset: -0.05 },
+      { mode: "mask_region", vertical_offset: -0.25 },
     ),
     {
       left: "50%",
-      top: "74.5%",
+      top: "75.75%",
       width: "90%",
       transform: "translate(-50%, -50%)",
     },
   )
+})
+
+test("mask-region caption preview clamps inside mask safe padding", () => {
+  const mask = { x: 0.05, y: 0.72, width: 0.9, height: 0.15 }
+  assert.equal(captionPreviewStyle(mask, { mode: "mask_region", vertical_offset: -0.25 }).top, "75.75%")
+  assert.equal(captionPreviewStyle(mask, { mode: "mask_region", vertical_offset: 0.25 }).top, "83.25%")
+})
+
+test("existing job hydration remains source of truth after delayed profile defaults", () => {
+  const hydrated = hydrateLocalizationJobConfig({
+    manifest: {
+      job_id: "job-16x9",
+      request: {
+        profile_id: "profile-existing",
+        target_aspect: "16:9",
+        mask_box: { x: 0.05, y: 0.72, width: 0.9, height: 0.15, mode: "solid" },
+        caption_placement: { mode: "mask_region", vertical_offset: 0.1 },
+      },
+      effective_profile: { target_aspect: "9:16" },
+    },
+  })
+
+  assert.equal(hydrated.profileId, "profile-existing")
+  assert.equal(hydrated.targetAspect, "16:9")
+  assert.equal(resolveProfileTargetAspect({
+    currentAspect: hydrated.targetAspect,
+    selectedProfile: { target_aspect: "9:16" },
+    aspectOverridden: false,
+    jobConfigHydrated: true,
+  }), "16:9")
+})
+
+test("rerender readiness mirrors canonical stage prerequisites", () => {
+  const complete = { status: "complete" }
+  const pending = { status: "pending" }
+  assert.equal(canRerenderLocalization({
+    manifest: { request: { mode: "full_dub" }, stages: { translation: complete, dubbing: complete, audio_mix: complete } },
+    translation_review_pending: false,
+  }), true)
+  assert.equal(canRerenderLocalization({
+    manifest: { request: { mode: "full_dub" }, stages: { translation: complete, dubbing: pending, audio_mix: complete } },
+    translation_review_pending: false,
+  }), false)
+  assert.equal(canRerenderLocalization({
+    manifest: { request: { mode: "captions_only" }, stages: { translation: complete, dubbing: complete, audio_mix: complete } },
+    translation_review_pending: false,
+  }), true)
+  assert.equal(canRerenderLocalization({
+    manifest: { request: { mode: "full_dub" }, stages: { translation: complete, dubbing: complete, audio_mix: complete } },
+    translation_review_pending: true,
+  }), false)
 })
 
 test("render payload explicitly marks normalized mask and caption placement", () => {

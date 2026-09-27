@@ -434,6 +434,45 @@ async def rerun_localization_job(job_id: str, body: RerunRequest):
     return {"ok": True, "job_id": job_id, "from_stage": stage}
 
 
+def _assert_rerender_ready(run: LocalizationRun) -> None:
+    """Fail closed unless the canonical runner can skip every upstream stage."""
+    request = run.request
+    if not run.is_complete("translation", ("transcript",)):
+        raise HTTPException(
+            status_code=409,
+            detail="Không thể kết xuất lại vì bản dịch chưa hoàn tất.",
+        )
+    if request.get("translation_review_pending"):
+        raise HTTPException(
+            status_code=409,
+            detail="Không thể kết xuất lại vì đang chờ duyệt bản dịch.",
+        )
+
+    mode = str(request.get("mode") or "full_dub").strip().lower()
+    if mode == "full_dub":
+        if not run.is_complete("dubbing", ("transcript", "dub_track", "plan", "chunks")):
+            raise HTTPException(
+                status_code=409,
+                detail="Không thể kết xuất lại vì phần lồng tiếng chưa hoàn tất.",
+            )
+        if not run.is_complete("audio_mix", ("mixed_audio",)):
+            raise HTTPException(
+                status_code=409,
+                detail="Không thể kết xuất lại vì phần trộn âm thanh chưa hoàn tất.",
+            )
+        return
+
+    if mode == "captions_only":
+        if not run.is_complete("dubbing") or not run.is_complete("audio_mix"):
+            raise HTTPException(
+                status_code=409,
+                detail="Không thể kết xuất lại vì trạng thái âm thanh/phụ đề chưa hoàn tất.",
+            )
+        return
+
+    raise HTTPException(status_code=409, detail="Chế độ bản địa hóa không hỗ trợ kết xuất lại.")
+
+
 @router.post("/jobs/{job_id}/rerender")
 async def rerender_localization_job(job_id: str, body: RenderRerunRequest):
     await _assert_job_inactive(job_id)
@@ -441,6 +480,9 @@ async def rerender_localization_job(job_id: str, body: RenderRerunRequest):
     provided = body.model_fields_set
     explicit_mask = body.mask_box if "mask_box" in provided else None
     if explicit_mask is not None:
+        mask_mode = str(explicit_mask.get("mode") or "").strip().lower()
+        if mask_mode not in {"blur", "solid"}:
+            raise HTTPException(status_code=400, detail="Mask mode must be blur or solid")
         if explicit_mask.get("normalized") is not True:
             raise HTTPException(status_code=400, detail="Mask box must explicitly set normalized=true")
         from backend.services.caption_service import parse_and_validate_mask_box
@@ -449,6 +491,7 @@ async def rerender_localization_job(job_id: str, body: RenderRerunRequest):
             raise HTTPException(status_code=400, detail="Mask box geometry is invalid")
 
     run = _load_run(job_id)
+    _assert_rerender_ready(run)
     mask_box = (
         body.mask_box
         if "mask_box" in provided
@@ -462,11 +505,12 @@ async def rerender_localization_job(job_id: str, body: RenderRerunRequest):
         if parse_and_validate_mask_box(mask_box, 1000, 1000) is None:
             raise HTTPException(status_code=400, detail="Mask box geometry is invalid")
 
-    placement = dict(
+    raw_placement = (
         body.caption_placement
         if "caption_placement" in provided
-        else run.request.get("caption_placement") or {}
+        else run.request.get("caption_placement")
     )
+    placement = dict(raw_placement or {})
     mode = str(placement.get("mode") or "default").strip().lower()
     if mode not in {"default", "mask_region"}:
         raise HTTPException(status_code=400, detail="Caption placement mode is invalid")

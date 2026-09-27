@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 import pytest
+from types import SimpleNamespace
 
 from backend.api import localization as api
 from backend.api import tools
@@ -267,6 +268,9 @@ async def test_rerender_updates_render_config_and_invalidates_only_final_render(
         }
         effective_profile = {"target_aspect": "9:16", "render_profile": "hq"}
 
+        def is_complete(self, stage, artifacts=()):
+            return stage in {"translation", "dubbing", "audio_mix"}
+
         def update_request(self, value):
             self.request = value
             events.append(("request", value))
@@ -331,6 +335,37 @@ async def test_rerender_rejects_non_normalized_or_invalid_mask_before_dispatch(m
 
 
 @pytest.mark.asyncio
+async def test_rerender_rejects_invalid_mask_mode_before_dispatch(monkeypatch):
+    dispatched = False
+
+    async def fake_inactive(job_id):
+        return None
+
+    async def fake_dispatch(run):
+        nonlocal dispatched
+        dispatched = True
+
+    monkeypatch.setattr(api, "_assert_job_inactive", fake_inactive)
+    monkeypatch.setattr(api, "_dispatch_existing_run", fake_dispatch)
+
+    with pytest.raises(api.HTTPException, match="mode") as exc:
+        await api.rerender_localization_job(
+            "job-render-invalid-mode",
+            api.RenderRerunRequest(mask_box={
+                "x": 0.05,
+                "y": 0.72,
+                "width": 0.9,
+                "height": 0.15,
+                "mode": "pixelate",
+                "normalized": True,
+            }),
+        )
+
+    assert exc.value.status_code == 400
+    assert dispatched is False
+
+
+@pytest.mark.asyncio
 async def test_rerender_partial_update_preserves_existing_render_config(monkeypatch):
     class FakeRun:
         job_id = "job-render-partial"
@@ -347,6 +382,9 @@ async def test_rerender_partial_update_preserves_existing_render_config(monkeypa
             "caption_placement": {"mode": "mask_region", "vertical_offset": -0.04},
         }
         effective_profile = {"target_aspect": "9:16", "render_profile": "hq"}
+
+        def is_complete(self, stage, artifacts=()):
+            return stage in {"translation", "dubbing", "audio_mix"}
 
         def update_request(self, value):
             self.request = value
@@ -394,6 +432,9 @@ async def test_rerender_explicit_null_mask_disables_mask_and_resets_placement(mo
         }
         effective_profile = {"target_aspect": "9:16"}
 
+        def is_complete(self, stage, artifacts=()):
+            return stage in {"translation", "dubbing", "audio_mix"}
+
         def update_request(self, value):
             self.request = value
 
@@ -424,6 +465,313 @@ async def test_rerender_explicit_null_mask_disables_mask_and_resets_placement(mo
         "mode": "default",
         "vertical_offset": 0.0,
     }
+
+
+@pytest.mark.asyncio
+async def test_rerender_explicit_null_caption_placement_resets_default(monkeypatch):
+    class FakeRun:
+        job_id = "job-render-reset-placement"
+        request = {
+            "mode": "captions_only",
+            "mask_box": None,
+            "caption_placement": {"mode": "mask_region", "vertical_offset": -0.04},
+        }
+        effective_profile = {"target_aspect": "16:9"}
+
+        def is_complete(self, stage, artifacts=()):
+            return stage in {"translation", "dubbing", "audio_mix"}
+
+        def update_request(self, value):
+            self.request = value
+
+        def update_effective_profile(self, value):
+            self.effective_profile = value
+
+        def invalidate_from(self, stage, *, delete_artifacts, preserve_files):
+            assert stage == "final_render"
+
+    async def fake_noop(*args, **kwargs):
+        return None
+
+    fake_run = FakeRun()
+    monkeypatch.setattr(api, "_assert_job_inactive", fake_noop)
+    monkeypatch.setattr(api, "_load_run", lambda job_id: fake_run)
+    monkeypatch.setattr(api, "_dispatch_existing_run", fake_noop)
+
+    await api.rerender_localization_job(
+        fake_run.job_id,
+        api.RenderRerunRequest(caption_placement=None),
+    )
+
+    assert fake_run.request["caption_placement"] == {
+        "mode": "default",
+        "vertical_offset": 0.0,
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mode", "complete_stages", "review_pending", "message"),
+    [
+        ("full_dub", {"translation", "audio_mix"}, False, "lồng tiếng"),
+        ("full_dub", {"translation", "dubbing"}, False, "âm thanh"),
+        ("full_dub", {"translation", "dubbing", "audio_mix"}, True, "duyệt bản dịch"),
+        ("captions_only", {"translation", "dubbing"}, False, "âm thanh"),
+    ],
+)
+async def test_rerender_blocks_when_upstream_is_not_ready(
+    monkeypatch, mode, complete_stages, review_pending, message,
+):
+    events = []
+
+    class FakeRun:
+        job_id = "job-render-not-ready"
+        request = {
+            "mode": mode,
+            "translation_review_pending": review_pending,
+            "translation_review_approved": not review_pending,
+        }
+        effective_profile = {"target_aspect": "9:16"}
+
+        def is_complete(self, stage, artifacts=()):
+            return stage in complete_stages
+
+        def update_request(self, value):
+            events.append(("request", value))
+
+        def update_effective_profile(self, value):
+            events.append(("profile", value))
+
+        def invalidate_from(self, *args, **kwargs):
+            events.append(("invalidate", args, kwargs))
+
+    async def fake_inactive(job_id):
+        return None
+
+    async def fake_dispatch(run):
+        events.append(("dispatch", run.job_id))
+
+    monkeypatch.setattr(api, "_assert_job_inactive", fake_inactive)
+    monkeypatch.setattr(api, "_load_run", lambda job_id: FakeRun())
+    monkeypatch.setattr(api, "_dispatch_existing_run", fake_dispatch)
+
+    with pytest.raises(api.HTTPException, match=message) as exc:
+        await api.rerender_localization_job(
+            "job-render-not-ready",
+            api.RenderRerunRequest(target_aspect="16:9"),
+        )
+
+    assert exc.value.status_code == 409
+    assert events == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["full_dub", "captions_only"])
+async def test_rerender_accepts_canonical_ready_upstream(monkeypatch, mode):
+    events = []
+
+    class FakeRun:
+        job_id = "job-render-ready"
+        request = {"mode": mode, "translation_review_pending": False}
+        effective_profile = {"target_aspect": "9:16"}
+
+        def is_complete(self, stage, artifacts=()):
+            return stage in {"translation", "dubbing", "audio_mix"}
+
+        def update_request(self, value):
+            self.request = value
+
+        def update_effective_profile(self, value):
+            self.effective_profile = value
+
+        def invalidate_from(self, stage, *, delete_artifacts, preserve_files):
+            events.append(("invalidate", stage, delete_artifacts, set(preserve_files)))
+
+    async def fake_inactive(job_id):
+        return None
+
+    async def fake_dispatch(run):
+        events.append(("dispatch", run.job_id))
+
+    fake_run = FakeRun()
+    monkeypatch.setattr(api, "_assert_job_inactive", fake_inactive)
+    monkeypatch.setattr(api, "_load_run", lambda job_id: fake_run)
+    monkeypatch.setattr(api, "_dispatch_existing_run", fake_dispatch)
+
+    result = await api.rerender_localization_job(
+        fake_run.job_id,
+        api.RenderRerunRequest(target_aspect="16:9"),
+    )
+
+    assert result["from_stage"] == "final_render"
+    assert events == [
+        ("invalidate", "final_render", True, set()),
+        ("dispatch", fake_run.job_id),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_canonical_rerender_resume_never_calls_upstream_processors(monkeypatch, tmp_path):
+    from backend.core import tool_runners
+    from backend.core.localization import LocalizationProfile, LocalizationSegment, LocalizationTranscript
+
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"source-video")
+    dub_track = tmp_path / "dub.wav"
+    dub_track.write_bytes(b"dub")
+    mixed_audio = tmp_path / "mixed.wav"
+    mixed_audio.write_bytes(b"mixed")
+    transcript = LocalizationTranscript(
+        text="hello",
+        language="en",
+        segments=[LocalizationSegment(
+            id="seg-1",
+            source_text="hello",
+            translated_text="xin chào",
+            source_start_ms=0,
+            source_end_ms=1000,
+            target_start_ms=0,
+            target_end_ms=1000,
+            translation_status="success",
+            timing_status="fit",
+        )],
+    )
+    profile = LocalizationProfile(
+        id="rerender-test",
+        name="Rerender test",
+        audio_mode="fast_duck",
+        target_aspect="9:16",
+    )
+    statuses = {
+        stage: "complete"
+        for stage in ("separation", "asr", "semantic", "translation", "dubbing", "audio_mix")
+    }
+    statuses.update(final_render="invalidated", qc="invalidated")
+    artifacts = {
+        ("dubbing", "dub_track"): dub_track,
+        ("audio_mix", "mixed_audio"): mixed_audio,
+    }
+    failures = []
+
+    class FakeRun:
+        job_id = "job-render-resume"
+        source_path = source
+        effective_profile = profile.model_dump()
+        request = {
+            "mode": "full_dub",
+            "review_translation": False,
+            "translation_review_pending": False,
+        }
+        manifest_path = tmp_path / "manifest.json"
+
+        def update_request(self, value):
+            self.request = value
+
+        def update_effective_profile(self, value):
+            self.effective_profile = value
+
+        def verify_source_identity(self):
+            return {}
+
+        def is_complete(self, stage, required_artifacts=()):
+            if statuses.get(stage) != "complete":
+                return False
+            return all(self.artifact(stage, key) is not None for key in required_artifacts)
+
+        def artifact(self, stage, key):
+            if key == "transcript" and stage in {"asr", "semantic", "translation", "dubbing"}:
+                return tmp_path / f"{stage}-transcript.json"
+            if key in {"plan", "chunks"} and stage == "dubbing":
+                return tmp_path / f"{key}.json"
+            return artifacts.get((stage, key))
+
+        def load_json(self, stage, key):
+            if key == "transcript":
+                return transcript.model_dump()
+            if key in {"plan", "chunks"}:
+                return []
+            raise KeyError((stage, key))
+
+        def record(self, stage):
+            return {"status": statuses.get(stage, "pending"), "metadata": {}}
+
+        def start(self, stage):
+            statuses[stage] = "running"
+
+        def artifact_path(self, stage, name):
+            return tmp_path / f"{stage}-{name}"
+
+        def save_json(self, stage, name, value):
+            path = self.artifact_path(stage, name)
+            path.write_text("{}", encoding="utf-8")
+            return path
+
+        def complete(self, stage, *, artifacts=None, metadata=None):
+            statuses[stage] = "complete"
+            for key, path in (artifacts or {}).items():
+                artifacts_map_key = (stage, key)
+                globals_artifacts[artifacts_map_key] = path
+
+        def fail(self, stage, error):
+            statuses[stage] = "failed"
+            failures.append((stage, str(error)))
+
+    globals_artifacts = artifacts
+    fake_run = FakeRun()
+
+    async def fail_upstream(*args, **kwargs):
+        raise AssertionError("rerender must not execute upstream processing")
+
+    async def fake_generate(segments, *, output_path, **kwargs):
+        output_path.write_text("[Events]\n", encoding="utf-8")
+        return output_path
+
+    async def fake_burn(video_path, ass_path, output_path, **kwargs):
+        output_path.write_bytes(b"rendered-video")
+        return output_path
+
+    async def fake_noop(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "backend.services.localization_stage_service.LocalizationRun.load",
+        lambda job_id: fake_run,
+    )
+    monkeypatch.setattr(tool_runners, "_load_user_settings", fake_noop)
+    monkeypatch.setattr(tool_runners, "_tool_progress", fake_noop)
+    monkeypatch.setattr(tool_runners, "_tool_success", fake_noop)
+    monkeypatch.setattr(tool_runners, "_tool_fail", fake_noop)
+    monkeypatch.setattr("backend.api.tools.tool_out_path", lambda job_id, suffix: tmp_path / f"out{suffix}")
+    monkeypatch.setattr("backend.services.localization_service.transcribe_for_localization", fail_upstream)
+    monkeypatch.setattr("backend.services.localization_service.prepare_semantic_transcript", fail_upstream)
+    monkeypatch.setattr("backend.services.localization_service.translate_transcript", fail_upstream)
+    monkeypatch.setattr("backend.services.localization_service.synthesize_timed_dub", fail_upstream)
+    monkeypatch.setattr("backend.services.localization_service.mix_dub_audio", fail_upstream)
+    monkeypatch.setattr("backend.services.caption_service.generate_captions_ass", fake_generate)
+    monkeypatch.setattr("backend.services.caption_service.burn_captions", fake_burn)
+    monkeypatch.setattr(
+        "backend.services.localization_qc_service.evaluate_localization_qc",
+        lambda **kwargs: SimpleNamespace(as_dict=lambda: {
+            "status": "READY", "failures": [], "warnings": [],
+        }),
+    )
+    monkeypatch.setattr("backend.services.video_utils.probe_duration", lambda path: 1.0)
+
+    await tool_runners.run_tool_translate(
+        job_id=fake_run.job_id,
+        in_path=source,
+        target_language="Vietnamese",
+        mode="full_dub",
+        voice_id="",
+        caption_style="viral",
+        emoji_style="none",
+        profile_override=profile.model_dump(),
+        cleanup_input=False,
+    )
+
+    assert failures == []
+    assert statuses["final_render"] == "complete"
+    assert statuses["qc"] == "complete"
 
 
 @pytest.mark.asyncio

@@ -774,6 +774,33 @@ def _max_chars_for(style: dict) -> int:
     return max(12, int(2200 / max(int(font_size), 1)))
 
 
+def _caption_budgets_for_mask(
+    style: dict,
+    resolution: tuple[int, int],
+    mask_box: dict,
+) -> tuple[int, int]:
+    """Return conservative word/character budgets for a mask-width caption."""
+    width, height = resolution
+    parsed = parse_and_validate_mask_box(mask_box, width, height)
+    if parsed is None:
+        raise ValueError("Invalid mask box for caption layout")
+    _, _, px_w, _, _ = parsed
+    font_size = int(
+        style.get("font_size_portrait") if height > width
+        else style.get("font_size_landscape")
+        or 56
+    )
+    if px_w < font_size * 4:
+        raise ValueError("Mask region is too small for caption layout")
+
+    global_chars = _max_chars_for(style)
+    estimated_char_width = max(font_size * 0.5, 1.0)
+    max_chars = min(global_chars, max(4, int(px_w / estimated_char_width)))
+    global_words = int(style.get("words_per_group", 6))
+    max_words = min(global_words, max(2, max_chars // 5))
+    return max_words, max_chars
+
+
 def _group_words_into_lines(
     words: list[dict], max_words: int, max_chars: int,
 ) -> list[list[dict]]:
@@ -831,16 +858,19 @@ def _generate_ass_events(
     words: list[dict],
     style: dict,
     position: tuple[int, int] | None = None,
+    max_words: int | None = None,
+    max_chars: int | None = None,
 ) -> str:
     """
     Generate ASS dialogue events with word-by-word highlighting over
     phrase-length lines. The full line stays on screen for its whole
     duration; the highlight walks word to word with no display gaps.
     """
-    max_words = style.get("words_per_group", 6)
+    max_words = max_words or style.get("words_per_group", 6)
+    max_chars = max_chars or _max_chars_for(style)
     highlight = style.get("highlight_color", "&H0000FFFF")
     primary = style.get("primary_color", "&H00FFFFFF")
-    lines = _group_words_into_lines(words, max_words, _max_chars_for(style))
+    lines = _group_words_into_lines(words, max_words, max_chars)
     events = []
 
     for li, line in enumerate(lines):
@@ -928,10 +958,13 @@ def _caption_position_for_mask(
         raise ValueError("Caption vertical offset must be between -0.25 and 0.25")
 
     center_x = int(round(px_x + px_w / 2))
-    center_y = int(round(px_y + px_h / 2 + vertical_offset * height))
-    safe_pad = max(font_size, 12)
-    center_x = max(safe_pad, min(center_x, width - safe_pad))
-    center_y = max(safe_pad, min(center_y, height - safe_pad))
+    center_y = int(round(px_y + px_h / 2 + vertical_offset * px_h))
+    safe_pad = max(int(round(height * 0.03)), 12)
+    min_y = px_y + safe_pad
+    max_y = px_y + px_h - safe_pad
+    if min_y > max_y:
+        raise ValueError("Mask region is too small for caption safe padding")
+    center_y = max(min_y, min(center_y, max_y))
     return center_x, center_y
 
 
@@ -1020,7 +1053,21 @@ async def generate_captions_ass(
         style_config,
         aspect_ratio,
     )
-    events = _generate_ass_events(words, style_config, position=position) if words else ""
+    max_words = None
+    max_chars = None
+    if position is not None:
+        max_words, max_chars = _caption_budgets_for_mask(
+            style_config,
+            resolution,
+            mask_box,
+        )
+    events = _generate_ass_events(
+        words,
+        style_config,
+        position=position,
+        max_words=max_words,
+        max_chars=max_chars,
+    ) if words else ""
 
     content = header + hook_event + events + "\n"
     output_path.write_text(content, encoding="utf-8")

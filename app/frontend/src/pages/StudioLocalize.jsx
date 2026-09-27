@@ -15,10 +15,13 @@ import LocalizationBatch from "./LocalizationBatch"
 import { LOCALIZE_STEPS, localizeStepForDetail } from "../studioModel"
 import {
   buildLocalizationRenderPayload,
+  canRerenderLocalization,
   captionPreviewStyle,
+  hydrateLocalizationJobConfig,
   maskPreset,
   pickPreviewReframeMethod,
   previewObjectFit,
+  resolveProfileTargetAspect,
 } from "../localizationPreview"
 
 const stepIndex = (value) => Math.max(0, LOCALIZE_STEPS.findIndex((item) => item.value === value))
@@ -67,7 +70,7 @@ export default function StudioLocalize({ source, sourcesLoading }) {
     http.get("/api/settings/localization-profiles").then(({ data }) => {
       if (!alive) return
       setProfiles(data?.profiles || [])
-      setProfileId(data?.default_profile_id || "")
+      setProfileId((current) => current || data?.default_profile_id || "")
     }).catch(() => {})
     return () => { alive = false }
   }, [])
@@ -75,10 +78,13 @@ export default function StudioLocalize({ source, sourcesLoading }) {
   const selectedProfile = useMemo(() => profiles.find((item) => item.id === profileId) || null, [profiles, profileId])
 
   useEffect(() => {
-    if (!aspectOverridden && selectedProfile?.target_aspect) {
-      setTargetAspect(selectedProfile.target_aspect)
-    }
-  }, [selectedProfile, aspectOverridden])
+    setTargetAspect((current) => resolveProfileTargetAspect({
+      currentAspect: current,
+      selectedProfile,
+      aspectOverridden,
+      jobConfigHydrated: Boolean(jobId && hydratedJobId === jobId),
+    }))
+  }, [selectedProfile, aspectOverridden, hydratedJobId, jobId])
 
   const previewAspect = useMemo(() => {
     if (targetAspect === "9:16") return "9 / 16"
@@ -93,7 +99,10 @@ export default function StudioLocalize({ source, sourcesLoading }) {
   const applyMaskPreset = (preset) => setMaskBox(maskPreset(preset))
 
   useEffect(() => {
-    if (!jobId) { setDetail(null); setDetailError("") }
+    setDetail(null)
+    setDetailError("")
+    setHydratedJobId("")
+    setAspectOverridden(false)
   }, [jobId])
 
   const loadDetail = useCallback(async () => {
@@ -123,25 +132,22 @@ export default function StudioLocalize({ source, sourcesLoading }) {
   const qc = detail?.qc
   const activeLocalization = Boolean(jobId)
     && ["pending", "running"].includes(detail?.job_status)
+  const canRerender = canRerenderLocalization(detail)
 
   useEffect(() => {
     if (!jobId || hydratedJobId === jobId || !detail?.manifest) return
-    const request = detail.manifest.request || {}
-    const savedMask = request.mask_box
-    const placement = request.caption_placement || {}
-    setTargetAspect(request.target_aspect || detail.manifest.effective_profile?.target_aspect || "9:16")
-    setEnableMask(Boolean(savedMask))
-    if (savedMask) {
-      setMaskBox({
-        x: Number(savedMask.x),
-        y: Number(savedMask.y),
-        width: Number(savedMask.width),
-        height: Number(savedMask.height),
-      })
-      setMaskMode(savedMask.mode === "solid" ? "solid" : "blur")
-    }
-    setCaptionPlacementMode(placement.mode === "mask_region" ? "mask_region" : "default")
-    setCaptionVerticalOffset(Number(placement.vertical_offset || 0))
+    const config = hydrateLocalizationJobConfig(detail)
+    if (!config || config.jobId !== jobId) return
+    if (config.profileId) setProfileId(config.profileId)
+    setTarget(config.target)
+    setMode(config.mode)
+    setReviewTranslation(config.reviewTranslation)
+    setTargetAspect(config.targetAspect)
+    setEnableMask(config.enableMask)
+    if (config.maskBox) setMaskBox(config.maskBox)
+    setMaskMode(config.maskMode)
+    setCaptionPlacementMode(config.captionPlacementMode)
+    setCaptionVerticalOffset(config.captionVerticalOffset)
     setHydratedJobId(jobId)
   }, [detail, hydratedJobId, jobId])
 
@@ -453,7 +459,46 @@ export default function StudioLocalize({ source, sourcesLoading }) {
     <Stack spacing={2}><Alert severity="info" variant="outlined">Mô hình viết lại thời lượng C7 <strong>{effective.rewrite_model || "mặc định kết nối"}</strong> tách biệt với mô hình dịch C6.</Alert><Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(3, 1fr)" }, gap: 1.5 }}><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Giọng đọc</Typography><Typography variant="body2">{effective.tts_provider || "mặc định nhà cung cấp"} · {effective.tts_voice || "giọng của hồ sơ"}</Typography></Paper><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Giới hạn nhịp</Typography><Typography variant="body2">Ưu tiên {effective.dub_speed_accept || 1.15}× · tối đa {effective.dub_speed_max || 1.3}×</Typography></Paper><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Viết lại</Typography><Typography variant="body2">{effective.dub_rewrite_attempts ?? 2} lần thử</Typography></Paper></Box>{chunks.length > 0 && <Stack spacing={1}>{chunks.map((chunk) => <Paper variant="outlined" key={chunk.id} sx={{ p: 1.25 }}><Typography variant="body2">Đoạn {chunk.id} · {chunk.speaker_id || "người nói —"} · tốc độ {Number(chunk.speed_factor || 1).toFixed(2)}×</Typography></Paper>)}</Stack>}{jobId && <Button variant="outlined" startIcon={<TuneOutlinedIcon />} onClick={() => setExpertOpen(true)} sx={{ alignSelf: "flex-start" }}>Nhịp / giọng nâng cao</Button>}</Stack>
   )
 
-  const renderPanel = <Stack spacing={2}><Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(2, 1fr)" }, gap: 1.5 }}><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Âm thanh</Typography><Typography variant="body2">Chế độ: {effective.audio_mode || "mặc định hồ sơ"}</Typography><Typography variant="body2">Nền: {effective.preserve_background === false ? "thay thế" : "giữ lại"}</Typography><Typography variant="body2">Giọng: {effective.tts_voice || "giọng của hồ sơ"}</Typography></Paper><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Hình ảnh & phụ đề</Typography><Typography variant="body2">Kiểu: {effective.caption_style || "viral"}</Typography><Typography variant="body2">Tỷ lệ: {targetAspect || effective.target_aspect || "nguồn"}</Typography><Typography variant="body2">Vùng che: {enableMask ? (maskMode === "solid" ? "Hộp tối" : "Làm mờ") : "Tắt"}</Typography><Typography variant="body2">Vietsub: {captionPlacementMode === "mask_region" && enableMask ? "Theo vùng chữ gốc" : "Vị trí mặc định"}</Typography></Paper></Box><Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap><StageChip name="Trộn âm thanh" record={stages.audio_mix} /><StageChip name="Kết xuất cuối" record={stages.final_render} /></Stack>{jobId && <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap><Button variant="contained" onClick={rerender} disabled={activeLocalization || rerendering}>{rerendering ? "Đang kết xuất…" : "Kết xuất lại video"}</Button><Button variant="outlined" startIcon={<TuneOutlinedIcon />} onClick={() => setExpertOpen(true)}>Điều khiển kết xuất nâng cao</Button></Stack>}</Stack>
+  const renderPanel = (
+    <Stack spacing={2}>
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(2, 1fr)" }, gap: 1.5 }}>
+        <Paper variant="outlined" sx={{ p: 2 }}>
+          <Typography variant="subtitle2">Âm thanh</Typography>
+          <Typography variant="body2">Chế độ: {effective.audio_mode || "mặc định hồ sơ"}</Typography>
+          <Typography variant="body2">Nền: {effective.preserve_background === false ? "thay thế" : "giữ lại"}</Typography>
+          <Typography variant="body2">Giọng: {effective.tts_voice || "giọng của hồ sơ"}</Typography>
+        </Paper>
+        <Paper variant="outlined" sx={{ p: 2 }}>
+          <Typography variant="subtitle2">Hình ảnh & phụ đề</Typography>
+          <Typography variant="body2">Kiểu: {effective.caption_style || "viral"}</Typography>
+          <Typography variant="body2">Tỷ lệ: {targetAspect || effective.target_aspect || "nguồn"}</Typography>
+          <Typography variant="body2">Vùng che: {enableMask ? (maskMode === "solid" ? "Hộp tối" : "Làm mờ") : "Tắt"}</Typography>
+          <Typography variant="body2">Vietsub: {captionPlacementMode === "mask_region" && enableMask ? "Theo vùng chữ gốc" : "Vị trí mặc định"}</Typography>
+        </Paper>
+      </Box>
+      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+        <StageChip name="Trộn âm thanh" record={stages.audio_mix} />
+        <StageChip name="Kết xuất cuối" record={stages.final_render} />
+      </Stack>
+      {jobId && (
+        <Stack spacing={0.75}>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            <Button variant="contained" onClick={rerender} disabled={activeLocalization || rerendering || !canRerender}>
+              {rerendering ? "Đang kết xuất…" : "Kết xuất lại video"}
+            </Button>
+            <Button variant="outlined" startIcon={<TuneOutlinedIcon />} onClick={() => setExpertOpen(true)}>
+              Điều khiển kết xuất nâng cao
+            </Button>
+          </Stack>
+          {!activeLocalization && !canRerender && (
+            <Typography variant="caption" color="text.secondary">
+              Hoàn tất bản dịch/lồng tiếng trước khi kết xuất lại.
+            </Typography>
+          )}
+        </Stack>
+      )}
+    </Stack>
+  )
 
   const qcPanel = <Stack spacing={2}>{qc ? <Alert severity={qc.status === "READY" ? "success" : qc.status === "FAILED" ? "error" : "warning"}><strong>{QC_STATUS_LABELS[qc.status] || qc.status}</strong> · {(qc.failures || []).length} lỗi · {(qc.warnings || []).length} cảnh báo</Alert> : <Alert severity="info">QC chưa hoàn tất.</Alert>}{qc && [...(qc.failures || []), ...(qc.warnings || [])].map((issue, index) => <Paper key={index} variant="outlined" sx={{ p: 1.5 }}><Typography variant="body2">{typeof issue === "string" ? issue : issue.message || JSON.stringify(issue)}</Typography></Paper>)}<Stack direction={{ xs: "column", sm: "row" }} spacing={1}>{qc?.status === "READY" && <Button variant="contained" onClick={() => navigate("/library")}>Mở đầu ra cuối trong Thư viện</Button>}{qc?.status && qc.status !== "READY" && <Button variant="contained" color="warning" startIcon={<FactCheckOutlinedIcon />} onClick={() => navigate(`/review?job=${encodeURIComponent(jobId)}`)}>Mở trong Duyệt</Button>}</Stack>{jobId && <Button variant="outlined" startIcon={<TuneOutlinedIcon />} onClick={() => setExpertOpen(true)} sx={{ alignSelf: "flex-start" }}>Mở duyệt nâng cao</Button>}</Stack>
 
