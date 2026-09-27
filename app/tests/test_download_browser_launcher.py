@@ -11,6 +11,7 @@ from backend.services.download_browser_launcher import (
     find_browser,
     find_supported_browser,
     launch_douyin_browser_session,
+    open_cdp_page,
     open_cookie_source_browser,
     reset_managed_douyin_session,
     resolve_browser_executable,
@@ -45,6 +46,77 @@ def test_dedicated_profile_is_persistent_and_affiliate2_owned(tmp_path):
     profile = affiliate2_douyin_profile_dir("edge", local_app_data=tmp_path)
     assert profile == tmp_path / "Affiliate2" / "browser" / "edge-douyin"
     assert "Default" not in profile.parts
+
+
+def test_open_cdp_page_activates_the_created_browser_tab(monkeypatch):
+    activated = []
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return (
+                b'{"id":"target-1","url":"https://www.douyin.com/",'
+                b'"webSocketDebuggerUrl":"ws://127.0.0.1:9222/devtools/page/target-1"}'
+            )
+
+    monkeypatch.setattr(
+        "backend.services.download_browser_launcher.urllib.request.urlopen",
+        lambda *_args, **_kwargs: Response(),
+    )
+    monkeypatch.setattr(
+        "backend.services.download_browser_launcher.activate_cdp_page",
+        lambda websocket_url, target_id, timeout_s=2.0: activated.append(
+            (websocket_url, target_id, timeout_s)
+        ) or {"ok": True},
+    )
+
+    result = open_cdp_page("http://127.0.0.1:9222", "https://www.douyin.com/")
+
+    assert result["ok"] is True
+    assert result["page_activated"] is True
+    assert activated == [
+        ("ws://127.0.0.1:9222/devtools/page/target-1", "target-1", 2.0)
+    ]
+
+
+def test_open_cdp_page_surfaces_activation_failure(monkeypatch):
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return (
+                b'{"id":"target-1","url":"https://www.douyin.com/",'
+                b'"webSocketDebuggerUrl":"ws://127.0.0.1:9222/devtools/page/target-1"}'
+            )
+
+    monkeypatch.setattr(
+        "backend.services.download_browser_launcher.urllib.request.urlopen",
+        lambda *_args, **_kwargs: Response(),
+    )
+    monkeypatch.setattr(
+        "backend.services.download_browser_launcher.activate_cdp_page",
+        lambda *_args, **_kwargs: {"ok": False, "error": "bring-to-front failed"},
+    )
+
+    result = open_cdp_page("http://127.0.0.1:9222", "https://www.douyin.com/")
+
+    assert result["ok"] is False
+    assert result["page_created"] is True
+    assert result["page_activated"] is False
+    assert result["error"] == "bring-to-front failed"
 
 
 def test_selected_edge_never_falls_back_to_installed_chrome(monkeypatch, tmp_path):
@@ -83,7 +155,11 @@ async def test_already_running_cdp_does_not_launch_duplicate(monkeypatch, tmp_pa
     )
     monkeypatch.setattr(
         "backend.services.download_browser_launcher.open_cdp_page",
-        lambda cdp_url, page_url: opened_pages.append((cdp_url, page_url)) or {"ok": True},
+        lambda cdp_url, page_url: opened_pages.append((cdp_url, page_url)) or {
+            "ok": True,
+            "page_created": True,
+            "page_activated": True,
+        },
         raising=False,
     )
 
@@ -95,8 +171,42 @@ async def test_already_running_cdp_does_not_launch_duplicate(monkeypatch, tmp_pa
     assert result["ok"] is True
     assert result["status"] == "already_running"
     assert result["connected"] is True
+    assert result["page_created"] is True
+    assert result["page_activated"] is True
     assert launches == []
     assert opened_pages == [("http://127.0.0.1:9222", "https://www.douyin.com/")]
+
+
+@pytest.mark.asyncio
+async def test_already_running_cdp_reports_activation_failure(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "backend.services.download_browser_launcher.probe_cdp_endpoint",
+        lambda *_args, **_kwargs: {
+            "endpoint_reachable": True,
+            "browser_product": "Edg/153.0",
+        },
+    )
+    monkeypatch.setattr(
+        "backend.services.download_browser_launcher.open_cdp_page",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "page_created": True,
+            "page_activated": False,
+            "activation_error": "bring-to-front failed",
+        },
+    )
+
+    result = await launch_douyin_browser_session(
+        "http://127.0.0.1:9222",
+        data_dir=tmp_path,
+    )
+
+    assert result["ok"] is False
+    assert result["connected"] is True
+    assert result["page_created"] is True
+    assert result["page_activated"] is False
+    assert result["page_open_error"] == "bring-to-front failed"
+    assert "could not bring its window to the front" in result["message"]
 
 
 @pytest.mark.asyncio

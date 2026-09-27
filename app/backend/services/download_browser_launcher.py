@@ -380,17 +380,88 @@ def probe_cdp_endpoint(cdp_url: str, timeout_s: float = 0.75) -> dict:
     return result
 
 
+def activate_cdp_page(
+    websocket_url: str,
+    target_id: str | None,
+    timeout_s: float = 2.0,
+) -> dict:
+    """Restore the target window and activate its tab through CDP."""
+    if not websocket_url:
+        return {"ok": False, "error": "CDP page did not expose a WebSocket URL."}
+
+    try:
+        from websockets.sync.client import connect
+
+        with connect(
+            websocket_url,
+            open_timeout=timeout_s,
+            close_timeout=min(timeout_s, 1.0),
+        ) as websocket:
+            command_id = 1
+
+            def send(method: str, params: dict | None = None) -> dict:
+                nonlocal command_id
+                current_id = command_id
+                command_id += 1
+                websocket.send(json.dumps({
+                    "id": current_id,
+                    "method": method,
+                    "params": params or {},
+                }))
+                while True:
+                    message = json.loads(websocket.recv(timeout=timeout_s))
+                    if message.get("id") == current_id:
+                        return message
+
+            window = send(
+                "Browser.getWindowForTarget",
+                {"targetId": target_id} if target_id else {},
+            )
+            window_result = window.get("result") or {}
+            bounds = window_result.get("bounds") or {}
+            if bounds.get("windowState") == "minimized" and window_result.get("windowId") is not None:
+                send(
+                    "Browser.setWindowBounds",
+                    {
+                        "windowId": window_result["windowId"],
+                        "bounds": {"windowState": "normal"},
+                    },
+                )
+            activated = send("Page.bringToFront")
+            if activated.get("error"):
+                return {"ok": False, "error": str(activated["error"])[:300]}
+            return {
+                "ok": True,
+                "window_id": window_result.get("windowId"),
+            }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": f"{type(exc).__name__}: {str(exc)[:300]}",
+        }
+
+
 def open_cdp_page(cdp_url: str, page_url: str, timeout_s: float = 2.0) -> dict:
-    """Open a page inside the exact running CDP browser session."""
+    """Open and visibly activate a page in the exact running CDP browser."""
     endpoint = f"{cdp_url.rstrip('/')}/json/new?{quote(page_url, safe='')}"
     request = urllib.request.Request(endpoint, method="PUT")
     try:
         with urllib.request.urlopen(request, timeout=timeout_s) as response:
             payload = json.loads(response.read().decode("utf-8"))
+            created = 200 <= int(response.status) < 300
+            activation = activate_cdp_page(
+                str(payload.get("webSocketDebuggerUrl") or ""),
+                payload.get("id"),
+                timeout_s,
+            )
             return {
-                "ok": 200 <= int(response.status) < 300,
+                "ok": bool(created and activation.get("ok")),
                 "target_id": payload.get("id"),
                 "url": payload.get("url") or page_url,
+                "page_created": created,
+                "page_activated": bool(activation.get("ok")),
+                "activation_error": activation.get("error"),
+                "error": activation.get("error"),
             }
     except Exception as exc:
         return {
@@ -504,16 +575,23 @@ async def launch_douyin_browser_session(
     if existing.get("endpoint_reachable"):
         if _endpoint_matches_browser(existing, selected_browser):
             opened_page = await asyncio.to_thread(open_cdp_page, selected_url, DOUYIN_URL)
+            page_opened = bool(opened_page.get("ok"))
             return {
                 **result,
-                "ok": True,
+                "ok": page_opened,
                 "status": "already_running",
                 "connected": True,
                 "already_running": True,
                 "browser_product": existing.get("browser_product"),
-                "page_opened": bool(opened_page.get("ok")),
-                "page_open_error": opened_page.get("error"),
-                "message": "Affiliate2 Douyin browser session is already running.",
+                "page_opened": page_opened,
+                "page_created": bool(opened_page.get("page_created", page_opened)),
+                "page_activated": bool(opened_page.get("page_activated", page_opened)),
+                "page_open_error": opened_page.get("activation_error") or opened_page.get("error"),
+                "message": (
+                    "Affiliate2 Douyin browser session is already running."
+                    if page_opened
+                    else "Douyin is running, but Affiliate2 could not bring its window to the front."
+                ),
             }
         repaired_port = find_free_local_port()
         selected_url = normalize_douyin_cdp_url(f"http://127.0.0.1:{repaired_port}")
