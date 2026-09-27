@@ -6,6 +6,7 @@ import {
 import NewspaperIcon from "@mui/icons-material/Newspaper"
 import OpenInNewIcon from "@mui/icons-material/OpenInNew"
 import BookmarkAddIcon from "@mui/icons-material/BookmarkAddOutlined"
+import { formatScore, scoreSeverity } from "../../scoutScore"
 import MovieCreationIcon from "@mui/icons-material/MovieCreationOutlined"
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore"
 import ExpandLessIcon from "@mui/icons-material/ExpandLess"
@@ -26,8 +27,7 @@ function timeAgo(dateStr) {
 }
 
 function ScoreChip({ score }) {
-  const color = score >= 70 ? "success" : score >= 40 ? "warning" : "error"
-  return <Chip label={score.toFixed(0)} size="small" color={color} sx={{ fontWeight: 700, fontSize: "0.7rem", height: 22 }} />
+  return <Chip label={formatScore(score, 0)} size="small" color={scoreSeverity(score)} sx={{ fontWeight: 700, fontSize: "0.7rem", height: 22 }} />
 }
 
 function ArticleCard({ article, onSave, onGenerate }) {

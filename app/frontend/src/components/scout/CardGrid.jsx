@@ -13,10 +13,13 @@ import BookmarkAddIcon from "@mui/icons-material/BookmarkAdd"
 import BookmarkAddedIcon from "@mui/icons-material/BookmarkAdded"
 import ContentCutIcon from "@mui/icons-material/ContentCutOutlined"
 import { candidateStatus, thumbnailRequestKey } from "../../discoverModel"
+import { formatCount, formatScore, scoreSeverity } from "../../scoutScore"
 
 function ViralityChip({ score }) {
-  const color = score >= 70 ? "success" : score >= 40 ? "warning" : "error"
-  return <Chip label={score.toFixed(1)} size="small" color={color} sx={{ fontWeight: 700, fontSize: "0.75rem" }} />
+  // `virality_score` is NULL for most stored results (never computed for those
+  // platforms). Calling toFixed on null crashed the whole Scout Results page
+  // via the ErrorBoundary, so an absent score renders as the "—" placeholder.
+  return <Chip label={formatScore(score)} size="small" color={scoreSeverity(score)} sx={{ fontWeight: 700, fontSize: "0.75rem" }} />
 }
 
 function VPHChip({ vph }) {
@@ -60,9 +63,7 @@ function CreatorOutlierChip({ ratio }) {
 }
 
 function formatViews(n) {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
-  return String(n)
+  return formatCount(n)
 }
 
 function getWatchUrl(r) {

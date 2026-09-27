@@ -8,11 +8,10 @@ import DownloadIcon from "@mui/icons-material/Download"
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline"
 import ContentCutIcon from "@mui/icons-material/ContentCutOutlined"
 import { candidateStatus } from "../../discoverModel"
+import { formatCount, formatScore, scoreSeverity } from "../../scoutScore"
 
 function formatViews(n) {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
-  return String(n)
+  return formatCount(n)
 }
 
 export default function DataTable({
@@ -111,9 +110,9 @@ export default function DataTable({
               <TableCell>{formatViews(r.comments)}</TableCell>
               <TableCell>
                 <Chip
-                  label={(r.virality_score || 0).toFixed(1)}
+                  label={formatScore(r.virality_score)}
                   size="small"
-                  color={(r.virality_score || 0) >= 70 ? "success" : (r.virality_score || 0) >= 40 ? "warning" : "error"}
+                  color={scoreSeverity(r.virality_score)}
                   sx={{ fontWeight: 700, fontSize: "0.75rem" }}
                 />
               </TableCell>

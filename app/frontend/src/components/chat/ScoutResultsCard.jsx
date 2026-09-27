@@ -6,6 +6,7 @@ import {
 } from "@mui/material"
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft"
 import ChevronRightIcon from "@mui/icons-material/ChevronRight"
+import { formatScore, scoreSeverity } from "../../scoutScore"
 import DownloadIcon from "@mui/icons-material/DownloadOutlined"
 import LaunchIcon from "@mui/icons-material/Launch"
 import VisibilityIcon from "@mui/icons-material/VisibilityOutlined"
@@ -20,8 +21,9 @@ function formatViews(n) {
 }
 
 function ViralityChip({ score }) {
-  const color = score >= 70 ? "success" : score >= 40 ? "warning" : "error"
-  return <Chip label={score.toFixed(1)} size="small" color={color} sx={{ fontWeight: 700, fontSize: "0.7rem", height: 22 }} />
+  // scout results legitimately carry `virality_score: null` (never computed for
+  // that platform); toFixed on null threw and took down the chat card.
+  return <Chip label={formatScore(score)} size="small" color={scoreSeverity(score)} sx={{ fontWeight: 700, fontSize: "0.7rem", height: 22 }} />
 }
 
 export default function ScoutResultsCard({ results, platform, jobId }) {
