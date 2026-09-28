@@ -14,12 +14,22 @@ from backend.main import create_app
 
 
 ROOT = Path(__file__).resolve().parents[2]
+BUILD_RELEASE = ROOT / "scripts" / "build_release.py"
+BOOTSTRAP = ROOT / "scripts" / "bootstrap.ps1"
 PREFLIGHT = ROOT / "scripts" / "preflight.py"
 RUN_SCRIPT = ROOT / "scripts" / "run.ps1"
 
 
 def _load_preflight():
     spec = importlib.util.spec_from_file_location("affiliate2_preflight", PREFLIGHT)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_build_release():
+    spec = importlib.util.spec_from_file_location("affiliate2_build_release", BUILD_RELEASE)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -46,6 +56,30 @@ def test_stable_run_honors_data_and_content_roots_from_env():
     assert '$env:VIRALMINT_DATA_DIR = $DataRoot' in script
     assert '$env:CONTENT_ENGINE_ROOT = $ContentRoot' in script
     assert '$env:VIRALMINT_DATA_DIR = $RepoRoot' not in script
+
+
+def test_release_builder_packages_bootstrap_cuda_helper(tmp_path):
+    build_release = _load_build_release()
+    release = tmp_path / build_release.RELEASE_NAME
+
+    build_release.build_directory(ROOT, release)
+
+    assert "cuda_torch.py" in build_release.SCRIPT_FILES
+    for filename in (
+        "bootstrap.ps1",
+        "cuda_torch.py",
+        "preflight.py",
+        "run.ps1",
+        "stop.ps1",
+    ):
+        assert (release / "scripts" / filename).is_file()
+    assert "cuda_torch.py" in BOOTSTRAP.read_text(encoding="utf-8")
+
+
+def test_preflight_requires_bootstrap_cuda_helper():
+    preflight = _load_preflight()
+
+    assert "scripts/cuda_torch.py" in preflight.REQUIRED_FILES
 
 
 def test_preflight_reports_missing_mandatory_tools(monkeypatch, tmp_path):

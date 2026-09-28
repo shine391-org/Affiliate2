@@ -23,6 +23,7 @@ ROOT_FILES = (
 )
 SCRIPT_FILES = (
     "bootstrap.ps1",
+    "cuda_torch.py",
     "preflight.py",
     "run.ps1",
     "stop.ps1",

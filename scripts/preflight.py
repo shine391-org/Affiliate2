@@ -29,6 +29,7 @@ REQUIRED_FILES = (
     "app/requirements.txt",
     "app/frontend/package.json",
     "app/frontend/package-lock.json",
+    "scripts/cuda_torch.py",
     ".env.example",
 )
 REQUIRED_DIRS = (
