@@ -231,40 +231,69 @@ async def localization_job_detail(job_id: str):
 
 @router.get("/exceptions")
 async def localization_exceptions(limit: int = 50):
+    from sqlalchemy import select
+    from backend.database import AsyncSessionLocal
+    from backend.models.job import Job
+
     root = settings.STORAGE_ROOT / "localization_jobs"
     if not root.exists():
         return {"total": 0, "items": []}
-    items = []
+    candidates = []
     for manifest in root.glob("*/manifest.json"):
         try:
             data = json.loads(manifest.read_text(encoding="utf-8"))
-        except Exception:
+            if not isinstance(data, dict):
+                continue
+            if int(data.get("version") or 0) != MANIFEST_VERSION:
+                continue
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
             continue
-        if int(data.get("version") or 0) != MANIFEST_VERSION:
+        job_id = data.get("job_id")
+        if not isinstance(job_id, str) or not job_id.strip():
             continue
         stages = data.get("stages") or {}
+        if not isinstance(stages, dict):
+            continue
         qc = stages.get("qc") or {}
-        qc_status = (qc.get("metadata") or {}).get("status")
+        if not isinstance(qc, dict):
+            qc = {}
+        qc_metadata = qc.get("metadata") or {}
+        qc_status = qc_metadata.get("status") if isinstance(qc_metadata, dict) else None
         failed = [
             {"stage": name, "error": rec.get("error")}
             for name, rec in stages.items()
-            if rec.get("status") == "failed"
+            if isinstance(rec, dict) and rec.get("status") == "failed"
         ]
         if qc_status in {"FAILED", "NEEDS_REVIEW"} or failed:
-            qc_report = None
-            try:
-                qc_report = _optional_json(LocalizationRun.load(str(data.get("job_id"))), "qc", "report")
-            except (ValueError, RuntimeError):
-                pass
-            items.append({
-                "job_id": data.get("job_id"),
-                "updated_at": data.get("updated_at"),
-                "qc_status": qc_status,
-                "failed_stages": failed,
-                "qc_failures": (qc_report or {}).get("failures") or [],
-                "qc_warnings": (qc_report or {}).get("warnings") or [],
-                "request": data.get("request") or {},
-            })
+            candidates.append((job_id, data, qc_status, failed))
+
+    if not candidates:
+        return {"total": 0, "items": []}
+
+    candidate_ids = {job_id for job_id, *_rest in candidates}
+    async with AsyncSessionLocal() as db:
+        existing_job_ids = set((await db.execute(
+            select(Job.id).where(Job.id.in_(candidate_ids))
+        )).scalars().all())
+
+    items = []
+    for job_id, data, qc_status, failed in candidates:
+        if job_id not in existing_job_ids:
+            continue
+        qc_report = None
+        try:
+            qc_report = _optional_json(LocalizationRun.load(job_id), "qc", "report")
+        except (ValueError, RuntimeError):
+            pass
+        items.append({
+            "job_id": job_id,
+            "updated_at": data.get("updated_at"),
+            "qc_status": qc_status,
+            "failed_stages": failed,
+            "qc_failures": (qc_report or {}).get("failures") or [],
+            "qc_warnings": (qc_report or {}).get("warnings") or [],
+            "request": data.get("request") or {},
+        })
     items.sort(key=lambda x: x.get("updated_at") or "", reverse=True)
     items = items[: max(1, min(limit, 200))]
     return {"total": len(items), "items": items}

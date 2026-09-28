@@ -5,6 +5,7 @@ export const PRIMARY_NAV_ITEMS = [
   { to: "/review", label: "Duyệt", icon: "review" },
   { to: "/publish", label: "Xuất bản", icon: "publish" },
   { to: "/performance", label: "Hiệu suất", icon: "performance" },
+  { to: "/messaging", label: "Nhắn tin", icon: "messaging", activeRoot: "/messaging" },
   { to: "/utilities", label: "Công cụ", icon: "utilities" },
 ]
 

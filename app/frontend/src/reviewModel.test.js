@@ -107,3 +107,24 @@ test("review selection stays inside the active filtered queue", () => {
   assert.equal(reviewSelectionForItems(items, "translation", "job-audio"), "")
   assert.equal(reviewSelectionForItems(items, "audio", "job-audio"), "job-audio")
 })
+
+test("review selection repairs a stale selected item to the first visible item", () => {
+  const items = [
+    { job_id: "live-review", status: "NEEDS_REVIEW", categories: ["QC"] },
+    { job_id: "live-failed", status: "FAILED", categories: ["QC"] },
+  ]
+
+  assert.equal(reviewSelectionForItems(items, "needs-review", "stale-orphan"), "live-review")
+})
+
+test("review selection clears when refresh leaves an empty queue", () => {
+  assert.equal(reviewSelectionForItems([], "needs-review", "stale-orphan"), "")
+})
+
+test("review selection preserves a legitimate selected item", () => {
+  const items = [
+    { job_id: "live-review", status: "NEEDS_REVIEW", categories: ["QC"] },
+  ]
+
+  assert.equal(reviewSelectionForItems(items, "needs-review", "live-review"), "live-review")
+})

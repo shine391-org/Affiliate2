@@ -1,5 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 
 import {
   PRIMARY_NAV_ITEMS,
@@ -19,9 +20,23 @@ test("primary navigation is workflow-first and ordered", () => {
       ["Duyệt", "/review"],
       ["Xuất bản", "/publish"],
       ["Hiệu suất", "/performance"],
+      ["Nhắn tin", "/messaging"],
       ["Công cụ", "/utilities"],
     ],
   )
+})
+
+test("messaging navigation has a sidebar icon mapping", () => {
+  const layout = readFileSync(new URL("./components/Layout.jsx", import.meta.url), "utf8")
+  const messaging = PRIMARY_NAV_ITEMS.find((item) => item.to === "/messaging")
+
+  assert.deepEqual(messaging, {
+    to: "/messaging",
+    label: "Nhắn tin",
+    icon: "messaging",
+    activeRoot: "/messaging",
+  })
+  assert.match(layout, /messaging:\s*<ChatBubbleOutlineIcon\s*\/>/)
 })
 
 test("settings is the only bottom navigation destination", () => {

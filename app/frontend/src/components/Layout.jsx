@@ -22,6 +22,7 @@ import TravelExploreIcon from "@mui/icons-material/TravelExploreOutlined"
 import FactCheckIcon from "@mui/icons-material/FactCheckOutlined"
 import CloudUploadIcon from "@mui/icons-material/CloudUploadOutlined"
 import InsightsIcon from "@mui/icons-material/InsightsOutlined"
+import ChatBubbleOutlineIcon from "@mui/icons-material/ChatBubbleOutline"
 
 const DRAWER_WIDTH = 240
 const COLLAPSED_WIDTH = 64
@@ -33,6 +34,7 @@ const NAV_ICONS = {
   review: <FactCheckIcon />,
   publish: <CloudUploadIcon />,
   performance: <InsightsIcon />,
+  messaging: <ChatBubbleOutlineIcon />,
   utilities: <BuildIcon />,
   settings: <SettingsIcon />,
 }
