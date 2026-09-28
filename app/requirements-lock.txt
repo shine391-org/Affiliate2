@@ -282,6 +282,18 @@ numpy==2.4.6
     #   torchvision
     #   transformers
     #   whisperx
+nvidia-cublas-cu12==12.9.2.10
+    # via
+    #   -r app/requirements.txt
+    #   nvidia-cudnn-cu12
+nvidia-cuda-nvrtc-cu12==12.9.86
+    # via
+    #   -r app/requirements.txt
+    #   nvidia-cublas-cu12
+nvidia-cuda-runtime-cu12==12.9.79
+    # via -r app/requirements.txt
+nvidia-cudnn-cu12==9.26.0.51
+    # via -r app/requirements.txt
 oauthlib==3.3.1
     # via requests-oauthlib
 omegaconf==2.3.1

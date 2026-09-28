@@ -65,6 +65,14 @@ curl-cffi>=0.15
 
 # Transcription / HQ alignment
 faster-whisper
+# CTranslate2's Windows wheel does not bundle CUDA 12 cuBLAS/runtime. Install
+# NVIDIA's official wheels and register their bin directories at runtime (see
+# whisper_service.register_nvidia_dll_directories) instead of copying DLLs into
+# site-packages/ctranslate2, which is lost whenever .venv is recreated.
+nvidia-cublas-cu12>=12.6,<13; sys_platform == "win32"
+nvidia-cudnn-cu12>=9,<10; sys_platform == "win32"
+nvidia-cuda-runtime-cu12>=12.6,<13; sys_platform == "win32"
+nvidia-cuda-nvrtc-cu12>=12.6,<13; sys_platform == "win32"
 # Match VideoLingo's tested WhisperX/PyTorch family. Loose WhisperX + arbitrary
 # Torch is not a supported combination and commonly breaks alignment/pyannote.
 whisperx>=3.8.6,<3.9

@@ -230,7 +230,41 @@ def build_plan(
             current.end_ms = cue.end_ms
 
     chunks.append(current)
-    for chunk in chunks:
+
+    # A hard max-size split can strand a final aligned syllable in a window
+    # far shorter than even its conservative speech estimate (real regression:
+    # b8193843 left Vietnamese "sẽ" in 20ms). When the split itself created an
+    # impossible singleton and no speaker/voice/gap boundary exists, merge that
+    # one cue back into the preceding chunk. The exceptional chunk is at most
+    # max_chunk_size + 1; preserving a viable speech window is more important
+    # than enforcing a soft synthesis batch size that created invalid timing.
+    for chunk_pos in range(len(chunks) - 1, 0, -1):
+        chunk = chunks[chunk_pos]
+        previous = chunks[chunk_pos - 1]
+        if len(chunk.item_indexes) != 1:
+            continue
+        orphan_idx = chunk.item_indexes[0]
+        orphan = plan[orphan_idx]
+        orphan_window_ms = orphan.original_end_ms - orphan.original_start_ms
+        if orphan.estimated_duration_ms <= orphan_window_ms * config.speed_max:
+            continue
+        previous_last = ordered[previous.item_indexes[-1]]
+        orphan_cue = ordered[orphan_idx]
+        if (
+            previous_last.speaker_id != orphan_cue.speaker_id
+            or previous_last.voice_id != orphan_cue.voice_id
+            or orphan_cue.start_ms - previous_last.end_ms > config.gap_tolerance_ms
+        ):
+            continue
+        previous.item_indexes.extend(chunk.item_indexes)
+        previous.end_ms = chunk.end_ms
+        chunks.pop(chunk_pos)
+
+    # Merging an intermediate orphan removes a chunk, so normalize IDs before
+    # persisting plans/artifact names and before targeted chunk regeneration can
+    # address them later.
+    for chunk_id, chunk in enumerate(chunks, start=1):
+        chunk.id = chunk_id
         for idx in chunk.item_indexes:
             plan[idx].chunk_id = chunk.id
     return plan, chunks

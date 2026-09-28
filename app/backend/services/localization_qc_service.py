@@ -89,12 +89,48 @@ def audio_max_volume_db(path: Path) -> float | None:
     return float(match.group(1)) if match else None
 
 
+def _source_speech_ms(transcript: LocalizationTranscript) -> int:
+    """Measure aligned source speech without counting long silence inside cues."""
+    intervals: list[tuple[int, int]] = []
+    fallback_ms = 0
+    for segment in transcript.segments:
+        if not segment.source_text.strip():
+            continue
+        word_intervals: list[tuple[int, int]] = []
+        for word in segment.source_words or []:
+            try:
+                if isinstance(word, dict):
+                    start, end = word.get("start"), word.get("end")
+                else:
+                    start, end = word.start, word.end
+                start_ms = round(float(start) * 1000)
+                end_ms = round(float(end) * 1000)
+            except (AttributeError, TypeError, ValueError):
+                continue
+            if end_ms > start_ms:
+                word_intervals.append((start_ms, end_ms))
+        if word_intervals:
+            intervals.extend(word_intervals)
+        else:
+            fallback_ms += max(0, segment.source_end_ms - segment.source_start_ms)
+
+    if not intervals:
+        return fallback_ms
+
+    current_start, current_end = sorted(intervals)[0]
+    aligned_ms = 0
+    for start_ms, end_ms in sorted(intervals)[1:]:
+        if start_ms <= current_end:
+            current_end = max(current_end, end_ms)
+        else:
+            aligned_ms += current_end - current_start
+            current_start, current_end = start_ms, end_ms
+    aligned_ms += current_end - current_start
+    return fallback_ms + aligned_ms
+
+
 def _speech_coverage(transcript: LocalizationTranscript) -> float:
-    source = sum(
-        max(0, s.source_end_ms - s.source_start_ms)
-        for s in transcript.segments
-        if s.source_text.strip()
-    )
+    source = _source_speech_ms(transcript)
     target = sum(
         max(0, (s.target_end_ms or 0) - (s.target_start_ms or 0))
         for s in transcript.segments

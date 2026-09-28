@@ -67,6 +67,38 @@ def test_planner_respects_max_chunk_size():
     assert [len(c.item_indexes) for c in chunks] == [2, 1]
 
 
+def test_planner_rebalances_max_size_split_that_strands_impossible_micro_cue():
+    """Real b8193843 shape: 16 cues at max size 5 left a 20ms word alone."""
+    cfg = DubbingConfig(max_chunk_size=5, gap_tolerance_ms=1500, speed_max=1.30)
+    cues = [
+        _cue(i, (i - 1) * 1200, i * 1200 - 200, f"cue {i}")
+        for i in range(1, 16)
+    ]
+    cues.append(_cue(16, cues[-1].end_ms, cues[-1].end_ms + 20, "sẽ"))
+
+    plan, chunks = build_plan(cues, cfg, language="Vietnamese")
+
+    assert [len(c.item_indexes) for c in chunks] == [5, 5, 6]
+    assert chunks[-1].item_indexes == [10, 11, 12, 13, 14, 15]
+    assert chunks[-1].start_ms == cues[10].start_ms
+    assert plan[10].chunk_id == plan[15].chunk_id
+
+
+def test_planner_renumbers_chunks_after_rebalancing_an_intermediate_orphan():
+    cfg = DubbingConfig(max_chunk_size=2, gap_tolerance_ms=1500, speed_max=1.30)
+    cues = [
+        _cue(1, 0, 1000, "one", speaker="a"),
+        _cue(2, 1000, 2000, "two", speaker="a"),
+        _cue(3, 2000, 2020, "sẽ", speaker="a"),
+        _cue(4, 4000, 5000, "four", speaker="b"),
+    ]
+
+    plan, chunks = build_plan(cues, cfg, language="Vietnamese")
+
+    assert [chunk.id for chunk in chunks] == [1, 2]
+    assert [item.chunk_id for item in plan] == [1, 1, 1, 2]
+
+
 def test_speaker_change_is_hard_chunk_boundary():
     cfg = DubbingConfig()
     plan, chunks = build_plan([

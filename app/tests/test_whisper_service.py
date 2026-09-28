@@ -46,11 +46,13 @@ def _stub_faster_whisper(monkeypatch):
     WhisperService._model = None
     WhisperService._loaded_quality = None
     WhisperService._loaded_model_name = None
+    WhisperService._loaded_device = None
     WhisperService._evict_task = None
     yield
     WhisperService._model = None
     WhisperService._loaded_quality = None
     WhisperService._loaded_model_name = None
+    WhisperService._loaded_device = None
     WhisperService._evict_task = None
 
 
@@ -193,3 +195,132 @@ def test_explicit_model_override_is_not_replaced_by_quality(tmp_path):
 def test_unknown_quality_fails_loudly_without_explicit_model():
     with pytest.raises(ValueError, match="Unknown Whisper quality"):
         WhisperService.load("magic")
+
+
+def test_windows_nvidia_dll_directories_are_registered_and_handles_are_kept(
+    monkeypatch, tmp_path,
+):
+    bin_dir = tmp_path / "nvidia" / "cublas" / "bin"
+    bin_dir.mkdir(parents=True)
+    dll = bin_dir / "cublas64_12.dll"
+    dll.write_bytes(b"dll")
+
+    class FakeDistribution:
+        files = [type("F", (), {"__str__": lambda self: "nvidia/cublas/bin/cublas64_12.dll"})()]
+
+        @staticmethod
+        def locate_file(_file):
+            return dll
+
+    handles = []
+    loaded = []
+    monkeypatch.setattr(ws_mod.sys, "platform", "win32")
+    monkeypatch.setattr(
+        ws_mod.metadata,
+        "distribution",
+        lambda name: FakeDistribution() if name == "nvidia-cublas-cu12" else (_ for _ in ()).throw(ws_mod.metadata.PackageNotFoundError),
+    )
+    monkeypatch.setattr(ws_mod.os, "add_dll_directory", lambda path: handles.append(path) or object())
+    monkeypatch.setattr(ws_mod.ctypes, "WinDLL", lambda path: loaded.append(path) or object())
+    monkeypatch.setattr(ws_mod, "_NVIDIA_DLL_HANDLES", [])
+    monkeypatch.setattr(ws_mod, "_NVIDIA_DLL_LIBRARIES", {})
+    monkeypatch.setattr(ws_mod, "_NVIDIA_DLL_DIRECTORIES", set())
+
+    registered = ws_mod.register_nvidia_dll_directories()
+
+    assert registered == [bin_dir]
+    assert handles == [str(bin_dir)]
+    assert loaded == [str(dll)]
+    assert len(ws_mod._NVIDIA_DLL_HANDLES) == 1
+    assert len(ws_mod._NVIDIA_DLL_LIBRARIES) == 1
+
+
+def test_cuda_constructor_non_runtime_error_is_not_swallowed(monkeypatch):
+    constructed = []
+
+    class BrokenModel:
+        def __init__(self, *_args, **kwargs):
+            constructed.append(kwargs.get("device"))
+            raise ValueError("unsupported GPU language option")
+
+    fake = types.ModuleType("faster_whisper")
+    fake.WhisperModel = BrokenModel
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake)
+    monkeypatch.setattr(WhisperService, "_select_device", classmethod(lambda cls: ("cuda", "float16")))
+
+    with pytest.raises(ValueError, match="unsupported GPU language option"):
+        WhisperService.load("fast")
+
+    assert constructed == ["cuda"]
+
+
+def test_cuda_compute_failure_retries_once_on_cpu_and_replaces_singleton(monkeypatch, tmp_path):
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"real-path-placeholder")
+    constructed = []
+
+    class LazyCudaFailureModel:
+        def __init__(self, name, device=None, compute_type=None):
+            self.name = name
+            self.device = device
+            self.compute_type = compute_type
+            constructed.append((device, compute_type))
+
+        def transcribe(self, _path, **_kwargs):
+            info = types.SimpleNamespace(language="en", language_probability=0.99)
+            if self.device == "cuda":
+                def fail_during_iteration():
+                    WhisperService._last_used = 1.0
+                    raise RuntimeError("Library cublas64_12.dll is not found or cannot be loaded")
+                    yield  # pragma: no cover
+                return fail_during_iteration(), info
+            seg = types.SimpleNamespace(
+                start=0.0, end=1.0, text=" cpu success ",
+                words=[types.SimpleNamespace(word="cpu", start=0.0, end=1.0, probability=0.9)],
+            )
+            return iter([seg]), info
+
+    fake = types.ModuleType("faster_whisper")
+    fake.WhisperModel = LazyCudaFailureModel
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake)
+    monkeypatch.setattr(WhisperService, "_select_device", classmethod(lambda cls: ("cuda", "float16")))
+    monkeypatch.setattr("backend.services.video_utils.probe_duration", lambda *_args, **_kwargs: 1.0)
+
+    result = asyncio.run(ws_mod.whisper_service.transcribe(audio, quality="fast"))
+
+    assert result["text"] == "cpu success"
+    assert constructed == [("cuda", "float16"), ("cpu", "int8")]
+    assert WhisperService._loaded_device == "cpu"
+    assert WhisperService._model.device == "cpu"
+    assert WhisperService._last_used > 1.0
+
+
+def test_non_cuda_compute_failure_is_not_retried(monkeypatch, tmp_path):
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"real-path-placeholder")
+    constructed = []
+
+    class BadAudioModel:
+        def __init__(self, name, device=None, compute_type=None):
+            self.name = name
+            self.device = device
+            constructed.append(device)
+
+        def transcribe(self, _path, **_kwargs):
+            info = types.SimpleNamespace(language="en", language_probability=0.99)
+            def fail_during_iteration():
+                raise ValueError("invalid audio frame")
+                yield  # pragma: no cover
+            return fail_during_iteration(), info
+
+    fake = types.ModuleType("faster_whisper")
+    fake.WhisperModel = BadAudioModel
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake)
+    monkeypatch.setattr(WhisperService, "_select_device", classmethod(lambda cls: ("cuda", "float16")))
+    monkeypatch.setattr("backend.services.video_utils.probe_duration", lambda *_args, **_kwargs: 1.0)
+
+    with pytest.raises(ValueError, match="invalid audio frame"):
+        asyncio.run(ws_mod.whisper_service.transcribe(audio, quality="fast"))
+
+    assert constructed == ["cuda"]
+    assert WhisperService._loaded_device == "cuda"

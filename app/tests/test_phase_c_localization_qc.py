@@ -57,6 +57,37 @@ def test_qc_ready_when_media_timing_and_translation_are_clean(monkeypatch, tmp_p
     assert report.failures == []
 
 
+def test_qc_coverage_uses_aligned_speech_not_silence_inside_semantic_cue(
+    monkeypatch, tmp_path,
+):
+    source = tmp_path / "s.mp4"
+    final = tmp_path / "f.mp4"
+    source.write_bytes(b"s")
+    final.write_bytes(b"f")
+    monkeypatch.setattr(qc, "probe_media", lambda p: _media(duration=20.0))
+    monkeypatch.setattr(qc, "audio_max_volume_db", lambda p: -1.0)
+
+    report = qc.evaluate_localization_qc(
+        source_video=source,
+        final_video=final,
+        transcript=_tx(
+            source_end_ms=20_000,
+            target_end_ms=1_000,
+            source_words=[
+                {"word": "你", "start": 0.0, "end": 0.5, "score": 0.9},
+                {"word": "好", "start": 19.5, "end": 20.0, "score": 0.9},
+            ],
+        ),
+        profile=LocalizationProfile(id="x", name="X", target_aspect="9:16"),
+    )
+
+    assert report.status == "READY"
+    assert report.metrics["speech_coverage_ratio"] == 1.0
+    assert "low_target_speech_coverage" not in {
+        row["code"] for row in report.failures
+    }
+
+
 def test_qc_fails_untranslated_and_low_target_coverage(monkeypatch, tmp_path):
     source = tmp_path / "s.mp4"
     final = tmp_path / "f.mp4"

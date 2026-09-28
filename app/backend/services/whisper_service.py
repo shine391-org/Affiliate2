@@ -2,13 +2,112 @@
 # Copyright (c) 2025-2026 ViralMint Contributors
 """Singleton faster-whisper transcription service."""
 import asyncio
+import ctypes
+from importlib import metadata
 import logging
 import os
+import sys
 import threading
 import time
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+_NVIDIA_RUNTIME_PACKAGES = (
+    "nvidia-cublas-cu12",
+    "nvidia-cudnn-cu12",
+    "nvidia-cuda-runtime-cu12",
+    "nvidia-cuda-nvrtc-cu12",
+)
+_NVIDIA_DLL_HANDLES: list[object] = []
+_NVIDIA_DLL_LIBRARIES: dict[Path, object] = {}
+_NVIDIA_DLL_DIRECTORIES: set[Path] = set()
+_PRELOAD_NVIDIA_DLLS = {
+    "cublas64_12.dll",
+    "cublaslt64_12.dll",
+    "cudnn64_9.dll",
+}
+
+
+def register_nvidia_dll_directories() -> list[Path]:
+    """Make NVIDIA wheel DLLs discoverable without copying them into CTranslate2.
+
+    Python 3.8+ no longer searches arbitrary PATH entries for extension-module
+    dependencies on Windows. NVIDIA's runtime wheels install their DLLs below
+    ``site-packages/nvidia/*/bin``, so register those exact directories and keep
+    the returned handles alive for the process lifetime.
+    """
+    if sys.platform != "win32" or not hasattr(os, "add_dll_directory"):
+        return []
+
+    candidates: set[Path] = set()
+    preload_paths: set[Path] = set()
+    for env_name in ("CUDA_PATH", "CUDA_HOME"):
+        root = os.environ.get(env_name)
+        if root:
+            candidates.add(Path(root) / "bin")
+
+    for package_name in _NVIDIA_RUNTIME_PACKAGES:
+        try:
+            distribution = metadata.distribution(package_name)
+        except metadata.PackageNotFoundError:
+            continue
+        for entry in distribution.files or ():
+            if not str(entry).lower().endswith(".dll"):
+                continue
+            dll_path = Path(distribution.locate_file(entry)).resolve()
+            candidates.add(dll_path.parent)
+            if dll_path.name.lower() in _PRELOAD_NVIDIA_DLLS:
+                preload_paths.add(dll_path)
+
+    registered: list[Path] = []
+    for directory in sorted(candidates, key=lambda path: str(path).lower()):
+        directory = directory.resolve()
+        if not directory.is_dir() or directory in _NVIDIA_DLL_DIRECTORIES:
+            continue
+        try:
+            handle = os.add_dll_directory(str(directory))
+        except OSError as exc:
+            logger.warning("Could not register CUDA DLL directory %s: %s", directory, exc)
+            continue
+        _NVIDIA_DLL_HANDLES.append(handle)
+        _NVIDIA_DLL_DIRECTORIES.add(directory)
+        registered.append(directory)
+        logger.info("CUDA DLL directory registered: %s", directory)
+
+    # CTranslate2 resolves cuBLAS lazily with LoadLibrary during the first
+    # compute. On Windows that call does not consistently consult Python's DLL
+    # directory cookies, so preload the small set of root runtime libraries by
+    # absolute path. Their dependency DLLs are then resolved through the
+    # registered directories above. Keep handles alive just like directory
+    # cookies; no binaries are copied into another package.
+    for dll_path in sorted(preload_paths, key=lambda path: path.name.lower()):
+        if dll_path in _NVIDIA_DLL_LIBRARIES:
+            continue
+        try:
+            _NVIDIA_DLL_LIBRARIES[dll_path] = ctypes.WinDLL(str(dll_path))
+        except OSError as exc:
+            logger.warning("Could not preload CUDA runtime library %s: %s", dll_path, exc)
+    return registered
+
+
+def _is_cuda_runtime_error(exc: BaseException) -> bool:
+    message = str(exc).lower()
+    # Require a CUDA runtime/library signal. Generic words such as "gpu" or
+    # "out of memory" can also describe invalid user/model configuration or a
+    # process-wide allocation failure and must not silently change devices.
+    return any(marker in message for marker in (
+        "cuda",
+        "cublas",
+        "cudnn",
+        "cudart",
+        "cufft",
+        "curand",
+        "nvrtc",
+    ))
+
+
+register_nvidia_dll_directories()
 
 WHISPER_QUALITY_MAP = {
     "fast":     "base",
@@ -64,6 +163,7 @@ class WhisperService:
     _model = None
     _loaded_quality = None
     _loaded_model_name = None
+    _loaded_device = None
     _lock = threading.Lock()
     _last_used = 0.0
     _evict_task = None
@@ -123,6 +223,7 @@ class WhisperService:
         resolved_model = resolve_whisper_model(quality, model_name)
         with cls._lock:
             if cls._model is None or cls._loaded_model_name != resolved_model:
+                register_nvidia_dll_directories()
                 from faster_whisper import WhisperModel
                 device, compute_type = cls._select_device()
                 logger.info("Loading Whisper model: %s (quality=%s, device=%s, compute=%s)",
@@ -135,7 +236,7 @@ class WhisperService:
                     )
                     cls._loaded_device = device
                 except Exception as exc:
-                    if device != "cpu":
+                    if device != "cpu" and _is_cuda_runtime_error(exc):
                         logger.warning(
                             "Failed to initialize Whisper on %s (%s): %s. Falling back to CPU int8.",
                             device, compute_type, exc,
@@ -152,6 +253,36 @@ class WhisperService:
                 cls._loaded_model_name = resolved_model
                 logger.info("Whisper model '%s' loaded successfully on %s", resolved_model, cls._loaded_device)
             cls._last_used = time.monotonic()
+            return cls._model
+
+    @classmethod
+    def _replace_failed_cuda_model(cls, failed_model, resolved_model: str, quality: str, exc: BaseException):
+        """Drop a broken CUDA singleton and replace it with CPU/int8 once."""
+        with cls._lock:
+            if (
+                cls._model is not failed_model
+                and cls._model is not None
+                and cls._loaded_model_name == resolved_model
+                and cls._loaded_device == "cpu"
+            ):
+                return cls._model
+
+            logger.warning(
+                "Whisper CUDA compute failed for '%s': %s. Retrying once on CPU int8.",
+                resolved_model,
+                exc,
+            )
+            cls._model = None
+            cls._loaded_device = None
+            from faster_whisper import WhisperModel
+            cls._model = WhisperModel(
+                resolved_model,
+                device="cpu",
+                compute_type="int8",
+            )
+            cls._loaded_quality = quality
+            cls._loaded_model_name = resolved_model
+            cls._loaded_device = "cpu"
             return cls._model
 
     @classmethod
@@ -253,6 +384,7 @@ class WhisperService:
         if not await has_audio_stream(Path(audio_path)):
             raise ValueError(f"No audio stream found in {audio_path}")
 
+        resolved_model = resolve_whisper_model(quality, model_name)
         model = self.load(quality, model_name=model_name)
 
         # Duration serves two decisions: the progress fraction denominator AND
@@ -262,50 +394,34 @@ class WhisperService:
         from backend.services.video_utils import probe_duration
         total_duration = await asyncio.to_thread(probe_duration, Path(audio_path))
 
-        def _run():
-            # Gate only BATCH-length audio (see _SERIALIZE_MIN_SECONDS —
-            # short/interactive transcriptions must never queue here).
-            gate = (type(self)._transcribe_gate
-                    if total_duration >= _SERIALIZE_MIN_SECONDS else None)
-            if gate is not None and not gate.acquire(blocking=False):
-                logger.info(
-                    "Whisper busy — %s (%.0fs) waits for the active batch "
-                    "transcription to finish",
-                    Path(audio_path).name, total_duration,
-                )
-                gate.acquire()
-            try:
-                segments_gen, info = model.transcribe(
-                    str(audio_path),
-                    beam_size=1 if timing_only else 5,
-                    vad_filter=timing_only,
-                    language=language,
-                    word_timestamps=True,
-                )
-                # Stream the generator instead of list()-ing it so progress can
-                # be reported as the decode advances through the audio.
-                segments = []
-                last_emit = 0.0
-                best_fraction = 0.0
-                for s in segments_gen:
-                    segments.append(s)
-                    if on_progress is not None and total_duration > 0:
-                        now = time.monotonic()
-                        if now - last_emit >= _PROGRESS_EMIT_INTERVAL:
-                            # Monotonic guard: a segment with end=None maps to
-                            # fraction 0.0 — emitting it would walk the bar
-                            # backwards mid-transcription.
-                            fraction = min(0.99, float(s.end or 0.0) / total_duration)
-                            if fraction > best_fraction:
-                                best_fraction = fraction
-                                last_emit = now
-                                try:
-                                    on_progress(fraction)
-                                except Exception:
-                                    pass  # progress UI must never break transcription
-            finally:
-                if gate is not None:
-                    gate.release()
+        def _consume(active_model):
+            segments_gen, info = active_model.transcribe(
+                str(audio_path),
+                beam_size=1 if timing_only else 5,
+                vad_filter=timing_only,
+                language=language,
+                word_timestamps=True,
+            )
+            # Stream the generator instead of list()-ing it so progress can be
+            # reported as the decode advances through the audio. Keeping this
+            # inside the retry boundary is required because CTranslate2 may
+            # defer its first CUDA compute until generator iteration.
+            segments = []
+            last_emit = 0.0
+            best_fraction = 0.0
+            for s in segments_gen:
+                segments.append(s)
+                if on_progress is not None and total_duration > 0:
+                    now = time.monotonic()
+                    if now - last_emit >= _PROGRESS_EMIT_INTERVAL:
+                        fraction = min(0.99, float(s.end or 0.0) / total_duration)
+                        if fraction > best_fraction:
+                            best_fraction = fraction
+                            last_emit = now
+                            try:
+                                on_progress(fraction)
+                            except Exception:
+                                pass  # progress UI must never break transcription
             text = " ".join([s.text.strip() for s in segments])
             return {
                 "text": text,
@@ -324,6 +440,35 @@ class WhisperService:
                     for s in segments
                 ],
             }
+
+        def _run():
+            # Gate only BATCH-length audio (see _SERIALIZE_MIN_SECONDS —
+            # short/interactive transcriptions must never queue here).
+            gate = (type(self)._transcribe_gate
+                    if total_duration >= _SERIALIZE_MIN_SECONDS else None)
+            if gate is not None and not gate.acquire(blocking=False):
+                logger.info(
+                    "Whisper busy — %s (%.0fs) waits for the active batch "
+                    "transcription to finish",
+                    Path(audio_path).name, total_duration,
+                )
+                gate.acquire()
+            try:
+                try:
+                    return _consume(model)
+                except Exception as exc:
+                    if type(self)._loaded_device != "cuda" or not _is_cuda_runtime_error(exc):
+                        raise
+                    cpu_model = type(self)._replace_failed_cuda_model(
+                        model,
+                        resolved_model,
+                        quality,
+                        exc,
+                    )
+                    return _consume(cpu_model)
+            finally:
+                if gate is not None:
+                    gate.release()
 
         try:
             return await asyncio.to_thread(_run)
