@@ -128,6 +128,58 @@ async def _tool_progress(job_id: str, pct: float, step: str, user_id: str):
     await ws_manager.send_progress(job_id, pct, step, user_id)
 
 
+# Demucs owns the separation stage (job 6% → 15%); ASR starts at 16%.
+SEPARATION_PROGRESS_START = 6
+SEPARATION_PROGRESS_END = 15
+
+
+def separation_job_progress(fraction: float) -> float:
+    """Map a normalized 0..1 separation fraction onto the 6→15 job window.
+
+    The end is exclusive: a completed separation reports 15 and ASR takes over
+    from 16, so a full 1.0 must never equal or exceed the ASR start.
+    """
+    try:
+        frac = float(fraction)
+    except (TypeError, ValueError):
+        frac = 0.0
+    if frac != frac:  # NaN
+        frac = 0.0
+    frac = min(1.0, max(0.0, frac))
+    return SEPARATION_PROGRESS_START + frac * (SEPARATION_PROGRESS_END - SEPARATION_PROGRESS_START)
+
+
+def separation_step_text(fraction: float) -> str:
+    try:
+        pct = int(min(1.0, max(0.0, float(fraction))) * 100)
+    except (TypeError, ValueError):
+        pct = 0
+    return f"Đang tách giọng/nền HQ · {pct}%"
+
+
+def _separation_progress_forwarder(job_id: str, user_id: str, previous: list[float]):
+    """Bridge Demucs' worker-thread callback to the async progress emitter.
+
+    Mirrors the Whisper progress bridge in clip_extractor: the callback runs on
+    a Demucs worker thread, so it schedules the coroutine on the loop. The
+    `previous` cell holds the last emitted percent so a late/duplicated
+    callback can never walk the job backwards.
+    """
+    loop = asyncio.get_running_loop()
+
+    def _forward(fraction: float) -> None:
+        pct = separation_job_progress(fraction)
+        if pct < previous[0]:
+            return
+        previous[0] = pct
+        asyncio.run_coroutine_threadsafe(
+            _tool_progress(job_id, pct, separation_step_text(fraction), user_id),
+            loop,
+        )
+
+    return _forward
+
+
 async def _tool_success(
     job_id: str, out_path: Path, cleanup: list[Path], user_id: str,
     extra_output: dict | None = None,
@@ -1081,9 +1133,16 @@ async def run_tool_translate(
                         from backend.services.audio_separation_service import (
                             separate_vocals_background,
                         )
+                        # Live Demucs progress across 6→15%. Without this the
+                        # whole stage read as frozen at 6% until the model
+                        # finished, which looked like a hung job.
+                        _sep_forward = _separation_progress_forwarder(
+                            job_id, user_id, [SEPARATION_PROGRESS_START],
+                        )
                         vocals_file, background_file = await separate_vocals_background(
                             source_path,
                             run.stage_dir("separation"),
+                            on_progress=_sep_forward,
                         )
                         run.complete(
                             "separation",

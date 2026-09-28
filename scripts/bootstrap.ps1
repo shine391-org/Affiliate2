@@ -57,6 +57,13 @@ if (-not (Test-Path $RequirementsFile)) {
 & $PythonExe -m pip install -r $RequirementsFile
 if ($LASTEXITCODE -ne 0) { throw "backend dependency install failed" }
 
+# PyPI ships a CPU-only torch==2.8.0 wheel on Windows, so HQ Demucs separation
+# and WhisperX alignment silently ran on CPU. Swap in the matching official
+# CUDA build when an NVIDIA GPU is present; skipped everywhere else, and a
+# failure only warns because Affiliate2 still runs on CPU.
+& $PythonExe (Join-Path $PSScriptRoot "cuda_torch.py")
+if ($LASTEXITCODE -ne 0) { Write-Warning "CUDA PyTorch check failed; continuing with the installed build." }
+
 if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
     throw "Node.js 22+/npm 10+ are required and npm was not found on PATH."
 }
