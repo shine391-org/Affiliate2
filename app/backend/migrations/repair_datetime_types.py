@@ -77,11 +77,44 @@ def to_canonical_datetime_str(value: Any) -> str | None:
     return None
 
 
+class MalformedDatetimeError(ValueError):
+    """A non-null datetime value could not be parsed into canonical format.
+
+    Raised INSTEAD of mutating the value. Automatic startup repair must never
+    invent data: a value this module cannot understand is far more likely to be
+    a legacy import format (or a genuine corruption needing human eyes) than
+    something safe to discard. Nullable-ness is irrelevant — silently writing
+    NULL over a populated column is data loss, and a backup nobody knows to
+    restore is not a safety net.
+    """
+
+    def __init__(self, table: str, column: str, rowid: int, raw_value: Any) -> None:
+        self.table = table
+        self.column = column
+        self.rowid = rowid
+        self.raw_value = raw_value
+        super().__init__(
+            "Malformed datetime value; repair aborted to preserve data: "
+            f"table={table!r}, column={column!r}, rowid={rowid!r}, raw_value={raw_value!r}. "
+            "No rows were modified. Normalize or remove this value manually "
+            "(the backup mechanism does not run because nothing was changed), "
+            "then restart."
+        )
+
+
 def repair_database_datetimes(db_path: Path | str, backup: bool = True) -> dict[str, int]:
     """Inspect and repair non-canonical datetime values across all SQLite tables.
 
+    Fail-closed and two-phase:
+
+      SCAN  — plan every update and raise MalformedDatetimeError on the first
+              value that cannot be parsed. No mutation has happened yet, so the
+              abort leaves the database byte-for-byte unchanged.
+      APPLY — back up once, then write every planned update in a single
+              transaction that rolls back entirely on any failure.
+
     Only mutates rows that actually deviate from the canonical format.
-    Idempotent: running on a clean database does 0 updates.
+    Idempotent: running on a clean database does 0 updates and creates no backup.
     """
     db_path = Path(db_path)
     if not db_path.exists() or db_path.stat().st_size == 0:
@@ -114,7 +147,10 @@ def repair_database_datetimes(db_path: Path | str, backup: bool = True) -> dict[
                 if is_dt and name_lower not in ("format", "concat"):
                     columns_to_check.append((table, col_name, bool(notnull)))
 
-        rows_to_update: list[tuple[str, str, Any, str | None]] = []
+        # ---- PHASE 1: SCAN / PLAN -------------------------------------------------
+        # Read-only. Raising here guarantees zero mutations, so a malformed value
+        # discovered late in the scan can never leave earlier rows half-repaired.
+        rows_to_update: list[tuple[str, str, Any, str]] = []
         for table, col_name, notnull in columns_to_check:
             cur.execute(f"SELECT rowid, {col_name}, typeof({col_name}) FROM {table}")
             rows = cur.fetchall()
@@ -125,37 +161,22 @@ def repair_database_datetimes(db_path: Path | str, backup: bool = True) -> dict[
                 if col_typeof in ("integer", "real"):
                     canonical = to_canonical_datetime_str(val)
                     if canonical is None:
-                        if notnull:
-                            raise ValueError(
-                                f"Malformed non-null datetime in table '{table}', column '{col_name}', "
-                                f"rowid={rowid}: raw value={val!r}"
-                            )
-                        logger.warning(
-                            "Converting unparseable nullable datetime to NULL in table '%s', column '%s', rowid=%s (raw value: %r)",
-                            table, col_name, rowid, val,
-                        )
-                        canonical = None
+                        raise MalformedDatetimeError(table, col_name, rowid, val)
                     rows_to_update.append((table, col_name, rowid, canonical))
                 elif col_typeof == "text":
                     text_val = str(val).strip()
                     if not _CANONICAL_RE.match(text_val):
                         canonical = to_canonical_datetime_str(text_val)
                         if canonical is None:
-                            if notnull:
-                                raise ValueError(
-                                    f"Malformed non-null datetime in table '{table}', column '{col_name}', "
-                                    f"rowid={rowid}: raw value={val!r}"
-                                )
-                            logger.warning(
-                                "Converting unparseable nullable datetime to NULL in table '%s', column '%s', rowid=%s (raw value: %r)",
-                                table, col_name, rowid, val,
-                            )
-                            canonical = None
+                            raise MalformedDatetimeError(table, col_name, rowid, val)
                         rows_to_update.append((table, col_name, rowid, canonical))
 
         if not rows_to_update:
             return {"repaired_rows": 0, "tables_scanned": len(tables)}
 
+        # ---- PHASE 2: APPLY -------------------------------------------------------
+        # Reached only when the whole scan parsed cleanly, so the backup is taken
+        # exactly once and only for a repair that will actually happen.
         if backup:
             ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
             backup_path = db_path.with_name(f"{db_path.name}.backup_before_repair_{ts}")

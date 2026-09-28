@@ -28,6 +28,7 @@ from backend.core.localization import (
     LocalizationTranscript,
 )
 from backend.migrations.repair_datetime_types import (
+    MalformedDatetimeError,
     repair_database_datetimes,
     to_canonical_datetime_str,
 )
@@ -170,16 +171,41 @@ def test_datetime_repair_types_and_safety(tmp_path):
     cur.execute("INSERT INTO items VALUES ('1', 1700000000, '2025-01-01 12:00:00', 1700000000.5)")
     # Row 2: Already canonical format
     cur.execute("INSERT INTO items VALUES ('2', '2025-01-01 12:00:00.000000', '2025-01-01 12:00:00.000000', '2025-01-01 12:00:00.000000')")
-    # Row 3: Malformed nullable datetime
+    # Row 3: Malformed NULLABLE datetime — the data-loss case. Repair must now
+    # fail closed and preserve the raw value instead of writing NULL over it.
     cur.execute("INSERT INTO items VALUES ('3', 'not-a-datetime-text', '2025-01-01 12:00:00.000000', NULL)")
     conn.commit()
     conn.close()
 
-    # First run repairs non-canonical items
+    # A malformed value anywhere aborts the whole repair: nothing is written.
+    with pytest.raises(MalformedDatetimeError):
+        repair_database_datetimes(db_file, backup=True)
+
+    conn = sqlite3.connect(str(db_file))
+    cur = conn.cursor()
+    # Row 1 parseable-but-non-canonical must ALSO be untouched — the abort
+    # happens during scan, so there is no partial repair.
+    cur.execute("SELECT created_at, updated_at, published_date FROM items WHERE id='1'")
+    r1 = cur.fetchone()
+    assert r1 == (1700000000, "2025-01-01 12:00:00", 1700000000.5), "Partial repair before the abort!"
+
+    cur.execute("SELECT created_at FROM items WHERE id='3'")
+    r3 = cur.fetchone()
+    assert r3[0] == "not-a-datetime-text", "Malformed nullable datetime must be preserved, not NULLed"
+    conn.close()
+
+    # No backup is created for an aborted repair — nothing was mutated.
+    assert not list(tmp_path.glob(f"{db_file.name}.backup_before_repair_*"))
+
+    # Drop the malformed row; the remaining repairable rows then normalize.
+    conn = sqlite3.connect(str(db_file))
+    conn.execute("DELETE FROM items WHERE id='3'")
+    conn.commit()
+    conn.close()
+
     res = repair_database_datetimes(db_file, backup=True)
     assert res["repaired_rows"] > 0
 
-    # Verify nullable malformed value became NULL, valid epochs converted
     conn = sqlite3.connect(str(db_file))
     cur = conn.cursor()
     cur.execute("SELECT created_at, updated_at, published_date FROM items WHERE id='1'")
@@ -188,14 +214,10 @@ def test_datetime_repair_types_and_safety(tmp_path):
     assert r1[1] is not None and "." in r1[1]
     assert r1[2] is not None and "." in r1[2]
 
-    cur.execute("SELECT created_at FROM items WHERE id='3'")
-    r3 = cur.fetchone()
-    assert r3[0] is None, "Malformed nullable datetime should become NULL"
-    conn.close()
-
     # Second run must be completely idempotent (0 repaired rows)
     res2 = repair_database_datetimes(db_file, backup=True)
     assert res2["repaired_rows"] == 0
+    conn.close()
 
 
 def test_datetime_repair_backup_is_wal_safe_sqlite_snapshot(tmp_path):
@@ -240,8 +262,25 @@ def test_datetime_repair_malformed_not_null_fails_closed(tmp_path):
     conn.commit()
     conn.close()
 
-    with pytest.raises(ValueError, match="Malformed non-null datetime.*critical_items.*updated_at"):
+    # NOT NULL and nullable now fail identically — nullable-ness no longer
+    # decides whether a value is destroyed, so the message no longer says
+    # "non-null" either.
+    with pytest.raises(MalformedDatetimeError) as excinfo:
         repair_database_datetimes(db_file, backup=True)
+
+    message = str(excinfo.value)
+    assert "critical_items" in message
+    assert "updated_at" in message
+    assert "garbage-corrupt-date" in message
+
+    # And the value must be preserved, not merely reported.
+    conn = sqlite3.connect(str(db_file))
+    try:
+        assert conn.execute("SELECT updated_at FROM critical_items").fetchone() == (
+            "garbage-corrupt-date",
+        )
+    finally:
+        conn.close()
 
 
 def test_datetime_repair_backup_failure_aborts(tmp_path, monkeypatch):
