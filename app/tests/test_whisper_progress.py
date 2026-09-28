@@ -47,11 +47,30 @@ class _FakeModel:
         return gen(), info
 
 
+def _fake_load(monkeypatch, model):
+    """Intercept the singleton load.
+
+    `transcribe` calls `load_with_device` (which returns the model AND the
+    device it was loaded on, so the CUDA→CPU fallback can decide from the
+    device this call started on). Patching `load` alone left the real model
+    loading and decoding the fake headerless wav, which PyAV rejects.
+    """
+    monkeypatch.setattr(
+        WhisperService, "load_with_device",
+        classmethod(lambda cls, quality="balanced", model_name=None: (model, "cpu")),
+    )
+    monkeypatch.setattr(
+        WhisperService, "load",
+        classmethod(lambda cls, quality="balanced", model_name=None: model),
+    )
+    return model
+
+
 @pytest.fixture
 def fake_whisper(monkeypatch, tmp_path):
     audio = tmp_path / "a.wav"
     audio.write_bytes(b"\x00" * 2048)
-    monkeypatch.setattr(WhisperService, "load", classmethod(lambda cls, q="balanced", model_name=None: _FakeModel()))
+    _fake_load(monkeypatch, _FakeModel())
 
     async def _has_audio(p):
         return True
@@ -69,8 +88,7 @@ async def test_on_progress_streams_fractions(fake_whisper, monkeypatch):
     # NEVER patch time.monotonic for this — asyncio's loop clock uses it too.
     import backend.services.whisper_service as W
     monkeypatch.setattr(W, "_PROGRESS_EMIT_INTERVAL", 0.0)
-    monkeypatch.setattr(WhisperService, "load",
-                        classmethod(lambda cls, q="balanced", model_name=None: _FakeModel(n_segments=5)))
+    _fake_load(monkeypatch, _FakeModel(n_segments=5))
     fractions = []
 
     result = await whisper_service.transcribe(
@@ -131,8 +149,7 @@ async def test_concurrent_transcriptions_serialize(fake_whisper, monkeypatch):
             info = SimpleNamespace(language="en", language_probability=0.9)
             return gen(), info
 
-    monkeypatch.setattr(WhisperService, "load",
-                        classmethod(lambda cls, q="balanced", model_name=None: _TrackedModel()))
+    _fake_load(monkeypatch, _TrackedModel())
 
     await asyncio.gather(
         whisper_service.transcribe(str(fake_whisper)),
@@ -170,8 +187,7 @@ async def test_short_audio_bypasses_the_gate(fake_whisper, monkeypatch):
             info = SimpleNamespace(language="en", language_probability=0.9)
             return gen(), info
 
-    monkeypatch.setattr(WhisperService, "load",
-                        classmethod(lambda cls, q="balanced", model_name=None: _BlockingModel()))
+    _fake_load(monkeypatch, _BlockingModel())
 
     async def _watchdog():
         # Release the decoders once both are in flight (or time out the test).
