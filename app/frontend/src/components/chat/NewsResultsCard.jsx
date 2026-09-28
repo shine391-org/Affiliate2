@@ -47,7 +47,7 @@ function ArticleCard({ article, onSave, onGenerate }) {
           size="small" variant="outlined"
           sx={{ fontSize: "0.6rem", height: 18, textTransform: "lowercase" }}
         />
-        <ScoreChip score={article.virality_score || 0} />
+        <ScoreChip score={article.virality_score} />
         {article.published_at && (
           <Typography variant="caption" sx={{ color: "text.secondary", fontSize: "0.65rem" }}>
             {timeAgo(article.published_at)}

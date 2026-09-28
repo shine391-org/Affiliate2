@@ -36,7 +36,11 @@ export default function ScoutResultsCard({ results, platform, jobId }) {
 
   if (!results || results.length === 0) return null
 
-  const sorted = [...results].sort((a, b) => (b.virality_score || 0) - (a.virality_score || 0))
+  // Unscored rows must sort LAST, not as if they scored 0. `|| 0` would rank a
+  // never-scored platform above a genuinely weak one.
+  const sorted = [...results].sort(
+    (a, b) => (b.virality_score ?? -1) - (a.virality_score ?? -1),
+  )
   const visible = expanded ? sorted : sorted.slice(0, 8)
   const CARD_WIDTH = 200
   const GAP = 10
@@ -148,7 +152,7 @@ export default function ScoutResultsCard({ results, platform, jobId }) {
                       <Chip label={r.platform} size="small" variant="outlined"
                         sx={{ fontSize: "0.55rem", height: 18, textTransform: "uppercase" }} />
                       <Stack direction="row" alignItems="center" spacing={0.25}>
-                        <ViralityChip score={r.virality_score || 0} />
+                        <ViralityChip score={r.virality_score} />
                         {r.video_url && (
                           <IconButton
                             size="small"
