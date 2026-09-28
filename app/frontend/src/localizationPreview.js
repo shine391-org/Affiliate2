@@ -85,6 +85,42 @@ export function resolveProfileTargetAspect({
   return selectedProfile.target_aspect
 }
 
+const STAGE_ERROR_LABELS = {
+  separation: "Tách nguồn",
+  asr: "Bản chép lời (ASR)",
+  semantic: "Phân đoạn ngữ nghĩa",
+  translation: "Bản dịch",
+  dubbing: "Lồng tiếng",
+  audio_mix: "Trộn âm thanh",
+  final_render: "Kết xuất",
+  qc: "QC",
+}
+
+const cleanText = (value) => {
+  const text = typeof value === "string" ? value.trim() : ""
+  return text && text !== "null" && text !== "undefined" ? text : ""
+}
+
+/**
+ * Surface a FAILED localization job's real reason.
+ *
+ * A job that died mid-pipeline (e.g. "Library cublas64_12.dll ...") used to
+ * render as a healthy-looking page: every stage chip read "đang chờ" and the
+ * only error surface was `detailError`, which is reserved for a failed HTTP
+ * fetch of the detail itself. The canonical backend fields win; a failed
+ * manifest stage is only a fallback when the job row carries no message.
+ */
+export function localizationJobFailure(detail) {
+  if (detail?.job_status !== "failed") return null
+  const stages = detail?.manifest?.stages || {}
+  const failedStage = Object.keys(stages).find((name) => stages[name]?.status === "failed")
+  const step = cleanText(detail.job_current_step) || (failedStage ? STAGE_ERROR_LABELS[failedStage] || failedStage : "")
+  const message = cleanText(detail.job_error_message)
+    || cleanText(failedStage ? stages[failedStage]?.error : "")
+    || "Tác vụ bản địa hóa thất bại mà không có thông báo lỗi."
+  return { step, message, stage: failedStage || null }
+}
+
 export function canRerenderLocalization(detail) {
   const manifest = detail?.manifest
   if (!manifest || detail?.translation_review_pending) return false

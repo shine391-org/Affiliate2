@@ -12,6 +12,7 @@ No real model is ever loaded here: faster_whisper.WhisperModel is stubbed.
 """
 import asyncio
 import sys
+import threading
 import types
 
 import pytest
@@ -293,6 +294,87 @@ def test_cuda_compute_failure_retries_once_on_cpu_and_replaces_singleton(monkeyp
     assert WhisperService._loaded_device == "cpu"
     assert WhisperService._model.device == "cpu"
     assert WhisperService._last_used > 1.0
+
+
+def test_concurrent_cuda_failures_both_fall_back_and_reuse_one_cpu_singleton(monkeypatch, tmp_path):
+    """Two short transcriptions must not race on the CUDA→CPU fallback.
+
+    `_loaded_device` is class-level mutable state. Job A's lazy CUDA failure
+    replaces the singleton with CPU, so a job B that fails afterwards would
+    read "cpu" from the global and re-raise — losing a job that a serial
+    scheduler would have completed. Both must succeed with ONE cpu model.
+    """
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"real-path-placeholder")
+    constructed = []
+
+    both_iterating = threading.Barrier(2, timeout=10)
+    cpu_built = threading.Event()
+    role_lock = threading.Lock()
+    roles = []
+
+    class RacingCudaModel:
+        def __init__(self, name, device=None, compute_type=None):
+            self.name = name
+            self.device = device
+            self.compute_type = compute_type
+            constructed.append((device, compute_type))
+            if device == "cpu":
+                cpu_built.set()
+
+        def transcribe(self, _path, **_kwargs):
+            info = types.SimpleNamespace(language="en", language_probability=0.99)
+            if self.device == "cuda":
+                def fail_during_iteration():
+                    # Both jobs hold the SAME cuda model and reach iteration.
+                    both_iterating.wait()
+                    with role_lock:
+                        roles.append(1)
+                        first = len(roles) == 1
+                    if first:
+                        # Job A fails first and swaps the singleton for CPU.
+                        raise RuntimeError("Library cublas64_12.dll is not found or cannot be loaded")
+                    # Job B only fails once A's replacement is visible, which is
+                    # exactly the window where the old global check went wrong.
+                    assert cpu_built.wait(10), "job A never replaced the singleton with CPU"
+                    raise RuntimeError("Library cublas64_12.dll is not found or cannot be loaded")
+                    yield  # pragma: no cover
+                return fail_during_iteration(), info
+            seg = types.SimpleNamespace(
+                start=0.0, end=1.0, text=" cpu success ",
+                words=[types.SimpleNamespace(word="cpu", start=0.0, end=1.0, probability=0.9)],
+            )
+            return iter([seg]), info
+
+    fake = types.ModuleType("faster_whisper")
+    fake.WhisperModel = RacingCudaModel
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake)
+    monkeypatch.setattr(WhisperService, "_select_device", classmethod(lambda cls: ("cuda", "float16")))
+    monkeypatch.setattr("backend.services.video_utils.probe_duration", lambda *_args, **_kwargs: 1.0)
+
+    results, errors = {}, {}
+
+    def _run(tag):
+        try:
+            results[tag] = asyncio.run(ws_mod.whisper_service.transcribe(audio, quality="fast"))
+        except BaseException as exc:  # noqa: BLE001 — reported below
+            errors[tag] = exc
+
+    threads = [threading.Thread(target=_run, args=(tag,)) for tag in ("A", "B")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(30)
+        assert not thread.is_alive(), "transcription thread deadlocked"
+
+    assert errors == {}, f"CUDA exception leaked: {errors!r}"
+    assert set(results) == {"A", "B"}
+    assert results["A"]["text"] == "cpu success"
+    assert results["B"]["text"] == "cpu success"
+    # One cuda model, ONE cpu replacement — the second job reuses it.
+    assert constructed == [("cuda", "float16"), ("cpu", "int8")]
+    assert WhisperService._loaded_device == "cpu"
+    assert WhisperService._model.device == "cpu"
 
 
 def test_non_cuda_compute_failure_is_not_retried(monkeypatch, tmp_path):

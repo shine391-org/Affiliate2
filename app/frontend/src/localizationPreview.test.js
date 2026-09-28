@@ -6,6 +6,7 @@ import {
   canRerenderLocalization,
   captionPreviewStyle,
   hydrateLocalizationJobConfig,
+  localizationJobFailure,
   maskPreset,
   pickPreviewReframeMethod,
   previewObjectFit,
@@ -118,4 +119,51 @@ test("render payload explicitly marks normalized mask and caption placement", ()
       caption_placement: { mode: "mask_region", vertical_offset: 0.04 },
     },
   )
+})
+
+// A job that died on a CUDA DLL load used to render as a healthy page: every
+// stage chip said "đang chờ" and no error text was shown anywhere.
+test("failed localization job surfaces the real backend error and step", () => {
+  const failure = localizationJobFailure({
+    job_status: "failed",
+    job_current_step: "asr",
+    job_error_message: "Library cublas64_12.dll is not found or cannot be loaded",
+    manifest: { stages: { translation: { status: "pending" }, dubbing: { status: "pending" } } },
+  })
+  assert.equal(failure.step, "asr")
+  assert.equal(failure.message, "Library cublas64_12.dll is not found or cannot be loaded")
+})
+
+test("running and successful jobs never produce a failure banner", () => {
+  assert.equal(localizationJobFailure({ job_status: "running", job_current_step: "asr" }), null)
+  assert.equal(localizationJobFailure({ job_status: "complete" }), null)
+  assert.equal(localizationJobFailure(null), null)
+  assert.equal(localizationJobFailure({}), null)
+})
+
+test("missing error message falls back to the failed manifest stage, then to stable text", () => {
+  const fromStage = localizationJobFailure({
+    job_status: "failed",
+    manifest: { stages: { dubbing: { status: "failed", error: "TTS provider timeout" } } },
+  })
+  assert.equal(fromStage.stage, "dubbing")
+  assert.equal(fromStage.step, "Lồng tiếng")
+  assert.equal(fromStage.message, "TTS provider timeout")
+
+  const bare = localizationJobFailure({ job_status: "failed", job_error_message: null })
+  assert.equal(bare.step, "")
+  assert.equal(bare.message, "Tác vụ bản địa hóa thất bại mà không có thông báo lỗi.")
+  assert.ok(!bare.message.includes("undefined"))
+  assert.ok(!bare.message.includes("null"))
+})
+
+test("canonical backend fields win over the manifest stage fallback", () => {
+  const failure = localizationJobFailure({
+    job_status: "failed",
+    job_current_step: "final_render",
+    job_error_message: "ffmpeg exit code 1",
+    manifest: { stages: { asr: { status: "failed", error: "stale" } } },
+  })
+  assert.equal(failure.step, "final_render")
+  assert.equal(failure.message, "ffmpeg exit code 1")
 })

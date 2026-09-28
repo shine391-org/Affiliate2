@@ -220,6 +220,21 @@ class WhisperService:
 
     @classmethod
     def load(cls, quality: str = "balanced", model_name: str | None = None):
+        model, _device = cls.load_with_device(quality, model_name=model_name)
+        return model
+
+    @classmethod
+    def load_with_device(cls, quality: str = "balanced", model_name: str | None = None):
+        """Return ``(model, device)`` captured atomically under the singleton lock.
+
+        The device has to travel WITH the model instance. `_loaded_device` is
+        class-level mutable state: when a CUDA compute failure makes one job
+        swap the singleton for a CPU model, every other in-flight caller that
+        is still iterating the old CUDA model sees "cpu" if it asks the class
+        later. Deciding the CUDA→CPU fallback from that global made a second
+        concurrent failure re-raise instead of reusing the CPU singleton the
+        first job had just built.
+        """
         resolved_model = resolve_whisper_model(quality, model_name)
         with cls._lock:
             if cls._model is None or cls._loaded_model_name != resolved_model:
@@ -253,7 +268,7 @@ class WhisperService:
                 cls._loaded_model_name = resolved_model
                 logger.info("Whisper model '%s' loaded successfully on %s", resolved_model, cls._loaded_device)
             cls._last_used = time.monotonic()
-            return cls._model
+            return cls._model, cls._loaded_device
 
     @classmethod
     def _replace_failed_cuda_model(cls, failed_model, resolved_model: str, quality: str, exc: BaseException):
@@ -385,7 +400,11 @@ class WhisperService:
             raise ValueError(f"No audio stream found in {audio_path}")
 
         resolved_model = resolve_whisper_model(quality, model_name)
-        model = self.load(quality, model_name=model_name)
+        # `initial_device` is the device THIS invocation's model was loaded on.
+        # It is captured together with the model, before any compute happens, so
+        # the CUDA→CPU fallback below cannot be flipped by another job swapping
+        # the class-level singleton to CPU mid-flight.
+        model, initial_device = self.load_with_device(quality, model_name=model_name)
 
         # Duration serves two decisions: the progress fraction denominator AND
         # whether this transcription is long enough to take the batch gate.
@@ -457,7 +476,11 @@ class WhisperService:
                 try:
                     return _consume(model)
                 except Exception as exc:
-                    if type(self)._loaded_device != "cuda" or not _is_cuda_runtime_error(exc):
+                    # Decide from the device this invocation STARTED on, not from
+                    # the class-level singleton. A concurrent job that already
+                    # replaced the CUDA model with CPU would otherwise make this
+                    # handler re-raise instead of reusing that CPU singleton.
+                    if initial_device != "cuda" or not _is_cuda_runtime_error(exc):
                         raise
                     cpu_model = type(self)._replace_failed_cuda_model(
                         model,

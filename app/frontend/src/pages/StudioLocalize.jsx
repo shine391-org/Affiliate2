@@ -18,6 +18,7 @@ import {
   canRerenderLocalization,
   captionPreviewStyle,
   hydrateLocalizationJobConfig,
+  localizationJobFailure,
   maskPreset,
   pickPreviewReframeMethod,
   previewObjectFit,
@@ -133,6 +134,7 @@ export default function StudioLocalize({ source, sourcesLoading }) {
   const activeLocalization = Boolean(jobId)
     && ["pending", "running"].includes(detail?.job_status)
   const canRerender = canRerenderLocalization(detail)
+  const jobFailure = localizationJobFailure(detail)
 
   useEffect(() => {
     if (!jobId || hydratedJobId === jobId || !detail?.manifest) return
@@ -515,6 +517,13 @@ export default function StudioLocalize({ source, sourcesLoading }) {
           {LOCALIZE_STEPS.map((item) => <Step key={item.value}><StepButton onClick={() => setStep(item.value)}>{item.label}</StepButton></Step>)}
         </Stepper>
         {detailError && <Alert severity="warning">{detailError}</Alert>}
+        {jobFailure && (
+          <Alert severity="error" data-testid="localization-job-failure">
+            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Tác vụ bản địa hóa thất bại</Typography>
+            {jobFailure.step ? <Typography variant="body2">Bước: {jobFailure.step}</Typography> : null}
+            <Typography variant="body2" sx={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{jobFailure.message}</Typography>
+          </Alert>
+        )}
         {jobId && <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap><Chip label={`Tác vụ ${jobId}`} size="small" /><StageChip name="Bản dịch" record={stages.translation} /><StageChip name="Lồng tiếng" record={stages.dubbing} /><StageChip name="QC" record={stages.qc} /><Box sx={{ flex: 1 }} /><Button size="small" variant="outlined" startIcon={<TuneOutlinedIcon />} onClick={() => setExpertOpen(true)}>Nâng cao / Chuyên gia</Button></Stack>}
         {panels[activeStep]}
       </Stack>
