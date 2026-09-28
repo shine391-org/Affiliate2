@@ -11,7 +11,7 @@ from sqlalchemy import select
 from backend.database import AsyncSessionLocal
 from backend.models.scout_result import ScoutResult
 from backend.models.downloaded_video import DownloadedVideo
-from backend.services.ytdlp_service import download_video
+from backend.services.ytdlp_service import _is_douyin_url, download_video
 from backend.core.ws_manager import ws_manager
 from backend.agents.job_helper import update_job_status
 from backend.config import settings
@@ -89,6 +89,7 @@ class DownloadAgent:
                     output_dir=settings.VIDEOS_DIR,
                     filename=sr.video_id,
                     extract_audio=True,
+                    title_hint=str(sr.title or ""),
                 )
 
                 # Save to DB
@@ -173,6 +174,11 @@ class DownloadAgent:
                         user_settings = us_result.scalar_one_or_none()
 
                     corrected_url = await ai_fix_url(sr.video_url, str(first_error), user_settings)
+                    # A Douyin URL carries the requested aweme identity; an
+                    # LLM rewrite can turn a controlled failure into the wrong
+                    # video, so this path stays fail-closed.
+                    if corrected_url and _is_douyin_url(str(sr.video_url or "")):
+                        raise first_error
                     if corrected_url:
                         logger.info(f"Retrying download with AI-corrected URL: {corrected_url}")
                         dl_result = await download_video(
@@ -180,6 +186,7 @@ class DownloadAgent:
                             output_dir=settings.VIDEOS_DIR,
                             filename=sr.video_id,
                             extract_audio=True,
+                            title_hint=str(sr.title or ""),
                         )
                         # Save to DB with full metadata (same as success path above)
                         async with AsyncSessionLocal() as db:

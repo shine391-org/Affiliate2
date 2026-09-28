@@ -319,3 +319,175 @@ async def test_douyin_search_surfaces_access_failure_from_shared_session():
     assert result.status == ProviderStatus.AUTH_REQUIRED
     assert result.error == "risk control"
 
+
+@pytest.mark.asyncio
+async def test_creator_request_uses_session_uifid_and_bounded_timeout():
+    provider = DouyinProvider()
+    captured = {}
+
+    class Response:
+        status = 200
+
+        async def text(self):
+            return '{"status_code":0,"user":{}}'
+
+        async def json(self):
+            return {"status_code": 0, "user": {}}
+
+    class Request:
+        async def get(self, url, **kwargs):
+            captured["url"] = url
+            captured.update(kwargs)
+            return Response()
+
+    class Context:
+        request = Request()
+
+    class Page:
+        async def evaluate(self, *args, **kwargs):
+            return "Mozilla/5.0 Edge"
+
+    await provider._request_json(
+        Context(),
+        Page(),
+        "/aweme/v1/web/user/profile/other/",
+        {"sec_user_id": "creator"},
+        referer="https://www.douyin.com/user/creator",
+        cookie_dict={"UIFID_TEMP": "session-derived"},
+    )
+
+    assert captured["headers"]["uifid"] == "session-derived"
+    assert captured["timeout"] <= 20_000
+    assert captured["headers"].get("x-tt-argus") != "1"
+
+
+@pytest.mark.asyncio
+async def test_creator_snapshot_reuses_one_authenticated_cdp_session():
+    provider = DouyinProvider()
+    opened = 0
+    session = SimpleNamespace(
+        context=object(),
+        page=object(),
+        cookie_dict={"UIFID": "session-derived"},
+        ms_token="token",
+    )
+
+    @asynccontextmanager
+    async def fake_session(*args, **kwargs):
+        nonlocal opened
+        opened += 1
+        yield session
+
+    profile_payload = {
+        "user": {"nickname": "Creator"},
+        "stats": {"follower_count": 12, "aweme_count": 34},
+    }
+    posts_payload = {
+        "aweme_list": [{
+            "aweme_id": "123",
+            "desc": "Exact video",
+            "author": {"sec_uid": "creator", "nickname": "Creator"},
+            "statistics": {},
+            "video": {},
+        }],
+        "has_more": False,
+    }
+
+    with patch("backend.sources.douyin.open_douyin_cdp_session", fake_session), \
+         patch.object(provider, "_fetch_creator_profile", new=AsyncMock(return_value=profile_payload)), \
+         patch.object(provider, "_fetch_creator_posts", new=AsyncMock(return_value=posts_payload)):
+        info, history = await provider.creator_snapshot("creator", limit=18)
+
+    assert opened == 1
+    assert info["display_name"] == "Creator"
+    assert history.status == ProviderStatus.SUCCESS
+    assert history.items[0]["video_url"] == "https://www.douyin.com/video/123"
+
+
+@pytest.mark.asyncio
+async def test_creator_snapshot_falls_back_to_creator_page_when_posts_api_is_403():
+    provider = DouyinProvider()
+
+    class Page:
+        def __init__(self):
+            self.goto = AsyncMock()
+            self.wait_for_timeout = AsyncMock()
+
+        async def eval_on_selector_all(self, selector, script):
+            assert selector == 'a[href*="/video/"]'
+            return [
+                {
+                    "video_id": "123",
+                    "video_url": "https://www.douyin.com/video/123?source=Baiduspider",
+                    "title": "First video",
+                    "cover_url": "https://img.example/123.jpg",
+                    "associated": True,
+                },
+                {
+                    "video_id": "456",
+                    "video_url": "https://www.douyin.com/video/456",
+                    "title": "Second video",
+                    "cover_url": None,
+                    "associated": True,
+                },
+            ]
+
+    page = Page()
+    session = SimpleNamespace(
+        context=object(),
+        page=page,
+        cookie_dict={"UIFID": "session-derived"},
+        ms_token="token",
+    )
+
+    @asynccontextmanager
+    async def fake_session(*args, **kwargs):
+        yield session
+
+    with patch("backend.sources.douyin.open_douyin_cdp_session", fake_session), \
+         patch.object(provider, "_fetch_creator_profile", new=AsyncMock(return_value={
+             "user": {"nickname": "Creator"},
+             "stats": {},
+         })), \
+         patch.object(
+             provider,
+             "_fetch_creator_posts",
+             new=AsyncMock(side_effect=PermissionError("Douyin HTTP 403")),
+         ):
+        info, history = await provider.creator_snapshot("creator", limit=18)
+
+    assert info["display_name"] == "Creator"
+    assert history.status == ProviderStatus.SUCCESS
+    assert [item["video_id"] for item in history.items] == ["123", "456"]
+    assert history.items[0]["video_url"] == "https://www.douyin.com/video/123"
+    page.goto.assert_awaited_once_with(
+        "https://www.douyin.com/user/creator",
+        wait_until="domcontentloaded",
+        timeout=30_000,
+    )
+
+
+@pytest.mark.asyncio
+async def test_creator_dom_fallback_rejects_unassociated_footer_links():
+    provider = DouyinProvider()
+
+    class Page:
+        async def goto(self, *args, **kwargs):
+            return None
+
+        async def wait_for_timeout(self, milliseconds):
+            return None
+
+        async def eval_on_selector_all(self, selector, script):
+            return [{
+                "video_id": "999",
+                "video_url": "https://www.douyin.com/video/999",
+                "title": "SEO footer link",
+                "cover_url": None,
+                "associated": False,
+            }]
+
+    items = await provider._fetch_creator_dom_items(Page(), "creator", limit=18)
+
+    assert items == []
+

@@ -286,7 +286,7 @@ class TestDownloadCascade:
         async def configured_browser():
             return ("edge", "Default")
 
-        async def resolve(url, cdp_url=None):
+        async def resolve(url, cdp_url=None, title_hint=""):
             return ResolvedDouyinMedia(
                 url="https://v3-web.douyinvod.com/video/main.mp4?sig=abc",
                 headers={"User-Agent": "Mozilla/5.0 Edge", "Referer": url},

@@ -703,27 +703,28 @@ async def _prepare_download_source(
     url: str,
     cookie_session: dict,
     douyin_cdp_url: str | None = None,
-) -> tuple[str, dict[str, str] | None, str | None]:
+    title_hint: str = "",
+) -> tuple[str, dict[str, str] | None, str | None, dict | None]:
     """Choose the URL that the canonical yt-dlp pipeline will download.
 
     TikTok still requires a readable yt-dlp browser session. Douyin gets one
-    narrow escape hatch for the Windows DPAPI/App-Bound case proven by runtime
-    QA: resolve a signed media URL through the already-authenticated CDP
-    browser, then hand that URL straight back to yt-dlp.
+    exact-identity gate proven by runtime QA: Douyin can serve a different
+    aweme at /video/<requested-id>, so the aweme identity is always proven
+    through the already-authenticated CDP browser before yt-dlp is pointed at
+    anything. The cookie store stays the download transport; it is never a
+    substitute for the identity check.
 
-    Returns (effective_url, headers, resolution_strategy).
+    Returns (effective_url, headers, resolution_strategy, verified_identity).
     """
     if _is_douyin_url(url):
-        if (
-            cookie_session.get("ok")
-            and _required_bytedance_cookie_count(url, cookie_session) > 0
-        ):
-            return url, None, None
-
         try:
             from backend.services.douyin_media_resolver import resolve_douyin_media
             resolved = await asyncio.wait_for(
-                resolve_douyin_media(url, cdp_url=douyin_cdp_url),
+                resolve_douyin_media(
+                    url,
+                    cdp_url=douyin_cdp_url,
+                    title_hint=title_hint,
+                ),
                 timeout=45,
             )
         except Exception as exc:
@@ -740,10 +741,16 @@ async def _prepare_download_source(
             ) from exc
 
         logger.info(
-            "Douyin browser-cookie path unavailable; using authenticated CDP "
-            "media resolution while keeping yt-dlp as the downloader"
+            "Douyin media identity proven through authenticated CDP "
+            "resolution; keeping yt-dlp as the downloader"
         )
-        return resolved.url, dict(resolved.headers), "douyin_cdp"
+        identity = {
+            "requested_aweme_id": resolved.requested_aweme_id,
+            "candidate_aweme_id": resolved.candidate_aweme_id,
+            "provenance": resolved.provenance,
+            "resolution_path": resolved.resolution_path,
+        }
+        return resolved.url, dict(resolved.headers), "douyin_cdp", identity
 
     if _is_tiktok_url(url):
         if not cookie_session.get("ok"):
@@ -760,7 +767,7 @@ async def _prepare_download_source(
                 "it, then retry."
             )
 
-    return url, None, None
+    return url, None, None, None
 
 
 async def probe_browser_session(browser: str = "auto", profile: str | None = None) -> dict:
@@ -851,6 +858,23 @@ FORMAT_FALLBACK_CHAIN = [
     "bestvideo[height<=720]+bestaudio/best[height<=720]",
 ]
 
+#: Douyin CDP resolution hands yt-dlp an already-signed CDN file, not a
+#: platform page. Its generic extractor reports a single format with no height
+#: metadata, so every `[height<=N]` selector fails with "Requested format is
+#: not available" even though the bytes are fetchable. One direct rung is the
+#: only ladder that can succeed for that input.
+DIRECT_MEDIA_FORMAT_CHAIN = ["best"]
+
+
+def _format_chain_for_source(
+    effective_url: str,
+    resolved_via: str | None,
+    format_chain: list[str],
+) -> list[str]:
+    if resolved_via == "douyin_cdp" and "douyinvod" in str(effective_url or ""):
+        return list(DIRECT_MEDIA_FORMAT_CHAIN)
+    return format_chain
+
 
 def _find_actual_video_file(output_dir: Path, filename_stem: str) -> Path | None:
     """Find the actual downloaded video file — yt-dlp may change the extension after merging."""
@@ -918,6 +942,7 @@ async def download_video(
     filename: str = None,
     extract_audio: bool = True,
     options: dict | None = None,
+    title_hint: str = "",
 ) -> dict:
     """
     Download a video using yt-dlp.
@@ -961,10 +986,13 @@ async def download_video(
         _inspect_browser_session, cookie_browser, cookie_profile
     )
     cookie_session_ok = bool(cookie_session.get("ok"))
-    effective_url, resolved_headers, resolved_via = await _prepare_download_source(
-        url, cookie_session, douyin_cdp_url=douyin_cdp_url
+    effective_url, resolved_headers, resolved_via, resolved_identity = await _prepare_download_source(
+        url, cookie_session, douyin_cdp_url=douyin_cdp_url, title_hint=title_hint
     )
     use_browser_cookies = cookie_session_ok and resolved_via is None
+    _format_chain = _format_chain_for_source(
+        effective_url, resolved_via, _format_chain
+    )
     effective_headers = {
         **_yt_dlp_http_headers(),
         **(resolved_headers or {}),
@@ -1312,6 +1340,7 @@ async def download_video(
             "option_postprocessors_dropped": opt_pps_dropped,
             # Safe QA/telemetry signal; contains no cookie or session values.
             "download_source": resolved_via or "yt_dlp",
+            "media_provenance": resolved_identity,
         }
 
     try:

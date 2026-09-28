@@ -106,12 +106,20 @@ def test_legacy_plaintext_cookie_exports_are_removed(monkeypatch, tmp_path):
     assert not newer.exists()
 
 
-async def _fake_resolved_douyin(url: str, cdp_url: str | None = None):
+async def _fake_resolved_douyin(
+    url: str,
+    cdp_url: str | None = None,
+    title_hint: str = "",
+):
     from backend.services.douyin_media_resolver import ResolvedDouyinMedia
     return ResolvedDouyinMedia(
         url="https://v3-web.douyinvod.com/video.mp4?sig=abc",
         headers={"Referer": url, "User-Agent": "Mozilla/5.0"},
         source_url=url,
+        requested_aweme_id="123",
+        candidate_aweme_id="123",
+        provenance="network:response-url",
+        resolution_path="network-response",
     )
 
 
@@ -162,7 +170,7 @@ async def test_douyin_unreadable_cookie_store_uses_cdp_resolution(monkeypatch):
     from backend.services import douyin_media_resolver as resolver
 
     monkeypatch.setattr(resolver, "resolve_douyin_media", _fake_resolved_douyin)
-    effective_url, headers, strategy = await svc._prepare_download_source(
+    effective_url, headers, strategy, identity = await svc._prepare_download_source(
         "https://www.douyin.com/video/123",
         {
             "ok": False,
@@ -175,6 +183,67 @@ async def test_douyin_unreadable_cookie_store_uses_cdp_resolution(monkeypatch):
     assert strategy == "douyin_cdp"
     assert effective_url.startswith("https://v3-web.douyinvod.com/")
     assert headers["Referer"] == "https://www.douyin.com/video/123"
+    assert identity["requested_aweme_id"] == "123"
+    assert identity["candidate_aweme_id"] == "123"
+
+
+@pytest.mark.asyncio
+async def test_douyin_cookie_path_still_verifies_exact_aweme_identity(monkeypatch):
+    """A working cookie store must not skip the exact-identity guarantee.
+
+    Douyin can serve a different aweme at /video/<requested-id>, so handing the
+    raw page URL to yt-dlp is unsafe even when cookies decrypt fine. The cookie
+    store stays the transport (yt-dlp keeps using it), but the aweme identity
+    is always proven first.
+    """
+    from backend.services import ytdlp_service as svc
+    from backend.services import douyin_media_resolver as resolver
+
+    calls = []
+
+    async def fake_resolve(url, cdp_url=None, title_hint=""):
+        calls.append((url, title_hint))
+        return await _fake_resolved_douyin(
+            url, cdp_url=cdp_url, title_hint=title_hint
+        )
+
+    monkeypatch.setattr(resolver, "resolve_douyin_media", fake_resolve)
+
+    effective_url, headers, strategy, identity = await svc._prepare_download_source(
+        "https://www.douyin.com/video/123",
+        {
+            "ok": True,
+            "douyin_cookie_count": 9,
+            "tiktok_cookie_count": 0,
+        },
+        title_hint="酸辣柠檬虾",
+    )
+
+    assert calls, "identity must be proven even when cookies are readable"
+    assert strategy == "douyin_cdp"
+    assert identity["requested_aweme_id"] == "123"
+    assert identity["candidate_aweme_id"] == "123"
+    assert effective_url.startswith("https://v3-web.douyinvod.com/")
+
+
+@pytest.mark.asyncio
+async def test_douyin_cookie_path_fails_loudly_when_identity_is_unprovable(monkeypatch):
+    """Failing identity must raise — never fall back to the raw page URL."""
+    from backend.core.exceptions import DownloadError
+    from backend.services import ytdlp_service as svc
+    from backend.services import douyin_media_resolver as resolver
+
+    async def fake_resolve(url, cdp_url=None, title_hint=""):
+        raise RuntimeError("candidate aweme 999 does not match requested 123")
+
+    monkeypatch.setattr(resolver, "resolve_douyin_media", fake_resolve)
+
+    with pytest.raises(DownloadError, match="could not resolve the media URL"):
+        await svc._prepare_download_source(
+            "https://www.douyin.com/video/123",
+            {"ok": True, "douyin_cookie_count": 9, "tiktok_cookie_count": 0},
+            title_hint="酸辣柠檬虾",
+        )
 
 
 @pytest.mark.asyncio

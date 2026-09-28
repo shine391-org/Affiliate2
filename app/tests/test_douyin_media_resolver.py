@@ -35,7 +35,7 @@ async def test_resolver_returns_dom_media_and_closes_temp_page():
             return None
 
         async def evaluate(self, script):
-            return ["https://v3-web.douyinvod.com/video/main.mp4?sig=abc"]
+            return ["https://v3-web.douyinvod.com/video/main.mp4?sig=abc&__vid=123"]
 
         async def close(self):
             self.closed = True
@@ -185,3 +185,141 @@ async def test_resolver_uses_partially_loaded_page_after_navigation_timeout():
         resolved = await resolve_douyin_media("https://www.douyin.com/video/123")
 
     assert resolved.url == expected
+
+
+@pytest.mark.asyncio
+async def test_resolver_rejects_unrelated_dom_video_for_requested_aweme():
+    unrelated = "https://v3-web.douyinvod.com/other.mp4?__vid=999"
+
+    class Page:
+        def on(self, *args, **kwargs):
+            return None
+
+        async def route(self, *args, **kwargs):
+            return None
+
+        async def goto(self, *args, **kwargs):
+            return None
+
+        async def evaluate(self, script):
+            return [unrelated]
+
+        async def wait_for_function(self, *args, **kwargs):
+            return None
+
+        async def close(self):
+            return None
+
+    page = Page()
+
+    class Context:
+        async def new_page(self):
+            return page
+
+    @asynccontextmanager
+    async def fake_session(*args, **kwargs):
+        yield SimpleNamespace(
+            context=Context(), page=None, created_page=False, user_agent="UA"
+        )
+
+    with patch(
+        "backend.services.douyin_media_resolver.open_douyin_cdp_session",
+        fake_session,
+    ):
+        with pytest.raises(RuntimeError, match=r"requested_aweme_id=123.*999"):
+            await resolve_douyin_media("https://www.douyin.com/video/123")
+
+
+@pytest.mark.asyncio
+async def test_resolver_accepts_dom_video_verified_for_requested_aweme():
+    expected = "https://v3-web.douyinvod.com/main.mp4?__vid=123"
+
+    class Page:
+        def on(self, *args, **kwargs):
+            return None
+
+        async def route(self, *args, **kwargs):
+            return None
+
+        async def goto(self, *args, **kwargs):
+            return None
+
+        async def evaluate(self, script):
+            return [expected]
+
+        async def wait_for_function(self, *args, **kwargs):
+            return None
+
+        async def close(self):
+            return None
+
+    page = Page()
+
+    class Context:
+        async def new_page(self):
+            return page
+
+    @asynccontextmanager
+    async def fake_session(*args, **kwargs):
+        yield SimpleNamespace(
+            context=Context(), page=None, created_page=False, user_agent="UA"
+        )
+
+    with patch(
+        "backend.services.douyin_media_resolver.open_douyin_cdp_session",
+        fake_session,
+    ):
+        resolved = await resolve_douyin_media("https://www.douyin.com/video/123")
+
+    assert resolved.url == expected
+
+
+@pytest.mark.asyncio
+async def test_resolver_rejects_unrelated_network_candidate_when_aweme_is_known():
+    unrelated = "https://v3-web.douyinvod.com/other.mp4?__vid=999"
+
+    class Response:
+        url = unrelated
+        headers = {"content-type": "video/mp4", "content-length": "999999"}
+
+    class Page:
+        def __init__(self):
+            self.response_handler = None
+
+        def on(self, event, handler):
+            if event == "response":
+                self.response_handler = handler
+
+        async def route(self, *args, **kwargs):
+            return None
+
+        async def goto(self, *args, **kwargs):
+            self.response_handler(Response())
+
+        async def evaluate(self, script):
+            return []
+
+        async def wait_for_function(self, *args, **kwargs):
+            return None
+
+        async def close(self):
+            return None
+
+    page = Page()
+
+    class Context:
+        async def new_page(self):
+            return page
+
+    @asynccontextmanager
+    async def fake_session(*args, **kwargs):
+        yield SimpleNamespace(
+            context=Context(), page=None, created_page=False, user_agent="UA"
+        )
+
+    with patch(
+        "backend.services.douyin_media_resolver.open_douyin_cdp_session",
+        fake_session,
+    ):
+        with pytest.raises(RuntimeError, match=r"requested_aweme_id=123.*999"):
+            await resolve_douyin_media("https://www.douyin.com/video/123")
