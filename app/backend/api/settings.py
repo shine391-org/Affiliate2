@@ -668,7 +668,16 @@ async def discover_tts_voices(body: TTSProbeRequest):
         voices = await tts_service.list_voices(
             provider, key, base_url=body.base_url,
         )
-        return {"ok": True, "provider": provider.value, "voices": voices}
+        models = []
+        if provider == tts_service.TTSProvider.ELEVENLABS:
+            from backend.services.elevenlabs_tts_service import list_models
+            models = await list_models(api_key=key, base_url=body.base_url)
+        return {
+            "ok": True,
+            "provider": provider.value,
+            "voices": voices,
+            "models": models,
+        }
     except ElevenLabsAPIError as exc:
         logger.warning(
             "ElevenLabs voice discovery failed: kind=%s status=%s",
