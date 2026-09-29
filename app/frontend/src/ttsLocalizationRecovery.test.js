@@ -22,9 +22,12 @@ test("TTS settings exposes connection test, ElevenLabs voice discovery, and exac
   assert.ok(tts.includes('audioRef.current.play().then'))
 })
 
-test("localization profile warns immediately when its TTS provider mismatches Settings", () => {
-  assert.ok(profiles.includes('Provider không khớp'))
+test("localization profile allows pinned Edge beside another global TTS provider", () => {
+  assert.ok(profiles.includes('edgeCrossProviderOverride'))
+  assert.ok(profiles.includes('ghim Edge TTS'))
+  assert.ok(profiles.includes('không kế thừa API key, model, Base URL hoặc voice'))
   assert.ok(profiles.includes('Dùng TTS hiện tại cho hồ sơ'))
+  assert.ok(profiles.includes('provider hiện tại hoặc Edge TTS'))
 })
 
 test("expert recovery makes changed TTS resumable without locking the editor", () => {
