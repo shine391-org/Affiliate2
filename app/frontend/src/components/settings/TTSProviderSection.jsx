@@ -253,8 +253,10 @@ export default function TTSProviderSection({ settings, updateSettings }) {
       if (!audioRef.current) audioRef.current = new Audio()
       audioRef.current.src = url
       audioRef.current.onended = stopPreview
-      await audioRef.current.play()
-      showSnackbar("Đang phát bản thử giọng", "success")
+      audioRef.current.play().then(
+        () => showSnackbar("Đang phát bản thử giọng", "success"),
+        () => showSnackbar("Trình duyệt đã chặn tự phát; hãy bấm lại Nghe thử giọng", "warning"),
+      )
     } catch (err) {
       showSnackbar(await errorMessage(err, "Nghe thử giọng thất bại"), "error")
     } finally {
