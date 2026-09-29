@@ -59,6 +59,7 @@ export function hydrateLocalizationJobConfig(detail) {
     target: request.target_language || "vi",
     mode: request.mode === "captions_only" ? "captions_only" : "full_dub",
     reviewTranslation: Boolean(request.review_translation),
+    autoRepair: Boolean(request.auto_repair),
     targetAspect: request.target_aspect || manifest.effective_profile?.target_aspect || "9:16",
     enableMask: Boolean(savedMask),
     maskBox: savedMask ? {
