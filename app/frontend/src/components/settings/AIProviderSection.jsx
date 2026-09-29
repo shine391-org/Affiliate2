@@ -85,7 +85,10 @@ export default function AIProviderSection({ settings, updateSettings }) {
     () => [...new Set([...(registry[provider]?.models || []), ...discovered])],
     [registry, provider, discovered],
   )
-  const keyIsSet = !!settings?.ai_api_key_set
+  const savedProvider = settings?.ai_provider_profiles?.[provider] || null
+  const keyIsSet = provider === settings?.ai_provider
+    ? !!settings?.ai_api_key_set
+    : !!savedProvider?.api_key_set
   const connected = savedReady(settings)
 
   const effectiveRuntimeCard = (
@@ -130,16 +133,18 @@ export default function AIProviderSection({ settings, updateSettings }) {
   })
 
   const handleProviderChange = (next) => {
+    const saved = settings?.ai_provider_profiles?.[next] || null
     setProvider(next)
-    setModel("")
+    setModel(saved?.model || "")
     setDiscovered([])
-    setBaseUrl(PROVIDERS[next]?.baseUrl || "")
+    setBaseUrl(saved?.base_url || PROVIDERS[next]?.baseUrl || "")
+    setApiKey("")
   }
 
   const handleSave = async () => {
     const hasNewKey = !!apiKey.trim()
     const switchingProvider = provider !== (settings?.ai_provider || "openai")
-    if (meta.keyRequired && !hasNewKey && (!keyIsSet || switchingProvider)) {
+    if (meta.keyRequired && !hasNewKey && !keyIsSet) {
       showSnackbar("Dán API key cho nhà cung cấp này", "warning")
       return
     }
@@ -259,7 +264,11 @@ export default function AIProviderSection({ settings, updateSettings }) {
       <FormControl size="small" fullWidth>
         <InputLabel>Nhà cung cấp</InputLabel>
         <Select value={provider} label="Nhà cung cấp" onChange={(e) => handleProviderChange(e.target.value)} disabled={saving || probing}>
-          {Object.entries(PROVIDERS).map(([id, item]) => <MenuItem key={id} value={id}>{item.label}</MenuItem>)}
+          {Object.entries(PROVIDERS).map(([id, item]) => (
+            <MenuItem key={id} value={id}>
+              {item.label}{settings?.ai_provider_profiles?.[id] ? " · đã lưu" : ""}
+            </MenuItem>
+          ))}
         </Select>
       </FormControl>
 
@@ -275,20 +284,34 @@ export default function AIProviderSection({ settings, updateSettings }) {
         />
       )}
 
-      <TextField
-        label="ID mô hình"
-        size="small"
-        fullWidth
-        value={effectiveModel}
-        onChange={(e) => setModel(e.target.value)}
-        placeholder="ví dụ: qwen3:14b hoặc provider/model"
-        disabled={saving || probing}
-        inputProps={{ list: "ai-model-suggestions" }}
-        helperText="Nhập bất kỳ ID mô hình nào hoặc dò tìm từ endpoint được hỗ trợ."
-      />
-      <datalist id="ai-model-suggestions">
-        {suggestions.map((m) => <option key={m} value={m} />)}
-      </datalist>
+      {suggestions.length > 0 && (
+        <FormControl size="small" fullWidth>
+          <InputLabel>Chọn mô hình</InputLabel>
+          <Select
+            value={suggestions.includes(effectiveModel) ? effectiveModel : "__custom__"}
+            label="Chọn mô hình"
+            onChange={(e) => setModel(e.target.value === "__custom__" ? "" : e.target.value)}
+            disabled={saving || probing}
+          >
+            {suggestions.map((m) => <MenuItem key={m} value={m}>{m}</MenuItem>)}
+            <MenuItem value="__custom__"><em>Nhập ID khác…</em></MenuItem>
+          </Select>
+        </FormControl>
+      )}
+      {(suggestions.length === 0 || !suggestions.includes(effectiveModel)) && (
+        <TextField
+          label="ID mô hình"
+          size="small"
+          fullWidth
+          value={effectiveModel}
+          onChange={(e) => setModel(e.target.value)}
+          placeholder="ví dụ: qwen3:14b hoặc provider/model"
+          disabled={saving || probing}
+          helperText={suggestions.length
+            ? "Chọn mô hình đã quét ở trên hoặc nhập ID tùy chỉnh."
+            : "Nhập ID mô hình hoặc bấm Dò tìm mô hình để tải danh sách chọn."}
+        />
+      )}
 
       <TextField
         label={meta.keyRequired ? "API key" : "API key (tùy chọn)"}
@@ -297,7 +320,7 @@ export default function AIProviderSection({ settings, updateSettings }) {
         fullWidth
         value={apiKey}
         onChange={(e) => setApiKey(e.target.value)}
-        placeholder={keyIsSet ? "(để trống để giữ khóa hiện tại)" : (meta.placeholder || "tùy chọn với máy chủ cục bộ")}
+        placeholder={keyIsSet ? "(đã lưu cho provider này — để trống để giữ)" : (meta.placeholder || "tùy chọn với máy chủ cục bộ")}
         disabled={saving || probing}
         autoComplete="off"
         InputProps={{
