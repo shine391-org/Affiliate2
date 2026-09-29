@@ -1628,6 +1628,8 @@ async def run_tool_translate(
                             "rewrite_count": dubbing_rewrite_count,
                             "rewrite_provider": profile.rewrite_provider,
                             "rewrite_model": profile.rewrite_model,
+                            "rewrite_fallback_provider": profile.rewrite_fallback_provider,
+                            "rewrite_fallback_model": profile.rewrite_fallback_model,
                         },
                     )
                     if dubbing_rewrite_count:
@@ -1677,6 +1679,8 @@ async def run_tool_translate(
                             "rewrite_count": int(getattr(exc, "rewrite_count", 0) or 0),
                             "rewrite_provider": profile.rewrite_provider,
                             "rewrite_model": profile.rewrite_model,
+                            "rewrite_fallback_provider": profile.rewrite_fallback_provider,
+                            "rewrite_fallback_model": profile.rewrite_fallback_model,
                             "max_raw_required_speed": max(
                                 [1.0, *[
                                     float(item.get("required_speed") or 1.0)
