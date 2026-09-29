@@ -26,14 +26,26 @@ def _media_metadata_with_identity(
 
 
 def _detect_platform(url: str) -> str:
-    """Extract platform name from any URL domain — fully generic, no hardcoded list."""
+    """Extract platform name while preserving identity-sensitive host aliases."""
     from urllib.parse import urlparse
     try:
-        host = urlparse(url).hostname or ""
+        host = (urlparse(url).hostname or "").lower().rstrip(".")
     except Exception:
         return "unknown"
+
+    # Douyin short/share hosts carry the same requested aweme identity as
+    # www.douyin.com. Returning "v" / "iesdouyin" here bypasses the fail-closed
+    # download guard and can send an exact-identity failure to ai_fix_url().
+    if (
+        host == "douyin.com"
+        or host.endswith(".douyin.com")
+        or host == "iesdouyin.com"
+        or host.endswith(".iesdouyin.com")
+    ):
+        return "douyin"
+
     # Strip www. and take the domain name (e.g. "bilibili.com" → "bilibili")
-    host = host.lstrip("www.")
+    host = host.removeprefix("www.")
     parts = host.rsplit(".", 1)  # ["bilibili", "com"] or ["youtube", "co.uk"] etc
     if len(parts) >= 1:
         # Handle two-part TLDs like "co.uk", "com.br"
