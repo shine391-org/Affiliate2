@@ -60,7 +60,7 @@ export default function AIProviderSection({ settings, updateSettings }) {
     () => [...new Set([...(registry[provider]?.models || []), ...discovered])],
     [registry, provider, discovered],
   )
-  const keyIsSet = !!selected?.api_key_set
+  const keyIsSet = !!selected?.api_key_set && selected?.provider === provider
 
   const loadConnection = (id) => {
     const cfg = connections[id]
