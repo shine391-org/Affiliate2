@@ -436,7 +436,7 @@ export default function StudioLocalize({ source, sourcesLoading }) {
               <Switch
                 checked={autoRepair}
                 onChange={(e) => toggleAutoRepair(e.target.checked)}
-                disabled={autoRepairBusy}
+                disabled={autoRepairBusy || activeLocalization}
               />
             }
             label={
@@ -628,7 +628,7 @@ export default function StudioLocalize({ source, sourcesLoading }) {
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }}>
           <Box sx={{ flex: 1 }}><Typography variant="h6" sx={{ fontWeight: 800 }}>Bản địa hóa</Typography><Typography variant="caption" color="text.secondary">Một tác vụ Phase C xuyên suốt Nguồn → Bản chép lời → Bản dịch → Giọng & Nhịp → Kết xuất → QC</Typography></Box>
           <FormControlLabel
-            control={<Switch size="small" checked={autoRepair} onChange={(e) => toggleAutoRepair(e.target.checked)} disabled={autoRepairBusy} />}
+            control={<Switch size="small" checked={autoRepair} onChange={(e) => toggleAutoRepair(e.target.checked)} disabled={autoRepairBusy || activeLocalization} />}
             label={<Typography variant="body2">Tự động sửa lỗi</Typography>}
           />
           <Button variant="outlined" startIcon={<BatchPredictionOutlinedIcon />} onClick={() => setBatchOpen(true)}>Chạy hàng loạt</Button>
