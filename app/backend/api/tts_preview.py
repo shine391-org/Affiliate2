@@ -39,6 +39,7 @@ def _prune_previews(preview_dir: Path) -> None:
 
 
 class _PreviewBody(BaseModel):
+    connection_id: str | None = None
     provider: str
     voice_id: str
     api_key: str | None = None
@@ -65,6 +66,7 @@ async def tts_preview(body: _PreviewBody):
         raise HTTPException(400, f"Unknown provider: {provider_name}") from exc
 
     probe = settings_api.TTSProbeRequest(
+        connection_id=body.connection_id,
         provider=provider.value,
         api_key=body.api_key,
         base_url=body.base_url,
