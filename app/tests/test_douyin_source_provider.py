@@ -432,10 +432,18 @@ async def test_creator_snapshot_falls_back_to_creator_page_when_posts_api_is_403
                 },
             ]
 
-    page = Page()
+    user_page = Page()
+    dom_page = Page()
+    dom_page.close = AsyncMock()
+
+    class Context:
+        async def new_page(self):
+            return dom_page
+
     session = SimpleNamespace(
-        context=object(),
-        page=page,
+        context=Context(),
+        page=user_page,
+        created_page=False,
         cookie_dict={"UIFID": "session-derived"},
         ms_token="token",
     )
@@ -460,11 +468,13 @@ async def test_creator_snapshot_falls_back_to_creator_page_when_posts_api_is_403
     assert history.status == ProviderStatus.SUCCESS
     assert [item["video_id"] for item in history.items] == ["123", "456"]
     assert history.items[0]["video_url"] == "https://www.douyin.com/video/123"
-    page.goto.assert_awaited_once_with(
+    user_page.goto.assert_not_awaited()
+    dom_page.goto.assert_awaited_once_with(
         "https://www.douyin.com/user/creator",
         wait_until="domcontentloaded",
         timeout=30_000,
     )
+    dom_page.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio
