@@ -746,6 +746,15 @@ async def upsert_ai_connection(body: AIConnectionRequest):
                 detail=f"AI connection id '{connection_id}' already exists. Choose another name or edit the existing connection.",
             )
         existing = connections.get(connection_id, {})
+        if existing.get("archived"):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"AI connection id '{connection_id}' is archived and reserved "
+                    "for existing jobs. Create a new connection ID instead of "
+                    "reusing archived identity."
+                ),
+            )
         provider_changed = bool(
             existing.get("provider")
             and str(existing.get("provider")).strip().lower() != provider
@@ -848,6 +857,15 @@ async def upsert_tts_connection(body: TTSConnectionRequest):
                 detail=f"TTS connection id '{connection_id}' already exists. Choose another name or edit the existing connection.",
             )
         existing = connections.get(connection_id, {})
+        if existing.get("archived"):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"TTS connection id '{connection_id}' is archived and reserved "
+                    "for existing jobs. Create a new connection ID instead of "
+                    "reusing archived identity."
+                ),
+            )
         provider_changed = bool(
             existing.get("provider")
             and str(existing.get("provider")).strip().lower() != provider
