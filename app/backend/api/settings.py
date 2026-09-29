@@ -2,11 +2,12 @@
 # Copyright (c) 2025-2026 ViralMint Contributors
 """REST /api/settings — user settings CRUD + credential testing + OAuth callbacks."""
 import asyncio
+import json
 import logging
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 
 from backend.core.localization import (
@@ -40,6 +41,76 @@ def _validated_browser_override(browser: str, override: str | None) -> str | Non
     return override if resolved.get("found") else None
 
 
+def _load_provider_registry(raw: str | None) -> dict[str, dict]:
+    try:
+        value = json.loads(raw or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(provider).strip().lower(): dict(config)
+        for provider, config in value.items()
+        if str(provider).strip() and isinstance(config, dict)
+    }
+
+
+def _save_provider_registry(value: dict[str, dict]) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _capture_ai_provider(registry: dict[str, dict], settings_row) -> None:
+    provider = (getattr(settings_row, "ai_provider", None) or "").strip().lower()
+    if not provider:
+        return
+    registry[provider] = {
+        "model": getattr(settings_row, "ai_model", None),
+        "base_url": getattr(settings_row, "ai_base_url", None),
+        "api_key_encrypted": getattr(settings_row, "ai_api_key_encrypted", None),
+    }
+
+
+def _capture_tts_provider(registry: dict[str, dict], settings_row) -> None:
+    provider = (getattr(settings_row, "tts_provider", None) or "").strip().lower()
+    if not provider:
+        return
+    registry[provider] = {
+        "voice": getattr(settings_row, "preferred_tts_voice", None),
+        "model": getattr(settings_row, "tts_model", None),
+        "base_url": getattr(settings_row, "tts_base_url", None),
+        "region": getattr(settings_row, "tts_region", None),
+        "api_key_encrypted": getattr(settings_row, "tts_api_key_encrypted", None),
+    }
+
+
+def _public_ai_provider_profiles(settings_row) -> dict[str, dict]:
+    registry = _load_provider_registry(getattr(settings_row, "ai_provider_profiles_json", None))
+    _capture_ai_provider(registry, settings_row)
+    return {
+        provider: {
+            "model": cfg.get("model"),
+            "base_url": cfg.get("base_url"),
+            "api_key_set": bool(cfg.get("api_key_encrypted")),
+        }
+        for provider, cfg in registry.items()
+    }
+
+
+def _public_tts_provider_profiles(settings_row) -> dict[str, dict]:
+    registry = _load_provider_registry(getattr(settings_row, "tts_provider_profiles_json", None))
+    _capture_tts_provider(registry, settings_row)
+    return {
+        provider: {
+            "voice": cfg.get("voice"),
+            "model": cfg.get("model"),
+            "base_url": cfg.get("base_url"),
+            "region": cfg.get("region"),
+            "api_key_set": bool(cfg.get("api_key_encrypted")),
+        }
+        for provider, cfg in registry.items()
+    }
+
+
 # ── Pydantic schemas ──────────────────────────────────────────────────────────
 
 class SettingsResponse(BaseModel):
@@ -48,6 +119,7 @@ class SettingsResponse(BaseModel):
     ai_model: Optional[str] = None
     ai_base_url: Optional[str] = None
     ai_api_key_set: bool = False  # masked — never returns the actual key
+    ai_provider_profiles: dict[str, dict] = Field(default_factory=dict)
 
     # Service API keys (BYOK) — booleans only, never the plaintext key
     youtube_api_key_set: bool = False
@@ -79,6 +151,7 @@ class SettingsResponse(BaseModel):
     tts_base_url: Optional[str] = None
     tts_region: Optional[str] = None
     tts_api_key_set: bool = False
+    tts_provider_profiles: dict[str, dict] = Field(default_factory=dict)
     caption_style: str = "viral"
     caption_enabled: bool = True
     music_enabled: bool = True
@@ -152,6 +225,7 @@ async def get_settings():
         ai_model=s.ai_model,
         ai_base_url=s.ai_base_url,
         ai_api_key_set=bool(s.ai_api_key_encrypted),
+        ai_provider_profiles=_public_ai_provider_profiles(s),
         youtube_api_key_set=bool(s.youtube_api_key_encrypted),
         huggingface_token_set=bool(s.huggingface_token_encrypted),
         meta_page_access_token_set=bool(getattr(s, "meta_page_access_token_encrypted", None)),
@@ -186,6 +260,7 @@ async def get_settings():
         tts_base_url=s.tts_base_url,
         tts_region=s.tts_region,
         tts_api_key_set=bool(s.tts_api_key_encrypted),
+        tts_provider_profiles=_public_tts_provider_profiles(s),
         caption_style=s.caption_style or "viral",
         caption_enabled=s.caption_enabled if s.caption_enabled is not None else True,
         music_enabled=s.music_enabled if s.music_enabled is not None else True,
@@ -209,21 +284,34 @@ async def update_settings(update: SettingsUpdate):
             s = UserSettings(user_id="local")
             db.add(s)
 
-        # AI provider preference (BYOK). One encrypted key is stored, so a
-        # provider switch without a replacement key MUST clear the old secret;
-        # otherwise an OpenAI key can be sent to Anthropic/a local endpoint.
+        # AI provider connections are persisted per provider. The active row
+        # remains the runtime slot, while the registry remembers previously
+        # entered model/base/key so switching providers restores the old setup
+        # instead of presenting a blank form.
+        ai_registry = _load_provider_registry(
+            getattr(s, "ai_provider_profiles_json", None)
+        )
+        _capture_ai_provider(ai_registry, s)
+
         if update.ai_provider is not None:
             new_provider = update.ai_provider.strip().lower()
-            if new_provider != (s.ai_provider or "").strip().lower() and update.ai_api_key is None:
-                s.ai_api_key_encrypted = None
-            s.ai_provider = new_provider
+            old_provider = (s.ai_provider or "").strip().lower()
+            if new_provider != old_provider:
+                saved = ai_registry.get(new_provider, {})
+                s.ai_provider = new_provider
+                s.ai_model = saved.get("model")
+                s.ai_base_url = saved.get("base_url")
+                s.ai_api_key_encrypted = saved.get("api_key_encrypted")
+            else:
+                s.ai_provider = new_provider
         if update.ai_model is not None:
             s.ai_model = update.ai_model or None
         if update.ai_base_url is not None:
             s.ai_base_url = update.ai_base_url.strip() or None
         if update.ai_api_key is not None:
-            # Empty string clears the stored key; otherwise encrypt + store
             s.ai_api_key_encrypted = encrypt(update.ai_api_key) if update.ai_api_key else None
+        _capture_ai_provider(ai_registry, s)
+        s.ai_provider_profiles_json = _save_provider_registry(ai_registry)
 
         # Service API keys (BYOK) — empty string clears, populated value encrypts
         if update.youtube_api_key is not None:
@@ -294,25 +382,24 @@ async def update_settings(update: SettingsUpdate):
         # Preference fields
         if update.preferred_voice_id is not None:
             s.preferred_voice_id = update.preferred_voice_id
+        tts_registry = _load_provider_registry(
+            getattr(s, "tts_provider_profiles_json", None)
+        )
+        _capture_tts_provider(tts_registry, s)
+
         if update.tts_provider is not None:
             new_tts_provider = update.tts_provider.strip().lower()
-            provider_changed = (
-                new_tts_provider != (s.tts_provider or "").strip().lower()
-            )
-            if provider_changed:
-                if update.tts_api_key is None:
-                    s.tts_api_key_encrypted = None
-                # Provider-scoped identifiers/endpoints must not silently ride
-                # across a switch (e.g. an Azure voice/base URL into ElevenLabs).
-                if update.preferred_tts_voice is None:
-                    s.preferred_tts_voice = None
-                if update.tts_model is None:
-                    s.tts_model = None
-                if update.tts_base_url is None:
-                    s.tts_base_url = None
-                if update.tts_region is None:
-                    s.tts_region = None
-            s.tts_provider = new_tts_provider
+            old_tts_provider = (s.tts_provider or "").strip().lower()
+            if new_tts_provider != old_tts_provider:
+                saved = tts_registry.get(new_tts_provider, {})
+                s.tts_provider = new_tts_provider
+                s.preferred_tts_voice = saved.get("voice")
+                s.tts_model = saved.get("model")
+                s.tts_base_url = saved.get("base_url")
+                s.tts_region = saved.get("region")
+                s.tts_api_key_encrypted = saved.get("api_key_encrypted")
+            else:
+                s.tts_provider = new_tts_provider
         if update.preferred_tts_voice is not None:
             s.preferred_tts_voice = update.preferred_tts_voice or None
         if update.tts_model is not None:
@@ -330,6 +417,9 @@ async def update_settings(update: SettingsUpdate):
             s.tts_region = update.tts_region.strip() or None
         if update.tts_api_key is not None:
             s.tts_api_key_encrypted = encrypt(update.tts_api_key) if update.tts_api_key else None
+        _capture_tts_provider(tts_registry, s)
+        s.tts_provider_profiles_json = _save_provider_registry(tts_registry)
+
         if update.caption_style is not None:
             s.caption_style = update.caption_style
         if update.caption_enabled is not None:
@@ -384,9 +474,15 @@ async def _tts_probe_key(body: TTSProbeRequest) -> str:
         return body.api_key.strip()
     saved = await _load_saved_tts_settings()
     provider = (body.provider or "").strip().lower()
-    if not saved or (saved.tts_provider or "").strip().lower() != provider:
+    if not saved:
         return ""
-    encrypted = getattr(saved, "tts_api_key_encrypted", None)
+    if (saved.tts_provider or "").strip().lower() == provider:
+        encrypted = getattr(saved, "tts_api_key_encrypted", None)
+    else:
+        profile = _load_provider_registry(
+            getattr(saved, "tts_provider_profiles_json", None)
+        ).get(provider, {})
+        encrypted = profile.get("api_key_encrypted")
     return decrypt_safe(encrypted) if encrypted else ""
 
 
@@ -403,11 +499,16 @@ async def _probe_key(body: AIProbeRequest) -> str:
             select(UserSettings).where(UserSettings.user_id == "local")
         )
         s = result.scalar_one_or_none()
-    # A stored key only belongs to the stored provider. Never reuse it while
-    # probing a different endpoint/provider selected in the edit form.
-    if not s or (s.ai_provider or "").lower().strip() != provider:
+    if not s:
         return ""
-    return decrypt_safe(s.ai_api_key_encrypted) if s.ai_api_key_encrypted else ""
+    if (s.ai_provider or "").lower().strip() == provider:
+        encrypted = s.ai_api_key_encrypted
+    else:
+        profile = _load_provider_registry(
+            getattr(s, "ai_provider_profiles_json", None)
+        ).get(provider, {})
+        encrypted = profile.get("api_key_encrypted")
+    return decrypt_safe(encrypted) if encrypted else ""
 
 
 @router.get("/settings/ai/effective")
