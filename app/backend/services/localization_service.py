@@ -688,6 +688,7 @@ async def _call_ai_chat_resilient(
     total_timeout_s: float = 180,
     progress_cb=None,
     stage: str = "translation",
+    route_state: _AIStageRouteState | None = None,
 ) -> str:
     """One owner for AI retry/fallback with hard wall-clock budgets.
 
@@ -701,12 +702,26 @@ async def _call_ai_chat_resilient(
     loop = asyncio.get_running_loop()
     deadline = loop.time() + float(total_timeout_s)
     last_error: Exception | None = None
-    clients = [("primary", ai)]
-    if fallback_ai is not None:
-        clients.append(("fallback", fallback_ai))
 
-    usable_clients = [(role, client) for role, client in clients if client is not None]
-    for client_index, (role, client) in enumerate(usable_clients):
+    if route_state is not None:
+        start_index = min(route_state.sticky_index, len(route_state.clients) - 1)
+        usable_clients = [
+            (
+                "primary" if idx == 0 else f"fallback-{idx}",
+                route_state.clients[idx],
+                idx,
+            )
+            for idx in range(start_index, len(route_state.clients))
+        ]
+    else:
+        raw_clients = [ai] + ([fallback_ai] if fallback_ai is not None else [])
+        usable_clients = [
+            ("primary" if idx == 0 else f"fallback-{idx}", client, idx)
+            for idx, client in enumerate(raw_clients)
+            if client is not None
+        ]
+
+    for client_pos, (role, client, route_index) in enumerate(usable_clients):
         if hasattr(client, "max_retries"):
             client.max_retries = 0
 
@@ -714,7 +729,7 @@ async def _call_ai_chat_resilient(
         # provider still in the chain. Otherwise 3 hung primary attempts can
         # consume the entire global deadline and the configured fallback never
         # gets a single request.
-        providers_left = len(usable_clients) - client_index
+        providers_left = len(usable_clients) - client_pos
         provider_deadline = min(
             deadline,
             loop.time() + max(0.0, (deadline - loop.time()) / max(providers_left, 1)),
@@ -746,12 +761,25 @@ async def _call_ai_chat_resilient(
                 "timeout_s": round(timeout_s, 1),
             })
             try:
-                return await asyncio.wait_for(
+                result = await asyncio.wait_for(
                     client.chat(messages=messages, max_tokens=max_tokens),
                     timeout=timeout_s,
                 )
+                if route_state is not None:
+                    route_state.sticky_index = route_index
+                return result
             except Exception as exc:
                 last_error = exc
+                failure = {
+                    "connection_id": getattr(client, "connection_name", None),
+                    "provider": getattr(getattr(client, "provider", None), "value", str(getattr(client, "provider", ""))),
+                    "model": getattr(client, "model", None),
+                    "attempt": attempt,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc)[:240],
+                }
+                if route_state is not None:
+                    route_state.failure_chain.append(failure)
                 await _emit_ai_progress(progress_cb, {
                     "event": "error",
                     "stage": stage,
@@ -790,12 +818,14 @@ async def _call_ai_chat_resilient(
                     })
                     await asyncio.sleep(max(0.0, backoff))
 
-        if role == "primary" and fallback_ai is not None:
+        next_pos = client_pos + 1
+        if next_pos < len(usable_clients):
+            _next_role, next_client, _next_index = usable_clients[next_pos]
             await _emit_ai_progress(progress_cb, {
                 "event": "switch_fallback",
                 "stage": stage,
-                "provider": getattr(fallback_ai, "connection_name", None) or getattr(getattr(fallback_ai, "provider", None), "value", str(getattr(fallback_ai, "provider", ""))),
-                "model": getattr(fallback_ai, "model", None),
+                "provider": getattr(next_client, "connection_name", None) or getattr(getattr(next_client, "provider", None), "value", str(getattr(next_client, "provider", ""))),
+                "model": getattr(next_client, "model", None),
             })
 
     if loop.time() >= deadline:
