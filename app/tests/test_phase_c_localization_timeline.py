@@ -6,6 +6,7 @@ from backend.core.localization import (
     localization_segments_from_source,
     localization_transcript_from_source,
 )
+from backend.services.localization_service import LocalizationTimingError
 
 
 def test_whisper_segments_become_explicit_source_coordinates():
@@ -95,3 +96,28 @@ def test_invalid_source_timestamp_fails_instead_of_becoming_zero(bad):
         localization_segments_from_source([
             {"start": bad, "end": 1.0, "text": "bad timestamp"}
         ])
+
+
+
+def test_timing_error_preserves_c7_rewrite_audit():
+    unresolved = [{
+        "chunk_id": 7,
+        "reason": "timing_overflow",
+        "required_speed": 1.49,
+        "speed_max": 1.30,
+    }]
+    audit = [{
+        "chunk_id": 7,
+        "reason": "rewrite_not_shorter",
+    }, *unresolved]
+
+    error = LocalizationTimingError(
+        unresolved,
+        rewrite_count=2,
+        all_issues=audit,
+    )
+
+    assert error.rewrite_count == 2
+    assert error.issues == unresolved
+    assert error.all_issues == audit
+    assert "chunk 7: speed 1.49x" in str(error)
