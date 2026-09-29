@@ -308,6 +308,31 @@ def _ai_client_for_selector(
     encrypted = saved.get("api_key_encrypted")
     key = decrypt_safe(encrypted) if encrypted else ""
 
+    # Reproducible jobs may have materialized an environment-backed provider
+    # even when there is no Settings row/registry entry. Preserve that path on
+    # resume instead of accidentally turning "env OpenAI" into "missing key".
+    if not key and not saved:
+        try:
+            from backend.core.ai_provider import AIProvider, COMPATIBLE_PRESETS, compatible_base_url
+            env_ai = get_ai_client(None)
+            matches_env = requested == getattr(env_ai.provider, "value", "")
+            if requested in COMPATIBLE_PRESETS and env_ai.provider == AIProvider.COMPATIBLE:
+                preset_base = compatible_base_url(requested, base_url)
+                matches_env = bool(
+                    preset_base
+                    and str(getattr(env_ai, "base_url", "") or "").rstrip("/") == preset_base.rstrip("/")
+                )
+            if matches_env:
+                if model:
+                    env_ai.model = model
+                if base_url:
+                    env_ai.base_url = base_url.rstrip("/")
+                env_ai.max_retries = 0
+                env_ai.connection_name = requested
+                return env_ai
+        except Exception:
+            pass
+
     ai = make_ai_client(
         provider_name=requested,
         api_key=key or "",
