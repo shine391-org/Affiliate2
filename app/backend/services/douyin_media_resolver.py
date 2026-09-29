@@ -181,12 +181,20 @@ def _normalize_dom_candidate(raw) -> _MediaCandidate | None:
         return None
     if not _is_http_media_url(url):
         return None
+    unique_dom_ids = tuple(dict.fromkeys(dom_ids))
+    # Multiple DOM ids mean the owning element/card was not identified
+    # unambiguously (typically a shared feed ancestor containing sibling video
+    # links). DOM evidence is only a fallback when the media URL has no own id,
+    # so ambiguous DOM evidence must prove nothing rather than accidentally
+    # blessing whichever sibling happens to match the request.
+    if len(unique_dom_ids) > 1:
+        unique_dom_ids = ()
     return _MediaCandidate(
         url=url,
         # The media URL's own identity stays separate from the DOM guess so a
         # conflicting DOM association can never launder a wrong video.
         url_aweme_ids=_aweme_ids_from_url(url),
-        dom_aweme_ids=tuple(dict.fromkeys(dom_ids)),
+        dom_aweme_ids=unique_dom_ids,
         provenance=provenance,
         resolution_path="dom",
     )
@@ -453,15 +461,30 @@ async def resolve_douyin_media(
                         const awemeIds = new Set();
                         let node = v;
                         for (let depth = 0; node && depth < 8; depth += 1, node = node.parentElement) {
+                            const localIds = new Set();
                             for (const attr of Array.from(node.attributes || [])) {
                                 const text = String(attr.value || '');
                                 for (const match of text.matchAll(/(?:\/video\/|aweme[_-]?id[=:"']+)(\d+)/gi)) {
-                                    awemeIds.add(match[1]);
+                                    localIds.add(match[1]);
                                 }
                             }
+                            if (node.matches?.('a[href*="/video/"]')) {
+                                const match = String(node.href || '').match(/\/video\/(\d+)/);
+                                if (match) localIds.add(match[1]);
+                            }
+                            // Nearest owning subtree wins. Never keep walking up
+                            // into a feed/container and collect sibling cards.
                             for (const link of node.querySelectorAll?.('a[href*="/video/"]') || []) {
                                 const match = String(link.href || '').match(/\/video\/(\d+)/);
-                                if (match) awemeIds.add(match[1]);
+                                if (match) localIds.add(match[1]);
+                            }
+                            if (localIds.size > 0) {
+                                // One id = useful card evidence. >1 ids =
+                                // ambiguous subtree, intentionally prove none.
+                                if (localIds.size === 1) {
+                                    for (const id of localIds) awemeIds.add(id);
+                                }
+                                break;
                             }
                         }
                         return urls.filter(Boolean).map(url => ({
