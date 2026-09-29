@@ -352,7 +352,7 @@ async def _semantic_chat_with_fallback(
                 "role": role,
                 "attempt": attempt,
                 "max_attempts": max_attempts,
-                "provider": getattr(getattr(ai, "provider", None), "value", str(getattr(ai, "provider", ""))),
+                "provider": getattr(ai, "connection_name", None) or getattr(getattr(ai, "provider", None), "value", str(getattr(ai, "provider", ""))),
                 "model": getattr(ai, "model", None),
                 "timeout_s": round(timeout_s, 1),
             })
