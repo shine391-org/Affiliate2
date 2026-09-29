@@ -1534,6 +1534,46 @@ async def run_tool_translate(
                 )
                 run.start("dubbing")
                 try:
+                    async def _rewrite_progress(event: dict):
+                        name = event.get("event")
+                        provider = str(event.get("provider") or "")
+                        model = str(event.get("model") or "")
+                        role = str(event.get("role") or "primary")
+                        if name == "attempt":
+                            await _tool_progress(
+                                job_id,
+                                54,
+                                (
+                                    f"C7 viết lại · {'fallback' if role == 'fallback' else 'AI chính'} "
+                                    f"{provider}/{model} · thử {event.get('attempt')}/{event.get('max_attempts')}"
+                                ),
+                                user_id,
+                            )
+                        elif name == "error":
+                            await _tool_progress(
+                                job_id,
+                                54,
+                                (
+                                    f"C7 AI lỗi · {provider}/{model} · "
+                                    f"thử {event.get('attempt')}/{event.get('max_attempts')}..."
+                                ),
+                                user_id,
+                            )
+                        elif name == "retry_wait":
+                            await _tool_progress(
+                                job_id,
+                                54,
+                                f"C7 AI tạm lỗi · chờ {event.get('backoff_s')}s rồi thử lại...",
+                                user_id,
+                            )
+                        elif name == "switch_fallback":
+                            await _tool_progress(
+                                job_id,
+                                54,
+                                f"C7 chuyển fallback {provider}/{model}...",
+                                user_id,
+                            )
+
                     regenerate_chunk_ids = {
                         int(x) for x in (run.request.get("regenerate_chunk_ids") or [])
                     }
@@ -1550,6 +1590,7 @@ async def run_tool_translate(
                         # identity sidecar before reusing any raw chunk.
                         reuse_existing_chunks=True,
                         reference_media=asr_input,
+                        progress_cb=_rewrite_progress,
                     )
                     localized = dub.transcript
                     dub_track = dub.dub_track
