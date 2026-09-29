@@ -144,14 +144,23 @@ def materialize_localization_profile(
     translation_clients = _profile_ai_route_clients_compat(
         user_settings, profile, "translation"
     )
+    translation_specs = _profile_ai_route_specs(
+        user_settings, profile, "translation"
+    )
     translation_routes = [
         {
             "connection_id": getattr(client, "connection_name", None)
                 or getattr(getattr(client, "provider", None), "value", "ai"),
+            # Model affects content and is snapshotted. Connection endpoint is
+            # infrastructure: keep it live unless the profile explicitly pins
+            # a per-route base_url override.
             "model": getattr(client, "model", None),
-            "base_url": getattr(client, "base_url", None),
+            "base_url": (
+                translation_specs[index].get("base_url")
+                if index < len(translation_specs) else None
+            ),
         }
-        for client in translation_clients
+        for index, client in enumerate(translation_clients)
     ]
 
     data = profile.model_dump()
@@ -181,14 +190,20 @@ def materialize_localization_profile(
         rewrite_clients = _profile_ai_route_clients_compat(
             user_settings, profile, "rewrite"
         )
+        rewrite_specs = _profile_ai_route_specs(
+            user_settings, profile, "rewrite"
+        )
         rewrite_routes = [
             {
                 "connection_id": getattr(client, "connection_name", None)
                     or getattr(getattr(client, "provider", None), "value", "ai"),
                 "model": getattr(client, "model", None),
-                "base_url": getattr(client, "base_url", None),
+                "base_url": (
+                    rewrite_specs[index].get("base_url")
+                    if index < len(rewrite_specs) else None
+                ),
             }
-            for client in rewrite_clients
+            for index, client in enumerate(rewrite_clients)
         ]
         data["rewrite_routes"] = rewrite_routes
         first_rewrite = rewrite_routes[0]
@@ -218,8 +233,8 @@ def materialize_localization_profile(
             "tts_provider": getattr(tts.provider, "value", str(tts.provider)),
             "tts_model": tts.model,
             "tts_voice": tts.default_voice or None,
-            "tts_base_url": tts.base_url,
-            "tts_region": tts.region,
+            "tts_base_url": profile.tts_base_url,
+            "tts_region": profile.tts_region,
         })
 
     return LocalizationProfile.model_validate(data)
@@ -992,14 +1007,17 @@ async def translate_transcript(
     ).hexdigest()[:16]
     glossary_str = json.dumps(getattr(profile, "glossary", {}) or {}, sort_keys=True, ensure_ascii=False)
     glossary_hash = hashlib.sha256(glossary_str.encode("utf-8")).hexdigest()[:16]
+    route_specs = _profile_ai_route_specs(user_settings, profile, "translation")
     route_fingerprint = [
         {
             "connection_id": getattr(client, "connection_name", None),
             "provider": getattr(getattr(client, "provider", None), "value", str(getattr(client, "provider", ""))),
             "model": getattr(client, "model", ""),
-            "base_url": str(getattr(client, "base_url", "") or "").rstrip("/"),
+            "base_url_override": str(
+                (route_specs[index].get("base_url") if index < len(route_specs) else "") or ""
+            ).rstrip("/"),
         }
-        for client in route_clients
+        for index, client in enumerate(route_clients)
     ]
     checkpoint_meta = {
         "semantic_hash": semantic_sig,
