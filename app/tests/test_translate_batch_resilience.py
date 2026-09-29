@@ -2369,3 +2369,41 @@ async def test_translation_recursive_shape_split_shares_one_batch_deadline(monke
     assert all(value is not None for value in seen_deadlines)
     first = seen_deadlines[0]
     assert all(value == first for value in seen_deadlines)
+
+
+
+@pytest.mark.asyncio
+async def test_ai_failure_provenance_redacts_api_key():
+    events = []
+
+    class SecretFailure:
+        connection_name = "cloud-main"
+        provider = SimpleNamespace(value="openai")
+        model = "model-x"
+        api_key = "super-secret-key"
+        max_retries = None
+
+        async def chat(self, **kwargs):
+            raise RuntimeError("request failed with token super-secret-key")
+
+    client = SecretFailure()
+    state = ls._AIStageRouteState([client])
+
+    with pytest.raises(RuntimeError):
+        await ls._call_ai_chat_resilient(
+            client,
+            None,
+            messages=[{"role": "user", "content": "x"}],
+            max_attempts=1,
+            attempt_timeout_s=1,
+            total_timeout_s=2,
+            progress_cb=lambda event: events.append(dict(event)),
+            route_state=state,
+        )
+
+    serialized = json.dumps({
+        "chain": state.failure_chain,
+        "events": events,
+    })
+    assert "super-secret-key" not in serialized
+    assert "***" in serialized
