@@ -27,10 +27,14 @@ test("localization profile warns immediately when its TTS provider mismatches Se
   assert.ok(profiles.includes('Dùng TTS hiện tại cho hồ sơ'))
 })
 
-test("expert recovery distinguishes persisted rerun from current-settings rebind", () => {
+test("expert recovery makes changed TTS resumable without locking the editor", () => {
   assert.ok(expert.includes('/rebind-tts'))
-  assert.ok(expert.includes('Chạy lại với cấu hình job'))
-  assert.ok(expert.includes('Dùng TTS hiện tại & chạy lại lồng tiếng'))
+  assert.ok(expert.includes('Dùng TTS hiện tại & tiếp tục'))
+  assert.ok(expert.includes('Cấu hình TTS đã thay đổi'))
+  assert.ok(expert.includes('không chạy lại tách âm thanh, ASR hoặc dịch thuật'))
+  assert.ok(expert.includes('Chạy lại từ '))
+  assert.ok(!expert.includes('Chạy lại với cấu hình job'))
+  assert.ok(expert.includes('await load()'))
   assert.ok(expert.includes('TTS của job'))
   assert.ok(expert.includes('TTS hiện tại'))
 })
