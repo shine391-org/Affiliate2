@@ -49,6 +49,10 @@ class TTSRebindRequest(BaseModel):
     model: str | None = None
 
 
+class AutoRepairRequest(BaseModel):
+    enabled: bool
+
+
 # Only GPT-SoVITS consumes reference audio in the canonical TTS interface; every
 # other provider ignores it. A reference clip is therefore provider-scoped state
 # once the provider changes to one that cannot use it.
@@ -645,24 +649,76 @@ async def rebind_localization_tts(job_id: str, body: TTSRebindRequest):
 
 @router.post("/jobs/{job_id}/rerun")
 async def rerun_localization_job(job_id: str, body: RerunRequest):
-    """Rerun the SAME persisted job binding from a selected stage.
+    """Rerun the SAME persisted job binding from the exact failed stage.
 
-    This endpoint is deliberately reproducible: it never changes TTS provider,
-    voice, model or credentials merely because global Settings changed. A user
-    who wants to adopt current Settings must use /rebind-tts explicitly.
+    With no explicit stage this is the normal recovery action: choose the first
+    incomplete/failed stage, preserve every completed upstream artifact, and
+    use stage-specific resume state (translation checkpoint or failed dubbing
+    chunks) where possible. Explicit expert reruns keep their previous behavior.
     """
     await _assert_job_inactive(job_id)
     run = _load_run(job_id)
+    smart_retry = body.from_stage is None
     stage = body.from_stage or run.first_incomplete_stage() or "qc"
-    preserve_files = {"checkpoint.json"} if body.from_stage is None and stage == "translation" else set()
-    run.invalidate_from(stage, delete_artifacts=True, preserve_files=preserve_files)
+    preserve_files = {"checkpoint.json"} if smart_retry and stage == "translation" else set()
+    delete_artifacts = True
+
+    if smart_retry and stage == "dubbing":
+        meta = dict(run.record("dubbing").get("metadata") or {})
+        failed_chunk_ids = sorted({
+            int(item.get("chunk_id"))
+            for item in (meta.get("issues") or [])
+            if isinstance(item, dict)
+            and item.get("reason") == "timing_overflow"
+            and item.get("chunk_id") is not None
+        })
+        if failed_chunk_ids:
+            run.update_request({
+                **run.request,
+                "regenerate_chunk_ids": failed_chunk_ids,
+            })
+            # Keep raw chunk files so only the overflowing chunks regenerate.
+            delete_artifacts = False
+
+    run.invalidate_from(
+        stage,
+        delete_artifacts=delete_artifacts,
+        preserve_files=preserve_files,
+    )
     if stage == "separation":
         # This is the explicit recovery path for an intentionally replaced
         # source. All source-derived artifacts were invalidated above, so the
         # current bytes can safely become the new canonical identity.
         run.refresh_source_identity()
     await _dispatch_existing_run(run)
-    return {"ok": True, "job_id": job_id, "from_stage": stage}
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "from_stage": stage,
+        "smart_retry": smart_retry,
+        "preserved_upstream": list(STAGES[:STAGES.index(stage)]),
+        "targeted_chunk_ids": run.request.get("regenerate_chunk_ids", [])
+            if smart_retry and stage == "dubbing" else [],
+    }
+
+
+@router.post("/jobs/{job_id}/auto-repair")
+async def set_localization_auto_repair(job_id: str, body: AutoRepairRequest):
+    """Toggle bounded automatic repair for this persisted localization job."""
+    run = _load_run(job_id)
+    request = {
+        **run.request,
+        "auto_repair": bool(body.enabled),
+    }
+    if not body.enabled:
+        request.pop("last_auto_repair", None)
+    run.update_request(request)
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "auto_repair": bool(body.enabled),
+        "attempts": dict(run.request.get("auto_repair_attempts") or {}),
+    }
 
 
 def _assert_rerender_ready(run: LocalizationRun) -> None:
