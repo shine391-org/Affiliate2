@@ -349,6 +349,7 @@ async def prepare_semantic_transcript(
     *,
     profile: LocalizationProfile,
     user_settings,
+    progress_cb=None,
 ) -> LocalizationTranscript:
     from backend.services.semantic_segmentation import (
         normalize_semantic_cues,
@@ -358,8 +359,23 @@ async def prepare_semantic_transcript(
     normalized = normalize_semantic_cues(transcript)
     if not profile.semantic_segmentation or len(normalized.segments) <= 1:
         return normalized
-    ai = _profile_ai_client(user_settings, profile)
-    return await refine_semantic_cues_with_ai(normalized, ai)
+
+    ai = _profile_ai_client(user_settings, profile, "translation")
+    fallback_ai = _profile_ai_fallback_client(
+        user_settings,
+        profile,
+        "translation",
+        primary_ai=ai,
+    )
+    return await refine_semantic_cues_with_ai(
+        normalized,
+        ai,
+        fallback_ai=fallback_ai,
+        attempt_timeout_s=profile.semantic_ai_attempt_timeout_s,
+        max_attempts=profile.semantic_ai_retry_attempts,
+        total_timeout_s=profile.semantic_ai_total_timeout_s,
+        progress_cb=progress_cb,
+    )
 
 
 def _strip_json_fence(raw: str) -> str:
