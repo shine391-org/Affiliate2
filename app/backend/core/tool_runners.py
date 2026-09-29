@@ -1277,14 +1277,14 @@ async def run_tool_translate(
                 model = str(event.get("model") or "")
                 if name == "attempt":
                     semantic_runtime["attempts"] += 1
-                    if role == "fallback":
+                    if role.startswith("fallback"):
                         semantic_runtime["fallback_provider_used"] = True
                     await _tool_progress(
                         job_id,
                         pct,
                         (
                             f"Phân đoạn ngữ nghĩa {window}/{total} · "
-                            f"{'fallback' if role == 'fallback' else 'AI chính'} "
+                            f"{'fallback' if role.startswith('fallback') else 'AI chính'} "
                             f"{provider}/{model} · thử {event.get('attempt')}/{event.get('max_attempts')}"
                         ),
                         user_id,
@@ -1366,14 +1366,14 @@ async def run_tool_translate(
                 model = str(event.get("model") or "")
                 if name == "attempt":
                     translation_runtime["attempts"] += 1
-                    if role == "fallback":
+                    if role.startswith("fallback"):
                         translation_runtime["fallback_provider_used"] = True
                     await _tool_progress(
                         job_id,
                         pct,
                         (
                             f"Dịch {current}/{total} · "
-                            f"{'fallback' if role == 'fallback' else 'AI chính'} "
+                            f"{'fallback' if role.startswith('fallback') else 'AI chính'} "
                             f"{provider}/{model} · thử {event.get('attempt')}/{event.get('max_attempts')}"
                         ),
                         user_id,
@@ -1431,6 +1431,12 @@ async def run_tool_translate(
                         "translation_fallback_provider": profile.translation_fallback_provider,
                         "translation_fallback_model": profile.translation_fallback_model,
                         "translation_preset": profile.translation_preset,
+                        "translation_routes": [
+                            route.model_dump() for route in profile.translation_routes
+                        ],
+                        "translation_ai": dict(
+                            localized.metadata.get("translation_ai") or {}
+                        ),
                         **translation_runtime,
                     },
                 )
@@ -1442,6 +1448,15 @@ async def run_tool_translate(
                     "translation_model": profile.translation_model,
                     "translation_fallback_provider": profile.translation_fallback_provider,
                     "translation_fallback_model": profile.translation_fallback_model,
+                    "translation_routes": [
+                        route.model_dump() for route in profile.translation_routes
+                    ],
+                    "ai_failure_chain": list(
+                        getattr(exc, "ai_failure_chain", None) or []
+                    ),
+                    "ai_selected_connection": getattr(
+                        exc, "ai_selected_connection", None
+                    ),
                 }
                 run.fail("translation", exc)
                 raise
@@ -1546,7 +1561,7 @@ async def run_tool_translate(
                                 job_id,
                                 54,
                                 (
-                                    f"C7 viết lại · {'fallback' if role == 'fallback' else 'AI chính'} "
+                                    f"C7 viết lại · {'fallback' if role.startswith('fallback') else 'AI chính'} "
                                     f"{provider}/{model} · thử {event.get('attempt')}/{event.get('max_attempts')}"
                                 ),
                                 user_id,
@@ -1632,6 +1647,12 @@ async def run_tool_translate(
                             "rewrite_model": profile.rewrite_model,
                             "rewrite_fallback_provider": profile.rewrite_fallback_provider,
                             "rewrite_fallback_model": profile.rewrite_fallback_model,
+                            "rewrite_routes": [
+                                route.model_dump() for route in profile.rewrite_routes
+                            ],
+                            "rewrite_ai": dict(
+                                localized.metadata.get("dubbing", {}).get("rewrite_ai") or {}
+                            ),
                         },
                     )
                     if dubbing_rewrite_count:
