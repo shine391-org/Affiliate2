@@ -422,6 +422,44 @@ async def _semantic_chat_with_fallback(
     return None
 
 
+async def _advance_semantic_route_on_invalid(
+    route_clients,
+    route_state,
+    *,
+    error: Exception,
+    progress_cb=None,
+    window_index: int,
+    window_total: int,
+) -> bool:
+    """Advance sticky semantic route after a structurally-invalid 200 response."""
+    if not route_clients or route_state is None:
+        return False
+    current_index = int(route_state.get("sticky_index", 0) or 0)
+    if current_index + 1 >= len(route_clients):
+        return False
+
+    current = route_clients[current_index]
+    route_state.setdefault("failure_chain", []).append({
+        "connection_id": getattr(current, "connection_name", None),
+        "provider": getattr(getattr(current, "provider", None), "value", str(getattr(current, "provider", ""))),
+        "model": getattr(current, "model", None),
+        "attempt": 1,
+        "error_type": "InvalidStructuredOutput",
+        "error": str(error)[:220],
+    })
+    route_state["sticky_index"] = current_index + 1
+    next_client = route_clients[current_index + 1]
+    await _emit_semantic_progress(progress_cb, {
+        "event": "switch_fallback",
+        "window": window_index,
+        "total": window_total,
+        "reason": "invalid_structured_output",
+        "provider": getattr(next_client, "connection_name", None) or getattr(getattr(next_client, "provider", None), "value", str(getattr(next_client, "provider", ""))),
+        "model": getattr(next_client, "model", None),
+    })
+    return True
+
+
 async def _refine_words_with_ai(
     transcript: LocalizationTranscript,
     ai,
@@ -496,31 +534,34 @@ Return ONLY JSON:
 [{{"ids":["w00001","w00002"]}}, {{"ids":["w00003"]}}]
 Every input word ID must appear exactly once and in the same order."""
 
-            raw = await _semantic_chat_with_fallback(
-                ai,
-                fallback_ai,
-                route_clients=route_clients,
-                route_state=route_state,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=1800,
-                attempt_timeout_s=attempt_timeout_s,
-                max_attempts=max_attempts,
-                deadline_at=deadline_at,
-                progress_cb=progress_cb,
-                window_index=window_index,
-                window_total=window_total,
-            )
-            if raw is None:
-                # Optional AI refinement exhausted its bounded budget/provider
-                # chain. Open a circuit breaker and finish deterministically.
-                ai_available = False
-                groups = _deterministic_word_groups(window)
-                await _emit_semantic_progress(progress_cb, {
-                    "event": "deterministic_fallback",
-                    "window": window_index,
-                    "total": window_total,
-                })
-            else:
+            messages = [{"role": "user", "content": prompt}]
+            while True:
+                raw = await _semantic_chat_with_fallback(
+                    ai,
+                    fallback_ai,
+                    route_clients=route_clients,
+                    route_state=route_state,
+                    messages=messages,
+                    max_tokens=1800,
+                    attempt_timeout_s=attempt_timeout_s,
+                    max_attempts=max_attempts,
+                    deadline_at=deadline_at,
+                    progress_cb=progress_cb,
+                    window_index=window_index,
+                    window_total=window_total,
+                )
+                if raw is None:
+                    # Optional AI refinement exhausted its bounded budget/provider
+                    # chain. Open a circuit breaker and finish deterministically.
+                    ai_available = False
+                    groups = _deterministic_word_groups(window)
+                    await _emit_semantic_progress(progress_cb, {
+                        "event": "deterministic_fallback",
+                        "window": window_index,
+                        "total": window_total,
+                    })
+                    break
+
                 try:
                     text = (raw or "").strip()
                     if text.startswith("```"):
@@ -542,10 +583,22 @@ Every input word ID must appear exactly once and in the same order."""
                         }
                         if len(known) > 1:
                             raise ValueError("semantic group crosses speaker boundary")
-                except Exception:
-                    # Invalid model output is a data-quality fallback, not
-                    # provider unavailability: later windows may still use AI.
+                    break
+                except Exception as exc:
+                    if await _advance_semantic_route_on_invalid(
+                        route_clients,
+                        route_state,
+                        error=exc,
+                        progress_cb=progress_cb,
+                        window_index=window_index,
+                        window_total=window_total,
+                    ):
+                        continue
+                    # With no healthy route left, deterministic grouping is the
+                    # semantic safety net. Later windows may still use the same
+                    # final route because malformed output is not a transport outage.
                     groups = _deterministic_word_groups(window)
+                    break
 
         generated = _word_groups_to_segments(
             groups,
@@ -646,29 +699,32 @@ Return ONLY JSON:
 [{{"ids":["cue-id-1","cue-id-2"]}}, {{"ids":["cue-id-3"]}}]
 Every input ID must appear exactly once and in the same order."""
 
-        raw = await _semantic_chat_with_fallback(
-            ai,
-            fallback_ai,
-            route_clients=route_clients,
-            route_state=route_state,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=1200,
-            attempt_timeout_s=attempt_timeout_s,
-            max_attempts=max_attempts,
-            deadline_at=deadline_at,
-            progress_cb=progress_cb,
-            window_index=window_index,
-            window_total=window_total,
-        )
-        if raw is None:
-            ai_available = False
-            groups = [[seg.id] for seg in window]
-            await _emit_semantic_progress(progress_cb, {
-                "event": "deterministic_fallback",
-                "window": window_index,
-                "total": window_total,
-            })
-        else:
+        messages = [{"role": "user", "content": prompt}]
+        while True:
+            raw = await _semantic_chat_with_fallback(
+                ai,
+                fallback_ai,
+                route_clients=route_clients,
+                route_state=route_state,
+                messages=messages,
+                max_tokens=1200,
+                attempt_timeout_s=attempt_timeout_s,
+                max_attempts=max_attempts,
+                deadline_at=deadline_at,
+                progress_cb=progress_cb,
+                window_index=window_index,
+                window_total=window_total,
+            )
+            if raw is None:
+                ai_available = False
+                groups = [[seg.id] for seg in window]
+                await _emit_semantic_progress(progress_cb, {
+                    "event": "deterministic_fallback",
+                    "window": window_index,
+                    "total": window_total,
+                })
+                break
+
             try:
                 text = (raw or "").strip()
                 if text.startswith("```"):
@@ -689,10 +745,19 @@ Every input ID must appear exactly once and in the same order."""
                     }
                     if len(speakers) > 1:
                         raise ValueError("semantic group crosses speaker boundary")
-            except Exception:
-                # Malformed/invalid grouping falls back only for this window;
-                # it does not imply the provider is unavailable.
+                break
+            except Exception as exc:
+                if await _advance_semantic_route_on_invalid(
+                    route_clients,
+                    route_state,
+                    error=exc,
+                    progress_cb=progress_cb,
+                    window_index=window_index,
+                    window_total=window_total,
+                ):
+                    continue
                 groups = [[seg.id] for seg in window]
+                break
 
         by_id = {seg.id: seg for seg in window}
         for ids in groups:
