@@ -1013,7 +1013,7 @@ async def _translate_batch_resilient(
             ai, batch[mid:], route_state=route_state,
             target_language=target_language, context=context,
             profile=profile, for_dub=for_dub, fallback_ai=fallback_ai,
-            progress_cb=progress_cb,
+            progress_cb=progress_cb, deadline_at=deadline_at,
         )
         return left + right, lf | {mid + i for i in rf}
 
@@ -2330,6 +2330,7 @@ async def synthesize_timed_dub(
             rewrite_state.update(measured_duration_ms=duration_ms, attempt=attempts + 1)
             changed = await _adapt_chunk_items(
                 ai, fallback_ai=fallback_ai, route_state=route_state,
+                deadline_at=rewrite_deadline_at, progress_cb=progress_cb,
                 plan=plan, chunk=chunk, segment_by_id=segment_by_id,
                 target_language=target_language, target_ms=chunk.available_ms,
                 profile=profile, issues=issues, state=rewrite_state,
