@@ -175,8 +175,28 @@ async def test_probed_providers_report_a_verified_connection(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_localization_preflight_accepts_configuration_only_binding(monkeypatch):
-    """A config-only provider passes preflight without claiming a live probe."""
+async def test_localization_preflight_rejects_unsupported_gpt_sovits_language(monkeypatch):
+    """GPT-SoVITS must fail before separation/ASR for unsupported Vietnamese."""
+    from backend.services import localization_service as localization
+
+    runtime = localization.TTSRuntimeConfig(
+        provider=tts_service.TTSProvider.GPT_SOVITS,
+        default_voice="",
+        api_key="",
+        model=None,
+        base_url="http://127.0.0.1:9880",
+        region=None,
+    )
+    monkeypatch.setattr(localization, "_tts_config", lambda *_args, **_kwargs: runtime)
+
+    with pytest.raises(ValueError, match="Chinese/English only"):
+        await localization.validate_localization_tts_preflight(
+            object(), SimpleNamespace(), "Vietnamese",
+        )
+
+
+@pytest.mark.asyncio
+async def test_localization_preflight_accepts_supported_gpt_sovits_language(monkeypatch):
     from backend.services import localization_service as localization
 
     runtime = localization.TTSRuntimeConfig(
@@ -190,7 +210,7 @@ async def test_localization_preflight_accepts_configuration_only_binding(monkeyp
     monkeypatch.setattr(localization, "_tts_config", lambda *_args, **_kwargs: runtime)
 
     health = await localization.validate_localization_tts_preflight(
-        object(), SimpleNamespace(), "Vietnamese",
+        object(), SimpleNamespace(), "English",
     )
 
     assert health["ok"] is True
@@ -248,6 +268,51 @@ async def test_settings_tts_probe_restores_key_for_saved_nonactive_provider(monk
 
     assert restored == "stored-eleven-secret"
     assert missing == ""
+
+
+@pytest.mark.asyncio
+async def test_openai_tts_probe_uses_saved_openai_ai_key_when_tts_slot_has_none(monkeypatch):
+    saved = SimpleNamespace(
+        tts_provider="edge_tts",
+        tts_api_key_encrypted=None,
+        tts_provider_profiles_json="{}",
+        ai_provider="openai",
+        ai_api_key_encrypted="enc-openai",
+        ai_provider_profiles_json="{}",
+    )
+    monkeypatch.setattr(settings_api, "_load_saved_tts_settings", lambda: _async_value(saved))
+    monkeypatch.setattr(settings_api, "decrypt_safe", lambda value: "openai-ai-secret" if value == "enc-openai" else "")
+
+    key = await settings_api._tts_probe_key(
+        settings_api.TTSProbeRequest(provider="openai_tts")
+    )
+
+    assert key == "openai-ai-secret"
+
+
+@pytest.mark.asyncio
+async def test_openai_tts_probe_uses_inactive_saved_openai_registry_key(monkeypatch):
+    saved = SimpleNamespace(
+        tts_provider="edge_tts",
+        tts_api_key_encrypted=None,
+        tts_provider_profiles_json="{}",
+        ai_provider="compatible",
+        ai_api_key_encrypted="enc-compatible",
+        ai_provider_profiles_json=json.dumps({
+            "openai": {"api_key_encrypted": "enc-openai-registry"},
+        }),
+    )
+    monkeypatch.setattr(settings_api, "_load_saved_tts_settings", lambda: _async_value(saved))
+    monkeypatch.setattr(settings_api, "decrypt_safe", lambda value: {
+        "enc-openai-registry": "registry-openai-secret",
+        "enc-compatible": "compatible-secret",
+    }.get(value, ""))
+
+    key = await settings_api._tts_probe_key(
+        settings_api.TTSProbeRequest(provider="openai_tts")
+    )
+
+    assert key == "registry-openai-secret"
 
 
 @pytest.mark.asyncio
@@ -477,3 +542,71 @@ def test_provider_registry_roundtrip_keeps_each_provider_configuration_separate(
     assert ai_registry["openai"]["api_key_encrypted"] == "enc-openai"
     assert ai_registry["openrouter"]["model"] == "anthropic/claude-sonnet-4.6"
     assert ai_registry["openrouter"]["api_key_encrypted"] == "enc-openrouter"
+
+
+@pytest.mark.asyncio
+async def test_settings_provider_switch_roundtrip_restores_ai_and_tts_connections(monkeypatch):
+    """Exercise the real update endpoint A→B→A with one durable settings row."""
+    from backend.models.user_settings import UserSettings
+
+    row = UserSettings(user_id="local")
+    row.ai_provider = "openai"
+    row.tts_provider = "edge_tts"
+
+    class Result:
+        def scalar_one_or_none(self):
+            return row
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+        async def execute(self, _query):
+            return Result()
+        def add(self, _row):
+            return None
+        async def commit(self):
+            return None
+
+    monkeypatch.setattr(settings_api, "AsyncSessionLocal", lambda: FakeSession())
+    monkeypatch.setattr(settings_api, "encrypt", lambda value: "enc::" + value)
+    monkeypatch.setattr(
+        settings_api, "decrypt_safe",
+        lambda value: value.removeprefix("enc::") if value else "",
+    )
+
+    await settings_api.update_settings(settings_api.SettingsUpdate(
+        ai_provider="openai", ai_model="gpt-a", ai_api_key="key-a",
+    ))
+    await settings_api.update_settings(settings_api.SettingsUpdate(
+        ai_provider="openrouter", ai_model="anthropic/b", ai_api_key="key-b",
+    ))
+    restored_ai = await settings_api.update_settings(
+        settings_api.SettingsUpdate(ai_provider="openai")
+    )
+    assert restored_ai.ai_provider == "openai"
+    assert restored_ai.ai_model == "gpt-a"
+    assert restored_ai.ai_api_key_set is True
+    assert restored_ai.ai_provider_profiles["openrouter"]["model"] == "anthropic/b"
+    assert restored_ai.ai_provider_profiles["openrouter"]["api_key_set"] is True
+
+    await settings_api.update_settings(settings_api.SettingsUpdate(
+        tts_provider="elevenlabs",
+        preferred_tts_voice="voice-eleven",
+        tts_model="eleven_multilingual_v2",
+        tts_base_url="https://api.elevenlabs.io/v1",
+        tts_api_key="tts-key-eleven",
+    ))
+    await settings_api.update_settings(settings_api.SettingsUpdate(
+        tts_provider="edge_tts",
+        preferred_tts_voice="vi-VN-HoaiMyNeural",
+    ))
+    restored_tts = await settings_api.update_settings(
+        settings_api.SettingsUpdate(tts_provider="elevenlabs")
+    )
+    assert restored_tts.tts_provider == "elevenlabs"
+    assert restored_tts.preferred_tts_voice == "voice-eleven"
+    assert restored_tts.tts_model == "eleven_multilingual_v2"
+    assert restored_tts.tts_api_key_set is True
+    assert restored_tts.tts_provider_profiles["edge_tts"]["voice"] == "vi-VN-HoaiMyNeural"
