@@ -225,3 +225,46 @@ def test_profile_rejects_excessive_video_slowdown():
             name="Bad Retime",
             video_retime_max_slowdown=1.5,
         )
+
+
+
+def test_profile_can_configure_bounded_ai_fallback_chains():
+    profile = LocalizationProfile(
+        id="fallback-chain",
+        name="Fallback chain",
+        translation_provider="compatible",
+        translation_model="longcat",
+        translation_base_url="http://127.0.0.1:8645/v1",
+        translation_fallback_provider="lmstudio",
+        translation_fallback_model="qwen3:8b",
+        translation_fallback_base_url="http://127.0.0.1:1234/v1",
+        translation_retry_attempts=2,
+        translation_attempt_timeout_s=60,
+        translation_total_timeout_s=150,
+        rewrite_provider="compatible",
+        rewrite_model="longcat",
+        rewrite_fallback_provider="lmstudio",
+        rewrite_fallback_model="qwen3:8b",
+        rewrite_retry_attempts=2,
+        rewrite_attempt_timeout_s=30,
+        rewrite_total_timeout_s=60,
+        semantic_ai_retry_attempts=2,
+        semantic_ai_attempt_timeout_s=20,
+        semantic_ai_total_timeout_s=50,
+    )
+
+    assert profile.translation_fallback_provider == "lmstudio"
+    assert profile.translation_fallback_model == "qwen3:8b"
+    assert profile.rewrite_fallback_provider == "lmstudio"
+    assert profile.translation_total_timeout_s == 150
+    assert profile.semantic_ai_total_timeout_s == 50
+
+
+def test_profile_rejects_total_ai_budget_shorter_than_single_attempt():
+    with pytest.raises(ValueError, match="translation_total_timeout_s"):
+        LocalizationProfile(
+            id="bad-ai-budget",
+            name="Bad AI budget",
+            translation_attempt_timeout_s=90,
+            translation_total_timeout_s=60,
+        )
