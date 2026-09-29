@@ -462,3 +462,56 @@ async def test_semantic_hanging_provider_hits_budget_and_finishes_deterministica
     assert got.segments
     assert "one" in got.segments[0].source_text
     assert any(e.get("event") == "deterministic_fallback" for e in events)
+
+
+
+@pytest.mark.asyncio
+async def test_semantic_hanging_primary_reserves_time_for_fallback():
+    import asyncio
+    from backend.services.semantic_segmentation import refine_semantic_cues_with_ai
+
+    tx = LocalizationTranscript(
+        text="one two three",
+        segments=[LocalizationSegment(
+            id="raw1",
+            source_text="one two three",
+            source_start_ms=0,
+            source_end_ms=1200,
+            source_words=[
+                {"word": "one", "start": 0.0, "end": 0.3},
+                {"word": " two", "start": 0.3, "end": 0.7},
+                {"word": " three", "start": 0.7, "end": 1.2},
+            ],
+        )],
+    )
+
+    class Hanging:
+        connection_name = "hermes"
+        async def chat(self, *args, **kwargs):
+            await asyncio.Event().wait()
+
+    class Fallback:
+        connection_name = "lmstudio"
+        calls = 0
+        async def chat(self, *args, **kwargs):
+            self.calls += 1
+            return '[{"ids":["w00001","w00002","w00003"]}]'
+
+    fallback = Fallback()
+    events = []
+    got = await refine_semantic_cues_with_ai(
+        tx,
+        Hanging(),
+        fallback_ai=fallback,
+        max_attempts=2,
+        attempt_timeout_s=0.05,
+        total_timeout_s=0.08,
+        progress_cb=lambda event: events.append(dict(event)),
+    )
+
+    assert fallback.calls == 1
+    assert got.segments[0].source_text == "one two three"
+    assert any(
+        e.get("event") == "attempt" and e.get("role") == "fallback"
+        for e in events
+    )
