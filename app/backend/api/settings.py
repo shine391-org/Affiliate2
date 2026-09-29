@@ -59,6 +59,159 @@ def _save_provider_registry(value: dict[str, dict]) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
+def _safe_connection_id(value: str) -> str:
+    import re
+    cleaned = re.sub(r"[^a-zA-Z0-9_-]+", "-", (value or "").strip()).strip("-_").lower()
+    if not cleaned:
+        raise ValueError("Connection id/name cannot be empty.")
+    return cleaned[:96]
+
+
+def _load_ai_connections(settings_row) -> dict[str, dict]:
+    """Load v2 connection registry, lazily projecting legacy provider snapshots."""
+    raw = _load_provider_registry(getattr(settings_row, "ai_connections_json", None))
+    connections: dict[str, dict] = {}
+    for connection_id, cfg in raw.items():
+        provider = str(cfg.get("provider") or "").strip().lower()
+        if not provider:
+            continue
+        connections[connection_id] = {
+            "label": str(cfg.get("label") or connection_id),
+            "provider": provider,
+            "model": cfg.get("model"),
+            "base_url": cfg.get("base_url"),
+            "api_key_encrypted": cfg.get("api_key_encrypted"),
+        }
+
+    if not connections:
+        legacy = _load_provider_registry(
+            getattr(settings_row, "ai_provider_profiles_json", None)
+        )
+        for provider, cfg in legacy.items():
+            connection_id = _safe_connection_id(provider)
+            connections[connection_id] = {
+                "label": provider,
+                "provider": provider,
+                "model": cfg.get("model"),
+                "base_url": cfg.get("base_url"),
+                "api_key_encrypted": cfg.get("api_key_encrypted"),
+            }
+
+    active_provider = (getattr(settings_row, "ai_provider", None) or "").strip().lower()
+    active_id = (getattr(settings_row, "ai_connection_id", None) or "").strip().lower()
+    if active_provider:
+        candidate = active_id or _safe_connection_id(active_provider)
+        existing = connections.get(candidate, {})
+        connections[candidate] = {
+            "label": existing.get("label") or active_provider,
+            "provider": active_provider,
+            "model": getattr(settings_row, "ai_model", None),
+            "base_url": getattr(settings_row, "ai_base_url", None),
+            "api_key_encrypted": getattr(settings_row, "ai_api_key_encrypted", None),
+        }
+    return connections
+
+
+def _load_tts_connections(settings_row) -> dict[str, dict]:
+    raw = _load_provider_registry(getattr(settings_row, "tts_connections_json", None))
+    connections: dict[str, dict] = {}
+    for connection_id, cfg in raw.items():
+        provider = str(cfg.get("provider") or "").strip().lower()
+        if not provider:
+            continue
+        connections[connection_id] = {
+            "label": str(cfg.get("label") or connection_id),
+            "provider": provider,
+            "voice": cfg.get("voice"),
+            "model": cfg.get("model"),
+            "base_url": cfg.get("base_url"),
+            "region": cfg.get("region"),
+            "api_key_encrypted": cfg.get("api_key_encrypted"),
+        }
+
+    if not connections:
+        legacy = _load_provider_registry(
+            getattr(settings_row, "tts_provider_profiles_json", None)
+        )
+        for provider, cfg in legacy.items():
+            connection_id = _safe_connection_id(provider)
+            connections[connection_id] = {
+                "label": provider,
+                "provider": provider,
+                "voice": cfg.get("voice"),
+                "model": cfg.get("model"),
+                "base_url": cfg.get("base_url"),
+                "region": cfg.get("region"),
+                "api_key_encrypted": cfg.get("api_key_encrypted"),
+            }
+
+    active_provider = (getattr(settings_row, "tts_provider", None) or "").strip().lower()
+    active_id = (getattr(settings_row, "tts_connection_id", None) or "").strip().lower()
+    if active_provider:
+        candidate = active_id or _safe_connection_id(active_provider)
+        existing = connections.get(candidate, {})
+        connections[candidate] = {
+            "label": existing.get("label") or active_provider,
+            "provider": active_provider,
+            "voice": getattr(settings_row, "preferred_tts_voice", None),
+            "model": getattr(settings_row, "tts_model", None),
+            "base_url": getattr(settings_row, "tts_base_url", None),
+            "region": getattr(settings_row, "tts_region", None),
+            "api_key_encrypted": getattr(settings_row, "tts_api_key_encrypted", None),
+        }
+    return connections
+
+
+def _public_ai_connections(settings_row) -> dict[str, dict]:
+    return {
+        connection_id: {
+            "id": connection_id,
+            "label": cfg.get("label") or connection_id,
+            "provider": cfg.get("provider"),
+            "model": cfg.get("model"),
+            "base_url": cfg.get("base_url"),
+            "api_key_set": bool(cfg.get("api_key_encrypted")),
+        }
+        for connection_id, cfg in _load_ai_connections(settings_row).items()
+    }
+
+
+def _public_tts_connections(settings_row) -> dict[str, dict]:
+    return {
+        connection_id: {
+            "id": connection_id,
+            "label": cfg.get("label") or connection_id,
+            "provider": cfg.get("provider"),
+            "voice": cfg.get("voice"),
+            "model": cfg.get("model"),
+            "base_url": cfg.get("base_url"),
+            "region": cfg.get("region"),
+            "api_key_set": bool(cfg.get("api_key_encrypted")),
+        }
+        for connection_id, cfg in _load_tts_connections(settings_row).items()
+    }
+
+
+def _active_ai_connection_id(settings_row) -> str | None:
+    connections = _load_ai_connections(settings_row)
+    explicit = (getattr(settings_row, "ai_connection_id", None) or "").strip().lower()
+    if explicit in connections:
+        return explicit
+    provider = (getattr(settings_row, "ai_provider", None) or "").strip().lower()
+    candidate = _safe_connection_id(provider) if provider else None
+    return candidate if candidate in connections else None
+
+
+def _active_tts_connection_id(settings_row) -> str | None:
+    connections = _load_tts_connections(settings_row)
+    explicit = (getattr(settings_row, "tts_connection_id", None) or "").strip().lower()
+    if explicit in connections:
+        return explicit
+    provider = (getattr(settings_row, "tts_provider", None) or "").strip().lower()
+    candidate = _safe_connection_id(provider) if provider else None
+    return candidate if candidate in connections else None
+
+
 def _capture_ai_provider(registry: dict[str, dict], settings_row) -> None:
     provider = (getattr(settings_row, "ai_provider", None) or "").strip().lower()
     if not provider:
@@ -120,6 +273,8 @@ class SettingsResponse(BaseModel):
     ai_base_url: Optional[str] = None
     ai_api_key_set: bool = False  # masked — never returns the actual key
     ai_provider_profiles: dict[str, dict] = Field(default_factory=dict)
+    ai_connection_id: Optional[str] = None
+    ai_connections: dict[str, dict] = Field(default_factory=dict)
 
     # Service API keys (BYOK) — booleans only, never the plaintext key
     youtube_api_key_set: bool = False
@@ -152,6 +307,8 @@ class SettingsResponse(BaseModel):
     tts_region: Optional[str] = None
     tts_api_key_set: bool = False
     tts_provider_profiles: dict[str, dict] = Field(default_factory=dict)
+    tts_connection_id: Optional[str] = None
+    tts_connections: dict[str, dict] = Field(default_factory=dict)
     caption_style: str = "viral"
     caption_enabled: bool = True
     music_enabled: bool = True
@@ -171,6 +328,7 @@ class SettingsUpdate(BaseModel):
     ai_model: Optional[str] = None
     ai_base_url: Optional[str] = None
     ai_api_key: Optional[str] = None  # plaintext on input — encrypted before storage
+    ai_connection_id: Optional[str] = None
 
     # Service API keys (BYOK) — plaintext on input, encrypted before storage.
     # Send empty string to clear a stored key.
@@ -196,6 +354,7 @@ class SettingsUpdate(BaseModel):
     tts_base_url: Optional[str] = None
     tts_region: Optional[str] = None
     tts_api_key: Optional[str] = None
+    tts_connection_id: Optional[str] = None
     caption_style: Optional[str] = None
     caption_enabled: Optional[bool] = None
     music_enabled: Optional[bool] = None
