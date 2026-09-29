@@ -980,6 +980,7 @@ async def run_tool_translate(
     mask_box: dict | None = None,
     caption_placement: dict | None = None,
     downloaded_video_id: str | None = None,
+    auto_repair: bool | None = None,
 ):
     """Canonical resumable Phase-C localization runner.
 
@@ -1027,6 +1028,8 @@ async def run_tool_translate(
         "caption_placement": caption_placement,
         "downloaded_video_id": downloaded_video_id,
     }
+    if auto_repair is not None:
+        request_snapshot["auto_repair"] = bool(auto_repair)
     logger.info(
         "TASK START tool:translate | job=%s target=%s mode=%s profile=%s aspect=%s",
         job_id[:8], target_language, mode, profile_id or "default", target_aspect or "default",
@@ -1116,6 +1119,8 @@ async def run_tool_translate(
                 request_snapshot["review_translation"] = bool(
                     run.request.get("review_translation")
                 )
+            if auto_repair is None:
+                request_snapshot.pop("auto_repair", None)
             if not downloaded_video_id and run.request.get("downloaded_video_id"):
                 downloaded_video_id = run.request.get("downloaded_video_id")
                 request_snapshot["downloaded_video_id"] = downloaded_video_id
@@ -1699,6 +1704,100 @@ async def run_tool_translate(
                 run.fail(current_stage, e)
             except Exception:
                 logger.debug("Could not record localization stage failure", exc_info=True)
+
+        # Optional bounded self-repair. This never changes provider/model/voice
+        # or any other user configuration. It only retries the exact failed
+        # stage once, preserving every completed upstream artifact. Dubbing
+        # timing failures are narrower still: only the overflowing chunks are
+        # marked for regeneration and raw non-target chunk files are retained.
+        request = run.request if run is not None else {}
+        repair_enabled = bool(request.get("auto_repair"))
+        attempts = dict(request.get("auto_repair_attempts") or {})
+        stage = current_stage if current_stage in {
+            "separation", "asr", "semantic", "translation",
+            "dubbing", "audio_mix", "final_render", "qc",
+        } else (run.first_incomplete_stage() if run is not None else None)
+        message = str(e or "").lower()
+        error_name = type(e).__name__.lower()
+        deterministic_markers = (
+            "api key", "lacks permission", "permission denied",
+            "configure that tts provider", "unsupported language",
+            "requires reference audio", "requires a base url",
+            "matches no streams", "no audio", "source media has changed",
+            "source identity", "missing or inaccessible",
+        )
+        cancelled = "cancel" in error_name
+        deterministic = any(marker in message for marker in deterministic_markers)
+        attempt_count = int(attempts.get(stage, 0) or 0) if stage else 0
+
+        if (
+            run is not None
+            and repair_enabled
+            and stage
+            and not cancelled
+            and not deterministic
+            and attempt_count < 1
+        ):
+            attempts[stage] = attempt_count + 1
+            repair_request = {
+                **run.request,
+                "auto_repair_attempts": attempts,
+                "last_auto_repair": {
+                    "stage": stage,
+                    "attempt": attempts[stage],
+                    "error": str(e)[:500],
+                },
+            }
+            delete_artifacts = True
+            preserve_files: set[str] = set()
+            if stage == "translation":
+                preserve_files = {"checkpoint.json"}
+            if stage == "dubbing" and hasattr(e, "issues"):
+                chunk_ids = sorted({
+                    int(item.get("chunk_id"))
+                    for item in (getattr(e, "issues", None) or [])
+                    if isinstance(item, dict) and item.get("chunk_id") is not None
+                })
+                if chunk_ids:
+                    repair_request["regenerate_chunk_ids"] = chunk_ids
+                    delete_artifacts = False
+
+            run.update_request(repair_request)
+            run.invalidate_from(
+                stage,
+                delete_artifacts=delete_artifacts,
+                preserve_files=preserve_files,
+            )
+            await _tool_progress(
+                job_id,
+                max(1.0, float({
+                    "separation": 5, "asr": 15, "semantic": 25, "translation": 35,
+                    "dubbing": 51, "audio_mix": 69, "final_render": 83, "qc": 93,
+                }.get(stage, 1))),
+                f"Tự động sửa: thử lại đúng bước {stage} (1/1)...",
+                user_id,
+            )
+            await run_tool_translate(
+                job_id,
+                run.source_path,
+                str(run.request.get("target_language") or target_language),
+                str(run.request.get("mode") or mode),
+                str(run.request.get("voice_id") or voice_id or ""),
+                str(run.effective_profile.get("caption_style") or caption_style or "viral"),
+                str(run.request.get("emoji_style") or emoji_style or "moderate"),
+                user_id=user_id,
+                target_aspect=run.effective_profile.get("target_aspect") or run.request.get("target_aspect"),
+                profile_id=run.request.get("profile_id"),
+                profile_override=run.effective_profile,
+                review_translation=bool(run.request.get("review_translation")),
+                cleanup_input=False,
+                mask_box=run.request.get("mask_box"),
+                caption_placement=run.request.get("caption_placement"),
+                downloaded_video_id=run.request.get("downloaded_video_id"),
+                auto_repair=None,
+            )
+            return
+
         await _tool_fail(job_id, e, cleanup, user_id, "translate")
 
 
