@@ -220,19 +220,34 @@ async def test_settings_tts_test_uses_unsaved_plaintext_key(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_settings_tts_test_uses_saved_encrypted_key_only_for_saved_provider(monkeypatch):
+async def test_settings_tts_probe_restores_key_for_saved_nonactive_provider(monkeypatch):
     saved = SimpleNamespace(
-        tts_provider="elevenlabs",
-        tts_api_key_encrypted="encrypted-value",
+        tts_provider="edge_tts",
+        tts_api_key_encrypted=None,
+        tts_provider_profiles_json=json.dumps({
+            "elevenlabs": {
+                "voice": "voice-1",
+                "model": "eleven_multilingual_v2",
+                "base_url": "https://api.elevenlabs.io/v1",
+                "region": None,
+                "api_key_encrypted": "encrypted-eleven",
+            },
+        }),
     )
     monkeypatch.setattr(settings_api, "_load_saved_tts_settings", lambda: _async_value(saved))
-    monkeypatch.setattr(settings_api, "decrypt_safe", lambda value: "stored-secret")
+    monkeypatch.setattr(settings_api, "decrypt_safe", lambda value: {
+        "encrypted-eleven": "stored-eleven-secret",
+    }[value])
 
-    same = await settings_api._tts_probe_key(settings_api.TTSProbeRequest(provider="elevenlabs"))
-    different = await settings_api._tts_probe_key(settings_api.TTSProbeRequest(provider="azure_tts"))
+    restored = await settings_api._tts_probe_key(
+        settings_api.TTSProbeRequest(provider="elevenlabs")
+    )
+    missing = await settings_api._tts_probe_key(
+        settings_api.TTSProbeRequest(provider="azure_tts")
+    )
 
-    assert same == "stored-secret"
-    assert different == ""
+    assert restored == "stored-eleven-secret"
+    assert missing == ""
 
 
 @pytest.mark.asyncio
@@ -399,3 +414,66 @@ def test_profile_credential_provider_cannot_reinterpret_another_tts_slot():
 
     with pytest.raises(ValueError, match="only self-contained Edge TTS"):
         localization._tts_config(user_settings, profile, "Vietnamese")
+
+
+def test_provider_registry_public_views_never_expose_encrypted_keys():
+    row = SimpleNamespace(
+        ai_provider="openai",
+        ai_model="gpt-current",
+        ai_base_url=None,
+        ai_api_key_encrypted="enc-openai",
+        ai_provider_profiles_json=json.dumps({
+            "openrouter": {
+                "model": "anthropic/claude-sonnet-4.6",
+                "base_url": "https://openrouter.ai/api/v1",
+                "api_key_encrypted": "enc-openrouter",
+            },
+        }),
+        tts_provider="edge_tts",
+        preferred_tts_voice="vi-VN-HoaiMyNeural",
+        tts_model=None,
+        tts_base_url=None,
+        tts_region=None,
+        tts_api_key_encrypted=None,
+        tts_provider_profiles_json=json.dumps({
+            "elevenlabs": {
+                "voice": "voice-1",
+                "model": "eleven_multilingual_v2",
+                "base_url": "https://api.elevenlabs.io/v1",
+                "region": None,
+                "api_key_encrypted": "enc-eleven",
+            },
+        }),
+    )
+
+    ai = settings_api._public_ai_provider_profiles(row)
+    tts = settings_api._public_tts_provider_profiles(row)
+
+    assert ai["openai"]["api_key_set"] is True
+    assert ai["openrouter"]["api_key_set"] is True
+    assert ai["openrouter"]["model"] == "anthropic/claude-sonnet-4.6"
+    assert tts["elevenlabs"]["api_key_set"] is True
+    assert tts["elevenlabs"]["voice"] == "voice-1"
+    combined = json.dumps({"ai": ai, "tts": tts})
+    assert "enc-openai" not in combined
+    assert "enc-openrouter" not in combined
+    assert "enc-eleven" not in combined
+
+
+def test_provider_registry_roundtrip_keeps_each_provider_configuration_separate():
+    ai_registry = {}
+    ai_row = SimpleNamespace(
+        ai_provider="openai", ai_model="gpt-5", ai_base_url=None,
+        ai_api_key_encrypted="enc-openai",
+    )
+    settings_api._capture_ai_provider(ai_registry, ai_row)
+    ai_row.ai_provider = "openrouter"
+    ai_row.ai_model = "anthropic/claude-sonnet-4.6"
+    ai_row.ai_base_url = "https://openrouter.ai/api/v1"
+    ai_row.ai_api_key_encrypted = "enc-openrouter"
+    settings_api._capture_ai_provider(ai_registry, ai_row)
+
+    assert ai_registry["openai"]["model"] == "gpt-5"
+    assert ai_registry["openai"]["api_key_encrypted"] == "enc-openai"
+    assert ai_registry["openrouter"]["model"] == "anthropic/claude-sonnet-4.6"
+    assert ai_registry["openrouter"]["api_key_encrypted"] == "enc-openrouter"
