@@ -98,21 +98,30 @@ _ASR_KEYS = {
     "asr_provider", "asr_model", "asr_quality",
     "alignment_mode", "diarization_mode", "diarization_speakers",
 }
-_SEMANTIC_KEYS = {"semantic_segmentation"}
-_TRANSLATION_KEYS = {
+_AI_TRANSLATION_ROUTE_KEYS = {
+    "translation_routes",
     "translation_provider", "translation_model", "translation_base_url",
     "translation_fallback_provider", "translation_fallback_model", "translation_fallback_base_url",
-    "translation_retry_attempts", "translation_attempt_timeout_s", "translation_total_timeout_s",
+}
+_SEMANTIC_KEYS = {
     "semantic_segmentation", "semantic_ai_retry_attempts",
     "semantic_ai_attempt_timeout_s", "semantic_ai_total_timeout_s",
+    # Semantic refinement consumes the C6 route chain too, so route changes
+    # invalidate semantic rather than reusing cues made by a different model.
+    *_AI_TRANSLATION_ROUTE_KEYS,
+}
+_TRANSLATION_KEYS = {
+    *_AI_TRANSLATION_ROUTE_KEYS,
+    "translation_retry_attempts", "translation_attempt_timeout_s", "translation_total_timeout_s",
     "translation_preset", "translation_instructions", "translation_guardrails", "glossary",
 }
 _DUBBING_KEYS = {
+    "rewrite_routes",
     "rewrite_provider", "rewrite_model", "rewrite_base_url",
     "rewrite_fallback_provider", "rewrite_fallback_model", "rewrite_fallback_base_url",
     "rewrite_retry_attempts", "rewrite_attempt_timeout_s", "rewrite_total_timeout_s",
     "rewrite_guardrails", "rewrite_instructions",
-    "tts_provider", "tts_model", "tts_voice", "tts_base_url", "tts_region",
+    "tts_connection_id", "tts_provider", "tts_model", "tts_voice", "tts_base_url", "tts_region",
     "speaker_voices", "speaker_reference_audio", "tts_reference_audio",
     "tts_reference_text", "tts_reference_language", "voice_clone_reference_mode",
     "dub_min_cue_duration_ms",
