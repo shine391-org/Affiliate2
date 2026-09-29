@@ -385,6 +385,8 @@ async def get_settings():
         ai_base_url=s.ai_base_url,
         ai_api_key_set=bool(s.ai_api_key_encrypted),
         ai_provider_profiles=_public_ai_provider_profiles(s),
+        ai_connection_id=_active_ai_connection_id(s),
+        ai_connections=_public_ai_connections(s),
         youtube_api_key_set=bool(s.youtube_api_key_encrypted),
         huggingface_token_set=bool(s.huggingface_token_encrypted),
         meta_page_access_token_set=bool(getattr(s, "meta_page_access_token_encrypted", None)),
@@ -420,6 +422,8 @@ async def get_settings():
         tts_region=s.tts_region,
         tts_api_key_set=bool(s.tts_api_key_encrypted),
         tts_provider_profiles=_public_tts_provider_profiles(s),
+        tts_connection_id=_active_tts_connection_id(s),
+        tts_connections=_public_tts_connections(s),
         caption_style=s.caption_style or "viral",
         caption_enabled=s.caption_enabled if s.caption_enabled is not None else True,
         music_enabled=s.music_enabled if s.music_enabled is not None else True,
@@ -443,6 +447,21 @@ async def update_settings(update: SettingsUpdate):
             s = UserSettings(user_id="local")
             db.add(s)
 
+        # Stable connection registry supports multiple endpoints/accounts using
+        # the same provider transport. The legacy active provider columns remain
+        # as the runtime compatibility slot.
+        if update.ai_connection_id is not None:
+            connection_id = _safe_connection_id(update.ai_connection_id)
+            connections = _load_ai_connections(s)
+            selected = connections.get(connection_id)
+            if not selected:
+                raise HTTPException(status_code=400, detail=f"Unknown AI connection: {connection_id}")
+            s.ai_connection_id = connection_id
+            s.ai_provider = selected.get("provider")
+            s.ai_model = selected.get("model")
+            s.ai_base_url = selected.get("base_url")
+            s.ai_api_key_encrypted = selected.get("api_key_encrypted")
+
         # AI provider connections are persisted per provider. The active row
         # remains the runtime slot, while the registry remembers previously
         # entered model/base/key so switching providers restores the old setup
@@ -455,12 +474,15 @@ async def update_settings(update: SettingsUpdate):
         if update.ai_provider is not None:
             new_provider = update.ai_provider.strip().lower()
             old_provider = (s.ai_provider or "").strip().lower()
-            if new_provider != old_provider:
+            if new_provider != old_provider and update.ai_connection_id is None:
                 saved = ai_registry.get(new_provider, {})
                 s.ai_provider = new_provider
                 s.ai_model = saved.get("model")
                 s.ai_base_url = saved.get("base_url")
                 s.ai_api_key_encrypted = saved.get("api_key_encrypted")
+                # Legacy provider switching maps to a stable provider-named
+                # connection. New UI can create any number of same-provider IDs.
+                s.ai_connection_id = _safe_connection_id(new_provider)
             else:
                 s.ai_provider = new_provider
         if update.ai_model is not None:
@@ -471,6 +493,21 @@ async def update_settings(update: SettingsUpdate):
             s.ai_api_key_encrypted = encrypt(update.ai_api_key) if update.ai_api_key else None
         _capture_ai_provider(ai_registry, s)
         s.ai_provider_profiles_json = _save_provider_registry(ai_registry)
+        ai_connections = _load_ai_connections(s)
+        active_ai_id = (
+            (getattr(s, "ai_connection_id", None) or "").strip().lower()
+            or _safe_connection_id((s.ai_provider or "openai"))
+        )
+        s.ai_connection_id = active_ai_id
+        previous_ai = ai_connections.get(active_ai_id, {})
+        ai_connections[active_ai_id] = {
+            "label": previous_ai.get("label") or active_ai_id,
+            "provider": (s.ai_provider or "openai").strip().lower(),
+            "model": s.ai_model,
+            "base_url": s.ai_base_url,
+            "api_key_encrypted": s.ai_api_key_encrypted,
+        }
+        s.ai_connections_json = _save_provider_registry(ai_connections)
 
         # Service API keys (BYOK) — empty string clears, populated value encrypts
         if update.youtube_api_key is not None:
@@ -541,6 +578,20 @@ async def update_settings(update: SettingsUpdate):
         # Preference fields
         if update.preferred_voice_id is not None:
             s.preferred_voice_id = update.preferred_voice_id
+        if update.tts_connection_id is not None:
+            connection_id = _safe_connection_id(update.tts_connection_id)
+            connections = _load_tts_connections(s)
+            selected = connections.get(connection_id)
+            if not selected:
+                raise HTTPException(status_code=400, detail=f"Unknown TTS connection: {connection_id}")
+            s.tts_connection_id = connection_id
+            s.tts_provider = selected.get("provider")
+            s.preferred_tts_voice = selected.get("voice")
+            s.tts_model = selected.get("model")
+            s.tts_base_url = selected.get("base_url")
+            s.tts_region = selected.get("region")
+            s.tts_api_key_encrypted = selected.get("api_key_encrypted")
+
         tts_registry = _load_provider_registry(
             getattr(s, "tts_provider_profiles_json", None)
         )
@@ -549,7 +600,7 @@ async def update_settings(update: SettingsUpdate):
         if update.tts_provider is not None:
             new_tts_provider = update.tts_provider.strip().lower()
             old_tts_provider = (s.tts_provider or "").strip().lower()
-            if new_tts_provider != old_tts_provider:
+            if new_tts_provider != old_tts_provider and update.tts_connection_id is None:
                 saved = tts_registry.get(new_tts_provider, {})
                 s.tts_provider = new_tts_provider
                 s.preferred_tts_voice = saved.get("voice")
@@ -557,6 +608,7 @@ async def update_settings(update: SettingsUpdate):
                 s.tts_base_url = saved.get("base_url")
                 s.tts_region = saved.get("region")
                 s.tts_api_key_encrypted = saved.get("api_key_encrypted")
+                s.tts_connection_id = _safe_connection_id(new_tts_provider)
             else:
                 s.tts_provider = new_tts_provider
         if update.preferred_tts_voice is not None:
@@ -578,6 +630,23 @@ async def update_settings(update: SettingsUpdate):
             s.tts_api_key_encrypted = encrypt(update.tts_api_key) if update.tts_api_key else None
         _capture_tts_provider(tts_registry, s)
         s.tts_provider_profiles_json = _save_provider_registry(tts_registry)
+        tts_connections = _load_tts_connections(s)
+        active_tts_id = (
+            (getattr(s, "tts_connection_id", None) or "").strip().lower()
+            or _safe_connection_id((s.tts_provider or "edge_tts"))
+        )
+        s.tts_connection_id = active_tts_id
+        previous_tts = tts_connections.get(active_tts_id, {})
+        tts_connections[active_tts_id] = {
+            "label": previous_tts.get("label") or active_tts_id,
+            "provider": (s.tts_provider or "edge_tts").strip().lower(),
+            "voice": s.preferred_tts_voice,
+            "model": s.tts_model,
+            "base_url": s.tts_base_url,
+            "region": s.tts_region,
+            "api_key_encrypted": s.tts_api_key_encrypted,
+        }
+        s.tts_connections_json = _save_provider_registry(tts_connections)
 
         if update.caption_style is not None:
             s.caption_style = update.caption_style
