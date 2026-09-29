@@ -500,7 +500,7 @@ def test_profile_credential_provider_cannot_reinterpret_another_tts_slot():
         tts_provider="openai_tts",
     )
 
-    with pytest.raises(ValueError, match="only self-contained Edge TTS"):
+    with pytest.raises(ValueError, match="no saved TTS connection"):
         localization._tts_config(user_settings, profile, "Vietnamese")
 
 
@@ -633,3 +633,214 @@ async def test_settings_provider_switch_roundtrip_restores_ai_and_tts_connection
     assert restored_tts.tts_model == "eleven_multilingual_v2"
     assert restored_tts.tts_api_key_set is True
     assert restored_tts.tts_provider_profiles["edge_tts"]["voice"] == "vi-VN-HoaiMyNeural"
+
+
+
+@pytest.mark.asyncio
+async def test_same_provider_connection_registry_keeps_distinct_endpoints(monkeypatch):
+    from backend.models.user_settings import UserSettings
+
+    row = UserSettings(user_id="local")
+    row.ai_provider = "compatible"
+    row.ai_model = "longcat-a"
+    row.ai_base_url = "http://127.0.0.1:8645/v1"
+    row.ai_connection_id = "hermes-a"
+    row.ai_connections_json = json.dumps({
+        "hermes-a": {
+            "label": "Hermes A",
+            "provider": "compatible",
+            "model": "longcat-a",
+            "base_url": "http://127.0.0.1:8645/v1",
+            "api_key_encrypted": None,
+        },
+    })
+
+    class Result:
+        def scalar_one_or_none(self):
+            return row
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+        async def execute(self, _query):
+            return Result()
+        def add(self, _row):
+            return None
+        async def commit(self):
+            return None
+
+    monkeypatch.setattr(settings_api, "AsyncSessionLocal", lambda: FakeSession())
+
+    result = await settings_api.upsert_ai_connection(
+        settings_api.AIConnectionRequest(
+            label="Hermes B",
+            provider="compatible",
+            model="longcat-b",
+            base_url="http://127.0.0.1:8745/v1",
+            activate=False,
+        )
+    )
+
+    assert set(result.ai_connections) >= {"hermes-a", "hermes-b"}
+    assert result.ai_connections["hermes-a"]["provider"] == "compatible"
+    assert result.ai_connections["hermes-b"]["provider"] == "compatible"
+    assert result.ai_connections["hermes-a"]["base_url"] != result.ai_connections["hermes-b"]["base_url"]
+
+
+@pytest.mark.asyncio
+async def test_connection_provider_change_never_reuses_old_provider_secret(monkeypatch):
+    from backend.models.user_settings import UserSettings
+
+    row = UserSettings(user_id="local")
+    row.ai_provider = "openai"
+    row.ai_model = "gpt-x"
+    row.ai_connection_id = "cloud-main"
+    row.ai_api_key_encrypted = "enc-old"
+    row.ai_connections_json = json.dumps({
+        "cloud-main": {
+            "label": "Cloud Main",
+            "provider": "openai",
+            "model": "gpt-x",
+            "base_url": None,
+            "api_key_encrypted": "enc-old",
+        },
+    })
+
+    class Result:
+        def scalar_one_or_none(self):
+            return row
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+        async def execute(self, _query):
+            return Result()
+        def add(self, _row):
+            return None
+        async def commit(self):
+            return None
+
+    monkeypatch.setattr(settings_api, "AsyncSessionLocal", lambda: FakeSession())
+    monkeypatch.setattr(settings_api, "decrypt_safe", lambda value: "old-secret" if value else "")
+
+    with pytest.raises(Exception):
+        await settings_api.upsert_ai_connection(
+            settings_api.AIConnectionRequest(
+                connection_id="cloud-main",
+                label="Cloud Main",
+                provider="anthropic",
+                model="claude-x",
+                api_key=None,
+            )
+        )
+
+    raw = json.loads(row.ai_connections_json)
+    assert raw["cloud-main"]["provider"] == "openai"
+    assert raw["cloud-main"]["api_key_encrypted"] == "enc-old"
+
+
+@pytest.mark.asyncio
+async def test_deleted_connection_is_archived_for_old_job_resume(monkeypatch):
+    from backend.models.user_settings import UserSettings
+    from backend.services import localization_service as ls
+
+    row = UserSettings(user_id="local")
+    row.ai_provider = "compatible"
+    row.ai_model = "active"
+    row.ai_base_url = "http://127.0.0.1:9000/v1"
+    row.ai_connection_id = "active"
+    row.ai_connections_json = json.dumps({
+        "active": {
+            "label": "Active",
+            "provider": "compatible",
+            "model": "active",
+            "base_url": "http://127.0.0.1:9000/v1",
+            "api_key_encrypted": None,
+        },
+        "old-hermes": {
+            "label": "Old Hermes",
+            "provider": "compatible",
+            "model": "old",
+            "base_url": "http://127.0.0.1:8645/v1",
+            "api_key_encrypted": None,
+        },
+    })
+    row.localization_profiles_json = json.dumps({"profiles": []})
+
+    class Result:
+        def scalar_one_or_none(self):
+            return row
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+        async def execute(self, _query):
+            return Result()
+        async def commit(self):
+            return None
+
+    monkeypatch.setattr(settings_api, "AsyncSessionLocal", lambda: FakeSession())
+
+    result = await settings_api.delete_ai_connection("old-hermes")
+    assert "old-hermes" not in result.ai_connections
+
+    raw = json.loads(row.ai_connections_json)
+    assert raw["old-hermes"]["archived"] is True
+    saved = ls._saved_ai_connection_config(row, "old-hermes")
+    assert saved["base_url"] == "http://127.0.0.1:8645/v1"
+
+
+def test_tts_connection_id_can_pin_second_same_provider_account():
+    from backend.core.crypto import encrypt
+
+    row = SimpleNamespace(
+        tts_connection_id="eleven-a",
+        tts_provider="elevenlabs",
+        preferred_tts_voice="voice-a",
+        tts_model="eleven_multilingual_v2",
+        tts_base_url="https://api.elevenlabs.io/v1",
+        tts_region=None,
+        tts_api_key_encrypted=encrypt("key-a"),
+        tts_connections_json=json.dumps({
+            "eleven-a": {
+                "label": "EL A",
+                "provider": "elevenlabs",
+                "voice": "voice-a",
+                "model": "eleven_multilingual_v2",
+                "base_url": "https://api.elevenlabs.io/v1",
+                "region": None,
+                "api_key_encrypted": encrypt("key-a"),
+            },
+            "eleven-b": {
+                "label": "EL B",
+                "provider": "elevenlabs",
+                "voice": "voice-b",
+                "model": "eleven_multilingual_v2",
+                "base_url": "https://api.elevenlabs.io/v1",
+                "region": None,
+                "api_key_encrypted": encrypt("key-b"),
+            },
+        }),
+        tts_provider_profiles_json="{}",
+        ai_provider=None,
+        ai_api_key_encrypted=None,
+        ai_connections_json="{}",
+        ai_provider_profiles_json="{}",
+    )
+    profile = LocalizationProfile(
+        id="pin-el-b",
+        name="Pin EL B",
+        tts_connection_id="eleven-b",
+        tts_provider="elevenlabs",
+    )
+
+    runtime = localization._tts_config(row, profile, "Vietnamese")
+    assert runtime.connection_id == "eleven-b"
+    assert runtime.default_voice == "voice-b"
+    assert runtime.api_key == "key-b"
