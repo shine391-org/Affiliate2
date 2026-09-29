@@ -2083,3 +2083,51 @@ def test_saved_inactive_local_provider_resolves_as_fallback():
     assert fallback.model == "qwen3:8b"
     assert fallback.base_url == "http://127.0.0.1:1234/v1"
     assert fallback.api_key == "local"
+
+
+
+@pytest.mark.asyncio
+async def test_hanging_primary_cannot_starve_translation_fallback():
+    import asyncio
+
+    class HangingPrimary:
+        connection_name = "hermes"
+        provider = SimpleNamespace(value="compatible")
+        model = "longcat"
+        max_retries = None
+
+        async def chat(self, **kwargs):
+            await asyncio.Event().wait()
+
+    class FastFallback:
+        connection_name = "lmstudio"
+        provider = SimpleNamespace(value="compatible")
+        model = "qwen3:8b"
+        max_retries = None
+        calls = 0
+
+        async def chat(self, **kwargs):
+            self.calls += 1
+            return "fallback-ok"
+
+    fallback = FastFallback()
+    events = []
+
+    result = await ls._call_ai_chat_resilient(
+        HangingPrimary(),
+        fallback,
+        messages=[{"role": "user", "content": "x"}],
+        max_tokens=8,
+        max_attempts=3,
+        attempt_timeout_s=0.05,
+        total_timeout_s=0.08,
+        progress_cb=lambda event: events.append(dict(event)),
+        stage="translation",
+    )
+
+    assert result == "fallback-ok"
+    assert fallback.calls == 1
+    assert any(
+        e.get("event") == "switch_fallback" and e.get("provider") == "lmstudio"
+        for e in events
+    )
