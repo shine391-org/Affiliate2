@@ -50,13 +50,13 @@ def _stub_faster_whisper(monkeypatch):
     WhisperService._loaded_device = None
     WhisperService._evict_task = None
     WhisperService._active_transcriptions = 0
-    WhisperService._active_transcriptions = 0
     yield
     WhisperService._model = None
     WhisperService._loaded_quality = None
     WhisperService._loaded_model_name = None
     WhisperService._loaded_device = None
     WhisperService._evict_task = None
+    WhisperService._active_transcriptions = 0
 
 
 @pytest.fixture(autouse=True)
