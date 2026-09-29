@@ -7,6 +7,8 @@ merges tiny adjacent cues before translation. It never rewrites source text.
 """
 from __future__ import annotations
 
+import asyncio
+import inspect
 import re
 
 from backend.core.localization import (
@@ -294,11 +296,99 @@ def _validate_group_ids(
     return groups
 
 
+async def _emit_semantic_progress(progress_cb, payload: dict) -> None:
+    if progress_cb is None:
+        return
+    result = progress_cb(payload)
+    if inspect.isawaitable(result):
+        await result
+
+
+async def _semantic_chat_with_fallback(
+    primary_ai,
+    fallback_ai,
+    *,
+    messages: list[dict],
+    max_tokens: int,
+    attempt_timeout_s: int,
+    max_attempts: int,
+    deadline_at: float,
+    progress_cb=None,
+    window_index: int,
+    window_total: int,
+) -> str | None:
+    """Bound optional semantic AI by a stage-wide deadline.
+
+    Any provider/network failure eventually degrades to deterministic grouping;
+    semantic refinement must never hold the whole localization job indefinitely.
+    """
+    from backend.core.ai_provider import is_transient_ai_error
+
+    loop = asyncio.get_running_loop()
+    clients = [("primary", primary_ai)]
+    if fallback_ai is not None:
+        clients.append(("fallback", fallback_ai))
+
+    for role, ai in clients:
+        if ai is None:
+            continue
+        if hasattr(ai, "max_retries"):
+            ai.max_retries = 0
+        for attempt in range(1, max_attempts + 1):
+            remaining = deadline_at - loop.time()
+            if remaining <= 0:
+                await _emit_semantic_progress(progress_cb, {
+                    "event": "budget_exhausted",
+                    "window": window_index,
+                    "total": window_total,
+                    "role": role,
+                })
+                return None
+            timeout_s = min(float(attempt_timeout_s), remaining)
+            await _emit_semantic_progress(progress_cb, {
+                "event": "attempt",
+                "window": window_index,
+                "total": window_total,
+                "role": role,
+                "attempt": attempt,
+                "max_attempts": max_attempts,
+                "provider": getattr(getattr(ai, "provider", None), "value", str(getattr(ai, "provider", ""))),
+                "model": getattr(ai, "model", None),
+                "timeout_s": round(timeout_s, 1),
+            })
+            try:
+                return await asyncio.wait_for(
+                    ai.chat(messages=messages, max_tokens=max_tokens),
+                    timeout=timeout_s,
+                )
+            except Exception as exc:
+                await _emit_semantic_progress(progress_cb, {
+                    "event": "error",
+                    "window": window_index,
+                    "total": window_total,
+                    "role": role,
+                    "attempt": attempt,
+                    "max_attempts": max_attempts,
+                    "error": str(exc)[:220],
+                })
+                if not is_transient_ai_error(exc):
+                    break
+                if attempt < max_attempts:
+                    await asyncio.sleep(min(1.5 * attempt, max(0.0, deadline_at - loop.time())))
+
+    return None
+
+
 async def _refine_words_with_ai(
     transcript: LocalizationTranscript,
     ai,
     *,
+    fallback_ai=None,
     max_words_per_window: int = 60,
+    attempt_timeout_s: int = 25,
+    max_attempts: int = 2,
+    deadline_at: float,
+    progress_cb=None,
 ) -> LocalizationTranscript | None:
     """SmartSub-style word-tier semantic segmentation.
 
@@ -327,8 +417,10 @@ async def _refine_words_with_ai(
     output: list[LocalizationSegment] = []
     next_group_index = 1
     ai_available = True
+    window_total = max(1, (len(words) + max_words_per_window - 1) // max_words_per_window)
     for start in range(0, len(words), max_words_per_window):
         window = words[start:start + max_words_per_window]
+        window_index = (start // max_words_per_window) + 1
         if len(window) == 1:
             groups = [[window[0]["id"]]]
         elif not ai_available:
@@ -359,17 +451,28 @@ Return ONLY JSON:
 [{{"ids":["w00001","w00002"]}}, {{"ids":["w00003"]}}]
 Every input word ID must appear exactly once and in the same order."""
 
-            try:
-                raw = await ai.chat(
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=1800,
-                )
-            except Exception:
-                # Semantic refinement is optional. One provider failure opens a
-                # stage-local circuit breaker so the remaining windows do not
-                # multiply the same network/model timeout.
+            raw = await _semantic_chat_with_fallback(
+                ai,
+                fallback_ai,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1800,
+                attempt_timeout_s=attempt_timeout_s,
+                max_attempts=max_attempts,
+                deadline_at=deadline_at,
+                progress_cb=progress_cb,
+                window_index=window_index,
+                window_total=window_total,
+            )
+            if raw is None:
+                # Optional AI refinement exhausted its bounded budget/provider
+                # chain. Open a circuit breaker and finish deterministically.
                 ai_available = False
                 groups = _deterministic_word_groups(window)
+                await _emit_semantic_progress(progress_cb, {
+                    "event": "deterministic_fallback",
+                    "window": window_index,
+                    "total": window_total,
+                })
             else:
                 try:
                     text = (raw or "").strip()
@@ -415,7 +518,12 @@ async def refine_semantic_cues_with_ai(
     transcript: LocalizationTranscript,
     ai,
     *,
+    fallback_ai=None,
     window_size: int = 12,
+    attempt_timeout_s: int = 25,
+    max_attempts: int = 2,
+    total_timeout_s: int = 60,
+    progress_cb=None,
 ) -> LocalizationTranscript:
     """SmartSub/VideoLingo-style boundary refinement with validated fallback.
 
@@ -424,8 +532,18 @@ async def refine_semantic_cues_with_ai(
     deterministic cues. In neither tier may AI rewrite source text.
     """
     base = normalize_semantic_cues(transcript)
+    loop = asyncio.get_running_loop()
+    deadline_at = loop.time() + float(total_timeout_s)
 
-    word_refined = await _refine_words_with_ai(base, ai)
+    word_refined = await _refine_words_with_ai(
+        base,
+        ai,
+        fallback_ai=fallback_ai,
+        attempt_timeout_s=attempt_timeout_s,
+        max_attempts=max_attempts,
+        deadline_at=deadline_at,
+        progress_cb=progress_cb,
+    )
     if word_refined is not None:
         return word_refined
 
@@ -435,8 +553,10 @@ async def refine_semantic_cues_with_ai(
     output: list[LocalizationSegment] = []
     group_index = 1
     ai_available = True
+    window_total = max(1, (len(base.segments) + window_size - 1) // window_size)
     for start in range(0, len(base.segments), window_size):
         window = base.segments[start:start + window_size]
+        window_index = (start // window_size) + 1
         if len(window) == 1:
             output.append(_merge_group(window, group_index))
             group_index += 1
@@ -475,14 +595,26 @@ Return ONLY JSON:
 [{{"ids":["cue-id-1","cue-id-2"]}}, {{"ids":["cue-id-3"]}}]
 Every input ID must appear exactly once and in the same order."""
 
-        try:
-            raw = await ai.chat(
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=1200,
-            )
-        except Exception:
+        raw = await _semantic_chat_with_fallback(
+            ai,
+            fallback_ai,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=1200,
+            attempt_timeout_s=attempt_timeout_s,
+            max_attempts=max_attempts,
+            deadline_at=deadline_at,
+            progress_cb=progress_cb,
+            window_index=window_index,
+            window_total=window_total,
+        )
+        if raw is None:
             ai_available = False
             groups = [[seg.id] for seg in window]
+            await _emit_semantic_progress(progress_cb, {
+                "event": "deterministic_fallback",
+                "window": window_index,
+                "total": window_total,
+            })
         else:
             try:
                 text = (raw or "").strip()
