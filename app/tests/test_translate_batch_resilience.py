@@ -2252,3 +2252,120 @@ async def test_exhausted_route_chain_attaches_non_secret_failure_history():
 
     assert [x["connection_id"] for x in exc.value.ai_failure_chain] == ["a", "b", "c"]
     assert all("api_key" not in item for item in exc.value.ai_failure_chain)
+
+
+
+@pytest.mark.asyncio
+async def test_invalid_structured_translation_advances_to_next_route():
+    class BadStructured:
+        connection_name = "hermes-main"
+        provider = SimpleNamespace(value="compatible")
+        model = "longcat"
+        max_retries = None
+        calls = 0
+
+        async def chat(self, **kwargs):
+            self.calls += 1
+            return '{"not":"the required array"}'
+
+    class GoodFallback:
+        connection_name = "lmstudio-qwen"
+        provider = SimpleNamespace(value="compatible")
+        model = "qwen3:8b"
+        max_retries = None
+        calls = 0
+
+        async def chat(self, **kwargs):
+            self.calls += 1
+            return json.dumps([
+                {"id": "s1", "text": "xin chào"},
+                {"id": "s2", "text": "thế giới"},
+            ])
+
+    batch = [
+        LocalizationSegment(
+            id="s1", source_text="hello", source_start_ms=0, source_end_ms=500,
+        ),
+        LocalizationSegment(
+            id="s2", source_text="world", source_start_ms=500, source_end_ms=1000,
+        ),
+    ]
+    primary = BadStructured()
+    fallback = GoodFallback()
+    state = ls._AIStageRouteState([primary, fallback])
+
+    texts, failed = await ls._translate_batch_resilient(
+        primary,
+        batch,
+        route_state=state,
+        target_language="Vietnamese",
+        context="hello world",
+        profile=_profile(
+            translation_retry_attempts=1,
+            translation_attempt_timeout_s=1,
+            translation_total_timeout_s=3,
+        ),
+        for_dub=True,
+        fallback_ai=fallback,
+    )
+
+    assert texts == ["xin chào", "thế giới"]
+    assert failed == set()
+    assert primary.calls == 1
+    assert fallback.calls == 1
+    assert state.sticky_index == 1
+    assert any(
+        item.get("error_type") == "InvalidStructuredOutput"
+        and item.get("connection_id") == "hermes-main"
+        for item in state.failure_chain
+    )
+
+
+@pytest.mark.asyncio
+async def test_translation_recursive_shape_split_shares_one_batch_deadline(monkeypatch):
+    seen_deadlines = []
+
+    async def fake_call(
+        ai,
+        fallback_ai,
+        messages,
+        max_tokens=3000,
+        max_attempts=3,
+        *,
+        attempt_timeout_s=75,
+        total_timeout_s=180,
+        progress_cb=None,
+        stage="translation",
+        route_state=None,
+        deadline_at=None,
+    ):
+        seen_deadlines.append(deadline_at)
+        return "[]"
+
+    monkeypatch.setattr(ls, "_call_ai_chat_resilient", fake_call)
+
+    batch = [
+        LocalizationSegment(
+            id=f"s{i}",
+            source_text=f"source {i}",
+            source_start_ms=i * 500,
+            source_end_ms=(i + 1) * 500,
+        )
+        for i in range(4)
+    ]
+
+    texts, failed = await ls._translate_batch_resilient(
+        object(),
+        batch,
+        target_language="Vietnamese",
+        context="ctx",
+        profile=_profile(translation_total_timeout_s=30),
+        for_dub=True,
+    )
+
+    assert len(texts) == 4
+    assert failed == {0, 1, 2, 3}
+    assert len(seen_deadlines) > 1
+    assert all(value is not None for value in seen_deadlines)
+    first = seen_deadlines[0]
+    assert all(value == first for value in seen_deadlines)
