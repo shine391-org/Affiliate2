@@ -844,3 +844,80 @@ def test_tts_connection_id_can_pin_second_same_provider_account():
     assert runtime.connection_id == "eleven-b"
     assert runtime.default_voice == "voice-b"
     assert runtime.api_key == "key-b"
+
+
+
+@pytest.mark.asyncio
+async def test_connection_provider_identity_is_immutable(monkeypatch):
+    from backend.models.user_settings import UserSettings
+
+    row = UserSettings(user_id="local")
+    row.ai_provider = "compatible"
+    row.ai_connection_id = "hermes-main"
+    row.ai_connections_json = json.dumps({
+        "hermes-main": {
+            "label": "Hermes main",
+            "provider": "compatible",
+            "model": "longcat",
+            "base_url": "http://127.0.0.1:8645/v1",
+            "api_key_encrypted": None,
+            "archived": False,
+        },
+    })
+    row.tts_provider = "edge_tts"
+    row.tts_connection_id = "edge-main"
+    row.tts_connections_json = json.dumps({
+        "edge-main": {
+            "label": "Edge main",
+            "provider": "edge_tts",
+            "voice": "vi-VN-HoaiMyNeural",
+            "model": None,
+            "base_url": None,
+            "region": None,
+            "api_key_encrypted": None,
+            "archived": False,
+        },
+    })
+
+    class Result:
+        def scalar_one_or_none(self):
+            return row
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+        async def execute(self, _query):
+            return Result()
+        def add(self, _row):
+            return None
+        async def commit(self):
+            return None
+
+    monkeypatch.setattr(settings_api, "AsyncSessionLocal", lambda: FakeSession())
+
+    with pytest.raises(Exception) as ai_exc:
+        await settings_api.upsert_ai_connection(settings_api.AIConnectionRequest(
+            connection_id="hermes-main",
+            label="Same ID, different transport",
+            provider="openai",
+            model="gpt-5",
+            api_key="secret",
+        ))
+    assert getattr(ai_exc.value, "status_code", None) == 409
+    assert "immutable" in str(getattr(ai_exc.value, "detail", "")).lower()
+    assert json.loads(row.ai_connections_json)["hermes-main"]["provider"] == "compatible"
+
+    with pytest.raises(Exception) as tts_exc:
+        await settings_api.upsert_tts_connection(settings_api.TTSConnectionRequest(
+            connection_id="edge-main",
+            label="Same ID, different TTS",
+            provider="elevenlabs",
+            voice="voice-x",
+            model="eleven_multilingual_v2",
+            api_key="secret",
+        ))
+    assert getattr(tts_exc.value, "status_code", None) == 409
+    assert "immutable" in str(getattr(tts_exc.value, "detail", "")).lower()
+    assert json.loads(row.tts_connections_json)["edge-main"]["provider"] == "edge_tts"
