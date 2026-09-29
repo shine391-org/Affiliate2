@@ -102,4 +102,5 @@ test("provider settings remember prior AI/TTS connections and expose selectable 
   assert.ok(tts.includes("saved?.region"))
   assert.ok(tts.includes("Đã lưu cho provider này"))
   assert.ok(tts.includes("models.map"))
+  assert.ok(tts.includes("if (Array.isArray(data?.models)) setModels(data.models)"))
 })
