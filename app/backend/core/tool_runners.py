@@ -95,6 +95,29 @@ async def localization_gpu_gate():
         _LOCALIZATION_GPU_GATE.release()
 
 
+def _release_localization_torch_cache_sync() -> None:
+    """Release unused PyTorch/Demucs allocator memory after C5/C8 GPU audio work.
+
+    This runs while the localization GPU gate is still held, after Demucs and
+    alignment/diarization have finished. It never frees live tensors; CUDA's
+    empty_cache() only returns UNUSED allocator blocks. Keeping those blocks
+    warm beyond the ASR/alignment boundary made failed jobs pin memory for no
+    useful downstream stage.
+    """
+    import gc
+    import sys
+
+    gc.collect()
+    torch = sys.modules.get("torch")
+    if torch is None:
+        return
+    try:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        logger.debug("Could not release localization torch cache", exc_info=True)
+
+
 def _cleanup_paths(*paths: Path):
     """Best-effort delete of scratch files. Never raises."""
     for p in paths:
@@ -1199,6 +1222,10 @@ async def run_tool_translate(
         if needs_separation or needs_asr:
             async with localization_gpu_gate():
                 await _run_gpu_audio_pipeline()
+                # Demucs/WhisperX GPU work is finished at this boundary. Keep
+                # the gate until unused allocator blocks are released so the
+                # next waiting localization job starts from a clean pool.
+                await asyncio.to_thread(_release_localization_torch_cache_sync)
         else:
             await _run_gpu_audio_pipeline()
 
