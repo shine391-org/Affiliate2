@@ -32,12 +32,14 @@ async def test_candidate_media_uses_canonical_downloader(monkeypatch, tmp_path):
 
     monkeypatch.setattr("backend.services.ytdlp_service.download_video", fake_download)
     result = await cis.fetch_candidate_media(
-        "bilibili", "123", "https://www.bilibili.com/video/BVtest", tmp_path
+        "bilibili", "123", "https://www.bilibili.com/video/BVtest", tmp_path,
+        title_hint="candidate caption",
     )
     assert result["status"] == "SUCCESS"
     assert result["path"] == source
     assert seen["extract_audio"] is False
     assert seen["options"]["quality"] == "best"
+    assert seen["title_hint"] == "candidate caption"
 
 
 @pytest.mark.asyncio
@@ -143,3 +145,54 @@ async def test_candidate_analysis_cache_avoids_provider(monkeypatch, tmp_path):
     result = await cis.analyze_candidate_intelligence({}, None, out)
     assert result["status"] == "CACHED"
     assert result["model_stats"]["calls"] == 0
+
+
+
+@pytest.mark.asyncio
+async def test_radar_pipeline_passes_candidate_title_to_media_fetch(monkeypatch, tmp_path):
+    from src.radar.intel import pipeline
+
+    seen = {}
+
+    monkeypatch.setattr(
+        pipeline,
+        "candidate_dir",
+        lambda platform, content_id: tmp_path / f"{platform}_{content_id}",
+    )
+
+    async def fake_media(platform, content_id, canonical_url, *, title_hint=""):
+        seen.update({
+            "platform": platform,
+            "content_id": content_id,
+            "canonical_url": canonical_url,
+            "title_hint": title_hint,
+        })
+        return {
+            "status": "MEDIA_UNAVAILABLE",
+            "path": None,
+            "meta": {"reason": "test"},
+        }
+
+    async def fake_analyze(metadata, transcript, out_path, force=False):
+        return {
+            "status": "ERROR",
+            "data": None,
+            "model_stats": {"calls": 0, "retries": 0},
+        }
+
+    monkeypatch.setattr(pipeline, "fetch_media_async", fake_media)
+    monkeypatch.setattr(pipeline, "analyze_candidate_async", fake_analyze)
+
+    result = await pipeline.run_intelligence_async(
+        [{
+            "platform": "douyin",
+            "content_id": "123",
+            "title": "这个产品很好用",
+            "canonical_url": "https://www.douyin.com/video/123",
+        }],
+        verbose=False,
+    )
+
+    assert result["requested"] == 1
+    assert seen["title_hint"] == "这个产品很好用"
+    assert seen["canonical_url"].endswith("/video/123")
