@@ -57,6 +57,7 @@ test("existing job hydration remains source of truth after delayed profile defau
       job_id: "job-16x9",
       request: {
         profile_id: "profile-existing",
+        auto_repair: true,
         target_aspect: "16:9",
         mask_box: { x: 0.05, y: 0.72, width: 0.9, height: 0.15, mode: "solid" },
         caption_placement: { mode: "mask_region", vertical_offset: 0.1 },
@@ -66,6 +67,7 @@ test("existing job hydration remains source of truth after delayed profile defau
   })
 
   assert.equal(hydrated.profileId, "profile-existing")
+  assert.equal(hydrated.autoRepair, true)
   assert.equal(hydrated.targetAspect, "16:9")
   assert.equal(resolveProfileTargetAspect({
     currentAspect: hydrated.targetAspect,
