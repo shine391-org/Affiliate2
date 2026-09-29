@@ -582,20 +582,36 @@ async def _call_ai_chat_resilient(
     if fallback_ai is not None:
         clients.append(("fallback", fallback_ai))
 
-    for role, client in clients:
-        if client is None:
-            continue
+    usable_clients = [(role, client) for role, client in clients if client is not None]
+    for client_index, (role, client) in enumerate(usable_clients):
         if hasattr(client, "max_retries"):
             client.max_retries = 0
 
+        # Reserve a fair share of the remaining wall-clock budget for every
+        # provider still in the chain. Otherwise 3 hung primary attempts can
+        # consume the entire global deadline and the configured fallback never
+        # gets a single request.
+        providers_left = len(usable_clients) - client_index
+        provider_deadline = min(
+            deadline,
+            loop.time() + max(0.0, (deadline - loop.time()) / max(providers_left, 1)),
+        )
+
         for attempt in range(1, max_attempts + 1):
-            remaining = deadline - loop.time()
-            if remaining <= 0:
+            global_remaining = deadline - loop.time()
+            provider_remaining = provider_deadline - loop.time()
+            if global_remaining <= 0:
                 raise TimeoutError(
                     f"{stage} AI deadline exceeded after {int(total_timeout_s)}s"
                 ) from last_error
+            if provider_remaining <= 0:
+                break
 
-            timeout_s = min(float(attempt_timeout_s), remaining)
+            timeout_s = min(
+                float(attempt_timeout_s),
+                global_remaining,
+                provider_remaining,
+            )
             await _emit_ai_progress(progress_cb, {
                 "event": "attempt",
                 "stage": stage,
@@ -630,7 +646,10 @@ async def _call_ai_chat_resilient(
                 if not transient:
                     break
                 if attempt < max_attempts:
-                    remaining = deadline - loop.time()
+                    remaining = min(
+                        deadline - loop.time(),
+                        provider_deadline - loop.time(),
+                    )
                     if remaining <= 0:
                         break
                     backoff = min(
