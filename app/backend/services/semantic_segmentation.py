@@ -304,6 +304,14 @@ async def _emit_semantic_progress(progress_cb, payload: dict) -> None:
         await result
 
 
+def _safe_semantic_error_text(exc: Exception, ai=None, limit: int = 220) -> str:
+    text = str(exc)
+    key = str(getattr(ai, "api_key", "") or "")
+    if key and len(key) >= 4:
+        text = text.replace(key, "***")
+    return text[:limit]
+
+
 async def _semantic_chat_with_fallback(
     primary_ai,
     fallback_ai,
@@ -397,7 +405,7 @@ async def _semantic_chat_with_fallback(
                         "model": getattr(ai, "model", None),
                         "attempt": attempt,
                         "error_type": type(exc).__name__,
-                        "error": str(exc)[:220],
+                        "error": _safe_semantic_error_text(exc, ai),
                     })
                 await _emit_semantic_progress(progress_cb, {
                     "event": "error",
@@ -406,7 +414,7 @@ async def _semantic_chat_with_fallback(
                     "role": role,
                     "attempt": attempt,
                     "max_attempts": max_attempts,
-                    "error": str(exc)[:220],
+                    "error": _safe_semantic_error_text(exc, ai),
                 })
                 if not is_transient_ai_error(exc):
                     break
