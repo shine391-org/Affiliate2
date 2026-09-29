@@ -1270,3 +1270,13 @@ async def test_auto_repair_toggle_persists_on_same_job(monkeypatch):
     )
     assert disabled["auto_repair"] is False
     assert run.request["auto_repair"] is False
+
+
+
+def test_ai_route_change_invalidates_semantic_and_rewrite_route_invalidates_dubbing():
+    assert api._profile_invalidation({"translation_routes"}) == "semantic"
+    assert api._profile_invalidation({"translation_provider"}) == "semantic"
+    assert api._profile_invalidation({"semantic_ai_total_timeout_s"}) == "semantic"
+    assert api._profile_invalidation({"translation_guardrails"}) == "translation"
+    assert api._profile_invalidation({"rewrite_routes"}) == "dubbing"
+    assert api._profile_invalidation({"tts_connection_id"}) == "dubbing"
