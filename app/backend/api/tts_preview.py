@@ -55,8 +55,17 @@ async def tts_preview(body: _PreviewBody):
     from backend.services import tts_service
     from backend.services.elevenlabs_tts_service import ElevenLabsAPIError
 
-    provider_name = (body.provider or "").strip().lower()
-    voice_id = (body.voice_id or "").strip()
+    saved = await settings_api._load_saved_settings()
+    connection = settings_api._tts_probe_connection(saved, settings_api.TTSProbeRequest(
+        connection_id=body.connection_id,
+        provider=body.provider,
+    )) if saved and body.connection_id else {}
+
+    provider_name = (
+        (body.provider or "").strip().lower()
+        or str(connection.get("provider") or "").strip().lower()
+    )
+    voice_id = (body.voice_id or connection.get("voice") or "").strip()
     safe_voice = re.sub(r"[^A-Za-z0-9_-]", "", voice_id)
     if not voice_id or not safe_voice:
         raise HTTPException(400, "voice_id is required")
@@ -69,10 +78,10 @@ async def tts_preview(body: _PreviewBody):
         connection_id=body.connection_id,
         provider=provider.value,
         api_key=body.api_key,
-        base_url=body.base_url,
-        model=body.model,
+        base_url=body.base_url or connection.get("base_url"),
+        model=body.model or connection.get("model"),
         voice_id=voice_id,
-        region=body.region,
+        region=body.region or connection.get("region"),
     )
     api_key = await settings_api._tts_probe_key(probe)
     preview_dir = settings.TMP_DIR / "tts_previews"
@@ -94,9 +103,9 @@ async def tts_preview(body: _PreviewBody):
             voice_id=voice_id,
             api_key=api_key,
             output_path=output_path,
-            model=body.model,
-            base_url=body.base_url,
-            region=body.region,
+            model=body.model or connection.get("model"),
+            base_url=body.base_url or connection.get("base_url"),
+            region=body.region or connection.get("region"),
             target_language="vi",
         )
     except ElevenLabsAPIError as exc:
