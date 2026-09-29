@@ -311,21 +311,35 @@ async def _describe_tts_bindings(run: LocalizationRun) -> dict:
     except Exception as exc:
         current_binding = None
         error = str(exc)[:200]
-    binding_mismatch = bool(
+    binding_mode = str(run.request.get("tts_binding_mode") or "legacy_snapshot")
+    provider_mismatch = bool(
         current_binding
-        and any(
-            (job_binding.get(key) or None) != (current_binding.get(key) or None)
-            for key in keys
-        )
+        and job_binding.get("tts_provider")
+        and job_binding.get("tts_provider") != current_binding.get("tts_provider")
     )
+    if binding_mode == "pinned":
+        # A pinned Edge profile is intentionally independent from the single
+        # Settings credential slot. Global ElevenLabs != job Edge is therefore
+        # NOT stale configuration. Credential-backed pinned providers still
+        # become unusable if Settings move to another provider.
+        binding_mismatch = bool(
+            provider_mismatch and job_binding.get("tts_provider") != "edge_tts"
+        )
+    else:
+        # Inherited jobs (and legacy snapshots where provenance was not stored)
+        # may legitimately be offered an explicit rebind when Settings drift.
+        binding_mismatch = bool(
+            current_binding
+            and any(
+                (job_binding.get(key) or None) != (current_binding.get(key) or None)
+                for key in keys
+            )
+        )
     return {
         "job": job_binding,
         "current": current_binding,
-        "provider_mismatch": bool(
-            current_binding
-            and job_binding.get("tts_provider")
-            and job_binding.get("tts_provider") != current_binding.get("tts_provider")
-        ),
+        "binding_mode": binding_mode,
+        "provider_mismatch": provider_mismatch,
         "binding_mismatch": binding_mismatch,
         "current_error": error,
     }
@@ -613,6 +627,10 @@ async def rebind_localization_tts(job_id: str, body: TTSRebindRequest):
     # translation/ASR fields are never touched here.
     resets = _provider_scoped_tts_resets(run.effective_profile, binding)
     run.update_effective_profile({**run.effective_profile, **binding, **resets})
+    run.update_request({
+        **run.request,
+        "tts_binding_mode": "inherit",
+    })
     run.invalidate_from("dubbing", delete_artifacts=True)
     await _dispatch_existing_run(run)
     return {
@@ -627,40 +645,15 @@ async def rebind_localization_tts(job_id: str, body: TTSRebindRequest):
 
 @router.post("/jobs/{job_id}/rerun")
 async def rerun_localization_job(job_id: str, body: RerunRequest):
+    """Rerun the SAME persisted job binding from a selected stage.
+
+    This endpoint is deliberately reproducible: it never changes TTS provider,
+    voice, model or credentials merely because global Settings changed. A user
+    who wants to adopt current Settings must use /rebind-tts explicitly.
+    """
     await _assert_job_inactive(job_id)
     run = _load_run(job_id)
     stage = body.from_stage or run.first_incomplete_stage() or "qc"
-
-    # A persisted profile snapshot keeps a job reproducible, but Settings own
-    # the only live TTS credential slot. Once the user changes provider/voice/
-    # model, replaying a dubbing-stage failure with the stale binding can never
-    # succeed. For any rerun that will execute dubbing, adopt the CURRENT
-    # Settings-owned TTS binding automatically while preserving every upstream
-    # artifact. This turns provider changes into a resumable job, not a dead end.
-    tts_rebound = False
-    previous_tts = None
-    current_tts = None
-    mode = str(run.request.get("mode") or "full_dub").strip().lower()
-    rerun_reaches_dubbing = STAGES.index(stage) <= STAGES.index("dubbing")
-    if mode == "full_dub" and rerun_reaches_dubbing:
-        described = await _describe_tts_bindings(run)
-        if described.get("binding_mismatch"):
-            current_tts = await _resolve_current_tts_binding(
-                run.effective_profile,
-                str(run.request.get("target_language") or "Vietnamese"),
-            )
-            previous_tts = {
-                key: run.effective_profile.get(key)
-                for key in ("tts_provider", "tts_model", "tts_voice", "tts_base_url", "tts_region")
-            }
-            resets = _provider_scoped_tts_resets(run.effective_profile, current_tts)
-            run.update_effective_profile({
-                **run.effective_profile,
-                **current_tts,
-                **resets,
-            })
-            tts_rebound = True
-
     preserve_files = {"checkpoint.json"} if body.from_stage is None and stage == "translation" else set()
     run.invalidate_from(stage, delete_artifacts=True, preserve_files=preserve_files)
     if stage == "separation":
@@ -669,14 +662,7 @@ async def rerun_localization_job(job_id: str, body: RerunRequest):
         # current bytes can safely become the new canonical identity.
         run.refresh_source_identity()
     await _dispatch_existing_run(run)
-    return {
-        "ok": True,
-        "job_id": job_id,
-        "from_stage": stage,
-        "tts_rebound": tts_rebound,
-        "previous_tts": previous_tts,
-        "current_tts": current_tts,
-    }
+    return {"ok": True, "job_id": job_id, "from_stage": stage}
 
 
 def _assert_rerender_ready(run: LocalizationRun) -> None:
