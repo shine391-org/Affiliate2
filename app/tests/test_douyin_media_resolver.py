@@ -691,3 +691,17 @@ def test_resolved_candidate_aweme_id_is_derived_from_the_media_url_evidence():
     # _resolved would derive for such a candidate is 999, never 123.
     assert _verified_candidate([candidate], "123") is None
     assert candidate.identity_ids[0] == "999"
+
+
+
+def test_ambiguous_dom_identity_proves_nothing():
+    candidate = _normalize_dom_candidate({
+        "url": "https://v3-web.douyinvod.com/main.mp4?sig=abc",
+        "awemeIds": ["123", "999"],
+        "provenance": "dom:shared-feed-container",
+    })
+    assert candidate is not None
+    assert candidate.url_aweme_ids == ()
+    assert candidate.dom_aweme_ids == ()
+    assert candidate.matches("123") is False
+    assert candidate.matches("999") is False
