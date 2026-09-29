@@ -72,7 +72,15 @@ def _provider_scoped_tts_resets(
     """
     previous_provider = str(effective_profile.get("tts_provider") or "").strip().lower()
     next_provider = str(binding.get("tts_provider") or "").strip().lower()
-    if not previous_provider or not next_provider or previous_provider == next_provider:
+    previous_connection = str(effective_profile.get("tts_connection_id") or "").strip().lower()
+    next_connection = str(binding.get("tts_connection_id") or "").strip().lower()
+    provider_changed = bool(
+        previous_provider and next_provider and previous_provider != next_provider
+    )
+    connection_changed = bool(
+        previous_connection and next_connection and previous_connection != next_connection
+    )
+    if not provider_changed and not connection_changed:
         return {}
 
     resets: dict[str, Any] = {
@@ -270,6 +278,7 @@ async def _resolve_current_tts_binding(
 
     candidate = dict(effective_profile)
     candidate.update({
+        "tts_connection_id": None,
         "tts_provider": None,
         "tts_model": model.strip() if model and model.strip() else None,
         "tts_voice": voice_id.strip() if voice_id and voice_id.strip() else None,
@@ -292,6 +301,7 @@ async def _resolve_current_tts_binding(
             detail=health.get("message") or "Current TTS Settings are not usable.",
         )
     return {
+        "tts_connection_id": runtime.connection_id,
         "tts_provider": getattr(runtime.provider, "value", str(runtime.provider)),
         "tts_model": runtime.model,
         "tts_voice": runtime.default_voice or None,
@@ -306,7 +316,7 @@ async def _describe_tts_bindings(run: LocalizationRun) -> dict:
     from backend.models.user_settings import UserSettings
     from backend.services.localization_service import _tts_config
 
-    keys = ("tts_provider", "tts_model", "tts_voice", "tts_base_url", "tts_region")
+    keys = ("tts_connection_id", "tts_provider", "tts_model", "tts_voice", "tts_base_url", "tts_region")
     job_binding = {key: run.effective_profile.get(key) for key in keys}
     try:
         async with AsyncSessionLocal() as db:
@@ -321,6 +331,7 @@ async def _describe_tts_bindings(run: LocalizationRun) -> dict:
             str(run.request.get("target_language") or "Vietnamese"),
         )
         current_binding = {
+            "tts_connection_id": runtime.connection_id,
             "tts_provider": getattr(runtime.provider, "value", str(runtime.provider)),
             "tts_model": runtime.model,
             "tts_voice": runtime.default_voice or None,
@@ -338,13 +349,9 @@ async def _describe_tts_bindings(run: LocalizationRun) -> dict:
         and job_binding.get("tts_provider") != current_binding.get("tts_provider")
     )
     if binding_mode == "pinned":
-        # A pinned Edge profile is intentionally independent from the single
-        # Settings credential slot. Global ElevenLabs != job Edge is therefore
-        # NOT stale configuration. Credential-backed pinned providers still
-        # become unusable if Settings move to another provider.
-        binding_mismatch = bool(
-            provider_mismatch and job_binding.get("tts_provider") != "edge_tts"
-        )
+        # A pinned connection is intentional and resolves its own live
+        # credential by stable ID. Global active TTS drift is not a mismatch.
+        binding_mismatch = False
     else:
         # Inherited jobs (and legacy snapshots where provenance was not stored)
         # may legitimately be offered an explicit rebind when Settings drift.
@@ -641,7 +648,7 @@ async def rebind_localization_tts(job_id: str, body: TTSRebindRequest):
     )
     previous = {
         key: run.effective_profile.get(key)
-        for key in ("tts_provider", "tts_model", "tts_voice", "tts_base_url", "tts_region")
+        for key in ("tts_connection_id", "tts_provider", "tts_model", "tts_voice", "tts_base_url", "tts_region")
     }
     # Provider-scoped voice/clone overrides must not survive the provider change;
     # translation/ASR fields are never touched here.
