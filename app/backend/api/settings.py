@@ -879,22 +879,46 @@ async def _load_saved_tts_settings():
         return result.scalar_one_or_none()
 
 
-async def _tts_probe_key(body: TTSProbeRequest) -> str:
-    """Resolve probe credentials through the same ownership chain as runtime.
+async def _load_saved_settings():
+    return await _load_saved_tts_settings()
 
-    Provider-scoped TTS keys win. OpenAI TTS additionally supports the saved
-    OpenAI AI-provider key and OPENAI_API_KEY, matching _tts_config(); this
-    prevents Settings test/preview from reporting "missing key" for a runtime
-    configuration that localization can actually use.
-    """
+
+def _ai_probe_connection(saved, body: AIProbeRequest) -> dict:
+    if not saved or not body.connection_id:
+        return {}
+    connection_id = _safe_connection_id(body.connection_id)
+    cfg = _load_ai_connections(saved).get(connection_id)
+    if not cfg:
+        raise HTTPException(status_code=404, detail=f"AI connection not found: {connection_id}")
+    return cfg
+
+
+def _tts_probe_connection(saved, body: TTSProbeRequest) -> dict:
+    if not saved or not body.connection_id:
+        return {}
+    connection_id = _safe_connection_id(body.connection_id)
+    cfg = _load_tts_connections(saved).get(connection_id)
+    if not cfg:
+        raise HTTPException(status_code=404, detail=f"TTS connection not found: {connection_id}")
+    return cfg
+
+
+async def _tts_probe_key(body: TTSProbeRequest) -> str:
+    """Resolve probe credentials through the same ownership chain as runtime."""
     if body.api_key is not None:
         return body.api_key.strip()
     saved = await _load_saved_tts_settings()
-    provider = (body.provider or "").strip().lower()
+    connection = _tts_probe_connection(saved, body) if saved else {}
+    provider = (
+        (body.provider or "").strip().lower()
+        or str(connection.get("provider") or "").strip().lower()
+    )
     if not saved:
         return app_settings.OPENAI_API_KEY if provider == "openai_tts" else ""
 
-    if (saved.tts_provider or "").strip().lower() == provider:
+    if connection:
+        encrypted = connection.get("api_key_encrypted")
+    elif (saved.tts_provider or "").strip().lower() == provider:
         encrypted = getattr(saved, "tts_api_key_encrypted", None)
     else:
         profile = _load_provider_registry(
@@ -923,18 +947,19 @@ async def _probe_key(body: AIProbeRequest) -> str:
     if body.api_key is not None:
         return body.api_key.strip()
 
-    provider = (body.provider or "").lower().strip()
+    s = await _load_saved_settings()
+    connection = _ai_probe_connection(s, body) if s else {}
+    provider = (
+        (body.provider or "").lower().strip()
+        or str(connection.get("provider") or "").lower().strip()
+    )
     if provider in {"ollama", "lmstudio", "vllm"}:
         return ""
-
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            select(UserSettings).where(UserSettings.user_id == "local")
-        )
-        s = result.scalar_one_or_none()
     if not s:
         return ""
-    if (s.ai_provider or "").lower().strip() == provider:
+    if connection:
+        encrypted = connection.get("api_key_encrypted")
+    elif (s.ai_provider or "").lower().strip() == provider:
         encrypted = s.ai_api_key_encrypted
     else:
         profile = _load_provider_registry(
@@ -964,13 +989,19 @@ async def discover_ai_models(body: AIProbeRequest):
         COMPATIBLE_PRESETS, compatible_base_url, list_openai_compatible_models,
     )
 
-    provider = (body.provider or "").lower().strip()
+    saved = await _load_saved_settings()
+    connection = _ai_probe_connection(saved, body) if saved else {}
+    provider = (
+        (body.provider or "").lower().strip()
+        or str(connection.get("provider") or "").lower().strip()
+    )
+    requested_base = body.base_url or connection.get("base_url")
     if provider == "openai":
         base_url = "https://api.openai.com/v1"
     elif provider == "openrouter":
         base_url = "https://openrouter.ai/api/v1"
     elif provider in COMPATIBLE_PRESETS or provider == "compatible":
-        base_url = compatible_base_url(provider, body.base_url)
+        base_url = compatible_base_url(provider, requested_base)
     else:
         raise HTTPException(status_code=400, detail="Model discovery is not supported for this provider.")
 
@@ -993,13 +1024,18 @@ async def test_ai_connection(body: AIProbeRequest):
     """Test the exact provider/base/model values the user is editing."""
     from backend.core.ai_provider import make_ai_client
 
+    saved = await _load_saved_settings()
+    connection = _ai_probe_connection(saved, body) if saved else {}
     key = await _probe_key(body)
+    provider_name = (body.provider or connection.get("provider") or "").strip().lower()
+    model = body.model or connection.get("model")
+    base_url = body.base_url or connection.get("base_url")
     try:
         client = make_ai_client(
-            provider_name=body.provider,
+            provider_name=provider_name,
             api_key=key,
-            model=body.model,
-            base_url=body.base_url,
+            model=model,
+            base_url=base_url,
         )
         reply = await client.chat(
             messages=[{"role": "user", "content": "Reply with exactly OK."}],
@@ -1018,8 +1054,14 @@ async def test_tts_connection(body: TTSProbeRequest):
     from backend.services import tts_service
     from backend.services.elevenlabs_tts_service import ElevenLabsAPIError
 
+    saved = await _load_saved_settings()
+    connection = _tts_probe_connection(saved, body) if saved else {}
+    provider_name = (
+        (body.provider or "").strip().lower()
+        or str(connection.get("provider") or "").strip().lower()
+    )
     try:
-        provider = tts_service.TTSProvider((body.provider or "").strip().lower())
+        provider = tts_service.TTSProvider(provider_name)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={
             "code": "unsupported_provider",
@@ -1031,10 +1073,10 @@ async def test_tts_connection(body: TTSProbeRequest):
         return await tts_service.test_tts_connection(
             provider=provider,
             api_key=key,
-            base_url=body.base_url,
-            model=body.model,
-            voice_id=body.voice_id,
-            region=body.region,
+            base_url=body.base_url or connection.get("base_url"),
+            model=body.model or connection.get("model"),
+            voice_id=body.voice_id or connection.get("voice"),
+            region=body.region or connection.get("region"),
         )
     except ElevenLabsAPIError as exc:
         logger.warning(
@@ -1066,8 +1108,14 @@ async def discover_tts_voices(body: TTSProbeRequest):
     from backend.services import tts_service
     from backend.services.elevenlabs_tts_service import ElevenLabsAPIError
 
+    saved = await _load_saved_settings()
+    connection = _tts_probe_connection(saved, body) if saved else {}
+    provider_name = (
+        (body.provider or "").strip().lower()
+        or str(connection.get("provider") or "").strip().lower()
+    )
     try:
-        provider = tts_service.TTSProvider((body.provider or "").strip().lower())
+        provider = tts_service.TTSProvider(provider_name)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={
             "code": "unsupported_provider",
@@ -1076,12 +1124,12 @@ async def discover_tts_voices(body: TTSProbeRequest):
     key = await _tts_probe_key(body)
     try:
         voices = await tts_service.list_voices(
-            provider, key, base_url=body.base_url,
+            provider, key, base_url=body.base_url or connection.get("base_url"),
         )
         models = []
         if provider == tts_service.TTSProvider.ELEVENLABS:
             from backend.services.elevenlabs_tts_service import list_models
-            models = await list_models(api_key=key, base_url=body.base_url)
+            models = await list_models(api_key=key, base_url=body.base_url or connection.get("base_url"))
         return {
             "ok": True,
             "provider": provider.value,
