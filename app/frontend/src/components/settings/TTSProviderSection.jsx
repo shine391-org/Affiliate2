@@ -4,7 +4,7 @@ import {
   Select, Stack, TextField, Typography,
 } from "@mui/material"
 import SaveOutlinedIcon from "@mui/icons-material/SaveOutlined"
-import http from "../../api/http"
+import http, { apiErrorMessage as errorMessage } from "../../api/http"
 import useAppStore from "../../store/appStore"
 
 const ELEVENLABS_BASE = "https://api.elevenlabs.io/v1"
@@ -17,12 +17,9 @@ const PROVIDERS = {
   gpt_sovits: { label: "GPT-SoVITS (clone giọng cục bộ)", base: true, defaultBase: "http://127.0.0.1:9880" },
 }
 
-const errorMessage = (err, fallback) => {
-  const detail = err.response?.data?.detail
-  if (typeof detail === "string") return detail
-  if (detail?.message) return detail.message
-  return err.message || fallback
-}
+// A request made with responseType:"blob" also delivers ERRORS as a Blob, so an
+// axios error body is not plain JSON and every provider status/message is lost.
+// errorMessage (api/http) decodes it before surfacing anything here.
 
 export default function TTSProviderSection({ settings, updateSettings }) {
   const showSnackbar = useAppStore((s) => s.showSnackbar)
@@ -108,10 +105,22 @@ export default function TTSProviderSection({ settings, updateSettings }) {
       if (!voice && found.length === 1) setVoice(found[0].voice_id)
       showSnackbar(found.length ? `Tìm thấy ${found.length} giọng` : "Không tìm thấy giọng nào", found.length ? "success" : "warning")
     } catch (err) {
-      showSnackbar(errorMessage(err, "Không thể tải danh sách giọng"), "error")
+      showSnackbar(await errorMessage(err, "Không thể tải danh sách giọng"), "error")
     } finally {
       setLoadingVoices(false)
     }
+  }
+
+  const healthLabel = (result) => {
+    if (!result?.ok) return "CHƯA SẴN SÀNG"
+    if (result.connection_verified === false) return "CẤU HÌNH HỢP LỆ"
+    return "READY"
+  }
+
+  const healthSeverity = (result) => {
+    if (!result?.ok) return "error"
+    if (result.connection_verified === false) return "warning"
+    return "success"
   }
 
   const testConnection = async () => {
@@ -120,11 +129,16 @@ export default function TTSProviderSection({ settings, updateSettings }) {
     try {
       const { data } = await http.post("/api/settings/tts/test", probePayload())
       setHealth(data)
-      showSnackbar(data?.ok ? "Kết nối TTS sẵn sàng" : (data?.message || "Cấu hình TTS chưa hợp lệ"), data?.ok ? "success" : "warning")
+      const message = data?.ok
+        ? (data?.connection_verified === false
+          ? (data?.message || "Cấu hình TTS hợp lệ (chưa xác minh kết nối)")
+          : "Kết nối TTS sẵn sàng")
+        : (data?.message || "Cấu hình TTS chưa hợp lệ")
+      showSnackbar(message, data?.ok ? (data?.connection_verified === false ? "warning" : "success") : "warning")
       if (Array.isArray(data?.voices)) setVoices(data.voices)
     } catch (err) {
-      const message = errorMessage(err, "Kiểm tra kết nối TTS thất bại")
-      setHealth({ ok: false, message })
+      const message = await errorMessage(err, "Kiểm tra kết nối TTS thất bại")
+      setHealth({ ok: false, connection_verified: false, message })
       showSnackbar(message, "error")
     } finally {
       setProbing(false)
@@ -150,7 +164,7 @@ export default function TTSProviderSection({ settings, updateSettings }) {
         () => showSnackbar("Trình duyệt đã chặn tự phát; hãy bấm lại Nghe thử giọng", "warning"),
       )
     } catch (err) {
-      showSnackbar(errorMessage(err, "Nghe thử giọng thất bại"), "error")
+      showSnackbar(await errorMessage(err, "Nghe thử giọng thất bại"), "error")
     } finally {
       setPreviewing(false)
     }
@@ -258,10 +272,15 @@ export default function TTSProviderSection({ settings, updateSettings }) {
       )}
 
       {health && (
-        <Alert severity={health.ok ? "success" : "error"}>
+        <Alert severity={healthSeverity(health)}>
           <Stack spacing={0.5}>
-            <Typography variant="body2" sx={{ fontWeight: 700 }}>{health.ok ? "READY" : "CHƯA SẴN SÀNG"}</Typography>
+            <Typography variant="body2" sx={{ fontWeight: 700 }}>{healthLabel(health)}</Typography>
             <Typography variant="body2">{health.message}</Typography>
+            {health.ok && health.connection_verified === false && (
+              <Typography variant="caption" color="text.secondary" component="div">
+                Chưa có yêu cầu nào được gửi tới nhà cung cấp. Bấm “Nghe thử giọng” để xác minh kết nối thật.
+              </Typography>
+            )}
             <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
               {health.voice_count != null && <Chip size="small" label={`${health.voice_count} giọng`} />}
               {health.selected_voice_valid != null && <Chip size="small" label={`Giọng: ${health.selected_voice_valid ? "hợp lệ" : "không hợp lệ"}`} />}

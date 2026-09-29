@@ -84,6 +84,25 @@ def _aweme_ids_from_url(url: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(values))
 
 
+def canonical_aweme_id(url: str | None) -> str | None:
+    """Extract the aweme id a Douyin URL names, or None when it names none.
+
+    Canonical page:      /video/<id>  (also /note/<id>)
+    Share page:          iesdouyin.com/share/video/<id>/...
+    Modal/discover page: ?modal_id=<id> (also aweme_id / item_id)
+    A v.douyin.com short link names no aweme: it only resolves after the
+    browser follows the redirect to the canonical page.
+    """
+    parsed = urlsplit(str(url or ""))
+    for key in ("modal_id", "aweme_id", "item_id"):
+        for value in parse_qs(parsed.query).get(key, []):
+            candidate = str(value).strip()
+            if candidate.isdigit():
+                return candidate
+    match = re.search(r"/(?:video|note|slides)/(\d+)(?:/|$|\?)", parsed.path)
+    return match.group(1) if match else None
+
+
 def _normalize_dom_candidate(raw) -> _MediaCandidate | None:
     if isinstance(raw, str):
         url = raw
@@ -113,6 +132,13 @@ def _verified_candidate(
     candidates: list[_MediaCandidate],
     expected_aweme_id: str | None,
 ) -> _MediaCandidate | None:
+    # Fail closed: an unproven requested identity can never be satisfied by an
+    # arbitrary DOM/network candidate, so this gate refuses to run without one.
+    if not expected_aweme_id:
+        raise ValueError(
+            "Douyin media identity cannot be accepted without a concrete "
+            "requested aweme_id"
+        )
     if not candidates:
         return None
     if expected_aweme_id:
@@ -254,8 +280,7 @@ async def resolve_douyin_media(
     source_url = str(source_url or "").strip()
     if "douyin.com/" not in source_url.lower() and "iesdouyin.com/" not in source_url.lower():
         raise ValueError("Douyin media resolver only accepts Douyin URLs")
-    source_path_id = urlsplit(source_url).path.rstrip("/").rsplit("/", 1)[-1]
-    source_video_id = source_path_id if source_path_id.isdigit() else None
+    source_video_id = canonical_aweme_id(source_url)
 
     async with open_douyin_cdp_session(cdp_url) as session:
         # If the shared session had to create a probe page, reuse that page
@@ -307,6 +332,32 @@ async def resolve_douyin_media(
                 # Douyin can keep domcontentloaded pending while the visible
                 # video and signed media URL are already usable.
                 pass
+
+            if not source_video_id:
+                # Share/short link: the server-side redirect already names the
+                # canonical aweme. Read that identity from the landed page URL
+                # (or its server-rendered og:url) before any candidate is
+                # considered. Never infer it from a media URL.
+                source_video_id = canonical_aweme_id(getattr(page, "url", ""))
+            if not source_video_id:
+                try:
+                    page_aweme_url = await page.evaluate(
+                        "() => (document.querySelector('meta[property=\"og:url\"]')"
+                        "?.content || document.querySelector('link[rel=\"canonical\"]')"
+                        "?.href || '')"
+                    )
+                except Exception:
+                    page_aweme_url = ""
+                source_video_id = canonical_aweme_id(page_aweme_url)
+            if not source_video_id:
+                # FAIL CLOSED. Without a concrete aweme id, no media may be
+                # accepted: accepting one would silently download a different
+                # video than the user asked for.
+                raise RuntimeError(
+                    "Could not resolve the Douyin share/short URL to a canonical "
+                    f"aweme_id: {source_url}. Refusing to download unverified "
+                    "media."
+                )
 
             async def _dom_media_urls():
                 return await page.evaluate(

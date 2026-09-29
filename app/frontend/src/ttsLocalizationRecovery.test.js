@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs"
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8")
 const tts = read("./components/settings/TTSProviderSection.jsx")
+const http = read("./api/http.js")
 const profiles = read("./components/settings/LocalizationProfilesSection.jsx")
 const expert = read("./components/tools/LocalizationExpertPanel.jsx")
 const studio = read("./pages/StudioLocalize.jsx")
@@ -32,6 +33,21 @@ test("expert recovery distinguishes persisted rerun from current-settings rebind
   assert.ok(expert.includes('Dùng TTS hiện tại & chạy lại lồng tiếng'))
   assert.ok(expert.includes('TTS của job'))
   assert.ok(expert.includes('TTS hiện tại'))
+})
+
+test("TTS settings never labels an unprobed provider as READY", () => {
+  assert.ok(tts.includes("CẤU HÌNH HỢP LỆ"), 'unverified providers must say configuration is valid')
+  assert.ok(tts.includes("connection_verified === false"))
+  assert.ok(!tts.includes('{health.ok ? "READY"'), 'READY must depend on connection_verified')
+})
+
+test("blob error bodies are decoded before any snackbar message", () => {
+  assert.ok(http.includes("export async function apiErrorMessage"))
+  assert.ok(http.includes("data instanceof Blob"))
+  assert.ok(http.includes("await data.text()"))
+  assert.ok(tts.includes("apiErrorMessage as errorMessage"))
+  assert.ok(tts.includes("await errorMessage(err"), 'preview/test errors must be awaited')
+  assert.ok(!tts.includes("err.response?.data?.detail"), 'raw blob detail access loses provider errors')
 })
 
 test("batch dialog has visible X and Đóng controls without cancellation calls", () => {

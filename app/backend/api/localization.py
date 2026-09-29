@@ -49,6 +49,41 @@ class TTSRebindRequest(BaseModel):
     model: str | None = None
 
 
+# Only GPT-SoVITS consumes reference audio in the canonical TTS interface; every
+# other provider ignores it. A reference clip is therefore provider-scoped state
+# once the provider changes to one that cannot use it.
+_CLONE_CAPABLE_TTS_PROVIDERS = {"gpt_sovits"}
+
+
+def _provider_scoped_tts_resets(
+    effective_profile: dict,
+    binding: dict,
+) -> dict[str, Any]:
+    """Drop TTS state that cannot be valid for the newly bound provider.
+
+    ``speaker_voices`` holds provider voice IDs (an ElevenLabs voice_id is
+    meaningless to Edge/Azure/OpenAI) and is preferred over the runtime default
+    voice in ``_voice_for_chunk``, so a stale entry silently wins. Clone
+    references are only honoured by clone-capable providers.
+    """
+    previous_provider = str(effective_profile.get("tts_provider") or "").strip().lower()
+    next_provider = str(binding.get("tts_provider") or "").strip().lower()
+    if not previous_provider or not next_provider or previous_provider == next_provider:
+        return {}
+
+    resets: dict[str, Any] = {
+        "speaker_voices": {},
+        "speaker_reference_audio": {},
+    }
+    if next_provider not in _CLONE_CAPABLE_TTS_PROVIDERS:
+        resets.update({
+            "tts_reference_audio": None,
+            "tts_reference_text": None,
+            "tts_reference_language": None,
+        })
+    return resets
+
+
 class RenderRerunRequest(BaseModel):
     target_aspect: Literal["source", "9:16", "16:9", "1:1"] | None = None
     mask_box: dict[str, Any] | None = None
@@ -566,7 +601,10 @@ async def rebind_localization_tts(job_id: str, body: TTSRebindRequest):
         key: run.effective_profile.get(key)
         for key in ("tts_provider", "tts_model", "tts_voice", "tts_base_url", "tts_region")
     }
-    run.update_effective_profile({**run.effective_profile, **binding})
+    # Provider-scoped voice/clone overrides must not survive the provider change;
+    # translation/ASR fields are never touched here.
+    resets = _provider_scoped_tts_resets(run.effective_profile, binding)
+    run.update_effective_profile({**run.effective_profile, **binding, **resets})
     run.invalidate_from("dubbing", delete_artifacts=True)
     await _dispatch_existing_run(run)
     return {
@@ -575,6 +613,7 @@ async def rebind_localization_tts(job_id: str, body: TTSRebindRequest):
         "from_stage": "dubbing",
         "previous_tts": previous,
         "current_tts": binding,
+        "cleared_profile_fields": sorted(resets),
     }
 
 

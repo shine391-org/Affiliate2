@@ -128,6 +128,74 @@ async def test_tts_health_detects_missing_selected_elevenlabs_voice(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_gpt_sovits_never_reports_a_verified_connection():
+    result = await tts_service.test_tts_connection(
+        provider=tts_service.TTSProvider.GPT_SOVITS,
+        voice_id="",
+        base_url="http://127.0.0.1:9880",
+    )
+
+    assert result["configuration_valid"] is True
+    assert result["connection_verified"] is False
+    assert "Cấu hình hợp lệ" in result["message"]
+    assert "READY" not in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_openai_tts_never_reports_a_verified_connection():
+    result = await tts_service.test_tts_connection(
+        provider=tts_service.TTSProvider.OPENAI_TTS,
+        api_key="sk-not-a-real-key",
+        voice_id="alloy",
+        model="tts-1",
+    )
+
+    assert result["configuration_valid"] is True
+    assert result["connection_verified"] is False
+
+
+@pytest.mark.asyncio
+async def test_probed_providers_report_a_verified_connection(monkeypatch):
+    async def fake_edge_voices(*args, **kwargs):
+        return [{"voice_id": "vi-VN-HoaiMyNeural", "name": "Mai"}]
+
+    monkeypatch.setattr(
+        tts_service, "list_voices", fake_edge_voices, raising=True,
+    )
+
+    result = await tts_service.test_tts_connection(
+        provider=tts_service.TTSProvider.EDGE_TTS,
+        voice_id="vi-VN-HoaiMyNeural",
+    )
+
+    assert result["connection_verified"] is True
+    assert result["configuration_valid"] is True
+
+
+@pytest.mark.asyncio
+async def test_localization_preflight_accepts_configuration_only_binding(monkeypatch):
+    """A config-only provider passes preflight without claiming a live probe."""
+    from backend.services import localization_service as localization
+
+    runtime = localization.TTSRuntimeConfig(
+        provider=tts_service.TTSProvider.GPT_SOVITS,
+        default_voice="",
+        api_key="",
+        model=None,
+        base_url="http://127.0.0.1:9880",
+        region=None,
+    )
+    monkeypatch.setattr(localization, "_tts_config", lambda *_args, **_kwargs: runtime)
+
+    health = await localization.validate_localization_tts_preflight(
+        object(), SimpleNamespace(), "Vietnamese",
+    )
+
+    assert health["ok"] is True
+    assert health["connection_verified"] is False
+
+
+@pytest.mark.asyncio
 async def test_settings_tts_test_uses_unsaved_plaintext_key(monkeypatch):
     seen = {}
 

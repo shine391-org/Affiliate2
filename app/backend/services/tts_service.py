@@ -155,7 +155,21 @@ async def test_tts_connection(
     voice_id: str | None = None,
     region: str | None = None,
 ) -> dict:
-    """Cheap provider/voice/model validation that never synthesizes speech."""
+    """Cheap provider/voice/model validation that never synthesizes speech.
+
+    The result distinguishes what was actually checked from what was merely
+    configured:
+
+    - ``configuration_valid``: the local settings are complete enough to try.
+    - ``connection_verified``: a real request to the provider was made and
+      succeeded. This is only True for providers probed over the network.
+    - ``ok``: usable for the localization preflight, i.e. configuration is
+      valid and, where a probe exists, it passed.
+
+    Never report ``connection_verified=True`` for a provider that was not
+    actually contacted: an invalid API key or a dead local GPT-SoVITS endpoint
+    must never be presented as a working connection.
+    """
     voice = (voice_id or DEFAULT_VOICES.get(provider, "") or "").strip()
     selected_model = (model or "").strip() or None
 
@@ -166,6 +180,8 @@ async def test_tts_connection(
         return {
             "ok": voice_valid,
             "provider": provider.value,
+            "configuration_valid": voice_valid,
+            "connection_verified": voice_valid,
             "authenticated": True,
             "endpoint": "edge-tts",
             "voice_count": len(voices),
@@ -206,6 +222,8 @@ async def test_tts_connection(
         return {
             "ok": ok,
             "provider": provider.value,
+            "configuration_valid": ok,
+            "connection_verified": ok,
             "authenticated": True,
             "endpoint": canonicalize_base_url(base_url),
             "voice_count": len(voices),
@@ -223,9 +241,13 @@ async def test_tts_connection(
         raise VoiceGenerationError("Azure Speech requires a region or custom endpoint")
     if provider in {TTSProvider.OPENAI_COMPATIBLE, TTSProvider.GPT_SOVITS} and not base_url:
         raise VoiceGenerationError(f"{info['label']} requires a base URL")
+    # No cheap, side-effect-free probe exists for these providers, so this
+    # result is explicitly NOT a verified connection.
     return {
         "ok": True,
         "provider": provider.value,
+        "configuration_valid": True,
+        "connection_verified": False,
         "authenticated": None,
         "endpoint": base_url,
         "voice_count": None,
@@ -233,7 +255,10 @@ async def test_tts_connection(
         "model_valid": bool(selected_model) or provider in {TTSProvider.AZURE, TTSProvider.GPT_SOVITS},
         "voices": await list_voices(provider, api_key, base_url=base_url),
         "models": [],
-        "message": "Configuration is complete. Use voice preview to validate speech generation.",
+        "message": (
+            "Cấu hình hợp lệ. Chưa xác minh kết nối tới nhà cung cấp này; "
+            "dùng Nghe thử giọng để xác nhận tạo speech thực tế."
+        ),
     }
 
 

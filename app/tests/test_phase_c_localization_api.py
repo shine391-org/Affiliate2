@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from backend.api import localization as api
 from backend.api import tools
+from backend.core.localization import LocalizationProfile
 
 
 @pytest.mark.asyncio
@@ -400,6 +401,103 @@ async def test_tts_rebind_voice_override_still_invalidates_only_dubbing(monkeypa
 
     assert events == ["dubbing"]
     assert run.effective_profile["translation_model"] == "keep-me"
+
+
+@pytest.mark.asyncio
+async def test_tts_rebind_to_other_provider_drops_provider_scoped_voice_state(monkeypatch):
+    events = []
+
+    class FakeRun:
+        job_id = "job-rebind-provider"
+        request = {"target_language": "Vietnamese", "mode": "full_dub"}
+        effective_profile = {
+            "id": "hq",
+            "name": "HQ",
+            "translation_model": "qwen-translation",
+            "asr_model": "large-v3",
+            "tts_provider": "elevenlabs",
+            "tts_model": "eleven_multilingual_v2",
+            "tts_voice": "eleven-voice-id",
+            "tts_base_url": "https://api.elevenlabs.io/v1",
+            "tts_region": None,
+            "speaker_voices": {"SPEAKER_00": "eleven-id"},
+            "speaker_reference_audio": {"SPEAKER_00": "ref/eleven.wav"},
+            "tts_reference_audio": "ref/global.wav",
+            "tts_reference_text": "reference transcript",
+            "tts_reference_language": "vi",
+        }
+
+        def update_effective_profile(self, value):
+            self.effective_profile = value
+
+        def invalidate_from(self, stage, *, delete_artifacts, preserve_files=set()):
+            events.append(stage)
+
+    async def fake_binding(*args, **kwargs):
+        return {
+            "tts_provider": "edge_tts", "tts_model": None,
+            "tts_voice": "vi-VN-HoaiMyNeural", "tts_base_url": None, "tts_region": None,
+        }
+
+    async def fake_dispatch(run):
+        return None
+
+    async def fake_inactive(job_id):
+        return None
+
+    run = FakeRun()
+    monkeypatch.setattr(api, "_assert_job_inactive", fake_inactive)
+    monkeypatch.setattr(api, "_load_run", lambda job_id: run)
+    monkeypatch.setattr(api, "_resolve_current_tts_binding", fake_binding)
+    monkeypatch.setattr(api, "_dispatch_existing_run", fake_dispatch)
+
+    result = await api.rebind_localization_tts(
+        run.job_id, api.TTSRebindRequest(source="settings"),
+    )
+
+    profile = run.effective_profile
+    assert profile["tts_provider"] == "edge_tts"
+    assert profile["speaker_voices"] == {}
+    assert profile["speaker_reference_audio"] == {}
+    assert profile["tts_reference_audio"] is None
+    assert profile["tts_reference_text"] is None
+    assert profile["tts_reference_language"] is None
+    assert "eleven-id" not in str(profile)
+    # Translation/ASR artifacts and configuration are untouched.
+    assert profile["translation_model"] == "qwen-translation"
+    assert profile["asr_model"] == "large-v3"
+    assert events == ["dubbing"]
+    assert "speaker_voices" in result["cleared_profile_fields"]
+
+
+def test_provider_scoped_tts_resets_keeps_state_when_provider_is_unchanged():
+    profile = {
+        "tts_provider": "elevenlabs",
+        "speaker_voices": {"SPEAKER_00": "eleven-id"},
+    }
+    assert api._provider_scoped_tts_resets(profile, {"tts_provider": "elevenlabs"}) == {}
+
+
+def test_provider_scoped_tts_resets_keeps_clone_reference_for_gpt_sovits():
+    resets = api._provider_scoped_tts_resets(
+        {"tts_provider": "elevenlabs"}, {"tts_provider": "gpt_sovits"},
+    )
+    assert resets == {"speaker_voices": {}, "speaker_reference_audio": {}}
+
+
+def test_rebuilt_profile_validates_after_provider_scoped_resets():
+    profile = LocalizationProfile.model_validate({
+        "id": "hq",
+        "name": "HQ",
+        "tts_provider": "edge_tts",
+        "speaker_voices": {},
+        "speaker_reference_audio": {},
+        "tts_reference_audio": None,
+        "tts_reference_text": None,
+        "tts_reference_language": None,
+    })
+    assert profile.speaker_voices == {}
+    assert profile.tts_reference_audio is None
 
 
 @pytest.mark.asyncio
