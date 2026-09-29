@@ -109,6 +109,7 @@ export default function TTSProviderSection({ settings, updateSettings }) {
       const { data } = await http.post("/api/settings/tts/voices", probePayload())
       const found = data?.voices || []
       setVoices(found)
+      if (Array.isArray(data?.models)) setModels(data.models)
       if (!voice && found.length === 1) setVoice(found[0].voice_id)
       showSnackbar(found.length ? `Tìm thấy ${found.length} giọng` : "Không tìm thấy giọng nào", found.length ? "success" : "warning")
     } catch (err) {
