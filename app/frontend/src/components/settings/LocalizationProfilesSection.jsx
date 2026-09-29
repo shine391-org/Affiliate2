@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import {
-  Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Checkbox,
+  Accordion, AccordionDetails, AccordionSummary, Alert, Autocomplete, Box, Button, Checkbox,
   Chip, Divider, FormControl, FormControlLabel, InputLabel, MenuItem, Select,
   Stack, TextField, Typography,
 } from "@mui/material"
@@ -91,14 +91,29 @@ export default function LocalizationProfilesSection({ settings }) {
   const ttsVoicePlaceholder = edgeCrossProviderOverride
     ? "vi-VN-HoaiMyNeural (mặc định Edge theo ngôn ngữ)"
     : (settings?.preferred_tts_voice || "kế thừa mặc định ngôn ngữ/nhà cung cấp")
-  const adoptCurrentTts = () => setDraft((prev) => ({
-    ...prev,
-    tts_provider: currentTtsProvider,
-    tts_model: settings?.tts_model || null,
-    tts_voice: settings?.preferred_tts_voice || null,
-    tts_base_url: settings?.tts_base_url || null,
-    tts_region: settings?.tts_region || null,
-  }))
+  const adoptCurrentTts = () => setDraft((prev) => {
+    const providerChanged = Boolean(
+      prev?.tts_provider && prev.tts_provider !== currentTtsProvider
+    )
+    return {
+      ...prev,
+      tts_provider: currentTtsProvider,
+      tts_model: settings?.tts_model || null,
+      tts_voice: settings?.preferred_tts_voice || null,
+      tts_base_url: settings?.tts_base_url || null,
+      tts_region: settings?.tts_region || null,
+      // Provider-scoped speaker/clone state must never survive a provider
+      // switch. _voice_for_chunk() prioritizes speaker_voices, so retaining an
+      // ElevenLabs voice id while adopting Edge would bypass the default voice.
+      ...(providerChanged ? {
+        speaker_voices: {},
+        speaker_reference_audio: {},
+        tts_reference_audio: null,
+        tts_reference_text: null,
+        tts_reference_language: null,
+      } : {}),
+    }
+  })
 
   const discoverModels = async () => {
     const provider = settings?.ai_provider || ""
@@ -287,10 +302,6 @@ export default function LocalizationProfilesSection({ settings }) {
         )}
       </Box>
 
-      <datalist id="localization-model-suggestions">
-        {[...new Set([settings?.ai_model, ...discoveredModels].filter(Boolean))].map((model) => <option key={model} value={model} />)}
-      </datalist>
-
       <Accordion defaultExpanded disableGutters>
         <AccordionSummary expandIcon={<ExpandMoreOutlinedIcon />}>
           <Box>
@@ -306,13 +317,21 @@ export default function LocalizationProfilesSection({ settings }) {
                 {PRESETS.map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
               </Select>
             </FormControl>
-            <TextField
-              size="small" fullWidth label="Mô hình dịch C6"
+            <Autocomplete
+              freeSolo
+              size="small"
+              fullWidth
+              options={[...new Set([settings?.ai_model, ...discoveredModels].filter(Boolean))]}
               value={draft.translation_model || ""}
-              onChange={(e) => patch("translation_model", e.target.value)}
-              placeholder={globalModel}
-              inputProps={{ list: "localization-model-suggestions" }}
-              helperText="Để trống = dùng mô hình mặc định/toàn cục. Nhập ID mô hình tương thích hoặc dùng Dò tìm mô hình."
+              onInputChange={(_, value) => patch("translation_model", value || null)}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Mô hình dịch C6"
+                  placeholder={globalModel}
+                  helperText="Chọn trực tiếp mô hình đã dò được, hoặc nhập ID tùy chỉnh. Để trống = dùng mô hình mặc định/toàn cục."
+                />
+              )}
             />
             <TextField
               size="small" fullWidth label="Ghi đè Base URL tương thích (tùy chọn)"
@@ -352,13 +371,21 @@ export default function LocalizationProfilesSection({ settings }) {
         </AccordionSummary>
         <AccordionDetails>
           <Stack spacing={2}>
-            <TextField
-              size="small" fullWidth label="Mô hình viết lại thời lượng C7"
+            <Autocomplete
+              freeSolo
+              size="small"
+              fullWidth
+              options={[...new Set([settings?.ai_model, ...discoveredModels].filter(Boolean))]}
               value={draft.rewrite_model || ""}
-              onChange={(e) => patch("rewrite_model", e.target.value)}
-              placeholder={globalModel}
-              inputProps={{ list: "localization-model-suggestions" }}
-              helperText="Có thể dùng mô hình nhỏ/nhanh hơn C6. Để trống = dùng mô hình mặc định/toàn cục."
+              onInputChange={(_, value) => patch("rewrite_model", value || null)}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Mô hình viết lại thời lượng C7"
+                  placeholder={globalModel}
+                  helperText="Chọn trực tiếp mô hình đã dò được hoặc nhập ID khác. Có thể dùng model nhỏ/nhanh hơn C6."
+                />
+              )}
             />
             <TextField
               size="small" fullWidth label="Ghi đè Base URL tương thích (tùy chọn)"
