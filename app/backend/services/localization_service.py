@@ -893,7 +893,8 @@ async def _translate_batch_resilient(
             progress_cb=progress_cb,
         )
         right, rf = await _translate_batch_resilient(
-            ai, batch[mid:], target_language=target_language, context=context,
+            ai, batch[mid:], route_state=route_state,
+            target_language=target_language, context=context,
             profile=profile, for_dub=for_dub, fallback_ai=fallback_ai,
             progress_cb=progress_cb,
         )
