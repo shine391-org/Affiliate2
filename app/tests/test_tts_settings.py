@@ -1117,3 +1117,46 @@ async def test_archived_or_conflicting_connection_cannot_be_activated(monkeypatc
         ))
     assert getattr(conflicting_tts.value, "status_code", None) == 409
     assert "conflicting" in str(getattr(conflicting_tts.value, "detail", "")).lower()
+
+
+
+@pytest.mark.asyncio
+async def test_tts_preview_connection_id_supplies_saved_runtime_fields(monkeypatch, tmp_path):
+    from backend.api import tts_preview
+
+    saved = SimpleNamespace()
+    connection = {
+        "provider": "openai_compatible_tts",
+        "voice": "vi-test",
+        "model": "tts-local",
+        "base_url": "http://127.0.0.1:9001/v1",
+        "region": None,
+        "api_key_encrypted": None,
+    }
+    seen = {}
+
+    monkeypatch.setattr(settings_api, "_load_saved_settings", lambda: _async_value(saved))
+    monkeypatch.setattr(
+        settings_api,
+        "_tts_probe_connection",
+        lambda _saved, body: connection if body.connection_id == "local-tts" else {},
+    )
+    monkeypatch.setattr(settings_api, "_tts_probe_key", lambda body: _async_value(""))
+
+    async def fake_generate(text, **kwargs):
+        seen.update(kwargs)
+        kwargs["output_path"].write_bytes(b"RIFFfake")
+        return kwargs["output_path"]
+
+    monkeypatch.setattr(tts_service, "generate_tts", fake_generate)
+    monkeypatch.setattr(type(tts_preview.settings), "TMP_DIR", property(lambda _self: tmp_path))
+
+    response = await tts_preview.tts_preview(tts_preview._PreviewBody(
+        connection_id="local-tts",
+        provider="openai_compatible_tts",
+        voice_id="vi-test",
+    ))
+
+    assert response.media_type == "audio/wav"
+    assert seen["model"] == "tts-local"
+    assert seen["base_url"] == "http://127.0.0.1:9001/v1"
