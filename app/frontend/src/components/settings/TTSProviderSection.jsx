@@ -298,10 +298,21 @@ export default function TTSProviderSection({ settings, updateSettings }) {
 
       <FormControl size="small" fullWidth>
         <InputLabel>Provider TTS</InputLabel>
-        <Select value={provider} label="Provider TTS" onChange={(e) => changeProvider(e.target.value)}>
+        <Select
+          value={provider}
+          label="Provider TTS"
+          onChange={(e) => changeProvider(e.target.value)}
+          disabled={!isNew}
+        >
           {Object.entries(PROVIDERS).map(([id, item]) => <MenuItem key={id} value={id}>{item.label}</MenuItem>)}
         </Select>
       </FormControl>
+
+      {!isNew && (
+        <Typography variant="caption" color="text.secondary">
+          Provider TTS của connection là cố định. Tạo connection mới nếu muốn đổi provider để job cũ vẫn resolve đúng giọng/credential.
+        </Typography>
+      )}
 
       {provider === "elevenlabs" && voices.length > 0 ? (
         <FormControl size="small" fullWidth>
