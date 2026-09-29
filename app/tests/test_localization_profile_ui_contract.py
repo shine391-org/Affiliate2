@@ -39,10 +39,11 @@ def test_localization_profiles_ui_exposes_ai_fallback_and_deadline_controls():
         / "LocalizationProfilesSection.jsx"
     ).read_text(encoding="utf-8")
 
-    assert "AI chính C6" in ui
-    assert "AI dự phòng C6" in ui
-    assert "AI chính C7" in ui
-    assert "AI dự phòng C7" in ui
+    assert "Chuỗi AI C6 / Semantic" in ui
+    assert "Chuỗi AI C7" in ui
+    assert "Thêm fallback" in ui
+    assert "connection_id" in ui
+    assert "sticky" in ui
     assert "Semantic tổng ngân sách" in ui
     assert "Dịch tổng ngân sách/batch" in ui
     assert "C7 tổng ngân sách" in ui
