@@ -692,27 +692,42 @@ def _tts_config(user_settings, profile: LocalizationProfile, target_language: st
     requested_provider = (profile.tts_provider or "").strip().lower() or None
     configured_provider = (configured_provider or "").strip().lower() or None
 
-    # Settings own one TTS connection/credential slot. A profile may pin that
-    # provider, but it must never reinterpret another provider's secret or
-    # endpoint.
-    if requested_provider and configured_provider and requested_provider != configured_provider:
-        raise ValueError(
-            f"Profile requests TTS provider '{requested_provider}', but Settings "
-            f"configure '{configured_provider}'. Configure that TTS provider first."
-        )
-
     raw_provider = requested_provider or configured_provider or TTSProvider.EDGE_TTS.value
     try:
         provider = TTSProvider(raw_provider)
     except ValueError as exc:
         raise ValueError(f"Unsupported TTS provider: {raw_provider}") from exc
 
-    # Do not inherit preferred_voice_id: it is the legacy generator voice slot
-    # and often contains an ElevenLabs ID that is invalid for Edge/Azure/OpenAI.
-    explicit_voice = (
-        profile.tts_voice
-        or getattr(user_settings, "preferred_tts_voice", None)
+    # A profile provider is a real production override, not merely a second
+    # copy of the global provider selector. Today Settings own one credential
+    # slot, so a provider that NEEDS that slot still has to match Settings.
+    # Edge is self-contained and may be pinned by a FAST profile while HQ keeps
+    # ElevenLabs globally. Crucially, a cross-provider override must inherit
+    # ZERO provider-scoped fields from the global connection.
+    cross_provider_override = bool(
+        requested_provider
+        and configured_provider
+        and requested_provider != configured_provider
     )
+    self_contained_override = provider == TTSProvider.EDGE_TTS
+    if cross_provider_override and not self_contained_override:
+        raise ValueError(
+            f"Profile requests TTS provider '{requested_provider}', but Settings "
+            f"configure '{configured_provider}'. This provider needs its own "
+            "configured connection; only self-contained Edge TTS can currently "
+            "override a different global TTS provider."
+        )
+
+    uses_settings_connection = bool(configured_provider) and not cross_provider_override
+
+    # Provider-scoped defaults are inherited only when the profile actually
+    # uses the Settings connection. This prevents an Edge FAST profile from
+    # accidentally receiving an ElevenLabs voice/model/base URL/API key.
+    settings_voice = (
+        getattr(user_settings, "preferred_tts_voice", None)
+        if uses_settings_connection else None
+    )
+    explicit_voice = profile.tts_voice or settings_voice
     if explicit_voice:
         voice = explicit_voice
     elif provider in {TTSProvider.EDGE_TTS, TTSProvider.AZURE}:
@@ -726,9 +741,14 @@ def _tts_config(user_settings, profile: LocalizationProfile, target_language: st
         )
 
     api_key = ""
-    encrypted_tts = getattr(user_settings, "tts_api_key_encrypted", None)
-    if encrypted_tts:
-        api_key = decrypt_safe(encrypted_tts) or ""
+    if uses_settings_connection:
+        encrypted_tts = getattr(user_settings, "tts_api_key_encrypted", None)
+        if encrypted_tts:
+            api_key = decrypt_safe(encrypted_tts) or ""
+
+    # OpenAI TTS has an existing secondary credential source. Preserve that
+    # behavior when no TTS key was resolved, but never reinterpret an
+    # ElevenLabs/Azure TTS secret as an OpenAI credential.
     if provider == TTSProvider.OPENAI_TTS and not api_key:
         if (
             (getattr(user_settings, "ai_provider", None) or "").lower() == "openai"
@@ -737,12 +757,17 @@ def _tts_config(user_settings, profile: LocalizationProfile, target_language: st
             api_key = decrypt_safe(user_settings.ai_api_key_encrypted) or ""
         api_key = api_key or settings.OPENAI_API_KEY
 
-    model = profile.tts_model or getattr(user_settings, "tts_model", None)
-    base_url = profile.tts_base_url or getattr(user_settings, "tts_base_url", None)
+    model = profile.tts_model
+    base_url = profile.tts_base_url
+    region = profile.tts_region
+    if uses_settings_connection:
+        model = model or getattr(user_settings, "tts_model", None)
+        base_url = base_url or getattr(user_settings, "tts_base_url", None)
+        region = region or getattr(user_settings, "tts_region", None)
+
     if provider == TTSProvider.ELEVENLABS:
         from backend.services.elevenlabs_tts_service import canonicalize_base_url
         base_url = canonicalize_base_url(base_url)
-    region = profile.tts_region or getattr(user_settings, "tts_region", None)
     return TTSRuntimeConfig(provider, voice or "", api_key, model, base_url, region)
 
 
