@@ -1810,6 +1810,44 @@ ITEMS:
             })
         return False
 
+    async def retry_on_invalid(detail: str) -> bool | None:
+        if route_state is None or route_state.sticky_index + 1 >= len(route_state.clients):
+            return None
+        current = route_state.current
+        route_state.failure_chain.append({
+            "connection_id": getattr(current, "connection_name", None),
+            "provider": getattr(getattr(current, "provider", None), "value", str(getattr(current, "provider", ""))),
+            "model": getattr(current, "model", None),
+            "attempt": 1,
+            "error_type": "InvalidStructuredOutput",
+            "error": f"rewrite {detail}",
+        })
+        route_state.sticky_index += 1
+        next_client = route_state.current
+        await _emit_ai_progress(progress_cb, {
+            "event": "switch_fallback",
+            "stage": "rewrite",
+            "reason": detail,
+            "provider": getattr(next_client, "connection_name", None) or getattr(getattr(next_client, "provider", None), "value", str(getattr(next_client, "provider", ""))),
+            "model": getattr(next_client, "model", None),
+        })
+        return await _adapt_chunk_items(
+            ai,
+            fallback_ai=fallback_ai,
+            route_state=route_state,
+            deadline_at=deadline_at,
+            progress_cb=progress_cb,
+            plan=plan,
+            chunk=chunk,
+            segment_by_id=segment_by_id,
+            target_language=target_language,
+            target_ms=target_ms,
+            profile=profile,
+            issues=issues,
+            state=state,
+            setup_error=setup_error,
+        )
+
     if ai is None:
         return record_unavailable(
             setup_error or RuntimeError("Duration rewrite AI client is unavailable")
@@ -1902,15 +1940,18 @@ ITEMS:
     mapped: dict[str, str] = {}
     for item in payload:
         if not isinstance(item, dict):
-            return record_invalid("item_not_object")
+            retried = await retry_on_invalid("item_not_object")
+            return retried if retried is not None else record_invalid("item_not_object")
         seg_id = str(item.get("id") or "")
         text = str(item.get("text") or "").strip()
         if not seg_id or not text or seg_id in mapped:
-            return record_invalid("invalid_or_duplicate_item")
+            retried = await retry_on_invalid("invalid_or_duplicate_item")
+            return retried if retried is not None else record_invalid("invalid_or_duplicate_item")
         mapped[seg_id] = text
     expected = [x["id"] for x in items]
     if set(mapped) != set(expected):
-        return record_invalid("id_mismatch")
+        retried = await retry_on_invalid("id_mismatch")
+        return retried if retried is not None else record_invalid("id_mismatch")
 
     current_text = chunk_text(plan, chunk)
     candidate_text = " ".join(mapped[item["id"]] for item in items)
@@ -1920,6 +1961,9 @@ ITEMS:
         current_words > 1
         and len(candidate_text.split()) >= current_words
     ):
+        retried = await retry_on_invalid("rewrite_not_shorter")
+        if retried is not None:
+            return retried
         if issues is not None:
             issues.append({
                 "chunk_id": chunk.id,
