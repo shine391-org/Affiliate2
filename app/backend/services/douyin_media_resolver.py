@@ -33,11 +33,63 @@ class ResolvedDouyinMedia:
 
 @dataclass(frozen=True)
 class _MediaCandidate:
+    """One playable media URL plus the evidence for which aweme it belongs to.
+
+    Evidence precedence is deliberate and NOT merged:
+
+    - ``url_aweme_ids``: the identity the media URL itself declares (``__vid``
+      or a ``/video/<id>`` path). Authoritative. A DOM association can never
+      override or rescue a conflicting one.
+    - ``dom_aweme_ids``: a page-association guess scraped from ancestor
+      attributes / anchors. It may only establish identity when the media URL
+      declares none at all.
+    """
+
     url: str
     content_length: int = 0
-    aweme_ids: tuple[str, ...] = ()
+    url_aweme_ids: tuple[str, ...] = ()
+    dom_aweme_ids: tuple[str, ...] = ()
     provenance: str = ""
     resolution_path: str = ""
+
+    @property
+    def identity_ids(self) -> tuple[str, ...]:
+        """The aweme ids this candidate may be claimed to be."""
+        return self.url_aweme_ids or self.dom_aweme_ids
+
+    def matches(self, expected_aweme_id: str) -> bool:
+        """Does this candidate prove it is the requested aweme?"""
+        if self.url_aweme_ids:
+            # The media URL states its own identity; a conflicting DOM
+            # association is a wrong-video signal, not a correction.
+            return expected_aweme_id in self.url_aweme_ids
+        return expected_aweme_id in self.dom_aweme_ids
+
+
+class _RedirectIdentityWatcher:
+    """Freeze the FIRST canonical aweme id seen in the navigation chain.
+
+    A v.douyin.com short link is resolved by following redirects, and Douyin's
+    own /video/<id> page is already proven capable of redirecting to a different
+    video. So the final page URL is not trustworthy: the first canonical
+    /video/<id> the redirect chain lands on is the requested video, and no later
+    hop is allowed to replace it.
+    """
+
+    def __init__(self) -> None:
+        self.chain: list[str] = []
+        self.frozen_aweme_id: str | None = None
+
+    def observe(self, url: str | None) -> None:
+        text = str(url or "").strip()
+        if not text:
+            return
+        self.chain.append(text)
+        if self.frozen_aweme_id is not None:
+            return  # already frozen; a later redirect cannot replace it
+        found = canonical_aweme_id(text)
+        if found:
+            self.frozen_aweme_id = found
 
 
 def _is_http_media_url(value: str | None) -> bool:
@@ -122,7 +174,10 @@ def _normalize_dom_candidate(raw) -> _MediaCandidate | None:
         return None
     return _MediaCandidate(
         url=url,
-        aweme_ids=tuple(dict.fromkeys([*_aweme_ids_from_url(url), *dom_ids])),
+        # The media URL's own identity stays separate from the DOM guess so a
+        # conflicting DOM association can never launder a wrong video.
+        url_aweme_ids=_aweme_ids_from_url(url),
+        dom_aweme_ids=tuple(dict.fromkeys(dom_ids)),
         provenance=provenance,
         resolution_path="dom",
     )
@@ -145,7 +200,7 @@ def _verified_candidate(
         candidates = [
             candidate
             for candidate in candidates
-            if expected_aweme_id in candidate.aweme_ids
+            if candidate.matches(expected_aweme_id)
         ]
         if not candidates:
             return None
@@ -167,7 +222,7 @@ def _identity_observation(
     observed_ids = sorted({
         aweme_id
         for item in observed
-        for aweme_id in item.aweme_ids
+        for aweme_id in item.identity_ids
     })
     provenance = sorted({item.provenance for item in observed if item.provenance})
     return (
@@ -205,7 +260,7 @@ def _aweme_play_candidates(aweme: dict) -> list[_MediaCandidate]:
             candidates.append(_MediaCandidate(
                 url=url,
                 content_length=int(height or 0),
-                aweme_ids=_aweme_ids_from_url(url),
+                url_aweme_ids=_aweme_ids_from_url(url),
                 provenance="search:play_addr",
                 resolution_path="search",
             ))
@@ -254,7 +309,9 @@ async def _search_caption_candidates(
                     found.append(_MediaCandidate(
                         url=candidate.url,
                         content_length=candidate.content_length,
-                        aweme_ids=(expected_aweme_id,),
+                        # The search API keyed this object by its own aweme_id;
+                        # that server-side identity is what proves the media.
+                        url_aweme_ids=candidate.url_aweme_ids or (expected_aweme_id,),
                         provenance=candidate.provenance,
                         resolution_path=candidate.resolution_path,
                     ))
@@ -290,6 +347,7 @@ async def resolve_douyin_media(
         page = session.page if reuse_probe_page else await session.context.new_page()
         close_page_here = not reuse_probe_page
         network_candidates: list[_MediaCandidate] = []
+        redirect_watcher = _RedirectIdentityWatcher()
 
         def _capture(response):
             try:
@@ -304,10 +362,21 @@ async def resolve_douyin_media(
                     network_candidates.append(_MediaCandidate(
                         url=candidate,
                         content_length=size,
-                        aweme_ids=_aweme_ids_from_url(candidate),
+                        url_aweme_ids=_aweme_ids_from_url(candidate),
                         provenance="network:video-response",
                         resolution_path="network",
                     ))
+            except Exception:
+                pass
+
+        def _capture_navigation(frame):
+            try:
+                if frame is not None and frame.parent_frame is not None:
+                    return  # only the main frame proves the requested video
+            except Exception:
+                pass
+            try:
+                redirect_watcher.observe(getattr(frame, "url", ""))
             except Exception:
                 pass
 
@@ -319,6 +388,7 @@ async def resolve_douyin_media(
                 await route.continue_()
 
         page.on("response", _capture)
+        page.on("framenavigated", _capture_navigation)
         await page.route("**/*", _lightweight_route)
 
         try:
@@ -334,10 +404,16 @@ async def resolve_douyin_media(
                 pass
 
             if not source_video_id:
-                # Share/short link: the server-side redirect already names the
-                # canonical aweme. Read that identity from the landed page URL
-                # (or its server-rendered og:url) before any candidate is
-                # considered. Never infer it from a media URL.
+                # Share/short link. The identity is the FIRST canonical
+                # /video/<id> observed in the redirect chain, frozen by the
+                # framenavigated watcher above. Reading only the final page
+                # URL would be unsafe: Douyin's own /video/<id> page is proven
+                # capable of redirecting to a different video.
+                source_video_id = redirect_watcher.frozen_aweme_id
+            if not source_video_id:
+                # The chain may have been captured without a frame event (e.g.
+                # a cached redirect). Fall back to the landed URL, but only
+                # while nothing canonical has been frozen yet.
                 source_video_id = canonical_aweme_id(getattr(page, "url", ""))
             if not source_video_id:
                 try:
@@ -355,8 +431,9 @@ async def resolve_douyin_media(
                 # video than the user asked for.
                 raise RuntimeError(
                     "Could not resolve the Douyin share/short URL to a canonical "
-                    f"aweme_id: {source_url}. Refusing to download unverified "
-                    "media."
+                    f"aweme_id: {source_url}. Redirect chain observed: "
+                    f"{redirect_watcher.chain or ['<none>']}. Refusing to "
+                    "download unverified media."
                 )
 
             async def _dom_media_urls():
@@ -387,6 +464,22 @@ async def resolve_douyin_media(
                 )
 
             def _resolved(candidate: _MediaCandidate) -> ResolvedDouyinMedia:
+                # Only a candidate that already passed _verified_candidate()
+                # reaches here, so its identity equals the requested id. Derive
+                # the reported id from the authoritative evidence, never from a
+                # DOM guess that could contradict the media URL.
+                if candidate.url_aweme_ids:
+                    claimed = (
+                        source_video_id
+                        if source_video_id in candidate.url_aweme_ids
+                        else candidate.url_aweme_ids[0]
+                    )
+                else:
+                    claimed = (
+                        source_video_id
+                        if source_video_id in candidate.dom_aweme_ids
+                        else candidate.dom_aweme_ids[0] if candidate.dom_aweme_ids else None
+                    )
                 return ResolvedDouyinMedia(
                     url=candidate.url,
                     headers={
@@ -395,11 +488,7 @@ async def resolve_douyin_media(
                     },
                     source_url=source_url,
                     requested_aweme_id=source_video_id,
-                    candidate_aweme_id=(
-                        source_video_id
-                        if source_video_id and source_video_id in candidate.aweme_ids
-                        else candidate.aweme_ids[0] if candidate.aweme_ids else None
-                    ),
+                    candidate_aweme_id=claimed,
                     provenance=candidate.provenance,
                     resolution_path=candidate.resolution_path,
                 )
