@@ -395,13 +395,40 @@ async def prepare_semantic_transcript(
     if not profile.semantic_segmentation or len(normalized.segments) <= 1:
         return normalized
 
-    ai = _profile_ai_client(user_settings, profile, "translation")
-    fallback_ai = _profile_ai_fallback_client(
-        user_settings,
-        profile,
-        "translation",
-        primary_ai=ai,
-    )
+    primary_error = None
+    try:
+        ai = _profile_ai_client(user_settings, profile, "translation")
+    except Exception as exc:
+        primary_error = exc
+        ai = None
+
+    fallback_ai = None
+    try:
+        fallback_ai = _profile_ai_fallback_client(
+            user_settings,
+            profile,
+            "translation",
+            primary_ai=ai,
+        )
+    except Exception as exc:
+        logger.warning("Semantic fallback AI configuration unavailable: %s", exc)
+
+    if ai is None:
+        if fallback_ai is not None:
+            ai, fallback_ai = fallback_ai, None
+        else:
+            logger.warning(
+                "Semantic AI unavailable; using deterministic segmentation: %s",
+                primary_error,
+            )
+            if progress_cb is not None:
+                await _emit_ai_progress(progress_cb, {
+                    "event": "deterministic_fallback",
+                    "stage": "semantic",
+                    "error": str(primary_error or "AI unavailable")[:220],
+                })
+            return normalized
+
     return await refine_semantic_cues_with_ai(
         normalized,
         ai,
@@ -704,16 +731,42 @@ async def translate_transcript(
     progress_cb=None,
 ) -> LocalizationTranscript:
     import hashlib
-    ai = _profile_ai_client(user_settings, profile)
+    primary_error = None
+    try:
+        ai = _profile_ai_client(user_settings, profile)
+    except Exception as exc:
+        primary_error = exc
+        ai = None
+
+    fallback_ai = None
+    try:
+        fallback_ai = _profile_ai_fallback_client(
+            user_settings,
+            profile,
+            "translation",
+            primary_ai=ai,
+        )
+    except Exception as exc:
+        if ai is None:
+            raise ValueError(
+                f"Primary and fallback translation AI are unavailable: primary={primary_error}; fallback={exc}"
+            ) from exc
+        logger.warning("Translation fallback AI configuration unavailable: %s", exc)
+
+    if ai is None:
+        if fallback_ai is None:
+            raise ValueError(f"Translation AI is unavailable: {primary_error}") from primary_error
+        ai, fallback_ai = fallback_ai, None
+        await _emit_ai_progress(progress_cb, {
+            "event": "switch_fallback",
+            "stage": "translation",
+            "provider": getattr(ai, "connection_name", None) or getattr(getattr(ai, "provider", None), "value", str(getattr(ai, "provider", ""))),
+            "model": getattr(ai, "model", None),
+            "reason": str(primary_error)[:220],
+        })
+
     if hasattr(ai, "max_retries"):
         ai.max_retries = 0
-
-    fallback_ai = _profile_ai_fallback_client(
-        user_settings,
-        profile,
-        "translation",
-        primary_ai=ai,
-    )
     if fallback_ai is not None and hasattr(fallback_ai, "max_retries"):
         fallback_ai.max_retries = 0
 
@@ -1584,6 +1637,11 @@ async def synthesize_timed_dub(
     fallback_ai = None
     try:
         ai = _profile_ai_client(user_settings, profile, "rewrite")
+    except Exception as exc:
+        ai = None
+        rewrite_ai_error = exc
+        logger.warning("Duration rewrite primary AI unavailable: %s", exc)
+    try:
         fallback_ai = _profile_ai_fallback_client(
             user_settings,
             profile,
@@ -1591,13 +1649,14 @@ async def synthesize_timed_dub(
             primary_ai=ai,
         )
     except Exception as exc:
-        # C7 rewrite is a quality optimization, not a hard dependency. A
-        # persisted translation can still be synthesized/measured/fitted even
-        # if its original AI provider is temporarily unavailable at resume.
-        ai = None
-        fallback_ai = None
-        rewrite_ai_error = exc
-        logger.warning("Duration rewrite AI client unavailable: %s", exc)
+        logger.warning("Duration rewrite fallback AI unavailable: %s", exc)
+        if rewrite_ai_error is None:
+            rewrite_ai_error = exc
+
+    if ai is None and fallback_ai is not None:
+        ai, fallback_ai = fallback_ai, None
+        rewrite_ai_error = None
+
     runtime = _tts_config(user_settings, profile, target_language)
 
     valid_segments = [
