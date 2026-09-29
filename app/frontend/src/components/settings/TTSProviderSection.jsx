@@ -46,7 +46,7 @@ export default function TTSProviderSection({ settings, updateSettings }) {
 
   const selected = selectedId ? connections[selectedId] : null
   const meta = PROVIDERS[provider] || PROVIDERS.edge_tts
-  const keyIsSet = !!selected?.api_key_set
+  const keyIsSet = !!selected?.api_key_set && selected?.provider === provider
   const selectedVoice = useMemo(
     () => voices.find((item) => item.voice_id === voice),
     [voices, voice],
