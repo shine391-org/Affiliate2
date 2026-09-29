@@ -43,6 +43,12 @@ class RerunRequest(BaseModel):
     ] | None = None
 
 
+class TTSRebindRequest(BaseModel):
+    source: Literal["settings"] = "settings"
+    voice_id: str | None = None
+    model: str | None = None
+
+
 class RenderRerunRequest(BaseModel):
     target_aspect: Literal["source", "9:16", "16:9", "1:1"] | None = None
     mask_box: dict[str, Any] | None = None
@@ -188,6 +194,100 @@ async def _dispatch_existing_run(run: LocalizationRun):
     ))
 
 
+async def _resolve_current_tts_binding(
+    effective_profile: dict,
+    target_language: str,
+    *,
+    voice_id: str | None = None,
+    model: str | None = None,
+) -> dict:
+    """Resolve and cheaply validate the current Settings-owned TTS connection."""
+    from sqlalchemy import select
+    from backend.database import AsyncSessionLocal
+    from backend.models.user_settings import UserSettings
+    from backend.services.localization_service import _tts_config
+    from backend.services.tts_service import test_tts_connection
+
+    async with AsyncSessionLocal() as db:
+        row = (await db.execute(
+            select(UserSettings).where(UserSettings.user_id == "local")
+        )).scalar_one_or_none()
+
+    candidate = dict(effective_profile)
+    candidate.update({
+        "tts_provider": None,
+        "tts_model": model.strip() if model and model.strip() else None,
+        "tts_voice": voice_id.strip() if voice_id and voice_id.strip() else None,
+        "tts_base_url": None,
+        "tts_region": None,
+    })
+    profile = LocalizationProfile.model_validate(candidate)
+    runtime = _tts_config(row, profile, target_language)
+    health = await test_tts_connection(
+        provider=runtime.provider,
+        api_key=runtime.api_key,
+        base_url=runtime.base_url,
+        model=runtime.model,
+        voice_id=runtime.default_voice,
+        region=runtime.region,
+    )
+    if not health.get("ok"):
+        raise HTTPException(
+            status_code=400,
+            detail=health.get("message") or "Current TTS Settings are not usable.",
+        )
+    return {
+        "tts_provider": getattr(runtime.provider, "value", str(runtime.provider)),
+        "tts_model": runtime.model,
+        "tts_voice": runtime.default_voice or None,
+        "tts_base_url": runtime.base_url,
+        "tts_region": runtime.region,
+    }
+
+
+async def _describe_tts_bindings(run: LocalizationRun) -> dict:
+    from sqlalchemy import select
+    from backend.database import AsyncSessionLocal
+    from backend.models.user_settings import UserSettings
+    from backend.services.localization_service import _tts_config
+
+    keys = ("tts_provider", "tts_model", "tts_voice", "tts_base_url", "tts_region")
+    job_binding = {key: run.effective_profile.get(key) for key in keys}
+    try:
+        async with AsyncSessionLocal() as db:
+            row = (await db.execute(
+                select(UserSettings).where(UserSettings.user_id == "local")
+            )).scalar_one_or_none()
+        candidate = dict(run.effective_profile)
+        candidate.update({key: None for key in keys})
+        profile = LocalizationProfile.model_validate(candidate)
+        runtime = _tts_config(
+            row, profile,
+            str(run.request.get("target_language") or "Vietnamese"),
+        )
+        current_binding = {
+            "tts_provider": getattr(runtime.provider, "value", str(runtime.provider)),
+            "tts_model": runtime.model,
+            "tts_voice": runtime.default_voice or None,
+            "tts_base_url": runtime.base_url,
+            "tts_region": runtime.region,
+        }
+        error = None
+    except Exception as exc:
+        current_binding = None
+        error = str(exc)[:200]
+    return {
+        "job": job_binding,
+        "current": current_binding,
+        "provider_mismatch": bool(
+            current_binding
+            and job_binding.get("tts_provider")
+            and job_binding.get("tts_provider") != current_binding.get("tts_provider")
+        ),
+        "current_error": error,
+    }
+
+
 @router.get("/jobs/{job_id}")
 async def localization_job_detail(job_id: str):
     from sqlalchemy import select
@@ -223,6 +323,7 @@ async def localization_job_detail(job_id: str):
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     detail = _job_detail(run)
+    detail["tts_binding"] = await _describe_tts_bindings(run)
     detail["job_status"] = job.status
     detail["job_current_step"] = job.current_step
     detail["job_error_message"] = job.error_message
@@ -445,6 +546,36 @@ async def regenerate_localization_chunk(job_id: str, chunk_id: int):
     run.invalidate_from("dubbing", delete_artifacts=False)
     await _dispatch_existing_run(run)
     return {"ok": True, "job_id": job_id, "regenerating_chunk": chunk_id}
+
+
+@router.post("/jobs/{job_id}/rebind-tts")
+async def rebind_localization_tts(job_id: str, body: TTSRebindRequest):
+    """Adopt current Settings TTS and rerun only dubbing plus downstream stages."""
+    await _assert_job_inactive(job_id)
+    run = _load_run(job_id)
+    if str(run.request.get("mode") or "full_dub").strip().lower() != "full_dub":
+        raise HTTPException(status_code=409, detail="This localization job does not use TTS dubbing.")
+
+    binding = await _resolve_current_tts_binding(
+        run.effective_profile,
+        str(run.request.get("target_language") or "Vietnamese"),
+        voice_id=body.voice_id,
+        model=body.model,
+    )
+    previous = {
+        key: run.effective_profile.get(key)
+        for key in ("tts_provider", "tts_model", "tts_voice", "tts_base_url", "tts_region")
+    }
+    run.update_effective_profile({**run.effective_profile, **binding})
+    run.invalidate_from("dubbing", delete_artifacts=True)
+    await _dispatch_existing_run(run)
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "from_stage": "dubbing",
+        "previous_tts": previous,
+        "current_tts": binding,
+    }
 
 
 @router.post("/jobs/{job_id}/rerun")

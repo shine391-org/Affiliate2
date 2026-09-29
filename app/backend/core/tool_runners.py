@@ -982,6 +982,7 @@ async def run_tool_translate(
         synthesize_timed_dub,
         transcribe_for_localization,
         translate_transcript,
+        validate_localization_tts_preflight,
     )
     from backend.services.localization_stage_service import LocalizationRun
 
@@ -1064,6 +1065,10 @@ async def run_tool_translate(
                 target_language=target_language,
                 for_dub=is_dub,
             )
+            if is_dub:
+                await validate_localization_tts_preflight(
+                    user_settings, profile, target_language,
+                )
             run = LocalizationRun(
                 job_id,
                 source_path=str(original_input),

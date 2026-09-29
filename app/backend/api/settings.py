@@ -318,7 +318,14 @@ async def update_settings(update: SettingsUpdate):
         if update.tts_model is not None:
             s.tts_model = update.tts_model.strip() or None
         if update.tts_base_url is not None:
-            s.tts_base_url = update.tts_base_url.strip() or None
+            candidate_tts_base_url = update.tts_base_url.strip() or None
+            effective_tts_provider = (
+                update.tts_provider or s.tts_provider or "edge_tts"
+            ).strip().lower()
+            if effective_tts_provider == "elevenlabs":
+                from backend.services.elevenlabs_tts_service import canonicalize_base_url
+                candidate_tts_base_url = canonicalize_base_url(candidate_tts_base_url)
+            s.tts_base_url = candidate_tts_base_url
         if update.tts_region is not None:
             s.tts_region = update.tts_region.strip() or None
         if update.tts_api_key is not None:
@@ -353,6 +360,34 @@ class AIProbeRequest(BaseModel):
     model: Optional[str] = None
     base_url: Optional[str] = None
     api_key: Optional[str] = None
+
+
+class TTSProbeRequest(BaseModel):
+    provider: str
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    model: Optional[str] = None
+    voice_id: Optional[str] = None
+    region: Optional[str] = None
+
+
+async def _load_saved_tts_settings():
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(UserSettings).where(UserSettings.user_id == "local")
+        )
+        return result.scalar_one_or_none()
+
+
+async def _tts_probe_key(body: TTSProbeRequest) -> str:
+    if body.api_key is not None:
+        return body.api_key.strip()
+    saved = await _load_saved_tts_settings()
+    provider = (body.provider or "").strip().lower()
+    if not saved or (saved.tts_provider or "").strip().lower() != provider:
+        return ""
+    encrypted = getattr(saved, "tts_api_key_encrypted", None)
+    return decrypt_safe(encrypted) if encrypted else ""
 
 
 async def _probe_key(body: AIProbeRequest) -> str:
@@ -440,6 +475,86 @@ async def test_ai_connection(body: AIProbeRequest):
     except Exception as exc:
         logger.warning("AI connection test failed: %s", exc)
         raise HTTPException(status_code=400, detail=f"Connection failed: {str(exc)[:200]}")
+
+
+@router.post("/settings/tts/test")
+async def test_tts_connection(body: TTSProbeRequest):
+    """Validate the exact unsaved TTS form values without generating speech."""
+    from backend.core.exceptions import VoiceGenerationError
+    from backend.services import tts_service
+    from backend.services.elevenlabs_tts_service import ElevenLabsAPIError
+
+    try:
+        provider = tts_service.TTSProvider((body.provider or "").strip().lower())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={
+            "code": "unsupported_provider",
+            "message": f"Unsupported TTS provider: {body.provider}",
+        }) from exc
+
+    key = await _tts_probe_key(body)
+    try:
+        return await tts_service.test_tts_connection(
+            provider=provider,
+            api_key=key,
+            base_url=body.base_url,
+            model=body.model,
+            voice_id=body.voice_id,
+            region=body.region,
+        )
+    except ElevenLabsAPIError as exc:
+        logger.warning(
+            "ElevenLabs connection test failed: kind=%s status=%s",
+            exc.kind, exc.status_code,
+        )
+        raise HTTPException(status_code=400, detail={
+            "code": exc.kind,
+            "provider_status": exc.status_code,
+            "message": str(exc),
+        }) from exc
+    except (VoiceGenerationError, ValueError) as exc:
+        logger.warning("TTS connection test failed: provider=%s error=%s", provider.value, exc)
+        raise HTTPException(status_code=400, detail={
+            "code": "invalid_configuration",
+            "message": str(exc)[:200],
+        }) from exc
+    except Exception as exc:
+        logger.warning("TTS connection test failed: provider=%s type=%s", provider.value, type(exc).__name__)
+        raise HTTPException(status_code=400, detail={
+            "code": "provider_unreachable",
+            "message": "TTS provider is unreachable.",
+        }) from exc
+
+
+@router.post("/settings/tts/voices")
+async def discover_tts_voices(body: TTSProbeRequest):
+    """Discover voices with unsaved form credentials or the matching saved key."""
+    from backend.services import tts_service
+    from backend.services.elevenlabs_tts_service import ElevenLabsAPIError
+
+    try:
+        provider = tts_service.TTSProvider((body.provider or "").strip().lower())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={
+            "code": "unsupported_provider",
+            "message": f"Unsupported TTS provider: {body.provider}",
+        }) from exc
+    key = await _tts_probe_key(body)
+    try:
+        voices = await tts_service.list_voices(
+            provider, key, base_url=body.base_url,
+        )
+        return {"ok": True, "provider": provider.value, "voices": voices}
+    except ElevenLabsAPIError as exc:
+        logger.warning(
+            "ElevenLabs voice discovery failed: kind=%s status=%s",
+            exc.kind, exc.status_code,
+        )
+        raise HTTPException(status_code=400, detail={
+            "code": exc.kind,
+            "provider_status": exc.status_code,
+            "message": str(exc),
+        }) from exc
 
 
 def _localization_profile_payload(store):

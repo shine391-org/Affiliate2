@@ -78,6 +78,16 @@ export default function LocalizationProfilesSection({ settings }) {
   }, [draft, globalModel])
 
   const patch = (key, value) => setDraft((prev) => ({ ...prev, [key]: value }))
+  const currentTtsProvider = settings?.tts_provider || "edge_tts"
+  const ttsProviderMismatch = Boolean(draft?.tts_provider && draft.tts_provider !== currentTtsProvider)
+  const adoptCurrentTts = () => setDraft((prev) => ({
+    ...prev,
+    tts_provider: currentTtsProvider,
+    tts_model: settings?.tts_model || null,
+    tts_voice: settings?.preferred_tts_voice || null,
+    tts_base_url: settings?.tts_base_url || null,
+    tts_region: settings?.tts_region || null,
+  }))
 
   const discoverModels = async () => {
     const provider = settings?.ai_provider || ""
@@ -203,6 +213,15 @@ export default function LocalizationProfilesSection({ settings }) {
           C6 = AI dịch nội dung · C7 = AI viết lại cho vừa thời lượng · TTS = tạo giọng đọc · Audio/Render/QC = xử lý và kiểm tra đầu ra. API key/endpoint dùng chung vẫn thuộc Kết nối AI hoặc TTS; hồ sơ này chỉ lưu override và chính sách sản xuất.
         </Typography>
       </Alert>
+
+      {ttsProviderMismatch && (
+        <Alert
+          severity="warning"
+          action={<Button color="inherit" size="small" onClick={adoptCurrentTts}>Dùng TTS hiện tại cho hồ sơ</Button>}
+        >
+          Provider không khớp: hồ sơ dùng <strong>{draft.tts_provider}</strong>, còn Kết nối TTS hiện tại dùng <strong>{currentTtsProvider}</strong>. Job mới sẽ fail-fast trước ASR/render nếu chưa đồng bộ.
+        </Alert>
+      )}
 
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
         <FormControl size="small" fullWidth>
