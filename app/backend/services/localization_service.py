@@ -155,12 +155,35 @@ def materialize_localization_profile(
         "translation_model": translation_ai.model,
         "translation_base_url": translation_ai.base_url,
     })
+    translation_fallback_ai = _profile_ai_fallback_client(
+        user_settings,
+        profile,
+        "translation",
+        primary_ai=translation_ai,
+    )
+    if translation_fallback_ai is not None:
+        fallback_selector = (
+            (profile.translation_fallback_provider or "").strip().lower()
+            or translation_selector
+        )
+        data.update({
+            "translation_fallback_provider": fallback_selector,
+            "translation_fallback_model": translation_fallback_ai.model,
+            "translation_fallback_base_url": translation_fallback_ai.base_url,
+        })
+
     if for_dub:
         rewrite_ai = _profile_ai_client(user_settings, profile, "rewrite")
         rewrite_selector = (
             (profile.rewrite_provider or "").strip().lower()
             or (getattr(user_settings, "ai_provider", None) or "").strip().lower()
             or rewrite_ai.provider.value
+        )
+        rewrite_fallback_ai = _profile_ai_fallback_client(
+            user_settings,
+            profile,
+            "rewrite",
+            primary_ai=rewrite_ai,
         )
         tts = _tts_config(user_settings, profile, target_language)
         data.update({
@@ -173,6 +196,16 @@ def materialize_localization_profile(
             "tts_base_url": tts.base_url,
             "tts_region": tts.region,
         })
+        if rewrite_fallback_ai is not None:
+            rewrite_fallback_selector = (
+                (profile.rewrite_fallback_provider or "").strip().lower()
+                or rewrite_selector
+            )
+            data.update({
+                "rewrite_fallback_provider": rewrite_fallback_selector,
+                "rewrite_fallback_model": rewrite_fallback_ai.model,
+                "rewrite_fallback_base_url": rewrite_fallback_ai.base_url,
+            })
     return LocalizationProfile.model_validate(data)
 
 
