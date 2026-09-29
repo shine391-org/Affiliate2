@@ -142,6 +142,7 @@ def canonical_aweme_id(url: str | None) -> str | None:
     Canonical page:      /video/<id>  (also /note/<id>)
     Share page:          iesdouyin.com/share/video/<id>/...
     Modal/discover page: ?modal_id=<id> (also aweme_id / item_id)
+    Short-link redirect: ?object_id=0_<id>_<id>_0  (v.douyin.com lands here)
     A v.douyin.com short link names no aweme: it only resolves after the
     browser follows the redirect to the canonical page.
     """
@@ -151,6 +152,14 @@ def canonical_aweme_id(url: str | None) -> str | None:
             candidate = str(value).strip()
             if candidate.isdigit():
                 return candidate
+    # v.douyin.com short links redirect to a page whose object_id carries the
+    # real aweme id in the form 0_<id>_<id>_0. This is the only place the id
+    # is exposed before the SPA hydrates.
+    for value in parse_qs(parsed.query).get("object_id", []):
+        parts = str(value).strip().split("_")
+        for part in parts:
+            if part.isdigit() and len(part) > 10:
+                return part
     match = re.search(r"/(?:video|note|slides)/(\d+)(?:/|$|\?)", parsed.path)
     return match.group(1) if match else None
 

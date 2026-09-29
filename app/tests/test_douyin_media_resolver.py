@@ -26,6 +26,18 @@ def test_canonical_aweme_id_reads_canonical_share_and_modal_urls():
     assert canonical_aweme_id("https://www.douyin.com/user/SEC_abc") is None
 
 
+def test_canonical_aweme_id_reads_short_link_object_id():
+    """v.douyin.com redirects to a page whose object_id carries the real id."""
+    url = (
+        "https://www.douyin.com/jingxuan?app=aweme&iid=&is_qrcode=1"
+        "&object_id=0_3638929914889127993_3638929914889127993_0"
+        "&redirect_from=iesdouyin&schema_type=20"
+    )
+    assert canonical_aweme_id(url) == "3638929914889127993"
+    # the bare short link itself still names nothing
+    assert canonical_aweme_id("https://v.douyin.com/iRNBho6G/") is None
+
+
 @pytest.mark.asyncio
 async def test_resolver_returns_dom_media_and_closes_temp_page():
     class Page:
