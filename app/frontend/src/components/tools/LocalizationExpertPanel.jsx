@@ -222,6 +222,13 @@ export default function LocalizationExpertPanel({ jobId }) {
   const chunks = detail?.chunks || []
   const qc = detail?.qc
   const ttsBinding = detail?.tts_binding
+  const dubbingMeta = stages?.dubbing?.metadata || {}
+  const rewriteIssues = (dubbingMeta.issues || []).filter((item) =>
+    String(item?.reason || "").startsWith("rewrite_")
+  )
+  const timingOverflows = (dubbingMeta.issues || []).filter((item) =>
+    item?.reason === "timing_overflow"
+  )
   const reviewPending = !!detail?.translation_review_pending
   const finalReady = stages?.final_render?.status === "complete"
   const stageEntries = useMemo(() => Object.entries(stages), [stages])
@@ -282,6 +289,43 @@ export default function LocalizationExpertPanel({ jobId }) {
             <Button size="small" variant="contained" color="warning" onClick={rebindTts} disabled={busy || !ttsBinding.current} sx={{ alignSelf: "flex-start" }}>
               Dùng TTS hiện tại & tiếp tục
             </Button>
+          </Stack>
+        </Alert>
+      )}
+
+      {(stages?.dubbing?.status === "complete" || stages?.dubbing?.status === "failed") && (
+        <Alert
+          severity={rewriteIssues.some((item) => item.reason === "rewrite_ai_unavailable") ? "warning" : "info"}
+          variant="outlined"
+        >
+          <Stack spacing={0.75}>
+            <Typography variant="subtitle2">C7 · Viết lại thời lượng</Typography>
+            <Typography variant="body2">
+              {"Đã viết lại: " + Number(dubbingMeta.rewrite_count || 0) + " đoạn" +
+                (dubbingMeta.rewrite_provider ? " · provider " + dubbingMeta.rewrite_provider : "") +
+                (dubbingMeta.rewrite_model ? " · model " + dubbingMeta.rewrite_model : "")}
+            </Typography>
+            {dubbingMeta.max_raw_required_speed != null && (
+              <Typography variant="caption" color="text.secondary">
+                {"Tốc độ yêu cầu lớn nhất: " + Number(dubbingMeta.max_raw_required_speed || 1).toFixed(2) + "×" +
+                  (dubbingMeta.max_fitted_speed_factor != null
+                    ? " → sau fit " + Number(dubbingMeta.max_fitted_speed_factor || 1).toFixed(2) + "×"
+                    : "")}
+              </Typography>
+            )}
+            {rewriteIssues.slice(0, 4).map((item, index) => (
+              <Typography key={item.chunk_id + "-" + index} variant="caption" color={item.reason === "rewrite_ai_unavailable" ? "error" : "text.secondary"}>
+                {"Chunk " + (item.chunk_id ?? "?") + " · " + item.reason +
+                  (item.message ? " · " + item.message : item.detail ? " · " + item.detail : "")}
+              </Typography>
+            ))}
+            {timingOverflows.slice(0, 4).map((item, index) => (
+              <Typography key={"overflow-" + item.chunk_id + "-" + index} variant="caption" color="error">
+                {"Chunk " + (item.chunk_id ?? "?") + " vẫn overflow · " +
+                  Number(item.required_speed || 1).toFixed(2) + "× / trần " +
+                  Number(item.speed_max || 1).toFixed(2) + "×"}
+              </Typography>
+            ))}
           </Stack>
         </Alert>
       )}
