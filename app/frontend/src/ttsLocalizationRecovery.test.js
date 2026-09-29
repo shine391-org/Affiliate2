@@ -3,6 +3,7 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8")
+const ai = read("./components/settings/AIProviderSection.jsx")
 const tts = read("./components/settings/TTSProviderSection.jsx")
 const http = read("./api/http.js")
 const profiles = read("./components/settings/LocalizationProfilesSection.jsx")
@@ -64,4 +65,23 @@ test("batch dialog has visible X and Đóng controls without cancellation calls"
   assert.ok(!studio.includes('/cancel'))
   assert.ok(batch.includes('Chọn video'))
   assert.ok(!batch.includes('Select videos'))
+})
+
+
+test("provider settings remember prior AI/TTS connections and expose selectable models", () => {
+  assert.ok(ai.includes("ai_provider_profiles"))
+  assert.ok(ai.includes("saved?.model"))
+  assert.ok(ai.includes("saved?.base_url"))
+  assert.ok(ai.includes("· đã lưu"))
+  assert.ok(ai.includes("<InputLabel>Chọn mô hình</InputLabel>"))
+  assert.ok(ai.includes("suggestions.map"))
+  assert.ok(ai.includes("Nhập ID khác…"))
+
+  assert.ok(tts.includes("tts_provider_profiles"))
+  assert.ok(tts.includes("saved?.voice"))
+  assert.ok(tts.includes("saved?.model"))
+  assert.ok(tts.includes("saved?.base_url"))
+  assert.ok(tts.includes("saved?.region"))
+  assert.ok(tts.includes("Đã lưu cho provider này"))
+  assert.ok(tts.includes("models.map"))
 })
