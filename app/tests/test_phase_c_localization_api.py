@@ -1126,7 +1126,10 @@ async def test_rerun_dubbing_preserves_persisted_tts_binding(monkeypatch):
         api.RerunRequest(from_stage="dubbing"),
     )
 
-    assert result == {"ok": True, "job_id": run.job_id, "from_stage": "dubbing"}
+    assert result["ok"] is True
+    assert result["job_id"] == run.job_id
+    assert result["from_stage"] == "dubbing"
+    assert result["smart_retry"] is False
     assert run.effective_profile == original_profile
     assert events == [
         ("invalidate", "dubbing", True, set()),
@@ -1172,5 +1175,94 @@ async def test_rerun_downstream_of_dubbing_does_not_rebind_tts(monkeypatch):
         api.RerunRequest(from_stage="final_render"),
     )
 
-    assert result == {"ok": True, "job_id": run.job_id, "from_stage": "final_render"}
+    assert result["ok"] is True
+    assert result["job_id"] == run.job_id
+    assert result["from_stage"] == "final_render"
+    assert result["smart_retry"] is False
     assert events == [("invalidate", "final_render"), ("dispatch", run.job_id)]
+
+
+
+@pytest.mark.asyncio
+async def test_smart_rerun_dubbing_targets_only_overflow_chunks(monkeypatch):
+    events = []
+
+    class FakeRun:
+        job_id = "job-smart-dubbing"
+        request = {"mode": "full_dub"}
+
+        def first_incomplete_stage(self):
+            return "dubbing"
+
+        def record(self, stage):
+            assert stage == "dubbing"
+            return {
+                "metadata": {
+                    "issues": [
+                        {"chunk_id": 7, "reason": "timing_overflow"},
+                        {"chunk_id": 9, "reason": "speed_warning"},
+                        {"chunk_id": 11, "reason": "timing_overflow"},
+                    ],
+                },
+            }
+
+        def update_request(self, value):
+            self.request = value
+            events.append(("request", dict(value)))
+
+        def invalidate_from(self, stage, *, delete_artifacts, preserve_files):
+            events.append(("invalidate", stage, delete_artifacts, set(preserve_files)))
+
+        def refresh_source_identity(self):
+            raise AssertionError("dubbing smart retry must not refresh source")
+
+    async def fake_inactive(job_id):
+        return None
+
+    async def fake_dispatch(run):
+        events.append(("dispatch", run.job_id))
+
+    run = FakeRun()
+    monkeypatch.setattr(api, "_assert_job_inactive", fake_inactive)
+    monkeypatch.setattr(api, "_load_run", lambda job_id: run)
+    monkeypatch.setattr(api, "_dispatch_existing_run", fake_dispatch)
+
+    result = await api.rerun_localization_job(
+        run.job_id,
+        api.RerunRequest(),
+    )
+
+    assert result["from_stage"] == "dubbing"
+    assert result["smart_retry"] is True
+    assert result["targeted_chunk_ids"] == [7, 11]
+    assert run.request["regenerate_chunk_ids"] == [7, 11]
+    assert ("invalidate", "dubbing", False, set()) in events
+    assert events[-1] == ("dispatch", run.job_id)
+
+
+@pytest.mark.asyncio
+async def test_auto_repair_toggle_persists_on_same_job(monkeypatch):
+    class FakeRun:
+        job_id = "job-auto-repair"
+        request = {"mode": "full_dub", "auto_repair_attempts": {"dubbing": 1}}
+
+        def update_request(self, value):
+            self.request = value
+
+    run = FakeRun()
+    monkeypatch.setattr(api, "_load_run", lambda job_id: run)
+
+    enabled = await api.set_localization_auto_repair(
+        run.job_id,
+        api.AutoRepairRequest(enabled=True),
+    )
+    assert enabled["auto_repair"] is True
+    assert run.request["auto_repair"] is True
+    assert enabled["attempts"] == {"dubbing": 1}
+
+    disabled = await api.set_localization_auto_repair(
+        run.job_id,
+        api.AutoRepairRequest(enabled=False),
+    )
+    assert disabled["auto_repair"] is False
+    assert run.request["auto_repair"] is False
