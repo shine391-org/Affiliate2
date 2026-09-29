@@ -746,6 +746,14 @@ async def _emit_ai_progress(progress_cb, payload: dict) -> None:
         await result
 
 
+def _safe_ai_error_text(exc: Exception, client=None, limit: int = 240) -> str:
+    text = str(exc)
+    key = str(getattr(client, "api_key", "") or "")
+    if key and len(key) >= 4:
+        text = text.replace(key, "***")
+    return text[:limit]
+
+
 def _attach_ai_failure_context(exc: Exception, stage: str, route_state: _AIStageRouteState | None):
     if route_state is None:
         return exc
@@ -860,7 +868,7 @@ async def _call_ai_chat_resilient(
                     "model": getattr(client, "model", None),
                     "attempt": attempt,
                     "error_type": type(exc).__name__,
-                    "error": str(exc)[:240],
+                    "error": _safe_ai_error_text(exc, client),
                 }
                 if route_state is not None:
                     route_state.failure_chain.append(failure)
@@ -872,7 +880,7 @@ async def _call_ai_chat_resilient(
                     "max_attempts": max_attempts,
                     "provider": getattr(client, "connection_name", None) or getattr(getattr(client, "provider", None), "value", str(getattr(client, "provider", ""))),
                     "model": getattr(client, "model", None),
-                    "error": str(exc)[:240],
+                    "error": _safe_ai_error_text(exc, client),
                 })
                 transient = is_transient_ai_error(exc)
                 # Non-transient errors do not deserve repeated attempts on the
