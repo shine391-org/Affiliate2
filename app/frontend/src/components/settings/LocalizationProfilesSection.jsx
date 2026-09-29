@@ -455,7 +455,7 @@ export default function LocalizationProfilesSection({ settings }) {
       const nextId = data.default_profile_id || data.profiles?.[0]?.id || ""
       setSelectedId(nextId)
       const profile = data.profiles?.find((p) => p.id === nextId) || null
-      setDraft(profile ? clone(profile) : null)
+      setDraft(normalizeProfile(profile))
       setGlossaryText(glossaryToText(profile?.glossary))
       showSnackbar("Đã xóa hồ sơ bản địa hóa", "info")
     } finally {
@@ -476,17 +476,19 @@ export default function LocalizationProfilesSection({ settings }) {
         </Typography>
       </Alert>
 
-      {edgeCrossProviderOverride && (
+      {pinnedTtsConnection && pinnedTtsConfig && pinnedTtsConnection !== activeTtsId && (
         <Alert severity="info" variant="outlined">
-          Hồ sơ này <strong>ghim Edge TTS</strong> dù Kết nối TTS dùng chung đang là <strong>{currentTtsProvider}</strong>. Đây là cấu hình hợp lệ: Edge tự chứa, không kế thừa API key, model, Base URL hoặc voice của provider dùng chung.
+          Hồ sơ đang ghim TTS connection <strong>{pinnedTtsConfig.label || pinnedTtsConnection}</strong> ({pinnedTtsConfig.provider}).
+          Đây là cấu hình hợp lệ và không phụ thuộc connection TTS đang active.
         </Alert>
       )}
-      {ttsProviderMismatch && (
+      {ttsConnectionMissing && (
         <Alert
           severity="warning"
           action={<Button color="inherit" size="small" onClick={adoptCurrentTts}>Dùng TTS hiện tại cho hồ sơ</Button>}
         >
-          Provider <strong>{draft.tts_provider}</strong> không phải kết nối TTS đang active (<strong>{currentTtsProvider}</strong>). Ứng dụng có nhớ cấu hình/credential của từng provider để khỏi nhập lại, nhưng job hiện chỉ dùng provider active hoặc Edge TTS tự chứa. Chọn “Dùng TTS hiện tại cho hồ sơ” hoặc chuyển kết nối TTS active trước khi chạy.
+          TTS connection <strong>{pinnedTtsConnection}</strong> không còn trong danh sách đang dùng.
+          Có thể là connection cũ đã archive; chọn connection hiện tại trước khi tạo job mới.
         </Alert>
       )}
 
@@ -513,29 +515,11 @@ export default function LocalizationProfilesSection({ settings }) {
       </Stack>
 
       <Box sx={{ p: 1.5, border: 1, borderColor: "divider", borderRadius: 2 }}>
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }}>
-          <Box sx={{ flex: 1 }}>
-            <Typography variant="subtitle2">Kết nối AI đã cấu hình</Typography>
-            <Typography variant="caption" color="text.secondary">
-              {globalProvider} · mô hình toàn cục/mặc định {globalModel}
-            </Typography>
-          </Box>
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={<RefreshOutlinedIcon />}
-            onClick={discoverModels}
-            disabled={discovering}
-          >
-            {discovering ? "Đang dò tìm…" : "Dò tìm mô hình"}
-          </Button>
-        </Stack>
-        {discoveredModels.length > 0 && (
-          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
-            {discoveredModels.slice(0, 8).map((model) => <Chip key={model} label={model} size="small" variant="outlined" />)}
-            {discoveredModels.length > 8 && <Chip label={`+${discoveredModels.length - 8} mô hình nữa`} size="small" />}
-          </Stack>
-        )}
+        <Typography variant="subtitle2">Connection Registry</Typography>
+        <Typography variant="caption" color="text.secondary">
+          {Object.keys(aiConnections).length} AI connection · {Object.keys(ttsConnections).length} TTS connection.
+          C6/C7 chọn connection theo thứ tự fallback bên dưới; mỗi route tự dò model từ đúng endpoint.
+        </Typography>
       </Box>
 
       <Accordion defaultExpanded disableGutters>
@@ -547,40 +531,9 @@ export default function LocalizationProfilesSection({ settings }) {
         </AccordionSummary>
         <AccordionDetails>
           <Stack spacing={2}>
-            <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
-              <FormControl size="small" fullWidth>
-                <InputLabel>AI chính C6</InputLabel>
-                <Select
-                  value={draft.translation_provider || ""}
-                  label="AI chính C6"
-                  onChange={(e) => setStageProvider("translation", e.target.value)}
-                >
-                  <MenuItem value=""><em>Kế thừa AI đang active ({globalProvider})</em></MenuItem>
-                  {availableAiProviders.map((value) => (
-                    <MenuItem key={value} value={value}>
-                      {value}{settings?.ai_provider_profiles?.[value] ? " · đã lưu" : value === settings?.ai_provider ? " · active" : ""}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              <FormControl size="small" fullWidth>
-                <InputLabel>AI dự phòng C6</InputLabel>
-                <Select
-                  value={draft.translation_fallback_provider || ""}
-                  label="AI dự phòng C6"
-                  onChange={(e) => setStageProvider("translation_fallback", e.target.value)}
-                >
-                  <MenuItem value=""><em>Không dùng fallback provider</em></MenuItem>
-                  {availableAiProviders.map((value) => (
-                    <MenuItem key={value} value={value}>
-                      {value}{settings?.ai_provider_profiles?.[value] ? " · đã lưu" : value === settings?.ai_provider ? " · active" : ""}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Stack>
+            {renderRouteChain("translation", "Chuỗi AI C6 / Semantic")}
             <Alert severity="info" variant="outlined">
-              C6 dùng AI chính → retry có giới hạn → AI dự phòng. Phân đoạn ngữ nghĩa AI cũng dùng cùng chuỗi này; nếu cả hai lỗi hoặc hết ngân sách thì tự chuyển sang phân đoạn nhanh không AI.
+              Chạy theo đúng thứ tự route. Khi một route lỗi và fallback thành công, route đó được giữ sticky cho phần còn lại của stage thay vì quay lại endpoint đang chết. Semantic dùng cùng chuỗi; hết toàn bộ budget thì chuyển deterministic.
             </Alert>
             <FormControlLabel
               control={
@@ -617,43 +570,6 @@ export default function LocalizationProfilesSection({ settings }) {
                 {PRESETS.map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
               </Select>
             </FormControl>
-            <Autocomplete
-              freeSolo
-              size="small"
-              fullWidth
-              options={[...new Set([settings?.ai_model, ...discoveredModels].filter(Boolean))]}
-              value={draft.translation_model || ""}
-              onInputChange={(_, value) => patch("translation_model", value || null)}
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  label="Mô hình dịch C6"
-                  placeholder={globalModel}
-                  helperText="Chọn trực tiếp mô hình đã dò được, hoặc nhập ID tùy chỉnh. Để trống = dùng mô hình mặc định/toàn cục."
-                />
-              )}
-            />
-            <TextField
-              size="small" fullWidth label="Ghi đè Base URL AI chính C6 (tùy chọn)"
-              value={draft.translation_base_url || ""}
-              onChange={(e) => patch("translation_base_url", e.target.value || null)}
-              placeholder={providerConfig(draft.translation_provider || settings?.ai_provider).base_url || "kế thừa endpoint đã lưu"}
-              helperText="Credential được lấy từ provider đã lưu trong Kết nối AI; không nhập key trong profile."
-            />
-            <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
-              <TextField
-                size="small" fullWidth label="Model fallback C6"
-                value={draft.translation_fallback_model || ""}
-                onChange={(e) => patch("translation_fallback_model", e.target.value || null)}
-                placeholder={providerConfig(draft.translation_fallback_provider).model || "model đã lưu của provider fallback"}
-              />
-              <TextField
-                size="small" fullWidth label="Base URL fallback C6 (tùy chọn)"
-                value={draft.translation_fallback_base_url || ""}
-                onChange={(e) => patch("translation_fallback_base_url", e.target.value || null)}
-                placeholder={providerConfig(draft.translation_fallback_provider).base_url || "endpoint đã lưu"}
-              />
-            </Stack>
             <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
               <TextField
                 size="small" type="number" fullWidth label="Dịch timeout / lần (giây)"
@@ -705,70 +621,10 @@ export default function LocalizationProfilesSection({ settings }) {
         </AccordionSummary>
         <AccordionDetails>
           <Stack spacing={2}>
-            <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
-              <FormControl size="small" fullWidth>
-                <InputLabel>AI chính C7</InputLabel>
-                <Select
-                  value={draft.rewrite_provider || ""}
-                  label="AI chính C7"
-                  onChange={(e) => setStageProvider("rewrite", e.target.value)}
-                >
-                  <MenuItem value=""><em>Kế thừa AI đang active ({globalProvider})</em></MenuItem>
-                  {availableAiProviders.map((value) => (
-                    <MenuItem key={value} value={value}>{value}{settings?.ai_provider_profiles?.[value] ? " · đã lưu" : value === settings?.ai_provider ? " · active" : ""}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              <FormControl size="small" fullWidth>
-                <InputLabel>AI dự phòng C7</InputLabel>
-                <Select
-                  value={draft.rewrite_fallback_provider || ""}
-                  label="AI dự phòng C7"
-                  onChange={(e) => setStageProvider("rewrite_fallback", e.target.value)}
-                >
-                  <MenuItem value=""><em>Không dùng fallback provider</em></MenuItem>
-                  {availableAiProviders.map((value) => (
-                    <MenuItem key={value} value={value}>{value}{settings?.ai_provider_profiles?.[value] ? " · đã lưu" : value === settings?.ai_provider ? " · active" : ""}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Stack>
-            <Autocomplete
-              freeSolo
-              size="small"
-              fullWidth
-              options={[...new Set([settings?.ai_model, ...discoveredModels].filter(Boolean))]}
-              value={draft.rewrite_model || ""}
-              onInputChange={(_, value) => patch("rewrite_model", value || null)}
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  label="Mô hình viết lại thời lượng C7"
-                  placeholder={globalModel}
-                  helperText="Chọn trực tiếp mô hình đã dò được hoặc nhập ID khác. Có thể dùng model nhỏ/nhanh hơn C6."
-                />
-              )}
-            />
-            <TextField
-              size="small" fullWidth label="Ghi đè Base URL AI chính C7 (tùy chọn)"
-              value={draft.rewrite_base_url || ""}
-              onChange={(e) => patch("rewrite_base_url", e.target.value || null)}
-              placeholder={providerConfig(draft.rewrite_provider || settings?.ai_provider).base_url || "kế thừa endpoint đã lưu"}
-            />
-            <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
-              <TextField
-                size="small" fullWidth label="Model fallback C7"
-                value={draft.rewrite_fallback_model || ""}
-                onChange={(e) => patch("rewrite_fallback_model", e.target.value || null)}
-                placeholder={providerConfig(draft.rewrite_fallback_provider).model || "model đã lưu của provider fallback"}
-              />
-              <TextField
-                size="small" fullWidth label="Base URL fallback C7 (tùy chọn)"
-                value={draft.rewrite_fallback_base_url || ""}
-                onChange={(e) => patch("rewrite_fallback_base_url", e.target.value || null)}
-                placeholder={providerConfig(draft.rewrite_fallback_provider).base_url || "endpoint đã lưu"}
-              />
-            </Stack>
+            {renderRouteChain("rewrite", "Chuỗi AI C7")}
+            <Alert severity="info" variant="outlined">
+              C7 cũng hỗ trợ N route theo thứ tự và sticky failover. Nếu toàn bộ AI rewrite lỗi/hết ngân sách, pipeline chuyển sang timing fit/video slowdown bounded thay vì treo.
+            </Alert>
             <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
               <TextField
                 size="small" type="number" fullWidth label="C7 timeout / lần (giây)"
@@ -805,13 +661,52 @@ export default function LocalizationProfilesSection({ settings }) {
             />
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
               <FormControl size="small" fullWidth>
-                <InputLabel>Ghi đè TTS cho hồ sơ</InputLabel>
-                <Select value={draft.tts_provider || ""} label="Ghi đè TTS cho hồ sơ" onChange={(e) => patch("tts_provider", e.target.value || null)}>
-                  <MenuItem value=""><em>Kế thừa kết nối TTS dùng chung</em></MenuItem>
-                  {["edge_tts", "openai_tts", "openai_compatible_tts", "azure_tts", "elevenlabs", "gpt_sovits"].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
+                <InputLabel>Kết nối TTS cho hồ sơ</InputLabel>
+                <Select
+                  value={draft.tts_connection_id || ""}
+                  label="Kết nối TTS cho hồ sơ"
+                  onChange={(e) => {
+                    const id = e.target.value
+                    const cfg = id ? ttsConnections[id] : null
+                    const nextId = id || activeTtsId || ""
+                    const nextCfg = cfg || ttsConnections[nextId] || null
+                    setDraft((prev) => {
+                      const changed = Boolean(prev?.tts_connection_id && prev.tts_connection_id !== nextId)
+                      return {
+                        ...prev,
+                        tts_connection_id: nextId || null,
+                        tts_provider: nextCfg?.provider || settings?.tts_provider || null,
+                        tts_model: nextCfg?.model || settings?.tts_model || null,
+                        tts_voice: nextCfg?.voice || settings?.preferred_tts_voice || null,
+                        tts_base_url: nextCfg?.base_url || settings?.tts_base_url || null,
+                        tts_region: nextCfg?.region || settings?.tts_region || null,
+                        ...(changed ? {
+                          speaker_voices: {},
+                          speaker_reference_audio: {},
+                          tts_reference_audio: null,
+                          tts_reference_text: null,
+                          tts_reference_language: null,
+                        } : {}),
+                      }
+                    })
+                  }}
+                >
+                  <MenuItem value=""><em>Kế thừa TTS active ({activeTtsId || "chưa có"})</em></MenuItem>
+                  {Object.entries(ttsConnections).map(([id, cfg]) => (
+                    <MenuItem key={id} value={id}>
+                      {cfg.label || id} · {cfg.provider}{id === activeTtsId ? " · ACTIVE" : ""}
+                    </MenuItem>
+                  ))}
                 </Select>
               </FormControl>
-              <TextField size="small" fullWidth label="ID giọng đọc" value={draft.tts_voice || ""} onChange={(e) => patch("tts_voice", e.target.value || null)} placeholder={ttsVoicePlaceholder} />
+              <TextField
+                size="small"
+                fullWidth
+                label="ID giọng đọc override"
+                value={draft.tts_voice || ""}
+                onChange={(e) => patch("tts_voice", e.target.value || null)}
+                placeholder={ttsVoicePlaceholder}
+              />
             </Stack>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
               <TextField size="small" type="number" fullWidth label="Giới hạn tốc độ ưu tiên" value={draft.dub_speed_accept ?? 1.15} onChange={(e) => patch("dub_speed_accept", Number(e.target.value))} inputProps={{ step: 0.01, min: 1, max: 2 }} />
@@ -942,10 +837,6 @@ export default function LocalizationProfilesSection({ settings }) {
               </FormControl>
               <TextField size="small" type="number" fullWidth label="Số người nói dự kiến" value={draft.diarization_speakers ?? ""} onChange={(e) => patch("diarization_speakers", e.target.value === "" ? null : Number(e.target.value))} inputProps={{ min: 1, max: 16 }} />
             </Stack>
-            <FormControlLabel
-              control={<Checkbox checked={!!draft.semantic_segmentation} onChange={(e) => patch("semantic_segmentation", e.target.checked)} />}
-              label="Phân đoạn ngữ nghĩa bằng AI"
-            />
           </Stack>
         </AccordionDetails>
       </Accordion>
