@@ -1249,7 +1249,11 @@ async def test_auto_repair_toggle_persists_on_same_job(monkeypatch):
         def update_request(self, value):
             self.request = value
 
+    async def fake_inactive(job_id):
+        assert job_id == run.job_id
+
     run = FakeRun()
+    monkeypatch.setattr(api, "_assert_job_inactive", fake_inactive)
     monkeypatch.setattr(api, "_load_run", lambda job_id: run)
 
     enabled = await api.set_localization_auto_repair(
