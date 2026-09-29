@@ -7,7 +7,9 @@ from types import SimpleNamespace
 import pytest
 
 from backend.api import settings as settings_api
+from backend.core.localization import LocalizationProfile
 from backend.services import elevenlabs_tts_service as eleven
+from backend.services import localization_service as localization
 from backend.services import tts_service
 
 
@@ -353,3 +355,47 @@ async def test_tts_preview_removes_partial_artifact_on_failure(monkeypatch, tmp_
 
 async def _async_value(value):
     return value
+
+
+def test_profile_edge_tts_override_isolated_from_global_elevenlabs():
+    user_settings = SimpleNamespace(
+        tts_provider="elevenlabs",
+        preferred_tts_voice="eleven-voice",
+        tts_model="eleven_multilingual_v2",
+        tts_base_url="https://api.elevenlabs.io/v1",
+        tts_region="global-region",
+        tts_api_key_encrypted="encrypted-eleven-key",
+    )
+    profile = LocalizationProfile(
+        id="fast-edge",
+        name="FAST Edge",
+        tts_provider="edge_tts",
+    )
+
+    runtime = localization._tts_config(user_settings, profile, "Vietnamese")
+
+    assert runtime.provider == tts_service.TTSProvider.EDGE_TTS
+    assert runtime.default_voice == "vi-VN-HoaiMyNeural"
+    assert runtime.api_key == ""
+    assert runtime.model is None
+    assert runtime.base_url is None
+    assert runtime.region is None
+
+
+def test_profile_credential_provider_cannot_reinterpret_another_tts_slot():
+    user_settings = SimpleNamespace(
+        tts_provider="elevenlabs",
+        preferred_tts_voice="eleven-voice",
+        tts_model="eleven_multilingual_v2",
+        tts_base_url="https://api.elevenlabs.io/v1",
+        tts_region=None,
+        tts_api_key_encrypted="encrypted-eleven-key",
+    )
+    profile = LocalizationProfile(
+        id="bad-openai",
+        name="Bad OpenAI override",
+        tts_provider="openai_tts",
+    )
+
+    with pytest.raises(ValueError, match="only self-contained Edge TTS"):
+        localization._tts_config(user_settings, profile, "Vietnamese")
