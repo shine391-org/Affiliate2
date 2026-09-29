@@ -750,8 +750,20 @@ async def upsert_ai_connection(body: AIConnectionRequest):
             existing.get("provider")
             and str(existing.get("provider")).strip().lower() != provider
         )
-        # Provider-scoped credentials must never cross provider boundaries.
-        encrypted = None if provider_changed else existing.get("api_key_encrypted")
+        if provider_changed:
+            # connection_id is durable identity referenced by profiles and
+            # persisted jobs. Reinterpreting the same id as another transport
+            # could make an old job consume a different credential/provider.
+            # Create a new connection instead.
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"AI connection '{connection_id}' is already "
+                    f"{existing.get('provider')}. Provider/transport is immutable; "
+                    "create a new connection ID for a different provider."
+                ),
+            )
+        encrypted = existing.get("api_key_encrypted")
         if body.api_key is not None:
             encrypted = encrypt(body.api_key) if body.api_key else None
         key = decrypt_safe(encrypted) if encrypted else ""
@@ -840,7 +852,16 @@ async def upsert_tts_connection(body: TTSConnectionRequest):
             existing.get("provider")
             and str(existing.get("provider")).strip().lower() != provider
         )
-        encrypted = None if provider_changed else existing.get("api_key_encrypted")
+        if provider_changed:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"TTS connection '{connection_id}' is already "
+                    f"{existing.get('provider')}. Provider/transport is immutable; "
+                    "create a new connection ID for a different provider."
+                ),
+            )
+        encrypted = existing.get("api_key_encrypted")
         if body.api_key is not None:
             encrypted = encrypt(body.api_key) if body.api_key else None
 
