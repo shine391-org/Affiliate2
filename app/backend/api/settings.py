@@ -670,18 +670,200 @@ async def update_settings(update: SettingsUpdate):
     return await get_settings()
 
 
+class AIConnectionRequest(BaseModel):
+    connection_id: Optional[str] = None
+    label: str
+    provider: str
+    model: Optional[str] = None
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    activate: bool = True
+
+
+class TTSConnectionRequest(BaseModel):
+    connection_id: Optional[str] = None
+    label: str
+    provider: str
+    voice: Optional[str] = None
+    model: Optional[str] = None
+    base_url: Optional[str] = None
+    region: Optional[str] = None
+    api_key: Optional[str] = None
+    activate: bool = True
+
+
+def _profile_references_connection(settings_row, connection_id: str, *, tts: bool = False) -> bool:
+    try:
+        payload = json.loads(getattr(settings_row, "localization_profiles_json", None) or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return False
+    for profile in payload.get("profiles", []) if isinstance(payload, dict) else []:
+        if not isinstance(profile, dict):
+            continue
+        if tts:
+            if str(profile.get("tts_connection_id") or "").strip().lower() == connection_id:
+                return True
+            continue
+        for key in ("translation_routes", "rewrite_routes"):
+            for route in profile.get(key, []) or []:
+                if isinstance(route, dict) and str(route.get("connection_id") or "").strip().lower() == connection_id:
+                    return True
+    return False
+
+
+@router.post("/settings/ai/connections", response_model=SettingsResponse)
+async def upsert_ai_connection(body: AIConnectionRequest):
+    from backend.core.ai_provider import make_ai_client
+
+    connection_id = _safe_connection_id(body.connection_id or body.label or body.provider)
+    provider = (body.provider or "").strip().lower()
+    # Validate the transport/config shape before storing it. A blank key is
+    # allowed only when an existing encrypted key is being preserved.
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(UserSettings).where(UserSettings.user_id == "local"))
+        s = result.scalar_one_or_none()
+        if not s:
+            s = UserSettings(user_id="local")
+            db.add(s)
+        connections = _load_ai_connections(s)
+        existing = connections.get(connection_id, {})
+        encrypted = existing.get("api_key_encrypted")
+        if body.api_key is not None:
+            encrypted = encrypt(body.api_key) if body.api_key else None
+        key = decrypt_safe(encrypted) if encrypted else ""
+        try:
+            make_ai_client(
+                provider_name=provider,
+                api_key=key or "",
+                model=body.model or existing.get("model"),
+                base_url=body.base_url or existing.get("base_url"),
+            )
+        except Exception as exc:
+            # Missing key is permitted while editing an already-stored keyed
+            # provider only when that stored key exists.
+            if not encrypted:
+                raise HTTPException(status_code=400, detail=str(exc)[:240]) from exc
+
+        connections[connection_id] = {
+            "label": body.label.strip() or connection_id,
+            "provider": provider,
+            "model": body.model or None,
+            "base_url": body.base_url.strip() if body.base_url else None,
+            "api_key_encrypted": encrypted,
+        }
+        s.ai_connections_json = _save_provider_registry(connections)
+        if body.activate:
+            cfg = connections[connection_id]
+            s.ai_connection_id = connection_id
+            s.ai_provider = provider
+            s.ai_model = cfg.get("model")
+            s.ai_base_url = cfg.get("base_url")
+            s.ai_api_key_encrypted = cfg.get("api_key_encrypted")
+        await db.commit()
+    return await get_settings()
+
+
+@router.delete("/settings/ai/connections/{connection_id}", response_model=SettingsResponse)
+async def delete_ai_connection(connection_id: str):
+    connection_id = _safe_connection_id(connection_id)
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(UserSettings).where(UserSettings.user_id == "local"))
+        s = result.scalar_one_or_none()
+        if not s:
+            raise HTTPException(status_code=404, detail="Settings not found")
+        if _active_ai_connection_id(s) == connection_id:
+            raise HTTPException(status_code=409, detail="Activate another AI connection before deleting this one.")
+        if _profile_references_connection(s, connection_id):
+            raise HTTPException(status_code=409, detail="This AI connection is still referenced by a localization profile.")
+        connections = _load_ai_connections(s)
+        if connection_id not in connections:
+            raise HTTPException(status_code=404, detail="AI connection not found")
+        connections.pop(connection_id)
+        s.ai_connections_json = _save_provider_registry(connections)
+        await db.commit()
+    return await get_settings()
+
+
+@router.post("/settings/tts/connections", response_model=SettingsResponse)
+async def upsert_tts_connection(body: TTSConnectionRequest):
+    from backend.services.tts_service import TTSProvider
+
+    connection_id = _safe_connection_id(body.connection_id or body.label or body.provider)
+    provider = (body.provider or "").strip().lower()
+    try:
+        TTSProvider(provider)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Unsupported TTS provider: {provider}") from exc
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(UserSettings).where(UserSettings.user_id == "local"))
+        s = result.scalar_one_or_none()
+        if not s:
+            s = UserSettings(user_id="local")
+            db.add(s)
+        connections = _load_tts_connections(s)
+        existing = connections.get(connection_id, {})
+        encrypted = existing.get("api_key_encrypted")
+        if body.api_key is not None:
+            encrypted = encrypt(body.api_key) if body.api_key else None
+        connections[connection_id] = {
+            "label": body.label.strip() or connection_id,
+            "provider": provider,
+            "voice": body.voice or None,
+            "model": body.model or None,
+            "base_url": body.base_url.strip() if body.base_url else None,
+            "region": body.region.strip() if body.region else None,
+            "api_key_encrypted": encrypted,
+        }
+        s.tts_connections_json = _save_provider_registry(connections)
+        if body.activate:
+            cfg = connections[connection_id]
+            s.tts_connection_id = connection_id
+            s.tts_provider = provider
+            s.preferred_tts_voice = cfg.get("voice")
+            s.tts_model = cfg.get("model")
+            s.tts_base_url = cfg.get("base_url")
+            s.tts_region = cfg.get("region")
+            s.tts_api_key_encrypted = cfg.get("api_key_encrypted")
+        await db.commit()
+    return await get_settings()
+
+
+@router.delete("/settings/tts/connections/{connection_id}", response_model=SettingsResponse)
+async def delete_tts_connection(connection_id: str):
+    connection_id = _safe_connection_id(connection_id)
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(UserSettings).where(UserSettings.user_id == "local"))
+        s = result.scalar_one_or_none()
+        if not s:
+            raise HTTPException(status_code=404, detail="Settings not found")
+        if _active_tts_connection_id(s) == connection_id:
+            raise HTTPException(status_code=409, detail="Activate another TTS connection before deleting this one.")
+        if _profile_references_connection(s, connection_id, tts=True):
+            raise HTTPException(status_code=409, detail="This TTS connection is still referenced by a localization profile.")
+        connections = _load_tts_connections(s)
+        if connection_id not in connections:
+            raise HTTPException(status_code=404, detail="TTS connection not found")
+        connections.pop(connection_id)
+        s.tts_connections_json = _save_provider_registry(connections)
+        await db.commit()
+    return await get_settings()
+
+
 # ── OAuth endpoints ──────────────────────────────────────────────────────────
 
 
 class AIProbeRequest(BaseModel):
-    provider: str
+    connection_id: Optional[str] = None
+    provider: Optional[str] = None
     model: Optional[str] = None
     base_url: Optional[str] = None
     api_key: Optional[str] = None
 
 
 class TTSProbeRequest(BaseModel):
-    provider: str
+    connection_id: Optional[str] = None
+    provider: Optional[str] = None
     api_key: Optional[str] = None
     base_url: Optional[str] = None
     model: Optional[str] = None
