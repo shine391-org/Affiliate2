@@ -49,6 +49,8 @@ def _stub_faster_whisper(monkeypatch):
     WhisperService._loaded_model_name = None
     WhisperService._loaded_device = None
     WhisperService._evict_task = None
+    WhisperService._active_transcriptions = 0
+    WhisperService._active_transcriptions = 0
     yield
     WhisperService._model = None
     WhisperService._loaded_quality = None
@@ -168,11 +170,11 @@ def test_evictor_drops_a_heavy_model_once_idle(monkeypatch):
     assert WhisperService._model is None
 
 
-def test_evictor_leaves_light_models_resident(monkeypatch):
+def test_evictor_drops_light_models_once_idle(monkeypatch):
     monkeypatch.setattr(ws_mod, "_IDLE_EVICT_SECONDS", 0)
-    WhisperService.load("fast")           # base → cheap to keep hot
+    WhisperService.load("fast")
     asyncio.run(WhisperService._evict_when_idle())
-    assert WhisperService._model is not None
+    assert WhisperService._model is None
 
 
 def test_arm_evictor_is_a_noop_without_a_running_loop():
@@ -180,6 +182,32 @@ def test_arm_evictor_is_a_noop_without_a_running_loop():
     WhisperService.load("best")
     WhisperService._arm_evictor()
     assert WhisperService._evict_task is None
+
+
+def test_unload_refuses_while_transcription_is_active():
+    WhisperService.load("best")
+    WhisperService._active_transcriptions = 1
+    assert WhisperService.unload() is False
+    assert WhisperService._model is not None
+    WhisperService._active_transcriptions = 0
+    assert WhisperService.unload() is True
+
+
+def test_transcribe_releases_active_lease_and_arms_idle_evictor(tmp_path, monkeypatch):
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"x")
+    armed = []
+
+    monkeypatch.setattr(
+        WhisperService,
+        "_arm_evictor",
+        classmethod(lambda cls: armed.append(cls._active_transcriptions)),
+    )
+
+    asyncio.run(ws_mod.whisper_service.transcribe(audio))
+
+    assert WhisperService._active_transcriptions == 0
+    assert armed == [0]
 
 
 def test_explicit_model_override_is_not_replaced_by_quality(tmp_path):
