@@ -275,12 +275,23 @@ export default function AIProviderSection({ settings, updateSettings }) {
 
       <FormControl size="small" fullWidth>
         <InputLabel>Provider / transport</InputLabel>
-        <Select value={provider} label="Provider / transport" onChange={(e) => changeProvider(e.target.value)}>
+        <Select
+          value={provider}
+          label="Provider / transport"
+          onChange={(e) => changeProvider(e.target.value)}
+          disabled={!isNew}
+        >
           {Object.entries(PROVIDERS).map(([id, item]) => (
             <MenuItem key={id} value={id}>{item.label}</MenuItem>
           ))}
         </Select>
       </FormControl>
+
+      {!isNew && (
+        <Typography variant="caption" color="text.secondary">
+          Provider/transport là identity cố định của connection. Muốn đổi loại provider, hãy tạo connection mới để job cũ không bị trỏ sang credential khác.
+        </Typography>
+      )}
 
       {isCompatible(provider) && (
         <TextField
