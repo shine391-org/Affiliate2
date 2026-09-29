@@ -470,12 +470,20 @@ async def _load_saved_tts_settings():
 
 
 async def _tts_probe_key(body: TTSProbeRequest) -> str:
+    """Resolve probe credentials through the same ownership chain as runtime.
+
+    Provider-scoped TTS keys win. OpenAI TTS additionally supports the saved
+    OpenAI AI-provider key and OPENAI_API_KEY, matching _tts_config(); this
+    prevents Settings test/preview from reporting "missing key" for a runtime
+    configuration that localization can actually use.
+    """
     if body.api_key is not None:
         return body.api_key.strip()
     saved = await _load_saved_tts_settings()
     provider = (body.provider or "").strip().lower()
     if not saved:
-        return ""
+        return app_settings.OPENAI_API_KEY if provider == "openai_tts" else ""
+
     if (saved.tts_provider or "").strip().lower() == provider:
         encrypted = getattr(saved, "tts_api_key_encrypted", None)
     else:
@@ -483,7 +491,22 @@ async def _tts_probe_key(body: TTSProbeRequest) -> str:
             getattr(saved, "tts_provider_profiles_json", None)
         ).get(provider, {})
         encrypted = profile.get("api_key_encrypted")
-    return decrypt_safe(encrypted) if encrypted else ""
+    if encrypted:
+        return decrypt_safe(encrypted) or ""
+
+    if provider == "openai_tts":
+        if (getattr(saved, "ai_provider", None) or "").strip().lower() == "openai":
+            ai_encrypted = getattr(saved, "ai_api_key_encrypted", None)
+        else:
+            ai_profile = _load_provider_registry(
+                getattr(saved, "ai_provider_profiles_json", None)
+            ).get("openai", {})
+            ai_encrypted = ai_profile.get("api_key_encrypted")
+        if ai_encrypted:
+            return decrypt_safe(ai_encrypted) or ""
+        return app_settings.OPENAI_API_KEY or ""
+
+    return ""
 
 
 async def _probe_key(body: AIProbeRequest) -> str:
