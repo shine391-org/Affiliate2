@@ -1160,5 +1160,5 @@ async def test_rerun_downstream_of_dubbing_does_not_rebind_tts(monkeypatch):
         api.RerunRequest(from_stage="final_render"),
     )
 
-    assert result["tts_rebound"] is False
+    assert result == {"ok": True, "job_id": run.job_id, "from_stage": "final_render"}
     assert events == [("invalidate", "final_render"), ("dispatch", run.job_id)]
