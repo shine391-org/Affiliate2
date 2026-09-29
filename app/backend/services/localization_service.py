@@ -134,78 +134,93 @@ def materialize_localization_profile(
     target_language: str,
     for_dub: bool = True,
 ) -> LocalizationProfile:
-    """Resolve non-secret runtime bindings once for a reproducible job snapshot.
+    """Resolve non-secret route identities once for a reproducible job snapshot.
 
-    Secrets stay in encrypted Settings; provider/model/base URL/voice/region are
-    safe configuration and must not drift silently between resume/rerun calls.
+    Credentials remain encrypted/live so rotating a key can recover the same
+    job. Connection ids/model/base URLs are snapshotted so a later global
+    Settings switch cannot silently move an in-flight job to another endpoint.
     """
-    translation_ai = _profile_ai_client(user_settings, profile, "translation")
-    translation_selector = (
-        (profile.translation_provider or "").strip().lower()
-        or (getattr(user_settings, "ai_provider", None) or "").strip().lower()
-        or translation_ai.provider.value
+    translation_clients = _profile_ai_route_clients(
+        user_settings, profile, "translation"
     )
+    translation_routes = [
+        {
+            "connection_id": getattr(client, "connection_name", None)
+                or getattr(getattr(client, "provider", None), "value", "ai"),
+            "model": getattr(client, "model", None),
+            "base_url": getattr(client, "base_url", None),
+        }
+        for client in translation_clients
+    ]
 
     data = profile.model_dump()
+    data["translation_routes"] = translation_routes
+    first = translation_routes[0]
     data.update({
-        # Preserve the user-facing connection selector (e.g. lmstudio) instead
-        # of collapsing every compatible endpoint to provider="compatible".
-        # Resume/fallback then resolves the same saved endpoint unambiguously.
-        "translation_provider": translation_selector,
-        "translation_model": translation_ai.model,
-        "translation_base_url": translation_ai.base_url,
+        # Legacy fields stay populated for old manifests/UI/tests, but runtime
+        # now consumes translation_routes.
+        "translation_provider": first["connection_id"],
+        "translation_model": first["model"],
+        "translation_base_url": first["base_url"],
+        "translation_fallback_provider": (
+            translation_routes[1]["connection_id"]
+            if len(translation_routes) > 1 else None
+        ),
+        "translation_fallback_model": (
+            translation_routes[1]["model"]
+            if len(translation_routes) > 1 else None
+        ),
+        "translation_fallback_base_url": (
+            translation_routes[1]["base_url"]
+            if len(translation_routes) > 1 else None
+        ),
     })
-    translation_fallback_ai = _profile_ai_fallback_client(
-        user_settings,
-        profile,
-        "translation",
-        primary_ai=translation_ai,
-    )
-    if translation_fallback_ai is not None:
-        fallback_selector = (
-            (profile.translation_fallback_provider or "").strip().lower()
-            or translation_selector
-        )
-        data.update({
-            "translation_fallback_provider": fallback_selector,
-            "translation_fallback_model": translation_fallback_ai.model,
-            "translation_fallback_base_url": translation_fallback_ai.base_url,
-        })
 
     if for_dub:
-        rewrite_ai = _profile_ai_client(user_settings, profile, "rewrite")
-        rewrite_selector = (
-            (profile.rewrite_provider or "").strip().lower()
-            or (getattr(user_settings, "ai_provider", None) or "").strip().lower()
-            or rewrite_ai.provider.value
+        rewrite_clients = _profile_ai_route_clients(
+            user_settings, profile, "rewrite"
         )
-        rewrite_fallback_ai = _profile_ai_fallback_client(
-            user_settings,
-            profile,
-            "rewrite",
-            primary_ai=rewrite_ai,
-        )
+        rewrite_routes = [
+            {
+                "connection_id": getattr(client, "connection_name", None)
+                    or getattr(getattr(client, "provider", None), "value", "ai"),
+                "model": getattr(client, "model", None),
+                "base_url": getattr(client, "base_url", None),
+            }
+            for client in rewrite_clients
+        ]
+        data["rewrite_routes"] = rewrite_routes
+        first_rewrite = rewrite_routes[0]
+        data.update({
+            "rewrite_provider": first_rewrite["connection_id"],
+            "rewrite_model": first_rewrite["model"],
+            "rewrite_base_url": first_rewrite["base_url"],
+            "rewrite_fallback_provider": (
+                rewrite_routes[1]["connection_id"]
+                if len(rewrite_routes) > 1 else None
+            ),
+            "rewrite_fallback_model": (
+                rewrite_routes[1]["model"]
+                if len(rewrite_routes) > 1 else None
+            ),
+            "rewrite_fallback_base_url": (
+                rewrite_routes[1]["base_url"]
+                if len(rewrite_routes) > 1 else None
+            ),
+        })
+
         tts = _tts_config(user_settings, profile, target_language)
         data.update({
-            "rewrite_provider": rewrite_selector,
-            "rewrite_model": rewrite_ai.model,
-            "rewrite_base_url": rewrite_ai.base_url,
+            "tts_connection_id": getattr(tts, "connection_id", None)
+                or profile.tts_connection_id
+                or getattr(user_settings, "tts_connection_id", None),
             "tts_provider": getattr(tts.provider, "value", str(tts.provider)),
             "tts_model": tts.model,
             "tts_voice": tts.default_voice or None,
             "tts_base_url": tts.base_url,
             "tts_region": tts.region,
         })
-        if rewrite_fallback_ai is not None:
-            rewrite_fallback_selector = (
-                (profile.rewrite_fallback_provider or "").strip().lower()
-                or rewrite_selector
-            )
-            data.update({
-                "rewrite_fallback_provider": rewrite_fallback_selector,
-                "rewrite_fallback_model": rewrite_fallback_ai.model,
-                "rewrite_fallback_base_url": rewrite_fallback_ai.base_url,
-            })
+
     return LocalizationProfile.model_validate(data)
 
 
