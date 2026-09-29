@@ -214,8 +214,8 @@ export default function LocalizationProfilesSection({ settings }) {
       tts_provider: currentTtsProvider,
       tts_model: settings?.tts_model || null,
       tts_voice: settings?.preferred_tts_voice || null,
-      tts_base_url: settings?.tts_base_url || null,
-      tts_region: settings?.tts_region || null,
+      tts_base_url: null,
+      tts_region: null,
       ...(connectionChanged ? {
         speaker_voices: {},
         speaker_reference_audio: {},
@@ -678,8 +678,8 @@ export default function LocalizationProfilesSection({ settings }) {
                         tts_provider: nextCfg?.provider || settings?.tts_provider || null,
                         tts_model: nextCfg?.model || settings?.tts_model || null,
                         tts_voice: nextCfg?.voice || settings?.preferred_tts_voice || null,
-                        tts_base_url: nextCfg?.base_url || settings?.tts_base_url || null,
-                        tts_region: nextCfg?.region || settings?.tts_region || null,
+                        tts_base_url: null,
+                        tts_region: null,
                         ...(changed ? {
                           speaker_voices: {},
                           speaker_reference_audio: {},
