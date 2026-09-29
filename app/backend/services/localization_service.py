@@ -299,6 +299,7 @@ def _ai_client_for_selector(
         if base_url:
             ai.base_url = base_url.rstrip("/")
         ai.max_retries = 0
+        ai.connection_name = requested or active or getattr(ai.provider, "value", str(ai.provider))
         return ai
 
     saved = _saved_ai_provider_config(user_settings, requested)
@@ -314,6 +315,7 @@ def _ai_client_for_selector(
         base_url=(base_url or saved_base),
     )
     ai.max_retries = 0
+    ai.connection_name = requested
     return ai
 
 
@@ -573,7 +575,7 @@ async def _call_ai_chat_resilient(
                 "role": role,
                 "attempt": attempt,
                 "max_attempts": max_attempts,
-                "provider": getattr(getattr(client, "provider", None), "value", str(getattr(client, "provider", ""))),
+                "provider": getattr(client, "connection_name", None) or getattr(getattr(client, "provider", None), "value", str(getattr(client, "provider", ""))),
                 "model": getattr(client, "model", None),
                 "timeout_s": round(timeout_s, 1),
             })
@@ -590,7 +592,7 @@ async def _call_ai_chat_resilient(
                     "role": role,
                     "attempt": attempt,
                     "max_attempts": max_attempts,
-                    "provider": getattr(getattr(client, "provider", None), "value", str(getattr(client, "provider", ""))),
+                    "provider": getattr(client, "connection_name", None) or getattr(getattr(client, "provider", None), "value", str(getattr(client, "provider", ""))),
                     "model": getattr(client, "model", None),
                     "error": str(exc)[:240],
                 })
@@ -623,7 +625,7 @@ async def _call_ai_chat_resilient(
             await _emit_ai_progress(progress_cb, {
                 "event": "switch_fallback",
                 "stage": stage,
-                "provider": getattr(getattr(fallback_ai, "provider", None), "value", str(getattr(fallback_ai, "provider", ""))),
+                "provider": getattr(fallback_ai, "connection_name", None) or getattr(getattr(fallback_ai, "provider", None), "value", str(getattr(fallback_ai, "provider", ""))),
                 "model": getattr(fallback_ai, "model", None),
             })
 
@@ -1341,6 +1343,7 @@ async def _adapt_chunk_items(
     ai,
     *,
     fallback_ai=None,
+    progress_cb=None,
     plan: list[PlanItem],
     chunk: DubbingChunk,
     segment_by_id: dict[str, LocalizationSegment],
@@ -1443,6 +1446,7 @@ ITEMS:
             max_attempts=profile.rewrite_retry_attempts,
             attempt_timeout_s=profile.rewrite_attempt_timeout_s,
             total_timeout_s=profile.rewrite_total_timeout_s,
+            progress_cb=progress_cb,
             stage="rewrite",
         )
     except Exception as exc:
@@ -1571,6 +1575,7 @@ async def synthesize_timed_dub(
     regenerate_chunk_ids: set[int] | None = None,
     reuse_existing_chunks: bool = False,
     reference_media: Path | None = None,
+    progress_cb=None,
 ) -> TimedDubResult:
     """C7 donor-derived chunk planner with measured TTS and bounded retiming."""
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -1745,7 +1750,7 @@ async def synthesize_timed_dub(
             and attempts < config.rewrite_max_attempts
         ):
             changed = await _adapt_chunk_items(
-                ai, fallback_ai=fallback_ai,
+                ai, fallback_ai=fallback_ai, progress_cb=progress_cb,
                 plan=plan, chunk=chunk, segment_by_id=segment_by_id,
                 target_language=target_language, target_ms=chunk.available_ms,
                 profile=profile, issues=issues, state=rewrite_state,
