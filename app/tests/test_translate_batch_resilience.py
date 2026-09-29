@@ -2131,3 +2131,36 @@ async def test_hanging_primary_cannot_starve_translation_fallback():
         e.get("event") == "switch_fallback" and e.get("provider") == "lmstudio"
         for e in events
     )
+
+
+
+def test_materialized_env_provider_can_resolve_again_without_saved_registry(monkeypatch):
+    from backend.core.ai_provider import AIClient, AIProvider
+
+    env_client = AIClient(
+        provider=AIProvider.OPENAI,
+        api_key="env-openai-key",
+        model="env-model",
+    )
+    monkeypatch.setattr(
+        "backend.core.ai_provider.get_ai_client",
+        lambda settings=None: env_client,
+    )
+
+    settings = SimpleNamespace(
+        ai_provider="",
+        ai_model=None,
+        ai_base_url=None,
+        ai_api_key_encrypted=None,
+        ai_provider_profiles_json="{}",
+    )
+
+    client = ls._ai_client_for_selector(
+        settings,
+        "openai",
+        model="materialized-model",
+    )
+
+    assert client.api_key == "env-openai-key"
+    assert client.model == "materialized-model"
+    assert client.connection_name == "openai"
