@@ -23,12 +23,15 @@ test("TTS settings exposes connection test, ElevenLabs voice discovery, and exac
   assert.ok(tts.includes('audioRef.current.play().then'))
 })
 
-test("localization profile allows pinned Edge beside another global TTS provider", () => {
+test("localization profile allows pinned Edge and clears provider-scoped TTS state on adoption", () => {
   assert.ok(profiles.includes('edgeCrossProviderOverride'))
   assert.ok(profiles.includes('ghim Edge TTS'))
   assert.ok(profiles.includes('không kế thừa API key, model, Base URL hoặc voice'))
   assert.ok(profiles.includes('Dùng TTS hiện tại cho hồ sơ'))
   assert.ok(profiles.includes('provider hiện tại hoặc Edge TTS'))
+  assert.ok(profiles.includes('speaker_voices: {}'))
+  assert.ok(profiles.includes('speaker_reference_audio: {}'))
+  assert.ok(profiles.includes('tts_reference_audio: null'))
 })
 
 test("expert recovery makes changed TTS resumable without locking the editor", () => {
@@ -67,6 +70,21 @@ test("batch dialog has visible X and Đóng controls without cancellation calls"
   assert.ok(!batch.includes('Select videos'))
 })
 
+
+test("localization C6/C7 model discovery is directly selectable and still free-form", () => {
+  assert.ok(profiles.includes("<Autocomplete"))
+  assert.ok(profiles.includes('label="Mô hình dịch C6"'))
+  assert.ok(profiles.includes('label="Mô hình viết lại thời lượng C7"'))
+  assert.ok(profiles.includes("freeSolo"))
+  assert.ok(!profiles.includes('localization-model-suggestions'))
+})
+
+test("expert panel exposes C7 rewrite evidence", () => {
+  assert.ok(expert.includes("C7 · Viết lại thời lượng"))
+  assert.ok(expert.includes("dubbingMeta.rewrite_count"))
+  assert.ok(expert.includes("rewrite_ai_unavailable"))
+  assert.ok(expert.includes("timing_overflow"))
+})
 
 test("provider settings remember prior AI/TTS connections and expose selectable models", () => {
   assert.ok(ai.includes("ai_provider_profiles"))
