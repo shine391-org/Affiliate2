@@ -338,14 +338,41 @@ export default function LocalizationProfilesSection({ settings }) {
     }
     setBusy(true)
     try {
+      const translationRoutes = (draft.translation_routes || [])
+        .filter((route) => route?.connection_id)
+        .map((route) => ({
+          connection_id: route.connection_id,
+          model: route.model?.trim() || null,
+          base_url: route.base_url?.trim() || null,
+        }))
+      const rewriteRoutes = (draft.rewrite_routes || [])
+        .filter((route) => route?.connection_id)
+        .map((route) => ({
+          connection_id: route.connection_id,
+          model: route.model?.trim() || null,
+          base_url: route.base_url?.trim() || null,
+        }))
+      if (!translationRoutes.length || !rewriteRoutes.length) {
+        throw new Error("C6 và C7 cần ít nhất một AI connection route")
+      }
       const payload = {
         ...draft,
-        translation_provider: draft.translation_provider || null,
-        translation_model: draft.translation_model?.trim() || null,
-        translation_base_url: draft.translation_base_url?.trim() || null,
-        rewrite_provider: draft.rewrite_provider || null,
-        rewrite_model: draft.rewrite_model?.trim() || null,
-        rewrite_base_url: draft.rewrite_base_url?.trim() || null,
+        translation_routes: translationRoutes,
+        rewrite_routes: rewriteRoutes,
+        // Keep the first two legacy slots synchronized for old manifests/tools.
+        translation_provider: translationRoutes[0]?.connection_id || null,
+        translation_model: translationRoutes[0]?.model || null,
+        translation_base_url: translationRoutes[0]?.base_url || null,
+        translation_fallback_provider: translationRoutes[1]?.connection_id || null,
+        translation_fallback_model: translationRoutes[1]?.model || null,
+        translation_fallback_base_url: translationRoutes[1]?.base_url || null,
+        rewrite_provider: rewriteRoutes[0]?.connection_id || null,
+        rewrite_model: rewriteRoutes[0]?.model || null,
+        rewrite_base_url: rewriteRoutes[0]?.base_url || null,
+        rewrite_fallback_provider: rewriteRoutes[1]?.connection_id || null,
+        rewrite_fallback_model: rewriteRoutes[1]?.model || null,
+        rewrite_fallback_base_url: rewriteRoutes[1]?.base_url || null,
+        tts_connection_id: draft.tts_connection_id || null,
         translation_instructions: draft.translation_instructions || "",
         rewrite_instructions: draft.rewrite_instructions || "",
         translation_guardrails: draft.translation_guardrails.trim(),
@@ -355,7 +382,7 @@ export default function LocalizationProfilesSection({ settings }) {
       const { data } = await http.post("/api/settings/localization-profiles", payload)
       setStore(data)
       setSelectedId(payload.id)
-      setDraft(clone(data.profiles.find((p) => p.id === payload.id) || payload))
+      setDraft(normalizeProfile(data.profiles.find((p) => p.id === payload.id) || payload))
       setGlossaryText(glossaryToText(payload.glossary))
       showSnackbar("Đã lưu hồ sơ bản địa hóa", "success")
     } catch (err) {
@@ -393,12 +420,23 @@ export default function LocalizationProfilesSection({ settings }) {
       translation_fallback_provider: null,
       translation_fallback_model: null,
       translation_fallback_base_url: null,
+      translation_routes: activeAiId ? [{
+        connection_id: activeAiId,
+        model: aiConnections[activeAiId]?.model || null,
+        base_url: null,
+      }] : [],
       rewrite_provider: null,
       rewrite_model: null,
       rewrite_base_url: null,
       rewrite_fallback_provider: null,
       rewrite_fallback_model: null,
       rewrite_fallback_base_url: null,
+      rewrite_routes: activeAiId ? [{
+        connection_id: activeAiId,
+        model: aiConnections[activeAiId]?.model || null,
+        base_url: null,
+      }] : [],
+      tts_connection_id: activeTtsId || null,
       rewrite_instructions: "",
       translation_guardrails: base?.translation_guardrails || store.prompt_defaults?.translation_guardrails || "",
       rewrite_guardrails: base?.rewrite_guardrails || store.prompt_defaults?.rewrite_guardrails || "",
