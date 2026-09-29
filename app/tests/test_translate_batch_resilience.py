@@ -1966,3 +1966,120 @@ async def test_adapt_chunk_invalid_shape_records_qc_warning():
     assert issues[0]["reason"] == "rewrite_invalid_response"
     assert issues[0]["detail"] == "shape_or_length"
 
+
+
+
+@pytest.mark.asyncio
+async def test_translation_retry_switches_to_saved_fallback_provider(monkeypatch):
+    events = []
+
+    class Transient503(RuntimeError):
+        status_code = 503
+
+    class Primary:
+        connection_name = "compatible"
+        provider = SimpleNamespace(value="compatible")
+        model = "longcat"
+        max_retries = None
+        calls = 0
+
+        async def chat(self, **kwargs):
+            self.calls += 1
+            raise Transient503("Hermes proxy unavailable")
+
+    class Fallback:
+        connection_name = "lmstudio"
+        provider = SimpleNamespace(value="compatible")
+        model = "qwen3:8b"
+        max_retries = None
+        calls = 0
+
+        async def chat(self, **kwargs):
+            self.calls += 1
+            return "fallback-ok"
+
+    async def no_sleep(_delay):
+        return None
+
+    async def progress(event):
+        events.append(dict(event))
+
+    primary = Primary()
+    fallback = Fallback()
+    monkeypatch.setattr(ls.asyncio, "sleep", no_sleep)
+
+    result = await ls._call_ai_chat_resilient(
+        primary,
+        fallback,
+        messages=[{"role": "user", "content": "x"}],
+        max_tokens=8,
+        max_attempts=2,
+        attempt_timeout_s=1,
+        total_timeout_s=5,
+        progress_cb=progress,
+        stage="translation",
+    )
+
+    assert result == "fallback-ok"
+    assert primary.calls == 2
+    assert fallback.calls == 1
+    assert primary.max_retries == 0
+    assert fallback.max_retries == 0
+    assert any(e["event"] == "switch_fallback" and e["provider"] == "lmstudio" for e in events)
+    assert any(e["event"] == "attempt" and e["role"] == "fallback" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_translation_hard_deadline_cancels_hanging_ai():
+    class Hanging:
+        connection_name = "hermes"
+        provider = SimpleNamespace(value="compatible")
+        model = "slow"
+        max_retries = None
+
+        async def chat(self, **kwargs):
+            await __import__("asyncio").Event().wait()
+
+    with pytest.raises(TimeoutError, match="deadline exceeded"):
+        await ls._call_ai_chat_resilient(
+            Hanging(),
+            None,
+            messages=[{"role": "user", "content": "x"}],
+            max_tokens=8,
+            max_attempts=2,
+            attempt_timeout_s=0.01,
+            total_timeout_s=0.03,
+            stage="translation",
+        )
+
+
+def test_saved_inactive_local_provider_resolves_as_fallback():
+    settings = SimpleNamespace(
+        ai_provider="compatible",
+        ai_model="longcat",
+        ai_base_url="http://127.0.0.1:8645/v1",
+        ai_api_key_encrypted=None,
+        ai_provider_profiles_json=json.dumps({
+            "lmstudio": {
+                "model": "qwen3:8b",
+                "base_url": "http://127.0.0.1:1234/v1",
+                "api_key_encrypted": None,
+            },
+        }),
+    )
+    profile = _profile(
+        translation_fallback_provider="lmstudio",
+        translation_fallback_model=None,
+    )
+
+    fallback = ls._profile_ai_fallback_client(
+        settings,
+        profile,
+        "translation",
+        primary_ai=None,
+    )
+
+    assert fallback.connection_name == "lmstudio"
+    assert fallback.model == "qwen3:8b"
+    assert fallback.base_url == "http://127.0.0.1:1234/v1"
+    assert fallback.api_key == "local"
