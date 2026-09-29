@@ -386,7 +386,7 @@ async def _refine_words_with_ai(
     fallback_ai=None,
     max_words_per_window: int = 60,
     attempt_timeout_s: int = 25,
-    max_attempts: int = 2,
+    max_attempts: int = 1,
     deadline_at: float,
     progress_cb=None,
 ) -> LocalizationTranscript | None:
@@ -521,7 +521,7 @@ async def refine_semantic_cues_with_ai(
     fallback_ai=None,
     window_size: int = 12,
     attempt_timeout_s: int = 25,
-    max_attempts: int = 2,
+    max_attempts: int = 1,
     total_timeout_s: int = 60,
     progress_cb=None,
 ) -> LocalizationTranscript:
