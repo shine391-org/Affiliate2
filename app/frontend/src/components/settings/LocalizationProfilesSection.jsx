@@ -79,7 +79,18 @@ export default function LocalizationProfilesSection({ settings }) {
 
   const patch = (key, value) => setDraft((prev) => ({ ...prev, [key]: value }))
   const currentTtsProvider = settings?.tts_provider || "edge_tts"
-  const ttsProviderMismatch = Boolean(draft?.tts_provider && draft.tts_provider !== currentTtsProvider)
+  const pinnedTtsProvider = draft?.tts_provider || null
+  const edgeCrossProviderOverride = Boolean(
+    pinnedTtsProvider === "edge_tts" && currentTtsProvider !== "edge_tts"
+  )
+  const ttsProviderMismatch = Boolean(
+    pinnedTtsProvider &&
+    pinnedTtsProvider !== currentTtsProvider &&
+    pinnedTtsProvider !== "edge_tts"
+  )
+  const ttsVoicePlaceholder = edgeCrossProviderOverride
+    ? "vi-VN-HoaiMyNeural (mặc định Edge theo ngôn ngữ)"
+    : (settings?.preferred_tts_voice || "kế thừa mặc định ngôn ngữ/nhà cung cấp")
   const adoptCurrentTts = () => setDraft((prev) => ({
     ...prev,
     tts_provider: currentTtsProvider,
@@ -214,12 +225,17 @@ export default function LocalizationProfilesSection({ settings }) {
         </Typography>
       </Alert>
 
+      {edgeCrossProviderOverride && (
+        <Alert severity="info" variant="outlined">
+          Hồ sơ này <strong>ghim Edge TTS</strong> dù Kết nối TTS dùng chung đang là <strong>{currentTtsProvider}</strong>. Đây là cấu hình hợp lệ: Edge tự chứa, không kế thừa API key, model, Base URL hoặc voice của provider dùng chung.
+        </Alert>
+      )}
       {ttsProviderMismatch && (
         <Alert
           severity="warning"
           action={<Button color="inherit" size="small" onClick={adoptCurrentTts}>Dùng TTS hiện tại cho hồ sơ</Button>}
         >
-          Provider không khớp: hồ sơ dùng <strong>{draft.tts_provider}</strong>, còn Kết nối TTS hiện tại dùng <strong>{currentTtsProvider}</strong>. Job mới sẽ fail-fast trước ASR/render nếu chưa đồng bộ.
+          Provider <strong>{draft.tts_provider}</strong> chưa có credential slot riêng trong kiến trúc hiện tại, trong khi Kết nối TTS dùng chung là <strong>{currentTtsProvider}</strong>. Hãy dùng provider hiện tại hoặc Edge TTS; registry nhiều credential sẽ là thay đổi riêng sau này.
         </Alert>
       )}
 
@@ -369,7 +385,7 @@ export default function LocalizationProfilesSection({ settings }) {
                   {["edge_tts", "openai_tts", "openai_compatible_tts", "azure_tts", "elevenlabs", "gpt_sovits"].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
                 </Select>
               </FormControl>
-              <TextField size="small" fullWidth label="ID giọng đọc" value={draft.tts_voice || ""} onChange={(e) => patch("tts_voice", e.target.value || null)} placeholder={settings?.preferred_tts_voice || "kế thừa mặc định ngôn ngữ/nhà cung cấp"} />
+              <TextField size="small" fullWidth label="ID giọng đọc" value={draft.tts_voice || ""} onChange={(e) => patch("tts_voice", e.target.value || null)} placeholder={ttsVoicePlaceholder} />
             </Stack>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
               <TextField size="small" type="number" fullWidth label="Giới hạn tốc độ ưu tiên" value={draft.dub_speed_accept ?? 1.15} onChange={(e) => patch("dub_speed_accept", Number(e.target.value))} inputProps={{ step: 0.01, min: 1, max: 2 }} />
