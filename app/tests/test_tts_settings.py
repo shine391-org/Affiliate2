@@ -1160,3 +1160,108 @@ async def test_tts_preview_connection_id_supplies_saved_runtime_fields(monkeypat
     assert response.media_type == "audio/wav"
     assert seen["model"] == "tts-local"
     assert seen["base_url"] == "http://127.0.0.1:9001/v1"
+
+
+
+@pytest.mark.asyncio
+async def test_provider_only_switch_rejects_ambiguous_same_provider_connections(monkeypatch):
+    from backend.models.user_settings import UserSettings
+
+    row = UserSettings(user_id="local")
+    row.ai_provider = "openai"
+    row.ai_connection_id = "openai-main"
+    row.ai_connections_json = json.dumps({
+        "openai-main": {
+            "label": "OpenAI",
+            "provider": "openai",
+            "model": "gpt-5",
+            "base_url": None,
+            "api_key_encrypted": "enc-openai",
+            "archived": False,
+        },
+        "hermes-a": {
+            "label": "Hermes A",
+            "provider": "compatible",
+            "model": "longcat-a",
+            "base_url": "http://127.0.0.1:8645/v1",
+            "api_key_encrypted": None,
+            "archived": False,
+        },
+        "hermes-b": {
+            "label": "Hermes B",
+            "provider": "compatible",
+            "model": "longcat-b",
+            "base_url": "http://127.0.0.1:8646/v1",
+            "api_key_encrypted": None,
+            "archived": False,
+        },
+    })
+    row.tts_provider = "edge_tts"
+    row.tts_connection_id = "edge-main"
+    row.tts_connections_json = json.dumps({
+        "edge-main": {
+            "label": "Edge",
+            "provider": "edge_tts",
+            "voice": "vi-VN-HoaiMyNeural",
+            "model": None,
+            "base_url": None,
+            "region": None,
+            "api_key_encrypted": None,
+            "archived": False,
+        },
+        "el-a": {
+            "label": "Eleven A",
+            "provider": "elevenlabs",
+            "voice": "voice-a",
+            "model": "eleven_multilingual_v2",
+            "base_url": "https://api.elevenlabs.io/v1",
+            "region": None,
+            "api_key_encrypted": "enc-a",
+            "archived": False,
+        },
+        "el-b": {
+            "label": "Eleven B",
+            "provider": "elevenlabs",
+            "voice": "voice-b",
+            "model": "eleven_multilingual_v2",
+            "base_url": "https://api.elevenlabs.io/v1",
+            "region": None,
+            "api_key_encrypted": "enc-b",
+            "archived": False,
+        },
+    })
+
+    class Result:
+        def scalar_one_or_none(self):
+            return row
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+        async def execute(self, _query):
+            return Result()
+        def add(self, _row):
+            return None
+        async def commit(self):
+            return None
+
+    monkeypatch.setattr(settings_api, "AsyncSessionLocal", lambda: FakeSession())
+
+    with pytest.raises(Exception) as ai_exc:
+        await settings_api.update_settings(settings_api.SettingsUpdate(
+            ai_provider="compatible",
+        ))
+    assert getattr(ai_exc.value, "status_code", None) == 409
+    assert "ai_connection_id" in str(getattr(ai_exc.value, "detail", ""))
+
+    with pytest.raises(Exception) as tts_exc:
+        await settings_api.update_settings(settings_api.SettingsUpdate(
+            tts_provider="elevenlabs",
+        ))
+    assert getattr(tts_exc.value, "status_code", None) == 409
+    assert "tts_connection_id" in str(getattr(tts_exc.value, "detail", ""))
+
+    assert row.ai_connection_id == "openai-main"
+    assert row.tts_connection_id == "edge-main"
