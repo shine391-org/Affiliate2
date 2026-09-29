@@ -255,6 +255,154 @@ async def test_translation_rerun_distinguishes_auto_resume_from_explicit_recompu
 
 
 @pytest.mark.asyncio
+async def test_existing_rerun_dispatches_persisted_effective_profile(monkeypatch, tmp_path):
+    captured = {}
+    source = tmp_path / "persisted.mp4"
+    source.write_bytes(b"source")
+
+    class FakeRun:
+        job_id = "job-persisted-tts"
+        source_path = source
+        request = {"target_language": "Vietnamese", "mode": "full_dub"}
+        effective_profile = {
+            "id": "persisted",
+            "name": "Persisted",
+            "tts_provider": "elevenlabs",
+            "tts_model": "eleven_multilingual_v2",
+            "tts_voice": "old-voice",
+        }
+
+        def verify_source_identity(self):
+            return None
+
+    async def fake_restart(job_id):
+        return True
+
+    def fake_dispatch(coro):
+        captured["coro"] = coro
+        coro.close()
+
+    async def completed_runner():
+        return None
+
+    def fake_runner(*args, **kwargs):
+        captured["profile_override"] = kwargs["profile_override"]
+        return completed_runner()
+
+    monkeypatch.setattr("backend.agents.job_helper.restart_job", fake_restart)
+    monkeypatch.setattr("backend.core.task_runner.dispatch", fake_dispatch)
+    monkeypatch.setattr("backend.core.tool_runners.run_tool_translate", fake_runner)
+
+    await api._dispatch_existing_run(FakeRun())
+
+    assert captured["profile_override"]["tts_provider"] == "elevenlabs"
+    assert captured["profile_override"]["tts_voice"] == "old-voice"
+
+
+@pytest.mark.asyncio
+async def test_explicit_tts_rebind_updates_only_tts_and_invalidates_from_dubbing(monkeypatch):
+    events = []
+
+    class FakeRun:
+        job_id = "job-rebind-tts"
+        request = {"target_language": "Vietnamese", "mode": "full_dub"}
+        effective_profile = {
+            "id": "hq",
+            "name": "HQ",
+            "translation_model": "qwen-translation",
+            "tts_provider": "elevenlabs",
+            "tts_model": "eleven_multilingual_v2",
+            "tts_voice": "old-voice",
+            "tts_base_url": "https://api.elevenlabs.io/v1",
+            "tts_region": None,
+        }
+
+        def update_effective_profile(self, value):
+            self.effective_profile = value
+            events.append(("profile", dict(value)))
+
+        def invalidate_from(self, stage, *, delete_artifacts, preserve_files=set()):
+            events.append(("invalidate", stage, delete_artifacts, set(preserve_files)))
+
+    async def fake_inactive(job_id):
+        events.append(("inactive", job_id))
+
+    async def fake_binding(*args, **kwargs):
+        return {
+            "tts_provider": "edge_tts",
+            "tts_model": None,
+            "tts_voice": "vi-VN-HoaiMyNeural",
+            "tts_base_url": None,
+            "tts_region": None,
+        }
+
+    async def fake_dispatch(run):
+        events.append(("dispatch", run.job_id))
+
+    run = FakeRun()
+    monkeypatch.setattr(api, "_assert_job_inactive", fake_inactive)
+    monkeypatch.setattr(api, "_load_run", lambda job_id: run)
+    monkeypatch.setattr(api, "_resolve_current_tts_binding", fake_binding)
+    monkeypatch.setattr(api, "_dispatch_existing_run", fake_dispatch)
+
+    result = await api.rebind_localization_tts(
+        run.job_id,
+        api.TTSRebindRequest(source="settings"),
+    )
+
+    assert result["from_stage"] == "dubbing"
+    assert run.effective_profile["tts_provider"] == "edge_tts"
+    assert run.effective_profile["tts_voice"] == "vi-VN-HoaiMyNeural"
+    assert run.effective_profile["translation_model"] == "qwen-translation"
+    assert ("invalidate", "dubbing", True, set()) in events
+    assert not any(event[0] == "invalidate" and event[1] != "dubbing" for event in events)
+    assert events[-1] == ("dispatch", run.job_id)
+
+
+@pytest.mark.asyncio
+async def test_tts_rebind_voice_override_still_invalidates_only_dubbing(monkeypatch):
+    events = []
+
+    class FakeRun:
+        job_id = "job-rebind-voice"
+        request = {"target_language": "Vietnamese", "mode": "full_dub"}
+        effective_profile = {"id": "hq", "name": "HQ", "translation_model": "keep-me", "tts_provider": "edge_tts"}
+
+        def update_effective_profile(self, value):
+            self.effective_profile = value
+
+        def invalidate_from(self, stage, *, delete_artifacts, preserve_files=set()):
+            events.append(stage)
+
+    async def fake_binding(_profile, _target, *, voice_id=None, model=None):
+        assert voice_id == "vi-VN-NamMinhNeural"
+        return {
+            "tts_provider": "edge_tts", "tts_model": model,
+            "tts_voice": voice_id, "tts_base_url": None, "tts_region": None,
+        }
+
+    async def fake_dispatch(run):
+        return None
+
+    async def fake_inactive(job_id):
+        return None
+
+    run = FakeRun()
+    monkeypatch.setattr(api, "_assert_job_inactive", fake_inactive)
+    monkeypatch.setattr(api, "_load_run", lambda job_id: run)
+    monkeypatch.setattr(api, "_resolve_current_tts_binding", fake_binding)
+    monkeypatch.setattr(api, "_dispatch_existing_run", fake_dispatch)
+
+    await api.rebind_localization_tts(
+        run.job_id,
+        api.TTSRebindRequest(source="settings", voice_id="vi-VN-NamMinhNeural"),
+    )
+
+    assert events == ["dubbing"]
+    assert run.effective_profile["translation_model"] == "keep-me"
+
+
+@pytest.mark.asyncio
 async def test_rerender_updates_render_config_and_invalidates_only_final_render(monkeypatch):
     events = []
 

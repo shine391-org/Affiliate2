@@ -147,6 +147,24 @@ export default function LocalizationExpertPanel({ jobId }) {
     }
   }
 
+  const rebindTts = async () => {
+    setBusy(true)
+    try {
+      await http.post("/api/localization/jobs/" + jobId + "/rebind-tts", { source: "settings" })
+      showSnackbar("Đã gắn TTS hiện tại; đang chạy lại từ bước Lồng tiếng", "info")
+      const status = await pollUntilTerminal()
+      showSnackbar(
+        status === "success" ? "Khôi phục lồng tiếng hoàn tất" : "Tác vụ khôi phục kết thúc: " + status,
+        status === "success" ? "success" : "warning",
+      )
+    } catch (err) {
+      const detailMessage = err.response?.data?.detail
+      showSnackbar(typeof detailMessage === "string" ? detailMessage : detailMessage?.message || "Không thể gắn lại TTS", "error")
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const saveSegment = async (change) => {
     setBusy(true)
     try {
@@ -197,6 +215,7 @@ export default function LocalizationExpertPanel({ jobId }) {
   const transcript = detail?.transcript?.segments || []
   const chunks = detail?.chunks || []
   const qc = detail?.qc
+  const ttsBinding = detail?.tts_binding
   const reviewPending = !!detail?.translation_review_pending
   const finalReady = stages?.final_render?.status === "complete"
   const stageEntries = useMemo(() => Object.entries(stages), [stages])
@@ -238,6 +257,29 @@ export default function LocalizationExpertPanel({ jobId }) {
         </Alert>
       )}
 
+      {ttsBinding && (
+        <Alert severity={ttsBinding.provider_mismatch ? "warning" : "info"} variant="outlined">
+          <Stack spacing={1}>
+            <Typography variant="subtitle2">Liên kết TTS của tác vụ</Typography>
+            <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 1 }}>
+              <Box>
+                <Typography variant="caption" color="text.secondary">TTS của job</Typography>
+                <Typography variant="body2">{ttsBinding.job?.tts_provider || "kế thừa"} · {ttsBinding.job?.tts_voice || "chưa chọn giọng"}</Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="text.secondary">TTS hiện tại</Typography>
+                <Typography variant="body2">{ttsBinding.current?.tts_provider || "không khả dụng"} · {ttsBinding.current?.tts_voice || "chưa chọn giọng"}</Typography>
+              </Box>
+            </Box>
+            {ttsBinding.provider_mismatch && <Typography variant="body2">Provider của job không còn khớp với Settings. Chạy lại thông thường vẫn cố ý dùng cấu hình đã lưu của job.</Typography>}
+            {ttsBinding.current_error && <Typography variant="caption" color="error">{ttsBinding.current_error}</Typography>}
+            <Button size="small" variant="contained" color="warning" onClick={rebindTts} disabled={busy || !ttsBinding.current} sx={{ alignSelf: "flex-start" }}>
+              Dùng TTS hiện tại & chạy lại lồng tiếng
+            </Button>
+          </Stack>
+        </Alert>
+      )}
+
       <Box>
         <Typography variant="caption" color="text.secondary">Các bước</Typography>
         <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 0.75 }}>
@@ -256,7 +298,7 @@ export default function LocalizationExpertPanel({ jobId }) {
       <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
         {["translation", "dubbing", "final_render", "qc"].map((stage) => (
           <Button key={stage} size="small" variant="outlined" startIcon={<ReplayOutlinedIcon />} onClick={() => rerun(stage)} disabled={busy}>
-            {"Chạy lại " + STAGE_LABELS[stage]}
+            {"Chạy lại với cấu hình job: " + STAGE_LABELS[stage]}
           </Button>
         ))}
       </Stack>

@@ -675,6 +675,153 @@ async def test_c7_targeted_regeneration_reuses_other_raw_chunks(monkeypatch, tmp
 
 
 @pytest.mark.asyncio
+async def test_c7_rewrite_retries_transient_provider_failure_before_disabling(
+    monkeypatch,
+):
+    plan = [
+        ls.PlanItem(
+            index=0,
+            segment_id="s1",
+            original_start_ms=0,
+            original_end_ms=1000,
+            original_text="một câu rất dài",
+            spoken_text="một câu rất dài",
+            estimated_duration_ms=1800,
+        )
+    ]
+    chunk = ls.DubbingChunk(
+        id=1,
+        item_indexes=[0],
+        start_ms=0,
+        end_ms=1000,
+    )
+    segment = LocalizationSegment(
+        id="s1",
+        source_text="原文",
+        translated_text="một câu rất dài",
+        source_start_ms=0,
+        source_end_ms=1000,
+        translation_status="success",
+    )
+
+    class Transient503(RuntimeError):
+        status_code = 503
+
+    class RecoveringAI:
+        def __init__(self):
+            self.calls = 0
+            self.max_retries = None
+
+        async def chat(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise Transient503("provider overloaded")
+            return json.dumps([{"id": "s1", "text": "ngắn"}], ensure_ascii=False)
+
+    async def no_sleep(_delay):
+        return None
+
+    ai = RecoveringAI()
+    monkeypatch.setattr(ls.asyncio, "sleep", no_sleep)
+    issues = []
+    state = {"measured_duration_ms": 1800, "attempt": 1}
+
+    changed = await ls._adapt_chunk_items(
+        ai,
+        plan=plan,
+        chunk=chunk,
+        segment_by_id={"s1": segment},
+        target_language="Vietnamese",
+        target_ms=1000,
+        profile=_profile(),
+        issues=issues,
+        state=state,
+    )
+
+    assert changed is True
+    assert ai.calls == 2
+    assert ai.max_retries == 0
+    assert state.get("unavailable") is not True
+    assert issues == []
+    assert segment.translated_text == "ngắn"
+
+
+@pytest.mark.asyncio
+async def test_c7_rewrite_exhausts_bounded_retries_before_opening_the_circuit(
+    monkeypatch,
+):
+    """The retry budget must stay bounded.
+
+    This is the pair of the recovery test above: when every transient attempt
+    fails, the chunk must be marked unavailable so the caller can disable the
+    optional rewrite for the rest of the job. A retry loop that never gives up
+    would hang the stage instead of degrading.
+    """
+    plan = [
+        ls.PlanItem(
+            index=0,
+            segment_id="s1",
+            original_start_ms=0,
+            original_end_ms=1000,
+            original_text="một câu rất dài",
+            spoken_text="một câu rất dài",
+            estimated_duration_ms=1800,
+        )
+    ]
+    chunk = ls.DubbingChunk(id=1, item_indexes=[0], start_ms=0, end_ms=1000)
+    segment = LocalizationSegment(
+        id="s1",
+        source_text="原文",
+        translated_text="một câu rất dài",
+        source_start_ms=0,
+        source_end_ms=1000,
+        translation_status="success",
+    )
+
+    class Transient503(RuntimeError):
+        status_code = 503
+
+    class DeadAI:
+        def __init__(self):
+            self.calls = 0
+            self.max_retries = None
+
+        async def chat(self, *args, **kwargs):
+            self.calls += 1
+            raise Transient503("provider overloaded")
+
+    async def no_sleep(_delay):
+        return None
+
+    ai = DeadAI()
+    monkeypatch.setattr(ls.asyncio, "sleep", no_sleep)
+    issues = []
+    state = {"measured_duration_ms": 1800, "attempt": 1}
+
+    changed = await ls._adapt_chunk_items(
+        ai,
+        plan=plan,
+        chunk=chunk,
+        segment_by_id={"s1": segment},
+        target_language="Vietnamese",
+        target_ms=1000,
+        profile=_profile(),
+        issues=issues,
+        state=state,
+    )
+
+    assert changed is False
+    # Bounded: exactly the helper's budget, then it stops.
+    assert ai.calls == 3
+    assert state.get("unavailable") is True
+    # The plan and caption transcript must stay untouched so a failed rewrite
+    # can never half-apply.
+    assert plan[0].spoken_text == "một câu rất dài"
+    assert segment.translated_text == "một câu rất dài"
+    assert [i["reason"] for i in issues] == ["rewrite_ai_unavailable"]
+
+
+@pytest.mark.asyncio
 async def test_c7_optional_rewrite_provider_failure_opens_job_circuit_breaker(
     monkeypatch, tmp_path,
 ):
@@ -700,7 +847,11 @@ async def test_c7_optional_rewrite_provider_failure_opens_job_circuit_breaker(
             self.calls += 1
             raise TimeoutError("local rewrite provider timeout")
 
+    async def no_sleep(_delay):
+        return None
+
     ai = TimeoutAI()
+    monkeypatch.setattr(ls.asyncio, "sleep", no_sleep)
     calls = _patch_dub_io(monkeypatch, tmp_path, [400, 400, 400])
     monkeypatch.setattr(ls, "_profile_ai_client", lambda *_: ai)
 
@@ -713,7 +864,7 @@ async def test_c7_optional_rewrite_provider_failure_opens_job_circuit_breaker(
         work_dir=tmp_path / "work",
     )
 
-    assert ai.calls == 1
+    assert ai.calls == 3
     assert calls["n"] == 3
     unavailable = [
         issue for issue in result.issues
@@ -1380,7 +1531,10 @@ async def test_c7_ai_rewrite_timeout_degrades_to_tts_instead_of_failing(
         work_dir=tmp_path / "work",
     )
 
-    assert slow.calls == 1
+    # A transient provider failure is retried within one bounded budget before
+    # the optional rewrite is disabled for the rest of the job. The contract
+    # under test is graceful degradation, not a single-attempt call count.
+    assert slow.calls == 3
     assert result.chunk_count == 1
     assert any(
         issue["reason"] == "rewrite_ai_unavailable"

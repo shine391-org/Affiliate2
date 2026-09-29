@@ -739,8 +739,33 @@ def _tts_config(user_settings, profile: LocalizationProfile, target_language: st
 
     model = profile.tts_model or getattr(user_settings, "tts_model", None)
     base_url = profile.tts_base_url or getattr(user_settings, "tts_base_url", None)
+    if provider == TTSProvider.ELEVENLABS:
+        from backend.services.elevenlabs_tts_service import canonicalize_base_url
+        base_url = canonicalize_base_url(base_url)
     region = profile.tts_region or getattr(user_settings, "tts_region", None)
     return TTSRuntimeConfig(provider, voice or "", api_key, model, base_url, region)
+
+
+async def validate_localization_tts_preflight(
+    user_settings,
+    profile: LocalizationProfile,
+    target_language: str,
+) -> dict:
+    """Fail before separation/ASR when the full-dub TTS binding is unusable."""
+    from backend.services import tts_service
+
+    runtime = _tts_config(user_settings, profile, target_language)
+    health = await tts_service.test_tts_connection(
+        provider=runtime.provider,
+        api_key=runtime.api_key,
+        base_url=runtime.base_url,
+        model=runtime.model,
+        voice_id=runtime.default_voice,
+        region=runtime.region,
+    )
+    if not health.get("ok"):
+        raise ValueError(health.get("message") or "TTS configuration is not usable.")
+    return health
 
 
 def _chunk_speaker(plan: list[PlanItem], chunk: DubbingChunk) -> str | None:
@@ -1157,7 +1182,16 @@ ITEMS:
         )
 
     try:
-        raw = await ai.chat(
+        # Translation already uses the canonical bounded transient retry helper.
+        # Duration rewrite is equally exposed to provider 429/5xx/timeout bursts;
+        # disabling rewrite after the first transient response can turn a
+        # recoverable provider hiccup into a guaranteed timing overflow. Keep
+        # retries owned here instead of nesting the SDK's implicit retry loop.
+        if hasattr(ai, "max_retries"):
+            ai.max_retries = 0
+        raw = await _call_ai_chat_resilient(
+            ai,
+            None,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1000,
         )

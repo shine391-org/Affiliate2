@@ -83,7 +83,7 @@ export default function LocalizationBatch({ embedded = false }) {
             startIcon={<CloudUploadOutlinedIcon />}
             sx={{ alignSelf: "flex-start" }}
           >
-            Select videos
+            Chọn video
             <input
               hidden
               type="file"

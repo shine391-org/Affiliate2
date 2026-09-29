@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
-  Alert, Box, Button, Checkbox, Chip, Dialog, DialogContent, DialogTitle, Divider, Drawer,
-  FormControl, FormControlLabel, InputLabel, MenuItem, Paper, Radio, RadioGroup,
+  Alert, Box, Button, Checkbox, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Divider, Drawer,
+  FormControl, FormControlLabel, IconButton, InputLabel, MenuItem, Paper, Radio, RadioGroup,
   Select, Slider, Stack, Step, StepButton, Stepper, Typography,
 } from "@mui/material"
 import BatchPredictionOutlinedIcon from "@mui/icons-material/BatchPredictionOutlined"
+import CloseOutlinedIcon from "@mui/icons-material/CloseOutlined"
 import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined"
 import TuneOutlinedIcon from "@mui/icons-material/TuneOutlined"
 import { useNavigate, useSearchParams } from "react-router-dom"
@@ -49,6 +50,14 @@ export default function StudioLocalize({ source, sourcesLoading }) {
   const [detailError, setDetailError] = useState("")
   const [starting, setStarting] = useState(false)
   const [batchOpen, setBatchOpen] = useState(params.get("batch") === "1")
+  const closeBatch = () => {
+    setBatchOpen(false)
+    setParams((previous) => {
+      const next = new URLSearchParams(previous)
+      next.delete("batch")
+      return next
+    }, { replace: true })
+  }
   const [expertOpen, setExpertOpen] = useState(false)
   const jobId = params.get("job") || ""
   const requestedStep = params.get("step") || ""
@@ -527,7 +536,20 @@ export default function StudioLocalize({ source, sourcesLoading }) {
         {jobId && <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap><Chip label={`Tác vụ ${jobId}`} size="small" /><StageChip name="Bản dịch" record={stages.translation} /><StageChip name="Lồng tiếng" record={stages.dubbing} /><StageChip name="QC" record={stages.qc} /><Box sx={{ flex: 1 }} /><Button size="small" variant="outlined" startIcon={<TuneOutlinedIcon />} onClick={() => setExpertOpen(true)}>Nâng cao / Chuyên gia</Button></Stack>}
         {panels[activeStep]}
       </Stack>
-      <Dialog open={batchOpen} onClose={() => setParams((previous) => { const next = new URLSearchParams(previous); next.delete("batch"); return next }, { replace: true })} maxWidth="md" fullWidth><DialogTitle>Chạy bản địa hóa hàng loạt</DialogTitle><DialogContent><LocalizationBatch embedded /></DialogContent></Dialog>
+      <Dialog open={batchOpen} onClose={closeBatch} keepMounted maxWidth="md" fullWidth>
+        <DialogTitle sx={{ pr: 6 }}>
+          Chạy bản địa hóa hàng loạt
+          <IconButton
+            aria-label="Đóng hộp thoại bản địa hóa hàng loạt"
+            onClick={closeBatch}
+            sx={{ position: "absolute", right: 8, top: 8 }}
+          >
+            <CloseOutlinedIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent><LocalizationBatch embedded /></DialogContent>
+        <DialogActions><Button onClick={closeBatch}>Đóng</Button></DialogActions>
+      </Dialog>
       <Drawer
         anchor="right"
         open={expertOpen}
