@@ -921,3 +921,97 @@ async def test_connection_provider_identity_is_immutable(monkeypatch):
     assert getattr(tts_exc.value, "status_code", None) == 409
     assert "immutable" in str(getattr(tts_exc.value, "detail", "")).lower()
     assert json.loads(row.tts_connections_json)["edge-main"]["provider"] == "edge_tts"
+
+
+
+@pytest.mark.asyncio
+async def test_archived_connection_id_cannot_be_reused(monkeypatch):
+    from backend.models.user_settings import UserSettings
+
+    row = UserSettings(user_id="local")
+    row.ai_provider = "compatible"
+    row.ai_connection_id = "active-ai"
+    row.ai_connections_json = json.dumps({
+        "active-ai": {
+            "label": "Active",
+            "provider": "compatible",
+            "model": "live",
+            "base_url": "http://127.0.0.1:8645/v1",
+            "api_key_encrypted": None,
+            "archived": False,
+        },
+        "old-hermes": {
+            "label": "Old Hermes",
+            "provider": "compatible",
+            "model": "old",
+            "base_url": "http://127.0.0.1:9000/v1",
+            "api_key_encrypted": None,
+            "archived": True,
+        },
+    })
+    row.tts_provider = "edge_tts"
+    row.tts_connection_id = "edge-active"
+    row.tts_connections_json = json.dumps({
+        "edge-active": {
+            "label": "Edge active",
+            "provider": "edge_tts",
+            "voice": "vi-VN-HoaiMyNeural",
+            "model": None,
+            "base_url": None,
+            "region": None,
+            "api_key_encrypted": None,
+            "archived": False,
+        },
+        "old-tts": {
+            "label": "Old TTS",
+            "provider": "edge_tts",
+            "voice": "en-US-AndrewMultilingualNeural",
+            "model": None,
+            "base_url": None,
+            "region": None,
+            "api_key_encrypted": None,
+            "archived": True,
+        },
+    })
+
+    class Result:
+        def scalar_one_or_none(self):
+            return row
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+        async def execute(self, _query):
+            return Result()
+        def add(self, _row):
+            return None
+        async def commit(self):
+            return None
+
+    monkeypatch.setattr(settings_api, "AsyncSessionLocal", lambda: FakeSession())
+
+    with pytest.raises(Exception) as ai_exc:
+        await settings_api.upsert_ai_connection(settings_api.AIConnectionRequest(
+            connection_id="old-hermes",
+            label="Reused old ID",
+            provider="compatible",
+            model="new",
+            base_url="http://127.0.0.1:9999/v1",
+        ))
+    assert getattr(ai_exc.value, "status_code", None) == 409
+    assert "archived" in str(getattr(ai_exc.value, "detail", "")).lower()
+
+    with pytest.raises(Exception) as tts_exc:
+        await settings_api.upsert_tts_connection(settings_api.TTSConnectionRequest(
+            connection_id="old-tts",
+            label="Reused old TTS ID",
+            provider="edge_tts",
+            voice="vi-VN-HoaiMyNeural",
+        ))
+    assert getattr(tts_exc.value, "status_code", None) == 409
+    assert "archived" in str(getattr(tts_exc.value, "detail", "")).lower()
+
+    assert json.loads(row.ai_connections_json)["old-hermes"]["base_url"] == "http://127.0.0.1:9000/v1"
+    assert json.loads(row.tts_connections_json)["old-tts"]["voice"] == "en-US-AndrewMultilingualNeural"
