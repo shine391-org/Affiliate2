@@ -250,7 +250,7 @@ export default function LocalizationProfilesSection({ settings }) {
           severity="warning"
           action={<Button color="inherit" size="small" onClick={adoptCurrentTts}>Dùng TTS hiện tại cho hồ sơ</Button>}
         >
-          Provider <strong>{draft.tts_provider}</strong> chưa có credential slot riêng trong kiến trúc hiện tại, trong khi Kết nối TTS dùng chung là <strong>{currentTtsProvider}</strong>. Hãy dùng provider hiện tại hoặc Edge TTS; registry nhiều credential sẽ là thay đổi riêng sau này.
+          Provider <strong>{draft.tts_provider}</strong> không phải kết nối TTS đang active (<strong>{currentTtsProvider}</strong>). Ứng dụng có nhớ cấu hình/credential của từng provider để khỏi nhập lại, nhưng job hiện chỉ dùng provider active hoặc Edge TTS tự chứa. Chọn “Dùng TTS hiện tại cho hồ sơ” hoặc chuyển kết nối TTS active trước khi chạy.
         </Alert>
       )}
 
