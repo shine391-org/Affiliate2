@@ -1539,6 +1539,7 @@ async def _adapt_chunk_items(
     ai,
     *,
     fallback_ai=None,
+    route_state: _AIStageRouteState | None = None,
     progress_cb=None,
     plan: list[PlanItem],
     chunk: DubbingChunk,
@@ -1644,6 +1645,7 @@ ITEMS:
             total_timeout_s=profile.rewrite_total_timeout_s,
             progress_cb=progress_cb,
             stage="rewrite",
+            route_state=route_state,
         )
     except Exception as exc:
         return record_unavailable(exc)
@@ -1777,28 +1779,19 @@ async def synthesize_timed_dub(
     work_dir.mkdir(parents=True, exist_ok=True)
     out = transcript.model_copy(deep=True)
     rewrite_ai_error: Exception | None = None
-    fallback_ai = None
+    route_state: _AIStageRouteState | None = None
     try:
-        ai = _profile_ai_client(user_settings, profile, "rewrite")
+        rewrite_clients = _profile_ai_route_clients(
+            user_settings, profile, "rewrite"
+        )
+        route_state = _AIStageRouteState(rewrite_clients)
+        ai = rewrite_clients[0]
+        fallback_ai = rewrite_clients[1] if len(rewrite_clients) > 1 else None
     except Exception as exc:
         ai = None
+        fallback_ai = None
         rewrite_ai_error = exc
-        logger.warning("Duration rewrite primary AI unavailable: %s", exc)
-    try:
-        fallback_ai = _profile_ai_fallback_client(
-            user_settings,
-            profile,
-            "rewrite",
-            primary_ai=ai,
-        )
-    except Exception as exc:
-        logger.warning("Duration rewrite fallback AI unavailable: %s", exc)
-        if rewrite_ai_error is None:
-            rewrite_ai_error = exc
-
-    if ai is None and fallback_ai is not None:
-        ai, fallback_ai = fallback_ai, None
-        rewrite_ai_error = None
+        logger.warning("Duration rewrite AI routes unavailable: %s", exc)
 
     runtime = _tts_config(user_settings, profile, target_language)
 
@@ -1952,7 +1945,7 @@ async def synthesize_timed_dub(
             and attempts < config.rewrite_max_attempts
         ):
             changed = await _adapt_chunk_items(
-                ai, fallback_ai=fallback_ai, progress_cb=progress_cb,
+                ai, fallback_ai=fallback_ai, route_state=route_state, progress_cb=progress_cb,
                 plan=plan, chunk=chunk, segment_by_id=segment_by_id,
                 target_language=target_language, target_ms=chunk.available_ms,
                 profile=profile, issues=issues, state=rewrite_state,
@@ -2044,7 +2037,8 @@ async def synthesize_timed_dub(
         ):
             rewrite_state.update(measured_duration_ms=duration_ms, attempt=attempts + 1)
             changed = await _adapt_chunk_items(
-                ai, plan=plan, chunk=chunk, segment_by_id=segment_by_id,
+                ai, fallback_ai=fallback_ai, route_state=route_state,
+                plan=plan, chunk=chunk, segment_by_id=segment_by_id,
                 target_language=target_language, target_ms=chunk.available_ms,
                 profile=profile, issues=issues, state=rewrite_state,
                 setup_error=rewrite_ai_error,
