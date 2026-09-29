@@ -53,6 +53,11 @@ async def test_library_source_preserved_on_failure(tmp_path, monkeypatch):
     monkeypatch.setattr(Settings, "STORAGE_ROOT", property(lambda self: tmp_path / "storage"))
     monkeypatch.setattr(tr, "_tool_fail", AsyncMock())
     monkeypatch.setattr(tr, "_tool_progress", AsyncMock())
+    cleanup_calls = []
+    monkeypatch.setattr(
+        tr, "_release_localization_torch_cache_sync",
+        lambda: cleanup_calls.append("released"),
+    )
     monkeypatch.setattr(tr, "_load_user_settings", AsyncMock(return_value=SimpleNamespace(
         localization_profiles_json=None, ai_provider="compatible", whisper_quality="balanced",
     )))
@@ -78,6 +83,7 @@ async def test_library_source_preserved_on_failure(tmp_path, monkeypatch):
     )
 
     tr._tool_fail.assert_awaited_once()
+    assert cleanup_calls == ["released"], "GPU cache cleanup must run even when ASR fails"
     assert source_file.exists(), "Library source was deleted on failure!"
     assert source_file.read_bytes() == b"content-library-source"
 
