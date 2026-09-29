@@ -462,6 +462,21 @@ async def update_settings(update: SettingsUpdate):
             selected = connections.get(connection_id)
             if not selected:
                 raise HTTPException(status_code=400, detail=f"Unknown AI connection: {connection_id}")
+            if selected.get("archived"):
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"AI connection '{connection_id}' is archived and cannot be activated.",
+                )
+            requested_provider = (update.ai_provider or "").strip().lower()
+            selected_provider = str(selected.get("provider") or "").strip().lower()
+            if requested_provider and requested_provider != selected_provider:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"AI connection '{connection_id}' is {selected_provider}; "
+                        f"request also supplied conflicting provider {requested_provider}."
+                    ),
+                )
             s.ai_connection_id = connection_id
             s.ai_provider = selected.get("provider")
             s.ai_model = selected.get("model")
@@ -590,6 +605,21 @@ async def update_settings(update: SettingsUpdate):
             selected = connections.get(connection_id)
             if not selected:
                 raise HTTPException(status_code=400, detail=f"Unknown TTS connection: {connection_id}")
+            if selected.get("archived"):
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"TTS connection '{connection_id}' is archived and cannot be activated.",
+                )
+            requested_provider = (update.tts_provider or "").strip().lower()
+            selected_provider = str(selected.get("provider") or "").strip().lower()
+            if requested_provider and requested_provider != selected_provider:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"TTS connection '{connection_id}' is {selected_provider}; "
+                        f"request also supplied conflicting provider {requested_provider}."
+                    ),
+                )
             s.tts_connection_id = connection_id
             s.tts_provider = selected.get("provider")
             s.preferred_tts_voice = selected.get("voice")
