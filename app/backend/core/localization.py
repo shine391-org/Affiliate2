@@ -72,7 +72,7 @@ class LocalizationProfile(BaseModel):
     rewrite_fallback_provider: str | None = None
     rewrite_fallback_model: str | None = None
     rewrite_fallback_base_url: str | None = None
-    rewrite_retry_attempts: int = Field(default=2, ge=1, le=4)
+    rewrite_retry_attempts: int = Field(default=3, ge=1, le=4)
     rewrite_attempt_timeout_s: int = Field(default=45, ge=10, le=180)
     rewrite_total_timeout_s: int = Field(default=90, ge=20, le=360)
     rewrite_guardrails: str = DEFAULT_REWRITE_GUARDRAILS
