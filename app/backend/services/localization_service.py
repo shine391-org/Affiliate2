@@ -72,8 +72,16 @@ _PRESET_INSTRUCTIONS = {
 
 
 class LocalizationTimingError(RuntimeError):
-    def __init__(self, issues: list[dict]):
+    def __init__(
+        self,
+        issues: list[dict],
+        *,
+        rewrite_count: int = 0,
+        all_issues: list[dict] | None = None,
+    ):
         self.issues = issues
+        self.rewrite_count = int(rewrite_count or 0)
+        self.all_issues = list(all_issues or issues)
         preview = "; ".join(
             (
                 f"chunk {x.get('chunk_id')}: speed {x.get('required_speed', '?')}x"
@@ -1727,7 +1735,11 @@ async def synthesize_timed_dub(
                 "segment_ids": [plan[i].segment_id for i in chunk.item_indexes],
             })
     if unresolved and fail_on_overflow:
-        raise LocalizationTimingError(unresolved)
+        raise LocalizationTimingError(
+            unresolved,
+            rewrite_count=rewrite_count,
+            all_issues=[*issues, *unresolved],
+        )
     issues.extend(unresolved)
 
     fitted_plan, fitted_chunks, report = fit_timeline(plan, chunks, config)
