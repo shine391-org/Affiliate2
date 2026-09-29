@@ -143,83 +143,86 @@ class AIClient:
         system: Optional[str] = None,
         max_tokens: int = 2048,
     ) -> str:
-        """True non-streaming completion for structured/background stages.
-
-        Localization C6/C7/semantic expect one complete JSON payload. Routing
-        those calls through SSE made a half-closed proxy transport look alive
-        indefinitely. Keep chat_stream() for interactive UI only.
-        """
+        """True non-streaming completion for structured/background stages."""
         if self.provider == AIProvider.ANTHROPIC:
-            import anthropic
-            client = anthropic.AsyncAnthropic(api_key=self.api_key)
-            response = await client.messages.create(
-                model=self.model,
-                max_tokens=max_tokens,
-                system=system or "",
-                messages=messages,
-            )
-            return "".join(
-                getattr(block, "text", "") or ""
-                for block in (getattr(response, "content", None) or [])
-            )
-
+            return await self._anthropic_complete(messages, system, max_tokens)
         if self.provider in (AIProvider.OPENAI, AIProvider.COMPATIBLE):
-            import openai
-            client_kwargs = {
-                "api_key": self.api_key,
-                "timeout": _openai_request_timeout_seconds(self.provider, self.base_url),
-            }
-            if self.max_retries is not None:
-                client_kwargs["max_retries"] = self.max_retries
-            if self.base_url:
-                client_kwargs["base_url"] = self.base_url
-            client = openai.AsyncOpenAI(**client_kwargs)
-            full_messages = []
-            if system:
-                full_messages.append({"role": "system", "content": system})
-            full_messages.extend(messages)
-            m = self.model.lower()
-            token_kwargs = (
-                {"max_completion_tokens": max_tokens}
-                if m.startswith(("gpt-5", "o1", "o3", "o4"))
-                else {"max_tokens": max_tokens}
-            )
-            response = await client.chat.completions.create(
-                model=self.model,
-                messages=full_messages,
-                stream=False,
-                **token_kwargs,
-            )
-            if not response.choices:
-                return ""
-            return response.choices[0].message.content or ""
-
+            return await self._openai_complete(messages, system, max_tokens)
         if self.provider == AIProvider.OPENROUTER:
-            import openai
-            client_kwargs = {
-                "api_key": self.api_key,
-                "base_url": "https://openrouter.ai/api/v1",
-                "default_headers": _OPENROUTER_HEADERS,
-                "timeout": 55.0,
-            }
-            if self.max_retries is not None:
-                client_kwargs["max_retries"] = self.max_retries
-            client = openai.AsyncOpenAI(**client_kwargs)
-            full_messages = []
-            if system:
-                full_messages.append({"role": "system", "content": system})
-            full_messages.extend(messages)
-            response = await client.chat.completions.create(
-                model=self.model,
-                messages=full_messages,
-                stream=False,
-                max_tokens=max_tokens,
-            )
-            if not response.choices:
-                return ""
-            return response.choices[0].message.content or ""
-
+            return await self._openrouter_complete(messages, system, max_tokens)
         raise ValueError(f"Unsupported AI provider: {self.provider}")
+
+    async def _anthropic_complete(self, messages, system, max_tokens):
+        import anthropic
+        client = anthropic.AsyncAnthropic(api_key=self.api_key)
+        response = await client.messages.create(
+            model=self.model,
+            max_tokens=max_tokens,
+            system=system or "",
+            messages=messages,
+        )
+        return "".join(
+            getattr(part, "text", "") or ""
+            for part in (getattr(response, "content", None) or [])
+        )
+
+    def _openai_client_kwargs(self) -> dict:
+        kwargs = {
+            "api_key": self.api_key,
+            "timeout": _openai_request_timeout_seconds(self.provider, self.base_url),
+        }
+        if self.max_retries is not None:
+            kwargs["max_retries"] = self.max_retries
+        if self.base_url:
+            kwargs["base_url"] = self.base_url
+        return kwargs
+
+    def _messages_with_system(self, messages, system):
+        full_messages = []
+        if system:
+            full_messages.append({"role": "system", "content": system})
+        full_messages.extend(messages)
+        return full_messages
+
+    async def _openai_complete(self, messages, system, max_tokens):
+        import openai
+        client = openai.AsyncOpenAI(**self._openai_client_kwargs())
+        m = self.model.lower()
+        token_kwargs = (
+            {"max_completion_tokens": max_tokens}
+            if m.startswith(("gpt-5", "o1", "o3", "o4"))
+            else {"max_tokens": max_tokens}
+        )
+        response = await client.chat.completions.create(
+            model=self.model,
+            messages=self._messages_with_system(messages, system),
+            stream=False,
+            **token_kwargs,
+        )
+        if not response.choices:
+            return ""
+        return response.choices[0].message.content or ""
+
+    async def _openrouter_complete(self, messages, system, max_tokens):
+        import openai
+        client_kwargs = {
+            "api_key": self.api_key,
+            "base_url": "https://openrouter.ai/api/v1",
+            "default_headers": _OPENROUTER_HEADERS,
+            "timeout": 55.0,
+        }
+        if self.max_retries is not None:
+            client_kwargs["max_retries"] = self.max_retries
+        client = openai.AsyncOpenAI(**client_kwargs)
+        response = await client.chat.completions.create(
+            model=self.model,
+            messages=self._messages_with_system(messages, system),
+            stream=False,
+            max_tokens=max_tokens,
+        )
+        if not response.choices:
+            return ""
+        return response.choices[0].message.content or ""
 
     # ── Provider implementations ──────────────────────────────────────────────
 
