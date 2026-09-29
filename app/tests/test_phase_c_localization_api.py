@@ -1064,28 +1064,27 @@ async def test_dispatch_existing_run_prefers_effective_caption_style_override(mo
 
 
 @pytest.mark.asyncio
-async def test_rerun_dubbing_auto_rebinds_changed_tts(monkeypatch):
+async def test_rerun_dubbing_preserves_persisted_tts_binding(monkeypatch):
     events = []
 
     class FakeRun:
-        job_id = "job-rerun-tts-change"
-        request = {"mode": "full_dub", "target_language": "Vietnamese"}
+        job_id = "job-rerun-pinned-edge"
+        request = {
+            "mode": "full_dub",
+            "target_language": "Vietnamese",
+            "tts_binding_mode": "pinned",
+        }
         effective_profile = {
             "translation_model": "keep-translation",
-            "tts_provider": "elevenlabs",
-            "tts_model": "eleven_multilingual_v2",
-            "tts_voice": "eleven-voice",
-            "tts_base_url": "https://api.elevenlabs.io/v1",
+            "tts_provider": "edge_tts",
+            "tts_model": None,
+            "tts_voice": "vi-VN-HoaiMyNeural",
+            "tts_base_url": None,
             "tts_region": None,
-            "speaker_voices": {"SPEAKER_00": "eleven-speaker-voice"},
-            "speaker_reference_audio": {"SPEAKER_00": "ref.wav"},
         }
 
         def first_incomplete_stage(self):
             return "dubbing"
-
-        def update_effective_profile(self, value):
-            self.effective_profile = value
 
         def invalidate_from(self, stage, *, delete_artifacts, preserve_files):
             events.append(("invalidate", stage, delete_artifacts, set(preserve_files)))
@@ -1096,32 +1095,18 @@ async def test_rerun_dubbing_auto_rebinds_changed_tts(monkeypatch):
     async def fake_inactive(job_id):
         return None
 
-    async def fake_describe(run):
-        return {
-            "binding_mismatch": True,
-            "provider_mismatch": True,
-            "job": {"tts_provider": "elevenlabs"},
-            "current": {"tts_provider": "edge_tts"},
-            "current_error": None,
-        }
-
-    async def fake_resolve(profile, target_language, **kwargs):
-        return {
-            "tts_provider": "edge_tts",
-            "tts_model": None,
-            "tts_voice": "vi-VN-HoaiMyNeural",
-            "tts_base_url": None,
-            "tts_region": None,
-        }
+    async def fail_rebind(*args, **kwargs):
+        raise AssertionError("ordinary rerun must never inspect or rebind current TTS Settings")
 
     async def fake_dispatch(run):
-        events.append(("dispatch", run.job_id))
+        events.append(("dispatch", run.job_id, run.effective_profile["tts_provider"]))
 
     run = FakeRun()
+    original_profile = dict(run.effective_profile)
     monkeypatch.setattr(api, "_assert_job_inactive", fake_inactive)
     monkeypatch.setattr(api, "_load_run", lambda job_id: run)
-    monkeypatch.setattr(api, "_describe_tts_bindings", fake_describe)
-    monkeypatch.setattr(api, "_resolve_current_tts_binding", fake_resolve)
+    monkeypatch.setattr(api, "_describe_tts_bindings", fail_rebind)
+    monkeypatch.setattr(api, "_resolve_current_tts_binding", fail_rebind)
     monkeypatch.setattr(api, "_dispatch_existing_run", fake_dispatch)
 
     result = await api.rerun_localization_job(
@@ -1129,17 +1114,11 @@ async def test_rerun_dubbing_auto_rebinds_changed_tts(monkeypatch):
         api.RerunRequest(from_stage="dubbing"),
     )
 
-    assert result["tts_rebound"] is True
-    assert result["previous_tts"]["tts_provider"] == "elevenlabs"
-    assert result["current_tts"]["tts_provider"] == "edge_tts"
-    assert run.effective_profile["tts_provider"] == "edge_tts"
-    assert run.effective_profile["tts_voice"] == "vi-VN-HoaiMyNeural"
-    assert run.effective_profile["translation_model"] == "keep-translation"
-    assert run.effective_profile["speaker_voices"] == {}
-    assert run.effective_profile["speaker_reference_audio"] == {}
+    assert result == {"ok": True, "job_id": run.job_id, "from_stage": "dubbing"}
+    assert run.effective_profile == original_profile
     assert events == [
         ("invalidate", "dubbing", True, set()),
-        ("dispatch", run.job_id),
+        ("dispatch", run.job_id, "edge_tts"),
     ]
 
 
