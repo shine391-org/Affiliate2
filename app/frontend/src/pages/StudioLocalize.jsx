@@ -31,6 +31,16 @@ const stepIndex = (value) => Math.max(0, LOCALIZE_STEPS.findIndex((item) => item
 const STAGE_STATUS_LABELS = { pending: "đang chờ", running: "đang chạy", complete: "hoàn tất", failed: "thất bại", skipped: "đã bỏ qua" }
 const QC_STATUS_LABELS = { READY: "Sẵn sàng", FAILED: "Thất bại", NEEDS_REVIEW: "Cần duyệt", COMPLETE: "Hoàn tất" }
 const formatMs = (value) => `${(Number(value || 0) / 1000).toFixed(2)}s`
+const STEP_FOR_FAILED_STAGE = {
+  separation: "source",
+  asr: "transcript",
+  semantic: "transcript",
+  translation: "translation",
+  dubbing: "voice-timing",
+  audio_mix: "voice-timing",
+  final_render: "render",
+  qc: "qc",
+}
 
 function StageChip({ name, record }) {
   const status = record?.status || "pending"
@@ -50,6 +60,7 @@ export default function StudioLocalize({ source, sourcesLoading }) {
   const [autoRepair, setAutoRepair] = useState(false)
   const [autoRepairBusy, setAutoRepairBusy] = useState(false)
   const [retryingFailure, setRetryingFailure] = useState(false)
+  const [focusedFailureKey, setFocusedFailureKey] = useState("")
   const [detail, setDetail] = useState(null)
   const [detailError, setDetailError] = useState("")
   const [starting, setStarting] = useState(false)
@@ -148,6 +159,20 @@ export default function StudioLocalize({ source, sourcesLoading }) {
     && ["pending", "running"].includes(detail?.job_status)
   const canRerender = canRerenderLocalization(detail)
   const jobFailure = localizationJobFailure(detail)
+  const stepAvailable = {
+    source: true,
+    transcript: ["running", "complete", "failed"].includes(stages.asr?.status)
+      || ["running", "complete", "failed"].includes(stages.semantic?.status),
+    translation: ["running", "complete", "failed"].includes(stages.translation?.status)
+      || Boolean(detail?.translation_review_pending),
+    "voice-timing": stages.translation?.status === "complete"
+      || ["running", "complete", "failed"].includes(stages.dubbing?.status)
+      || ["running", "complete", "failed"].includes(stages.audio_mix?.status),
+    render: stages.audio_mix?.status === "complete"
+      || ["running", "complete", "failed"].includes(stages.final_render?.status),
+    qc: stages.final_render?.status === "complete"
+      || ["running", "complete", "failed"].includes(stages.qc?.status),
+  }
 
   useEffect(() => {
     if (!jobId || hydratedJobId === jobId || !detail?.manifest) return
@@ -194,6 +219,15 @@ export default function StudioLocalize({ source, sourcesLoading }) {
     next.set("step", value)
     return next
   })
+
+  useEffect(() => {
+    if (!jobId || !jobFailure?.stage) return
+    const key = `${jobId}:${jobFailure.stage}`
+    if (focusedFailureKey === key) return
+    const failedStep = STEP_FOR_FAILED_STAGE[jobFailure.stage]
+    if (failedStep) setStep(failedStep)
+    setFocusedFailureKey(key)
+  }, [focusedFailureKey, jobFailure?.stage, jobId])
 
   const start = async () => {
     if (!source) { showSnackbar("Hãy chọn nguồn từ Thư viện trước", "warning"); return }
@@ -600,7 +634,16 @@ export default function StudioLocalize({ source, sourcesLoading }) {
           <Button variant="outlined" startIcon={<BatchPredictionOutlinedIcon />} onClick={() => setBatchOpen(true)}>Chạy hàng loạt</Button>
         </Stack>
         <Stepper nonLinear activeStep={stepIndex(activeStep)} sx={{ overflowX: "auto", pb: 0.5 }}>
-          {LOCALIZE_STEPS.map((item) => <Step key={item.value}><StepButton onClick={() => setStep(item.value)}>{item.label}</StepButton></Step>)}
+          {LOCALIZE_STEPS.map((item) => (
+            <Step key={item.value}>
+              <StepButton
+                onClick={() => setStep(item.value)}
+                disabled={!stepAvailable[item.value]}
+              >
+                {item.label}
+              </StepButton>
+            </Step>
+          ))}
         </Stepper>
         {detailError && <Alert severity="warning">{detailError}</Alert>}
         {jobFailure && (
