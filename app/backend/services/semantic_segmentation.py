@@ -308,6 +308,8 @@ async def _semantic_chat_with_fallback(
     primary_ai,
     fallback_ai,
     *,
+    route_clients=None,
+    route_state=None,
     messages: list[dict],
     max_tokens: int,
     attempt_timeout_s: int,
@@ -325,16 +327,26 @@ async def _semantic_chat_with_fallback(
     from backend.core.ai_provider import is_transient_ai_error
 
     loop = asyncio.get_running_loop()
-    clients = [("primary", primary_ai)]
-    if fallback_ai is not None:
-        clients.append(("fallback", fallback_ai))
+    if route_clients:
+        sticky_index = int((route_state or {}).get("sticky_index", 0) or 0)
+        sticky_index = min(sticky_index, len(route_clients) - 1)
+        usable_clients = [
+            ("primary" if idx == 0 else f"fallback-{idx}", route_clients[idx], idx)
+            for idx in range(sticky_index, len(route_clients))
+        ]
+    else:
+        raw_clients = [primary_ai] + ([fallback_ai] if fallback_ai is not None else [])
+        usable_clients = [
+            ("primary" if idx == 0 else f"fallback-{idx}", ai, idx)
+            for idx, ai in enumerate(raw_clients)
+            if ai is not None
+        ]
 
-    usable_clients = [(role, ai) for role, ai in clients if ai is not None]
-    for client_index, (role, ai) in enumerate(usable_clients):
+    for client_pos, (role, ai, route_index) in enumerate(usable_clients):
         if hasattr(ai, "max_retries"):
             ai.max_retries = 0
 
-        providers_left = len(usable_clients) - client_index
+        providers_left = len(usable_clients) - client_pos
         provider_deadline = min(
             deadline_at,
             loop.time() + max(0.0, (deadline_at - loop.time()) / max(providers_left, 1)),
@@ -370,10 +382,13 @@ async def _semantic_chat_with_fallback(
                 "timeout_s": round(timeout_s, 1),
             })
             try:
-                return await asyncio.wait_for(
+                result = await asyncio.wait_for(
                     ai.chat(messages=messages, max_tokens=max_tokens),
                     timeout=timeout_s,
                 )
+                if route_clients and route_state is not None:
+                    route_state["sticky_index"] = route_index
+                return result
             except Exception as exc:
                 await _emit_semantic_progress(progress_cb, {
                     "event": "error",
@@ -403,6 +418,8 @@ async def _refine_words_with_ai(
     ai,
     *,
     fallback_ai=None,
+    route_clients=None,
+    route_state=None,
     max_words_per_window: int = 60,
     attempt_timeout_s: int = 25,
     max_attempts: int = 1,
@@ -473,6 +490,8 @@ Every input word ID must appear exactly once and in the same order."""
             raw = await _semantic_chat_with_fallback(
                 ai,
                 fallback_ai,
+                route_clients=route_clients,
+                route_state=route_state,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=1800,
                 attempt_timeout_s=attempt_timeout_s,
@@ -538,6 +557,8 @@ async def refine_semantic_cues_with_ai(
     ai,
     *,
     fallback_ai=None,
+    route_clients=None,
+    route_state=None,
     window_size: int = 12,
     attempt_timeout_s: int = 25,
     max_attempts: int = 1,
@@ -558,6 +579,8 @@ async def refine_semantic_cues_with_ai(
         base,
         ai,
         fallback_ai=fallback_ai,
+        route_clients=route_clients,
+        route_state=route_state,
         attempt_timeout_s=attempt_timeout_s,
         max_attempts=max_attempts,
         deadline_at=deadline_at,
@@ -617,6 +640,8 @@ Every input ID must appear exactly once and in the same order."""
         raw = await _semantic_chat_with_fallback(
             ai,
             fallback_ai,
+            route_clients=route_clients,
+            route_state=route_state,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1200,
             attempt_timeout_s=attempt_timeout_s,
