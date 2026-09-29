@@ -104,3 +104,15 @@ test("provider settings remember prior AI/TTS connections and expose selectable 
   assert.ok(tts.includes("models.map"))
   assert.ok(tts.includes("if (Array.isArray(data?.models)) setModels(data.models)"))
 })
+
+
+test("studio exposes bounded auto-repair and exact failed-stage retry", () => {
+  assert.ok(studio.includes("Tự động sửa lỗi"))
+  assert.ok(studio.includes("/auto-repair"))
+  assert.ok(studio.includes("auto_repair"))
+  assert.ok(studio.includes("Thử lại đúng bước lỗi"))
+  assert.ok(studio.includes("/rerun"))
+  assert.ok(studio.includes("targeted_chunk_ids"))
+  assert.ok(studio.includes("STEP_FOR_FAILED_STAGE"))
+  assert.ok(studio.includes("disabled={!stepAvailable[item.value]}"))
+})
