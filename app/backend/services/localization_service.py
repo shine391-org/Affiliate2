@@ -1307,6 +1307,7 @@ async def _generate_tts_chunk_atomic(
 async def _adapt_chunk_items(
     ai,
     *,
+    fallback_ai=None,
     plan: list[PlanItem],
     chunk: DubbingChunk,
     segment_by_id: dict[str, LocalizationSegment],
@@ -1403,9 +1404,13 @@ ITEMS:
             ai.max_retries = 0
         raw = await _call_ai_chat_resilient(
             ai,
-            None,
+            fallback_ai,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1000,
+            max_attempts=profile.rewrite_retry_attempts,
+            attempt_timeout_s=profile.rewrite_attempt_timeout_s,
+            total_timeout_s=profile.rewrite_total_timeout_s,
+            stage="rewrite",
         )
     except Exception as exc:
         return record_unavailable(exc)
@@ -1538,13 +1543,21 @@ async def synthesize_timed_dub(
     work_dir.mkdir(parents=True, exist_ok=True)
     out = transcript.model_copy(deep=True)
     rewrite_ai_error: Exception | None = None
+    fallback_ai = None
     try:
         ai = _profile_ai_client(user_settings, profile, "rewrite")
+        fallback_ai = _profile_ai_fallback_client(
+            user_settings,
+            profile,
+            "rewrite",
+            primary_ai=ai,
+        )
     except Exception as exc:
         # C7 rewrite is a quality optimization, not a hard dependency. A
         # persisted translation can still be synthesized/measured/fitted even
         # if its original AI provider is temporarily unavailable at resume.
         ai = None
+        fallback_ai = None
         rewrite_ai_error = exc
         logger.warning("Duration rewrite AI client unavailable: %s", exc)
     runtime = _tts_config(user_settings, profile, target_language)
@@ -1699,7 +1712,8 @@ async def synthesize_timed_dub(
             and attempts < config.rewrite_max_attempts
         ):
             changed = await _adapt_chunk_items(
-                ai, plan=plan, chunk=chunk, segment_by_id=segment_by_id,
+                ai, fallback_ai=fallback_ai,
+                plan=plan, chunk=chunk, segment_by_id=segment_by_id,
                 target_language=target_language, target_ms=chunk.available_ms,
                 profile=profile, issues=issues, state=rewrite_state,
                 setup_error=rewrite_ai_error,
