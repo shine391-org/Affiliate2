@@ -29,6 +29,26 @@ DEFAULT_REWRITE_GUARDRAILS = """- Preserve intent, entities, relationships, quan
 - If essential facts cannot fit, preserve them rather than inventing, deleting or reversing facts."""
 
 
+class AIStageRoute(BaseModel):
+    """One ordered AI route used by a localization stage.
+
+    connection_id is stable user-owned identity. Provider/base/key live in the
+    Settings connection registry, so multiple compatible endpoints/accounts may
+    coexist without overloading the provider name as identity.
+    """
+    connection_id: str
+    model: str | None = None
+    base_url: str | None = None
+
+    @field_validator("connection_id")
+    @classmethod
+    def validate_connection_id(cls, value: str) -> str:
+        value = value.strip()
+        if not value or len(value) > 96:
+            raise ValueError("connection_id must be 1-96 characters")
+        return value
+
+
 class LocalizationProfile(BaseModel):
     id: str
     name: str
@@ -49,6 +69,7 @@ class LocalizationProfile(BaseModel):
     translation_fallback_provider: str | None = None
     translation_fallback_model: str | None = None
     translation_fallback_base_url: str | None = None
+    translation_routes: list[AIStageRoute] = Field(default_factory=list)
     translation_retry_attempts: int = Field(default=3, ge=1, le=5)
     translation_attempt_timeout_s: int = Field(default=75, ge=10, le=300)
     translation_total_timeout_s: int = Field(default=180, ge=20, le=900)
@@ -72,6 +93,7 @@ class LocalizationProfile(BaseModel):
     rewrite_fallback_provider: str | None = None
     rewrite_fallback_model: str | None = None
     rewrite_fallback_base_url: str | None = None
+    rewrite_routes: list[AIStageRoute] = Field(default_factory=list)
     rewrite_retry_attempts: int = Field(default=3, ge=1, le=4)
     rewrite_attempt_timeout_s: int = Field(default=45, ge=10, le=180)
     rewrite_total_timeout_s: int = Field(default=90, ge=20, le=360)
@@ -81,6 +103,7 @@ class LocalizationProfile(BaseModel):
     # protocol remains application-owned.
     rewrite_instructions: str = ""
 
+    tts_connection_id: str | None = None
     tts_provider: str | None = None
     tts_model: str | None = None
     tts_voice: str | None = None
