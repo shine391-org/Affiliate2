@@ -1489,6 +1489,31 @@ async def run_tool_translate(
                             "regenerate_chunk_ids": [],
                         })
                 except Exception as exc:
+                    # Timing failures happen after C7 may already have attempted
+                    # one or more rewrites. Persist that audit evidence before
+                    # marking the stage failed so the UI can prove whether C7
+                    # actually ran instead of exposing only the final overflow.
+                    if hasattr(exc, "rewrite_count"):
+                        failure_issues = list(
+                            getattr(exc, "all_issues", None)
+                            or getattr(exc, "issues", None)
+                            or []
+                        )
+                        unresolved = list(getattr(exc, "issues", None) or [])
+                        run.record("dubbing")["metadata"] = {
+                            "issues": failure_issues,
+                            "rewrite_count": int(getattr(exc, "rewrite_count", 0) or 0),
+                            "rewrite_provider": profile.rewrite_provider,
+                            "rewrite_model": profile.rewrite_model,
+                            "max_raw_required_speed": max(
+                                [1.0, *[
+                                    float(item.get("required_speed") or 1.0)
+                                    for item in unresolved
+                                    if isinstance(item, dict)
+                                ]],
+                            ),
+                            "failed_before_fit": True,
+                        }
                     run.fail("dubbing", exc)
                     raise
         elif not run.is_complete("dubbing"):
