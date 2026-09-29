@@ -69,7 +69,7 @@ class LocalizationProfile(BaseModel):
     translation_fallback_provider: str | None = None
     translation_fallback_model: str | None = None
     translation_fallback_base_url: str | None = None
-    translation_routes: list[AIStageRoute] = Field(default_factory=list)
+    translation_routes: list[AIStageRoute] = Field(default_factory=list, max_length=8)
     translation_retry_attempts: int = Field(default=3, ge=1, le=5)
     translation_attempt_timeout_s: int = Field(default=75, ge=10, le=300)
     translation_total_timeout_s: int = Field(default=180, ge=20, le=900)
@@ -93,7 +93,7 @@ class LocalizationProfile(BaseModel):
     rewrite_fallback_provider: str | None = None
     rewrite_fallback_model: str | None = None
     rewrite_fallback_base_url: str | None = None
-    rewrite_routes: list[AIStageRoute] = Field(default_factory=list)
+    rewrite_routes: list[AIStageRoute] = Field(default_factory=list, max_length=8)
     rewrite_retry_attempts: int = Field(default=3, ge=1, le=4)
     rewrite_attempt_timeout_s: int = Field(default=45, ge=10, le=180)
     rewrite_total_timeout_s: int = Field(default=90, ge=20, le=360)
@@ -199,6 +199,20 @@ class LocalizationProfile(BaseModel):
             raise ValueError("rewrite_total_timeout_s must be >= rewrite_attempt_timeout_s")
         if self.semantic_ai_total_timeout_s < self.semantic_ai_attempt_timeout_s:
             raise ValueError("semantic_ai_total_timeout_s must be >= semantic_ai_attempt_timeout_s")
+        for label, routes in (
+            ("translation_routes", self.translation_routes),
+            ("rewrite_routes", self.rewrite_routes),
+        ):
+            seen = set()
+            for route in routes:
+                identity = (
+                    route.connection_id.strip().lower(),
+                    (route.model or "").strip(),
+                    (route.base_url or "").strip().rstrip("/"),
+                )
+                if identity in seen:
+                    raise ValueError(f"{label} contains a duplicate route: {route.connection_id}")
+                seen.add(identity)
         return self
 
     @field_validator("glossary")
