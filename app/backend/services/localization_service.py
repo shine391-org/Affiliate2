@@ -101,6 +101,7 @@ class TTSRuntimeConfig:
     model: str | None
     base_url: str | None
     region: str | None
+    connection_id: str | None = None
 
 
 @dataclass
@@ -1075,49 +1076,110 @@ def _tts_config(user_settings, profile: LocalizationProfile, target_language: st
     from backend.core.crypto import decrypt_safe
     from backend.services.tts_service import DEFAULT_VOICES, TTSProvider
 
-    configured_provider = (
-        getattr(user_settings, "tts_provider", None)
-        if user_settings is not None
-        else None
+    active_connection_id = (
+        getattr(user_settings, "tts_connection_id", None)
+        if user_settings is not None else None
     )
-    requested_provider = (profile.tts_provider or "").strip().lower() or None
-    configured_provider = (configured_provider or "").strip().lower() or None
+    active_connection_id = (active_connection_id or "").strip().lower() or None
+    active_provider = (
+        getattr(user_settings, "tts_provider", None)
+        if user_settings is not None else None
+    )
+    active_provider = (active_provider or "").strip().lower() or None
+    requested_connection_id = (profile.tts_connection_id or "").strip().lower() or None
 
-    raw_provider = requested_provider or configured_provider or TTSProvider.EDGE_TTS.value
+    registry = _load_json_map(
+        getattr(user_settings, "tts_connections_json", None)
+        if user_settings is not None else None
+    )
+
+    connection_cfg: dict = {}
+    connection_id = requested_connection_id
+
+    if requested_connection_id:
+        if requested_connection_id == active_connection_id and active_provider:
+            connection_cfg = {
+                "provider": active_provider,
+                "voice": getattr(user_settings, "preferred_tts_voice", None),
+                "model": getattr(user_settings, "tts_model", None),
+                "base_url": getattr(user_settings, "tts_base_url", None),
+                "region": getattr(user_settings, "tts_region", None),
+                "api_key_encrypted": getattr(user_settings, "tts_api_key_encrypted", None),
+            }
+        else:
+            connection_cfg = dict(registry.get(requested_connection_id) or {})
+        if not connection_cfg:
+            raise ValueError(f"Unknown TTS connection: {requested_connection_id}")
+    else:
+        requested_provider = (profile.tts_provider or "").strip().lower() or None
+        # Legacy/materialized jobs may carry only provider. Resolve it to one
+        # saved connection when unambiguous so changing global active TTS does
+        # not silently alter the old job.
+        if requested_provider and requested_provider != active_provider:
+            matches = [
+                (cid, cfg) for cid, cfg in registry.items()
+                if str(cfg.get("provider") or "").strip().lower() == requested_provider
+            ]
+            if len(matches) == 1:
+                connection_id, connection_cfg = matches[0]
+            elif len(matches) > 1:
+                raise ValueError(
+                    f"Multiple TTS connections use provider '{requested_provider}'. "
+                    "Pin tts_connection_id in the localization profile."
+                )
+            elif requested_provider == TTSProvider.EDGE_TTS.value:
+                connection_cfg = {"provider": requested_provider}
+                connection_id = None
+            else:
+                # Legacy provider registry fallback.
+                legacy = _load_json_map(
+                    getattr(user_settings, "tts_provider_profiles_json", None)
+                    if user_settings is not None else None
+                ).get(requested_provider) or {}
+                if legacy:
+                    connection_cfg = {"provider": requested_provider, **legacy}
+                    connection_id = requested_provider
+                else:
+                    raise ValueError(
+                        f"No saved TTS connection for provider '{requested_provider}'."
+                    )
+        else:
+            connection_id = active_connection_id
+            connection_cfg = {
+                "provider": active_provider or TTSProvider.EDGE_TTS.value,
+                "voice": getattr(user_settings, "preferred_tts_voice", None)
+                    if user_settings is not None else None,
+                "model": getattr(user_settings, "tts_model", None)
+                    if user_settings is not None else None,
+                "base_url": getattr(user_settings, "tts_base_url", None)
+                    if user_settings is not None else None,
+                "region": getattr(user_settings, "tts_region", None)
+                    if user_settings is not None else None,
+                "api_key_encrypted": getattr(user_settings, "tts_api_key_encrypted", None)
+                    if user_settings is not None else None,
+            }
+
+    raw_provider = (
+        (profile.tts_provider or "").strip().lower()
+        or str(connection_cfg.get("provider") or "").strip().lower()
+        or TTSProvider.EDGE_TTS.value
+    )
     try:
         provider = TTSProvider(raw_provider)
     except ValueError as exc:
         raise ValueError(f"Unsupported TTS provider: {raw_provider}") from exc
 
-    # A profile provider is a real production override, not merely a second
-    # copy of the global provider selector. Today Settings own one credential
-    # slot, so a provider that NEEDS that slot still has to match Settings.
-    # Edge is self-contained and may be pinned by a FAST profile while HQ keeps
-    # ElevenLabs globally. Crucially, a cross-provider override must inherit
-    # ZERO provider-scoped fields from the global connection.
-    cross_provider_override = bool(
-        requested_provider
-        and configured_provider
-        and requested_provider != configured_provider
-    )
-    self_contained_override = provider == TTSProvider.EDGE_TTS
-    if cross_provider_override and not self_contained_override:
+    # Provider type is part of connection identity. A materialized profile may
+    # pin it for reproducibility, but it must not reinterpret another
+    # connection's secret as a different provider.
+    cfg_provider = str(connection_cfg.get("provider") or raw_provider).strip().lower()
+    if connection_cfg and cfg_provider and cfg_provider != raw_provider:
         raise ValueError(
-            f"Profile requests TTS provider '{requested_provider}', but Settings "
-            f"configure '{configured_provider}'. This provider needs its own "
-            "configured connection; only self-contained Edge TTS can currently "
-            "override a different global TTS provider."
+            f"TTS connection '{connection_id}' is {cfg_provider}, "
+            f"but profile requests {raw_provider}."
         )
 
-    uses_settings_connection = bool(configured_provider) and not cross_provider_override
-
-    # Provider-scoped defaults are inherited only when the profile actually
-    # uses the Settings connection. This prevents an Edge FAST profile from
-    # accidentally receiving an ElevenLabs voice/model/base URL/API key.
-    settings_voice = (
-        getattr(user_settings, "preferred_tts_voice", None)
-        if uses_settings_connection else None
-    )
+    settings_voice = connection_cfg.get("voice")
     explicit_voice = profile.tts_voice or settings_voice
     if explicit_voice:
         voice = explicit_voice
@@ -1127,56 +1189,53 @@ def _tts_config(user_settings, profile: LocalizationProfile, target_language: st
         voice = DEFAULT_VOICES.get(provider, "")
 
     if provider == TTSProvider.ELEVENLABS and not voice:
-        raise ValueError(
-            "ElevenLabs TTS requires a voice ID in Settings or the Localization Profile."
-        )
+        raise ValueError("ElevenLabs TTS requires a voice ID.")
 
-    api_key = ""
-    if uses_settings_connection:
-        encrypted_tts = getattr(user_settings, "tts_api_key_encrypted", None)
-        if encrypted_tts:
-            api_key = decrypt_safe(encrypted_tts) or ""
+    encrypted_tts = connection_cfg.get("api_key_encrypted")
+    api_key = decrypt_safe(encrypted_tts) if encrypted_tts else ""
 
-    # OpenAI TTS has an existing secondary credential source. Preserve that
-    # behavior when no TTS key was resolved, but never reinterpret an
-    # ElevenLabs/Azure TTS secret as an OpenAI credential.
+    # OpenAI TTS can reuse an OpenAI AI connection key, but only from an
+    # explicitly OpenAI connection. Never reinterpret another provider's key.
     if provider == TTSProvider.OPENAI_TTS and not api_key:
         ai_encrypted = None
-        if (
-            (getattr(user_settings, "ai_provider", None) or "").lower() == "openai"
-            and getattr(user_settings, "ai_api_key_encrypted", None)
-        ):
-            ai_encrypted = user_settings.ai_api_key_encrypted
-        else:
-            # Provider registry remembers inactive AI connections. Reuse the
-            # saved OpenAI credential here so runtime and Settings test/preview
-            # resolve exactly the same OpenAI TTS credential chain.
-            try:
-                ai_registry = json.loads(
-                    getattr(user_settings, "ai_provider_profiles_json", None) or "{}"
+        if user_settings is not None:
+            active_ai_provider = (getattr(user_settings, "ai_provider", None) or "").strip().lower()
+            if active_ai_provider == "openai":
+                ai_encrypted = getattr(user_settings, "ai_api_key_encrypted", None)
+            if not ai_encrypted:
+                ai_connections = _load_json_map(
+                    getattr(user_settings, "ai_connections_json", None)
                 )
-            except (TypeError, json.JSONDecodeError):
-                ai_registry = {}
-            if isinstance(ai_registry, dict):
-                openai_profile = ai_registry.get("openai") or {}
-                if isinstance(openai_profile, dict):
-                    ai_encrypted = openai_profile.get("api_key_encrypted")
+                openai_matches = [
+                    cfg for cfg in ai_connections.values()
+                    if str(cfg.get("provider") or "").strip().lower() == "openai"
+                    and cfg.get("api_key_encrypted")
+                ]
+                if len(openai_matches) == 1:
+                    ai_encrypted = openai_matches[0].get("api_key_encrypted")
+            if not ai_encrypted:
+                legacy_openai = _load_json_map(
+                    getattr(user_settings, "ai_provider_profiles_json", None)
+                ).get("openai") or {}
+                ai_encrypted = legacy_openai.get("api_key_encrypted")
         if ai_encrypted:
             api_key = decrypt_safe(ai_encrypted) or ""
         api_key = api_key or settings.OPENAI_API_KEY
 
-    model = profile.tts_model
-    base_url = profile.tts_base_url
-    region = profile.tts_region
-    if uses_settings_connection:
-        model = model or getattr(user_settings, "tts_model", None)
-        base_url = base_url or getattr(user_settings, "tts_base_url", None)
-        region = region or getattr(user_settings, "tts_region", None)
+    # Model/base/region are snapshotted into the effective profile for
+    # reproducibility; otherwise inherit from the selected connection.
+    model = profile.tts_model or connection_cfg.get("model")
+    base_url = profile.tts_base_url or connection_cfg.get("base_url")
+    region = profile.tts_region or connection_cfg.get("region")
 
     if provider == TTSProvider.ELEVENLABS:
         from backend.services.elevenlabs_tts_service import canonicalize_base_url
         base_url = canonicalize_base_url(base_url)
-    return TTSRuntimeConfig(provider, voice or "", api_key, model, base_url, region)
+
+    return TTSRuntimeConfig(
+        provider, voice or "", api_key, model, base_url, region,
+        connection_id=connection_id,
+    )
 
 
 async def validate_localization_tts_preflight(
