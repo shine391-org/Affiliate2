@@ -1256,13 +1256,64 @@ async def run_tool_translate(
                 run.load_json("semantic", "transcript")
             )
         else:
-            await _tool_progress(job_id, 26, "Building semantic speech cues...", user_id)
+            await _tool_progress(job_id, 26, "Đang chia câu/ngữ nghĩa...", user_id)
             run.start("semantic")
+            semantic_runtime = {
+                "attempts": 0,
+                "errors": 0,
+                "fallback_provider_used": False,
+                "deterministic_fallback": False,
+            }
+
+            async def _semantic_progress(event: dict):
+                name = event.get("event")
+                window = int(event.get("window") or 1)
+                total = max(1, int(event.get("total") or 1))
+                pct = min(34.0, 26.0 + (window - 1) / total * 8.0)
+                role = str(event.get("role") or "primary")
+                provider = str(event.get("provider") or "")
+                model = str(event.get("model") or "")
+                if name == "attempt":
+                    semantic_runtime["attempts"] += 1
+                    if role == "fallback":
+                        semantic_runtime["fallback_provider_used"] = True
+                    await _tool_progress(
+                        job_id,
+                        pct,
+                        (
+                            f"Phân đoạn ngữ nghĩa {window}/{total} · "
+                            f"{'fallback' if role == 'fallback' else 'AI chính'} "
+                            f"{provider}/{model} · thử {event.get('attempt')}/{event.get('max_attempts')}"
+                        ),
+                        user_id,
+                    )
+                elif name == "error":
+                    semantic_runtime["errors"] += 1
+                    await _tool_progress(
+                        job_id,
+                        pct,
+                        (
+                            f"AI phân đoạn lỗi ở {window}/{total} · "
+                            f"{'fallback' if role == 'fallback' else 'AI chính'} · "
+                            f"đang xử lý dự phòng..."
+                        ),
+                        user_id,
+                    )
+                elif name in {"budget_exhausted", "deterministic_fallback"}:
+                    semantic_runtime["deterministic_fallback"] = True
+                    await _tool_progress(
+                        job_id,
+                        pct,
+                        "AI phân đoạn không phản hồi · chuyển sang phân đoạn nhanh không AI...",
+                        user_id,
+                    )
+
             try:
                 transcript = await prepare_semantic_transcript(
                     transcript,
                     profile=profile,
                     user_settings=user_settings,
+                    progress_cb=_semantic_progress,
                 )
                 path = run.save_json(
                     "semantic", "transcript.json", transcript.model_dump()
@@ -1270,7 +1321,11 @@ async def run_tool_translate(
                 run.complete(
                     "semantic",
                     artifacts={"transcript": path},
-                    metadata={"semantic_cue_count": len(transcript.segments)},
+                    metadata={
+                        "semantic_cue_count": len(transcript.segments),
+                        "ai_enabled": bool(profile.semantic_segmentation),
+                        **semantic_runtime,
+                    },
                 )
             except Exception as exc:
                 run.fail("semantic", exc)
@@ -1285,10 +1340,69 @@ async def run_tool_translate(
         else:
             await _tool_progress(
                 job_id, 36,
-                f"Translating {len(transcript.segments)} semantic cues...",
+                f"Đang dịch {len(transcript.segments)} câu ngữ nghĩa...",
                 user_id,
             )
             run.start("translation")
+            translation_runtime = {
+                "attempts": 0,
+                "errors": 0,
+                "fallback_provider_used": False,
+            }
+            translation_batch = {"current": 1, "total": 1}
+
+            async def _translation_progress(event: dict):
+                name = event.get("event")
+                if name == "batch":
+                    translation_batch["current"] = int(event.get("batch") or 1)
+                    translation_batch["total"] = max(1, int(event.get("total_batches") or 1))
+                current = translation_batch["current"]
+                total = translation_batch["total"]
+                pct = min(50.0, 36.0 + (current - 1) / total * 14.0)
+                role = str(event.get("role") or "primary")
+                provider = str(event.get("provider") or "")
+                model = str(event.get("model") or "")
+                if name == "attempt":
+                    translation_runtime["attempts"] += 1
+                    if role == "fallback":
+                        translation_runtime["fallback_provider_used"] = True
+                    await _tool_progress(
+                        job_id,
+                        pct,
+                        (
+                            f"Dịch {current}/{total} · "
+                            f"{'fallback' if role == 'fallback' else 'AI chính'} "
+                            f"{provider}/{model} · thử {event.get('attempt')}/{event.get('max_attempts')}"
+                        ),
+                        user_id,
+                    )
+                elif name == "error":
+                    translation_runtime["errors"] += 1
+                    await _tool_progress(
+                        job_id,
+                        pct,
+                        (
+                            f"AI dịch lỗi · {provider}/{model} · "
+                            f"thử {event.get('attempt')}/{event.get('max_attempts')}..."
+                        ),
+                        user_id,
+                    )
+                elif name == "retry_wait":
+                    await _tool_progress(
+                        job_id,
+                        pct,
+                        f"AI tạm lỗi · chờ {event.get('backoff_s')}s rồi thử lại...",
+                        user_id,
+                    )
+                elif name == "switch_fallback":
+                    translation_runtime["fallback_provider_used"] = True
+                    await _tool_progress(
+                        job_id,
+                        pct,
+                        f"AI chính không dùng được · chuyển fallback {provider}/{model}...",
+                        user_id,
+                    )
+
             try:
                 localized = await translate_transcript(
                     transcript,
@@ -1297,6 +1411,7 @@ async def run_tool_translate(
                     user_settings=user_settings,
                     for_dub=is_dub,
                     checkpoint_dir=run.stage_dir("translation"),
+                    progress_cb=_translation_progress,
                 )
                 path = run.save_json(
                     "translation", "transcript.json", localized.model_dump()
@@ -1311,10 +1426,21 @@ async def run_tool_translate(
                         ),
                         "translation_provider": profile.translation_provider,
                         "translation_model": profile.translation_model,
+                        "translation_fallback_provider": profile.translation_fallback_provider,
+                        "translation_fallback_model": profile.translation_fallback_model,
                         "translation_preset": profile.translation_preset,
+                        **translation_runtime,
                     },
                 )
             except Exception as exc:
+                run.record("translation")["metadata"] = {
+                    **dict(run.record("translation").get("metadata") or {}),
+                    **translation_runtime,
+                    "translation_provider": profile.translation_provider,
+                    "translation_model": profile.translation_model,
+                    "translation_fallback_provider": profile.translation_fallback_provider,
+                    "translation_fallback_model": profile.translation_fallback_model,
+                }
                 run.fail("translation", exc)
                 raise
 
