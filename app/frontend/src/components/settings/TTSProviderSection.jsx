@@ -35,6 +35,7 @@ export default function TTSProviderSection({ settings, updateSettings }) {
   const [loadingVoices, setLoadingVoices] = useState(false)
   const [previewing, setPreviewing] = useState(false)
   const [voices, setVoices] = useState([])
+  const [models, setModels] = useState([])
   const [health, setHealth] = useState(null)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const audioRef = useRef(null)
@@ -68,6 +69,10 @@ export default function TTSProviderSection({ settings, updateSettings }) {
   ])
 
   const meta = PROVIDERS[provider] || PROVIDERS.edge_tts
+  const savedProvider = settings?.tts_provider_profiles?.[provider] || null
+  const keyIsSet = provider === settings?.tts_provider
+    ? !!settings?.tts_api_key_set
+    : !!savedProvider?.api_key_set
   const selectedVoice = useMemo(
     () => voices.find((item) => item.voice_id === voice),
     [voices, voice],
@@ -84,14 +89,16 @@ export default function TTSProviderSection({ settings, updateSettings }) {
   })
 
   const changeProvider = (next) => {
+    const saved = settings?.tts_provider_profiles?.[next] || null
     stopPreview()
     setProvider(next)
-    setVoice("")
+    setVoice(saved?.voice || "")
     setVoices([])
+    setModels([])
     setHealth(null)
-    setModel(PROVIDERS[next]?.defaultModel || "")
-    setBaseUrl(PROVIDERS[next]?.defaultBase || "")
-    setRegion("")
+    setModel(saved?.model || PROVIDERS[next]?.defaultModel || "")
+    setBaseUrl(saved?.base_url || PROVIDERS[next]?.defaultBase || "")
+    setRegion(saved?.region || "")
     setKey("")
     setShowAdvanced(false)
   }
@@ -136,6 +143,7 @@ export default function TTSProviderSection({ settings, updateSettings }) {
         : (data?.message || "Cấu hình TTS chưa hợp lệ")
       showSnackbar(message, data?.ok ? (data?.connection_verified === false ? "warning" : "success") : "warning")
       if (Array.isArray(data?.voices)) setVoices(data.voices)
+      if (Array.isArray(data?.models)) setModels(data.models)
     } catch (err) {
       const message = await errorMessage(err, "Kiểm tra kết nối TTS thất bại")
       setHealth({ ok: false, connection_verified: false, message })
@@ -171,11 +179,7 @@ export default function TTSProviderSection({ settings, updateSettings }) {
   }
 
   const save = async () => {
-    if (meta.needsKey && provider !== settings?.tts_provider && !key.trim()) {
-      showSnackbar("Thêm API key cho nhà cung cấp TTS mới", "warning")
-      return
-    }
-    if (meta.needsKey && !key.trim() && !settings?.tts_api_key_set) {
+    if (meta.needsKey && !key.trim() && !keyIsSet) {
       showSnackbar("Thêm API key cho nhà cung cấp TTS này", "warning")
       return
     }
@@ -223,7 +227,11 @@ export default function TTSProviderSection({ settings, updateSettings }) {
       <FormControl size="small" fullWidth>
         <InputLabel>Nhà cung cấp TTS</InputLabel>
         <Select value={provider} label="Nhà cung cấp TTS" onChange={(e) => changeProvider(e.target.value)}>
-          {Object.entries(PROVIDERS).map(([id, item]) => <MenuItem key={id} value={id}>{item.label}</MenuItem>)}
+          {Object.entries(PROVIDERS).map(([id, item]) => (
+            <MenuItem key={id} value={id}>
+              {item.label}{settings?.tts_provider_profiles?.[id] ? " · đã lưu" : ""}
+            </MenuItem>
+          ))}
         </Select>
       </FormControl>
 
@@ -238,20 +246,44 @@ export default function TTSProviderSection({ settings, updateSettings }) {
             ))}
           </Select>
         </FormControl>
-      ) : provider !== "elevenlabs" ? (
+      ) : provider === "elevenlabs" ? (
+        <TextField
+          label="ID giọng ElevenLabs"
+          size="small"
+          value={voice}
+          onChange={(e) => setVoice(e.target.value)}
+          helperText={voice ? "Giọng đã lưu cho provider này. Bấm Tải danh sách giọng để chọn lại." : "Bấm Tải danh sách giọng để chọn từ tài khoản."}
+        />
+      ) : (
         <TextField label="ID giọng mặc định" size="small" value={voice} onChange={(e) => setVoice(e.target.value)} />
-      ) : null}
+      )}
 
       {savedVoiceMissing && <Alert severity="error">Giọng đã lưu không còn tồn tại hoặc tài khoản không truy cập được: {voice}</Alert>}
 
-      {provider !== "edge_tts" && (
+      {provider !== "edge_tts" && models.length > 0 ? (
+        <FormControl size="small" fullWidth>
+          <InputLabel>Mô hình</InputLabel>
+          <Select
+            value={models.some((item) => (item.model_id || item.id || item) === model) ? model : "__custom__"}
+            label="Mô hình"
+            onChange={(e) => setModel(e.target.value === "__custom__" ? "" : e.target.value)}
+          >
+            {models.map((item) => {
+              const id = item.model_id || item.id || item
+              const name = item.name || id
+              return <MenuItem key={id} value={id}>{name} · {id}</MenuItem>
+            })}
+            <MenuItem value="__custom__"><em>Nhập model khác…</em></MenuItem>
+          </Select>
+        </FormControl>
+      ) : provider !== "edge_tts" ? (
         <TextField label="Mô hình" size="small" value={model} onChange={(e) => setModel(e.target.value)} placeholder={meta.defaultModel || "provider model id"} />
-      )}
+      ) : null}
 
       {meta.region && <TextField label="Vùng Azure" size="small" value={region} onChange={(e) => setRegion(e.target.value)} placeholder="southeastasia" />}
 
       {provider !== "edge_tts" && provider !== "gpt_sovits" && (
-        <TextField label="API key" type="password" size="small" value={key} onChange={(e) => setKey(e.target.value)} placeholder={settings?.tts_api_key_set ? "Để trống để dùng khóa đã lưu" : "BYOK key"} autoComplete="off" />
+        <TextField label="API key" type="password" size="small" value={key} onChange={(e) => setKey(e.target.value)} placeholder={keyIsSet ? "Đã lưu cho provider này — để trống để giữ" : "BYOK key"} autoComplete="off" />
       )}
 
       {provider === "elevenlabs" && (
