@@ -750,11 +750,28 @@ def _tts_config(user_settings, profile: LocalizationProfile, target_language: st
     # behavior when no TTS key was resolved, but never reinterpret an
     # ElevenLabs/Azure TTS secret as an OpenAI credential.
     if provider == TTSProvider.OPENAI_TTS and not api_key:
+        ai_encrypted = None
         if (
             (getattr(user_settings, "ai_provider", None) or "").lower() == "openai"
             and getattr(user_settings, "ai_api_key_encrypted", None)
         ):
-            api_key = decrypt_safe(user_settings.ai_api_key_encrypted) or ""
+            ai_encrypted = user_settings.ai_api_key_encrypted
+        else:
+            # Provider registry remembers inactive AI connections. Reuse the
+            # saved OpenAI credential here so runtime and Settings test/preview
+            # resolve exactly the same OpenAI TTS credential chain.
+            try:
+                ai_registry = json.loads(
+                    getattr(user_settings, "ai_provider_profiles_json", None) or "{}"
+                )
+            except (TypeError, json.JSONDecodeError):
+                ai_registry = {}
+            if isinstance(ai_registry, dict):
+                openai_profile = ai_registry.get("openai") or {}
+                if isinstance(openai_profile, dict):
+                    ai_encrypted = openai_profile.get("api_key_encrypted")
+        if ai_encrypted:
+            api_key = decrypt_safe(ai_encrypted) or ""
         api_key = api_key or settings.OPENAI_API_KEY
 
     model = profile.tts_model
@@ -780,6 +797,16 @@ async def validate_localization_tts_preflight(
     from backend.services import tts_service
 
     runtime = _tts_config(user_settings, profile, target_language)
+
+    # GPT-SoVITS donor adapter is intentionally language-limited. Validate that
+    # deterministic incompatibility before Demucs/ASR/translation consume time.
+    if runtime.provider == tts_service.TTSProvider.GPT_SOVITS:
+        from backend.services.gpt_sovits_service import _normalize_gpt_sovits_language
+        try:
+            _normalize_gpt_sovits_language(target_language)
+        except Exception as exc:
+            raise ValueError(str(exc)) from exc
+
     health = await tts_service.test_tts_connection(
         provider=runtime.provider,
         api_key=runtime.api_key,
