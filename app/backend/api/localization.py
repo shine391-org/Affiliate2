@@ -101,10 +101,17 @@ _ASR_KEYS = {
 _SEMANTIC_KEYS = {"semantic_segmentation"}
 _TRANSLATION_KEYS = {
     "translation_provider", "translation_model", "translation_base_url",
+    "translation_fallback_provider", "translation_fallback_model", "translation_fallback_base_url",
+    "translation_retry_attempts", "translation_attempt_timeout_s", "translation_total_timeout_s",
+    "semantic_segmentation", "semantic_ai_retry_attempts",
+    "semantic_ai_attempt_timeout_s", "semantic_ai_total_timeout_s",
     "translation_preset", "translation_instructions", "translation_guardrails", "glossary",
 }
 _DUBBING_KEYS = {
-    "rewrite_provider", "rewrite_model", "rewrite_base_url", "rewrite_guardrails", "rewrite_instructions",
+    "rewrite_provider", "rewrite_model", "rewrite_base_url",
+    "rewrite_fallback_provider", "rewrite_fallback_model", "rewrite_fallback_base_url",
+    "rewrite_retry_attempts", "rewrite_attempt_timeout_s", "rewrite_total_timeout_s",
+    "rewrite_guardrails", "rewrite_instructions",
     "tts_provider", "tts_model", "tts_voice", "tts_base_url", "tts_region",
     "speaker_voices", "speaker_reference_audio", "tts_reference_audio",
     "tts_reference_text", "tts_reference_language", "voice_clone_reference_mode",
