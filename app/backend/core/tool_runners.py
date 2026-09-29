@@ -1077,7 +1077,9 @@ async def run_tool_translate(
             # a later Settings change cannot distinguish "stale inherited
             # binding" from "intentional FAST=Edge while HQ=ElevenLabs".
             request_snapshot["tts_binding_mode"] = (
-                "pinned" if profile.tts_provider else "inherit"
+                "pinned"
+                if (profile.tts_connection_id or profile.tts_provider)
+                else "inherit"
             )
 
         # Manual tool controls are job-level overrides on the resolved profile.
