@@ -87,7 +87,12 @@ async def run_intelligence_async(
         }
 
         # --- 2. media ---
-        media = await fetch_media_async(platform, content_id, cand.get("canonical_url") or "")
+        media = await fetch_media_async(
+            platform,
+            content_id,
+            cand.get("canonical_url") or "",
+            title_hint=cand.get("title") or "",
+        )
         entry["media_status"] = media["status"]
         if media["status"] == "SUCCESS":
             summary["media_downloaded"] += 1
