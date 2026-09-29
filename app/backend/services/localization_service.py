@@ -770,6 +770,7 @@ async def _call_ai_chat_resilient(
     progress_cb=None,
     stage: str = "translation",
     route_state: _AIStageRouteState | None = None,
+    deadline_at: float | None = None,
 ) -> str:
     """One owner for AI retry/fallback with hard wall-clock budgets.
 
@@ -781,7 +782,8 @@ async def _call_ai_chat_resilient(
     from backend.core.ai_provider import is_transient_ai_error
 
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + float(total_timeout_s)
+    local_deadline = loop.time() + float(total_timeout_s)
+    deadline = min(local_deadline, deadline_at) if deadline_at is not None else local_deadline
     last_error: Exception | None = None
 
     if route_state is not None:
@@ -931,7 +933,12 @@ async def _translate_batch_resilient(
     for_dub: bool,
     fallback_ai=None,
     progress_cb=None,
+    deadline_at: float | None = None,
 ) -> tuple[list[str], set[int]]:
+    if deadline_at is None:
+        deadline_at = asyncio.get_running_loop().time() + float(
+            profile.translation_total_timeout_s
+        )
     prompt = _translation_prompt(
         target_language=target_language,
         batch=batch,
@@ -950,10 +957,42 @@ async def _translate_batch_resilient(
         progress_cb=progress_cb,
         stage="translation",
         route_state=route_state,
+        deadline_at=deadline_at,
     )
     try:
         return _validate_translation_payload(raw, batch), set()
     except (json.JSONDecodeError, ValueError) as exc:
+        # A transport-level 200 with unusable structured output is still a
+        # route failure for this structured stage. Advance to the next route
+        # before recursively shrinking the batch; otherwise one unhealthy model
+        # can silently degrade every singleton back to source text while a
+        # configured fallback is never tried.
+        if route_state is not None and route_state.sticky_index + 1 < len(route_state.clients):
+            current = route_state.current
+            route_state.failure_chain.append({
+                "connection_id": getattr(current, "connection_name", None),
+                "provider": getattr(getattr(current, "provider", None), "value", str(getattr(current, "provider", ""))),
+                "model": getattr(current, "model", None),
+                "attempt": 1,
+                "error_type": "InvalidStructuredOutput",
+                "error": str(exc)[:240],
+            })
+            route_state.sticky_index += 1
+            next_client = route_state.current
+            await _emit_ai_progress(progress_cb, {
+                "event": "switch_fallback",
+                "stage": "translation",
+                "reason": "invalid_structured_output",
+                "provider": getattr(next_client, "connection_name", None) or getattr(getattr(next_client, "provider", None), "value", str(getattr(next_client, "provider", ""))),
+                "model": getattr(next_client, "model", None),
+            })
+            return await _translate_batch_resilient(
+                ai, batch, route_state=route_state,
+                target_language=target_language, context=context,
+                profile=profile, for_dub=for_dub, fallback_ai=fallback_ai,
+                progress_cb=progress_cb, deadline_at=deadline_at,
+            )
+
         if len(batch) == 1:
             logger.warning("Translation shape failed for %s: %s", batch[0].id, exc)
             return [batch[0].source_text], {0}
@@ -968,7 +1007,7 @@ async def _translate_batch_resilient(
             ai, batch[:mid], route_state=route_state,
             target_language=target_language, context=context,
             profile=profile, for_dub=for_dub, fallback_ai=fallback_ai,
-            progress_cb=progress_cb,
+            progress_cb=progress_cb, deadline_at=deadline_at,
         )
         right, rf = await _translate_batch_resilient(
             ai, batch[mid:], route_state=route_state,
