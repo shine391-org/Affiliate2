@@ -534,12 +534,34 @@ class DouyinProvider:
                     if len(raw_awemes) < limit:
                         await asyncio.sleep(0.4)
             except PermissionError:
-                dom_items = await self._fetch_creator_dom_items(
-                    session.page,
-                    creator_id,
-                    creator_name=info.get("display_name") or "",
-                    limit=limit,
-                )
+                # Never navigate the user's already-open authenticated Douyin
+                # tab just to perform DOM recovery. Borrow the session cookies
+                # and create a temporary owned page; if the session itself
+                # already owns its probe page, reusing that page is safe.
+                dom_page = session.page
+                close_dom_page = False
+                if not getattr(session, "created_page", False):
+                    new_page = getattr(session.context, "new_page", None)
+                    if not callable(new_page):
+                        raise RuntimeError(
+                            "Douyin DOM fallback needs a temporary CDP page; "
+                            "refusing to navigate the user's existing tab."
+                        )
+                    dom_page = await new_page()
+                    close_dom_page = True
+                try:
+                    dom_items = await self._fetch_creator_dom_items(
+                        dom_page,
+                        creator_id,
+                        creator_name=info.get("display_name") or "",
+                        limit=limit,
+                    )
+                finally:
+                    if close_dom_page:
+                        try:
+                            await dom_page.close()
+                        except Exception:
+                            pass
                 if not dom_items:
                     raise
 
