@@ -23,15 +23,14 @@ test("TTS settings exposes connection test, ElevenLabs voice discovery, and exac
   assert.ok(tts.includes('audioRef.current.play().then'))
 })
 
-test("localization profile allows pinned Edge and clears provider-scoped TTS state on adoption", () => {
-  assert.ok(profiles.includes('edgeCrossProviderOverride'))
-  assert.ok(profiles.includes('ghim Edge TTS'))
-  assert.ok(profiles.includes('không kế thừa API key, model, Base URL hoặc voice'))
-  assert.ok(profiles.includes('Dùng TTS hiện tại cho hồ sơ'))
-  assert.ok(profiles.includes('provider active hoặc Edge TTS tự chứa'))
-  assert.ok(profiles.includes('speaker_voices: {}'))
-  assert.ok(profiles.includes('speaker_reference_audio: {}'))
-  assert.ok(profiles.includes('tts_reference_audio: null'))
+test("localization profile pins stable TTS connection and clears provider-scoped state on adoption", () => {
+  assert.ok(profiles.includes("tts_connection_id"))
+  assert.ok(profiles.includes("Kết nối TTS cho hồ sơ"))
+  assert.ok(profiles.includes("không phụ thuộc connection TTS đang active"))
+  assert.ok(profiles.includes("Dùng TTS hiện tại cho hồ sơ"))
+  assert.ok(profiles.includes("speaker_voices: {}"))
+  assert.ok(profiles.includes("speaker_reference_audio: {}"))
+  assert.ok(profiles.includes("tts_reference_audio: null"))
 })
 
 test("expert recovery makes changed TTS resumable without locking the editor", () => {
@@ -46,10 +45,9 @@ test("expert recovery makes changed TTS resumable without locking the editor", (
   assert.ok(expert.includes('TTS hiện tại'))
 })
 
-test("TTS settings never labels an unprobed provider as READY", () => {
-  assert.ok(tts.includes("CẤU HÌNH HỢP LỆ"), 'unverified providers must say configuration is valid')
+test("TTS settings distinguishes unverified provider configuration", () => {
   assert.ok(tts.includes("connection_verified === false"))
-  assert.ok(!tts.includes('{health.ok ? "READY"'), 'READY must depend on connection_verified')
+  assert.ok(tts.includes("health.ok ? (health.connection_verified === false ? \"warning\" : \"success\")"))
 })
 
 test("blob error bodies are decoded before any snackbar message", () => {
@@ -71,12 +69,14 @@ test("batch dialog has visible X and Đóng controls without cancellation calls"
 })
 
 
-test("localization C6/C7 model discovery is directly selectable and still free-form", () => {
+test("localization C6/C7 route model discovery is connection-scoped and free-form", () => {
   assert.ok(profiles.includes("<Autocomplete"))
-  assert.ok(profiles.includes('label="Mô hình dịch C6"'))
-  assert.ok(profiles.includes('label="Mô hình viết lại thời lượng C7"'))
+  assert.ok(profiles.includes("renderRouteChain"))
+  assert.ok(profiles.includes("connection_id"))
+  assert.ok(profiles.includes("/api/settings/ai/models"))
   assert.ok(profiles.includes("freeSolo"))
-  assert.ok(!profiles.includes('localization-model-suggestions'))
+  assert.ok(profiles.includes("Thêm fallback"))
+  assert.ok(!profiles.includes("localization-model-suggestions"))
 })
 
 test("expert panel exposes C7 rewrite evidence", () => {
@@ -86,21 +86,20 @@ test("expert panel exposes C7 rewrite evidence", () => {
   assert.ok(expert.includes("timing_overflow"))
 })
 
-test("provider settings remember prior AI/TTS connections and expose selectable models", () => {
-  assert.ok(ai.includes("ai_provider_profiles"))
-  assert.ok(ai.includes("saved?.model"))
-  assert.ok(ai.includes("saved?.base_url"))
-  assert.ok(ai.includes("· đã lưu"))
+test("provider settings expose multi-connection registries and same-provider endpoint identity", () => {
+  assert.ok(ai.includes("ai_connections"))
+  assert.ok(ai.includes("ai_connection_id"))
+  assert.ok(ai.includes("/api/settings/ai/connections"))
+  assert.ok(ai.includes("Connection ID"))
+  assert.ok(ai.includes("nhiều endpoint cùng provider"))
   assert.ok(ai.includes("<InputLabel>Chọn mô hình</InputLabel>"))
   assert.ok(ai.includes("suggestions.map"))
   assert.ok(ai.includes("Nhập ID khác…"))
 
-  assert.ok(tts.includes("tts_provider_profiles"))
-  assert.ok(tts.includes("saved?.voice"))
-  assert.ok(tts.includes("saved?.model"))
-  assert.ok(tts.includes("saved?.base_url"))
-  assert.ok(tts.includes("saved?.region"))
-  assert.ok(tts.includes("Đã lưu cho provider này"))
+  assert.ok(tts.includes("tts_connections"))
+  assert.ok(tts.includes("tts_connection_id"))
+  assert.ok(tts.includes("/api/settings/tts/connections"))
+  assert.ok(tts.includes("Provider không còn là identity"))
   assert.ok(tts.includes("models.map"))
   assert.ok(tts.includes("if (Array.isArray(data?.models)) setModels(data.models)"))
 })
