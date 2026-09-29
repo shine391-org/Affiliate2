@@ -364,3 +364,101 @@ async def test_invalid_semantic_response_does_not_trip_provider_breaker():
         "Cue 2. Cue 3.",
     ]
 
+
+
+
+@pytest.mark.asyncio
+async def test_semantic_primary_failure_uses_fallback_before_deterministic():
+    from backend.services.semantic_segmentation import refine_semantic_cues_with_ai
+
+    tx = LocalizationTranscript(
+        text="hello there yes indeed",
+        segments=[LocalizationSegment(
+            id="raw1",
+            source_text="hello there yes indeed",
+            source_start_ms=0,
+            source_end_ms=1600,
+            source_words=[
+                {"word": "hello", "start": 0.0, "end": 0.4},
+                {"word": " there", "start": 0.4, "end": 0.8},
+                {"word": " yes", "start": 0.9, "end": 1.2},
+                {"word": " indeed", "start": 1.2, "end": 1.6},
+            ],
+        )],
+    )
+
+    class Primary:
+        connection_name = "hermes"
+        calls = 0
+
+        async def chat(self, *args, **kwargs):
+            self.calls += 1
+            raise TimeoutError("proxy timeout")
+
+    class Fallback:
+        connection_name = "lmstudio"
+        calls = 0
+
+        async def chat(self, *args, **kwargs):
+            self.calls += 1
+            return '[{"ids":["w00001","w00002","w00003","w00004"]}]'
+
+    primary = Primary()
+    fallback = Fallback()
+    events = []
+
+    got = await refine_semantic_cues_with_ai(
+        tx,
+        primary,
+        fallback_ai=fallback,
+        max_attempts=1,
+        attempt_timeout_s=0.1,
+        total_timeout_s=1,
+        progress_cb=lambda event: events.append(dict(event)),
+    )
+
+    assert primary.calls == 1
+    assert fallback.calls == 1
+    assert got.segments[0].source_text == "hello there yes indeed"
+    assert any(e.get("role") == "fallback" and e.get("event") == "attempt" for e in events)
+    assert not any(e.get("event") == "deterministic_fallback" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_semantic_hanging_provider_hits_budget_and_finishes_deterministically():
+    from backend.services.semantic_segmentation import refine_semantic_cues_with_ai
+
+    tx = LocalizationTranscript(
+        text="one two three",
+        segments=[LocalizationSegment(
+            id="raw1",
+            source_text="one two three",
+            source_start_ms=0,
+            source_end_ms=1200,
+            source_words=[
+                {"word": "one", "start": 0.0, "end": 0.3},
+                {"word": " two", "start": 0.3, "end": 0.7},
+                {"word": " three", "start": 0.7, "end": 1.2},
+            ],
+        )],
+    )
+
+    class Hanging:
+        connection_name = "hermes"
+
+        async def chat(self, *args, **kwargs):
+            await __import__("asyncio").Event().wait()
+
+    events = []
+    got = await refine_semantic_cues_with_ai(
+        tx,
+        Hanging(),
+        max_attempts=1,
+        attempt_timeout_s=0.01,
+        total_timeout_s=0.02,
+        progress_cb=lambda event: events.append(dict(event)),
+    )
+
+    assert got.segments
+    assert "one" in got.segments[0].source_text
+    assert any(e.get("event") == "deterministic_fallback" for e in events)
