@@ -580,7 +580,7 @@ export default function LocalizationProfilesSection({ settings }) {
               />
               <TextField
                 size="small" type="number" fullWidth label="C7 số lần thử/provider"
-                value={draft.rewrite_retry_attempts ?? 2}
+                value={draft.rewrite_retry_attempts ?? 3}
                 onChange={(e) => patch("rewrite_retry_attempts", Number(e.target.value))}
                 inputProps={{ min: 1, max: 4, step: 1 }}
               />
