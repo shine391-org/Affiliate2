@@ -484,54 +484,123 @@ def _validate_translation_payload(raw: str, batch: list[LocalizationSegment]) ->
     return [seen[seg_id] for seg_id in expected]
 
 
+async def _emit_ai_progress(progress_cb, payload: dict) -> None:
+    if progress_cb is None:
+        return
+    result = progress_cb(payload)
+    if asyncio.iscoroutine(result):
+        await result
+
+
 async def _call_ai_chat_resilient(
     ai,
     fallback_ai,
     messages: list[dict],
     max_tokens: int = 3000,
     max_attempts: int = 3,
+    *,
+    attempt_timeout_s: float = 75,
+    total_timeout_s: float = 180,
+    progress_cb=None,
+    stage: str = "translation",
 ) -> str:
-    """Bounded exponential backoff retry for transient network/503 errors with optional fallback."""
+    """One owner for AI retry/fallback with hard wall-clock budgets.
+
+    SDK retries are disabled by the callers. Each attempt is wrapped in
+    asyncio.wait_for so a half-open SSE/proxy transport cannot keep a stage
+    stuck forever. A saved fallback provider/model is tried after the primary.
+    """
     import random
     from backend.core.ai_provider import is_transient_ai_error
 
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + float(total_timeout_s)
     last_error: Exception | None = None
-    # 1. Try primary AI
-    for attempt in range(max_attempts):
-        try:
-            return await ai.chat(messages=messages, max_tokens=max_tokens)
-        except Exception as exc:
-            last_error = exc
-            if not is_transient_ai_error(exc) or attempt == max_attempts - 1:
-                break
-            backoff = min(8.0, (1.5 ** attempt) + random.uniform(0.1, 0.4))
-            logger.warning(
-                "Transient error (%s) on translation AI (attempt %d/%d); retrying in %.2fs: %s",
-                type(exc).__name__, attempt + 1, max_attempts, backoff, exc,
-            )
-            await asyncio.sleep(backoff)
+    clients = [("primary", ai)]
+    if fallback_ai is not None:
+        clients.append(("fallback", fallback_ai))
 
-    # 2. Try fallback AI if configured and last_error was transient
-    if fallback_ai is not None and last_error is not None and is_transient_ai_error(last_error):
-        logger.warning(
-            "Primary translation model exhausted %d attempts (%s); switching to fallback model %s",
-            max_attempts, last_error, getattr(fallback_ai, "model", "?"),
-        )
-        for attempt in range(max_attempts):
+    for role, client in clients:
+        if client is None:
+            continue
+        if hasattr(client, "max_retries"):
+            client.max_retries = 0
+
+        for attempt in range(1, max_attempts + 1):
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise TimeoutError(
+                    f"{stage} AI deadline exceeded after {int(total_timeout_s)}s"
+                ) from last_error
+
+            timeout_s = min(float(attempt_timeout_s), remaining)
+            await _emit_ai_progress(progress_cb, {
+                "event": "attempt",
+                "stage": stage,
+                "role": role,
+                "attempt": attempt,
+                "max_attempts": max_attempts,
+                "provider": getattr(getattr(client, "provider", None), "value", str(getattr(client, "provider", ""))),
+                "model": getattr(client, "model", None),
+                "timeout_s": round(timeout_s, 1),
+            })
             try:
-                return await fallback_ai.chat(messages=messages, max_tokens=max_tokens)
+                return await asyncio.wait_for(
+                    client.chat(messages=messages, max_tokens=max_tokens),
+                    timeout=timeout_s,
+                )
             except Exception as exc:
                 last_error = exc
-                if not is_transient_ai_error(exc) or attempt == max_attempts - 1:
+                await _emit_ai_progress(progress_cb, {
+                    "event": "error",
+                    "stage": stage,
+                    "role": role,
+                    "attempt": attempt,
+                    "max_attempts": max_attempts,
+                    "provider": getattr(getattr(client, "provider", None), "value", str(getattr(client, "provider", ""))),
+                    "model": getattr(client, "model", None),
+                    "error": str(exc)[:240],
+                })
+                transient = is_transient_ai_error(exc)
+                # Non-transient errors do not deserve repeated attempts on the
+                # same provider, but a separately configured fallback may still
+                # be healthy (e.g. bad/deprecated primary model).
+                if not transient:
                     break
-                backoff = min(8.0, (1.5 ** attempt) + random.uniform(0.1, 0.4))
-                logger.warning(
-                    "Transient error (%s) on fallback AI (attempt %d/%d); retrying in %.2fs: %s",
-                    type(exc).__name__, attempt + 1, max_attempts, backoff, exc,
-                )
-                await asyncio.sleep(backoff)
+                if attempt < max_attempts:
+                    remaining = deadline - loop.time()
+                    if remaining <= 0:
+                        break
+                    backoff = min(
+                        8.0,
+                        (1.5 ** (attempt - 1)) + random.uniform(0.1, 0.4),
+                        remaining,
+                    )
+                    await _emit_ai_progress(progress_cb, {
+                        "event": "retry_wait",
+                        "stage": stage,
+                        "role": role,
+                        "attempt": attempt,
+                        "max_attempts": max_attempts,
+                        "backoff_s": round(backoff, 2),
+                    })
+                    await asyncio.sleep(max(0.0, backoff))
 
-    raise last_error
+        if role == "primary" and fallback_ai is not None:
+            await _emit_ai_progress(progress_cb, {
+                "event": "switch_fallback",
+                "stage": stage,
+                "provider": getattr(getattr(fallback_ai, "provider", None), "value", str(getattr(fallback_ai, "provider", ""))),
+                "model": getattr(fallback_ai, "model", None),
+            })
+
+    if loop.time() >= deadline:
+        raise TimeoutError(
+            f"{stage} AI deadline exceeded after {int(total_timeout_s)}s"
+        ) from last_error
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError(f"{stage} AI has no usable provider")
 
 
 async def _translate_batch_resilient(
@@ -543,6 +612,7 @@ async def _translate_batch_resilient(
     profile: LocalizationProfile,
     for_dub: bool,
     fallback_ai=None,
+    progress_cb=None,
 ) -> tuple[list[str], set[int]]:
     prompt = _translation_prompt(
         target_language=target_language,
@@ -552,7 +622,15 @@ async def _translate_batch_resilient(
         for_dub=for_dub,
     )
     raw = await _call_ai_chat_resilient(
-        ai, fallback_ai, messages=[{"role": "user", "content": prompt}], max_tokens=3000
+        ai,
+        fallback_ai,
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=3000,
+        max_attempts=profile.translation_retry_attempts,
+        attempt_timeout_s=profile.translation_attempt_timeout_s,
+        total_timeout_s=profile.translation_total_timeout_s,
+        progress_cb=progress_cb,
+        stage="translation",
     )
     try:
         return _validate_translation_payload(raw, batch), set()
@@ -560,14 +638,22 @@ async def _translate_batch_resilient(
         if len(batch) == 1:
             logger.warning("Translation shape failed for %s: %s", batch[0].id, exc)
             return [batch[0].source_text], {0}
+        await _emit_ai_progress(progress_cb, {
+            "event": "shape_split",
+            "stage": "translation",
+            "batch_size": len(batch),
+            "error": str(exc)[:180],
+        })
         mid = len(batch) // 2
         left, lf = await _translate_batch_resilient(
             ai, batch[:mid], target_language=target_language, context=context,
             profile=profile, for_dub=for_dub, fallback_ai=fallback_ai,
+            progress_cb=progress_cb,
         )
         right, rf = await _translate_batch_resilient(
             ai, batch[mid:], target_language=target_language, context=context,
             profile=profile, for_dub=for_dub, fallback_ai=fallback_ai,
+            progress_cb=progress_cb,
         )
         return left + right, lf | {mid + i for i in rf}
 
@@ -580,78 +666,23 @@ async def translate_transcript(
     user_settings,
     for_dub: bool,
     checkpoint_dir: Path | None = None,
+    progress_cb=None,
 ) -> LocalizationTranscript:
     import hashlib
     ai = _profile_ai_client(user_settings, profile)
     if hasattr(ai, "max_retries"):
         ai.max_retries = 0
 
-    fallback_ai = None
-    fb_model = getattr(profile, "translation_fallback_model", None)
-    if fb_model:
-        from backend.core.ai_provider import AIClient, AIProvider, COMPATIBLE_PRESETS, compatible_base_url
-        from backend.config import settings as app_settings
-        import os
+    fallback_ai = _profile_ai_fallback_client(
+        user_settings,
+        profile,
+        "translation",
+        primary_ai=ai,
+    )
+    if fallback_ai is not None and hasattr(fallback_ai, "max_retries"):
+        fallback_ai.max_retries = 0
 
-        fb_provider_raw = (getattr(profile, "translation_fallback_provider", None) or "").strip().lower()
-        primary_provider_val = getattr(getattr(ai, "provider", None), "value", str(getattr(ai, "provider", ""))).strip().lower()
-        user_prov_val = (getattr(user_settings, "ai_provider", None) or "").strip().lower()
-
-        is_same_provider = (
-            not fb_provider_raw
-            or fb_provider_raw == primary_provider_val
-            or (user_prov_val and fb_provider_raw == user_prov_val)
-            or (fb_provider_raw == "compatible" and ai.provider == AIProvider.COMPATIBLE)
-        )
-
-        if is_same_provider:
-            fallback_ai = AIClient(
-                provider=ai.provider,
-                api_key=ai.api_key,
-                model=fb_model,
-                base_url=ai.base_url,
-                max_retries=0,
-            )
-        else:
-            try:
-                if fb_provider_raw in COMPATIBLE_PRESETS or fb_provider_raw == AIProvider.COMPATIBLE.value:
-                    resolved_base = compatible_base_url(fb_provider_raw)
-                    if not resolved_base:
-                        raise ValueError(f"Base URL is required for OpenAI-compatible fallback provider '{fb_provider_raw}'")
-                    if fb_provider_raw == "gemini":
-                        key = (getattr(app_settings, "GEMINI_API_KEY", "") or os.getenv("GEMINI_API_KEY", "")).strip()
-                        if not key:
-                            raise ValueError("Google Gemini API key is missing for fallback provider")
-                        fallback_ai = AIClient(
-                            provider=AIProvider.COMPATIBLE,
-                            api_key=key,
-                            model=fb_model,
-                            base_url=resolved_base,
-                            max_retries=0,
-                        )
-                    else:
-                        fallback_ai = AIClient(
-                            provider=AIProvider.COMPATIBLE,
-                            api_key="local",
-                            model=fb_model,
-                            base_url=resolved_base,
-                            max_retries=0,
-                        )
-                else:
-                    prov_enum = AIProvider(fb_provider_raw)
-                    env_key_name = f"{prov_enum.value.upper()}_API_KEY"
-                    key = (getattr(app_settings, env_key_name, "") or os.getenv(env_key_name, "")).strip()
-                    if not key:
-                        raise ValueError(f"Missing API key for fallback provider '{fb_provider_raw}' ({env_key_name})")
-                    fallback_ai = AIClient(
-                        provider=prov_enum,
-                        api_key=key,
-                        model=fb_model,
-                        max_retries=0,
-                    )
-            except Exception as fb_exc:
-                logger.error("Invalid fallback AI configuration: %s", fb_exc)
-                raise ValueError(f"Invalid fallback AI provider configuration: {fb_exc}") from fb_exc
+    # Fallback credentials/base/model are resolved from the saved provider registry.
 
     out = transcript.model_copy(deep=True)
     context = _translation_context(transcript)
@@ -705,6 +736,17 @@ async def translate_transcript(
             texts = completed_batches[batch_key]["texts"]
             failed = set()
         else:
+            total_batches = max(
+                1,
+                (len(out.segments) + _TRANSLATION_BATCH_SIZE - 1) // _TRANSLATION_BATCH_SIZE,
+            )
+            batch_number = (start // _TRANSLATION_BATCH_SIZE) + 1
+            await _emit_ai_progress(progress_cb, {
+                "event": "batch",
+                "stage": "translation",
+                "batch": batch_number,
+                "total_batches": total_batches,
+            })
             texts, failed = await _translate_batch_resilient(
                 ai, batch,
                 target_language=target_language,
@@ -712,6 +754,7 @@ async def translate_transcript(
                 profile=profile,
                 for_dub=for_dub,
                 fallback_ai=fallback_ai,
+                progress_cb=progress_cb,
             )
             if failed:
                 completed_batches.pop(batch_key, None)
