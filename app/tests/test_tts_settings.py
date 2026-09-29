@@ -130,6 +130,29 @@ async def test_tts_health_detects_missing_selected_elevenlabs_voice(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_elevenlabs_voice_discovery_also_returns_selectable_models(monkeypatch):
+    async def fake_voices(provider, key, *, base_url=None):
+        assert provider == tts_service.TTSProvider.ELEVENLABS
+        assert key == "secret"
+        return [{"voice_id": "voice-1", "name": "Voice 1"}]
+
+    async def fake_models(*, api_key, base_url=None):
+        assert api_key == "secret"
+        return [{"model_id": "eleven_multilingual_v2", "name": "Multilingual v2"}]
+
+    monkeypatch.setattr(settings_api, "_tts_probe_key", lambda body: _async_value("secret"))
+    monkeypatch.setattr(tts_service, "list_voices", fake_voices)
+    monkeypatch.setattr(eleven, "list_models", fake_models)
+
+    result = await settings_api.discover_tts_voices(
+        settings_api.TTSProbeRequest(provider="elevenlabs")
+    )
+
+    assert result["voices"][0]["voice_id"] == "voice-1"
+    assert result["models"][0]["model_id"] == "eleven_multilingual_v2"
+
+
+@pytest.mark.asyncio
 async def test_gpt_sovits_never_reports_a_verified_connection():
     result = await tts_service.test_tts_connection(
         provider=tts_service.TTSProvider.GPT_SOVITS,
