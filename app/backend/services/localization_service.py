@@ -1727,6 +1727,7 @@ async def _adapt_chunk_items(
     *,
     fallback_ai=None,
     route_state: _AIStageRouteState | None = None,
+    deadline_at: float | None = None,
     progress_cb=None,
     plan: list[PlanItem],
     chunk: DubbingChunk,
@@ -1833,6 +1834,7 @@ ITEMS:
             progress_cb=progress_cb,
             stage="rewrite",
             route_state=route_state,
+            deadline_at=deadline_at,
         )
     except Exception as exc:
         return record_unavailable(exc)
@@ -1840,8 +1842,62 @@ ITEMS:
     try:
         payload = json.loads(_strip_json_fence(raw))
     except Exception:
+        if route_state is not None and route_state.sticky_index + 1 < len(route_state.clients):
+            current = route_state.current
+            route_state.failure_chain.append({
+                "connection_id": getattr(current, "connection_name", None),
+                "provider": getattr(getattr(current, "provider", None), "value", str(getattr(current, "provider", ""))),
+                "model": getattr(current, "model", None),
+                "attempt": 1,
+                "error_type": "InvalidStructuredOutput",
+                "error": "rewrite json_parse",
+            })
+            route_state.sticky_index += 1
+            return await _adapt_chunk_items(
+                ai,
+                fallback_ai=fallback_ai,
+                route_state=route_state,
+                deadline_at=deadline_at,
+                progress_cb=progress_cb,
+                plan=plan,
+                chunk=chunk,
+                segment_by_id=segment_by_id,
+                target_language=target_language,
+                target_ms=target_ms,
+                profile=profile,
+                issues=issues,
+                state=state,
+                setup_error=setup_error,
+            )
         return record_invalid("json_parse")
     if not isinstance(payload, list) or len(payload) != len(items):
+        if route_state is not None and route_state.sticky_index + 1 < len(route_state.clients):
+            current = route_state.current
+            route_state.failure_chain.append({
+                "connection_id": getattr(current, "connection_name", None),
+                "provider": getattr(getattr(current, "provider", None), "value", str(getattr(current, "provider", ""))),
+                "model": getattr(current, "model", None),
+                "attempt": 1,
+                "error_type": "InvalidStructuredOutput",
+                "error": "rewrite shape_or_length",
+            })
+            route_state.sticky_index += 1
+            return await _adapt_chunk_items(
+                ai,
+                fallback_ai=fallback_ai,
+                route_state=route_state,
+                deadline_at=deadline_at,
+                progress_cb=progress_cb,
+                plan=plan,
+                chunk=chunk,
+                segment_by_id=segment_by_id,
+                target_language=target_language,
+                target_ms=target_ms,
+                profile=profile,
+                issues=issues,
+                state=state,
+                setup_error=setup_error,
+            )
         return record_invalid("shape_or_length")
     mapped: dict[str, str] = {}
     for item in payload:
@@ -1980,6 +2036,10 @@ async def synthesize_timed_dub(
         rewrite_ai_error = exc
         logger.warning("Duration rewrite AI routes unavailable: %s", exc)
 
+    rewrite_deadline_at = (
+        asyncio.get_running_loop().time() + float(profile.rewrite_total_timeout_s)
+        if ai is not None else None
+    )
     runtime = _tts_config(user_settings, profile, target_language)
 
     valid_segments = [
@@ -2132,7 +2192,8 @@ async def synthesize_timed_dub(
             and attempts < config.rewrite_max_attempts
         ):
             changed = await _adapt_chunk_items(
-                ai, fallback_ai=fallback_ai, route_state=route_state, progress_cb=progress_cb,
+                ai, fallback_ai=fallback_ai, route_state=route_state,
+                deadline_at=rewrite_deadline_at, progress_cb=progress_cb,
                 plan=plan, chunk=chunk, segment_by_id=segment_by_id,
                 target_language=target_language, target_ms=chunk.available_ms,
                 profile=profile, issues=issues, state=rewrite_state,
