@@ -81,6 +81,7 @@ def _load_ai_connections(settings_row) -> dict[str, dict]:
             "model": cfg.get("model"),
             "base_url": cfg.get("base_url"),
             "api_key_encrypted": cfg.get("api_key_encrypted"),
+            "archived": bool(cfg.get("archived")),
         }
 
     if not connections:
@@ -108,6 +109,7 @@ def _load_ai_connections(settings_row) -> dict[str, dict]:
             "model": getattr(settings_row, "ai_model", None),
             "base_url": getattr(settings_row, "ai_base_url", None),
             "api_key_encrypted": getattr(settings_row, "ai_api_key_encrypted", None),
+            "archived": False,
         }
     return connections
 
@@ -127,6 +129,7 @@ def _load_tts_connections(settings_row) -> dict[str, dict]:
             "base_url": cfg.get("base_url"),
             "region": cfg.get("region"),
             "api_key_encrypted": cfg.get("api_key_encrypted"),
+            "archived": bool(cfg.get("archived")),
         }
 
     if not connections:
@@ -158,6 +161,7 @@ def _load_tts_connections(settings_row) -> dict[str, dict]:
             "base_url": getattr(settings_row, "tts_base_url", None),
             "region": getattr(settings_row, "tts_region", None),
             "api_key_encrypted": getattr(settings_row, "tts_api_key_encrypted", None),
+            "archived": False,
         }
     return connections
 
@@ -173,6 +177,7 @@ def _public_ai_connections(settings_row) -> dict[str, dict]:
             "api_key_set": bool(cfg.get("api_key_encrypted")),
         }
         for connection_id, cfg in _load_ai_connections(settings_row).items()
+        if not cfg.get("archived")
     }
 
 
@@ -189,13 +194,14 @@ def _public_tts_connections(settings_row) -> dict[str, dict]:
             "api_key_set": bool(cfg.get("api_key_encrypted")),
         }
         for connection_id, cfg in _load_tts_connections(settings_row).items()
+        if not cfg.get("archived")
     }
 
 
 def _active_ai_connection_id(settings_row) -> str | None:
     connections = _load_ai_connections(settings_row)
     explicit = (getattr(settings_row, "ai_connection_id", None) or "").strip().lower()
-    if explicit in connections:
+    if explicit in connections and not connections[explicit].get("archived"):
         return explicit
     provider = (getattr(settings_row, "ai_provider", None) or "").strip().lower()
     candidate = _safe_connection_id(provider) if provider else None
@@ -205,7 +211,7 @@ def _active_ai_connection_id(settings_row) -> str | None:
 def _active_tts_connection_id(settings_row) -> str | None:
     connections = _load_tts_connections(settings_row)
     explicit = (getattr(settings_row, "tts_connection_id", None) or "").strip().lower()
-    if explicit in connections:
+    if explicit in connections and not connections[explicit].get("archived"):
         return explicit
     provider = (getattr(settings_row, "tts_provider", None) or "").strip().lower()
     candidate = _safe_connection_id(provider) if provider else None
@@ -703,11 +709,19 @@ def _profile_references_connection(settings_row, connection_id: str, *, tts: boo
         if tts:
             if str(profile.get("tts_connection_id") or "").strip().lower() == connection_id:
                 return True
+            if str(profile.get("tts_provider") or "").strip().lower() == connection_id:
+                return True
             continue
         for key in ("translation_routes", "rewrite_routes"):
             for route in profile.get(key, []) or []:
                 if isinstance(route, dict) and str(route.get("connection_id") or "").strip().lower() == connection_id:
                     return True
+        for key in (
+            "translation_provider", "translation_fallback_provider",
+            "rewrite_provider", "rewrite_fallback_provider",
+        ):
+            if str(profile.get(key) or "").strip().lower() == connection_id:
+                return True
     return False
 
 
@@ -726,8 +740,18 @@ async def upsert_ai_connection(body: AIConnectionRequest):
             s = UserSettings(user_id="local")
             db.add(s)
         connections = _load_ai_connections(s)
+        if body.connection_id is None and connection_id in connections and not connections[connection_id].get("archived"):
+            raise HTTPException(
+                status_code=409,
+                detail=f"AI connection id '{connection_id}' already exists. Choose another name or edit the existing connection.",
+            )
         existing = connections.get(connection_id, {})
-        encrypted = existing.get("api_key_encrypted")
+        provider_changed = bool(
+            existing.get("provider")
+            and str(existing.get("provider")).strip().lower() != provider
+        )
+        # Provider-scoped credentials must never cross provider boundaries.
+        encrypted = None if provider_changed else existing.get("api_key_encrypted")
         if body.api_key is not None:
             encrypted = encrypt(body.api_key) if body.api_key else None
         key = decrypt_safe(encrypted) if encrypted else ""
@@ -750,6 +774,7 @@ async def upsert_ai_connection(body: AIConnectionRequest):
             "model": body.model or None,
             "base_url": body.base_url.strip() if body.base_url else None,
             "api_key_encrypted": encrypted,
+            "archived": False,
         }
         s.ai_connections_json = _save_provider_registry(connections)
         if body.activate:
@@ -778,7 +803,9 @@ async def delete_ai_connection(connection_id: str):
         connections = _load_ai_connections(s)
         if connection_id not in connections:
             raise HTTPException(status_code=404, detail="AI connection not found")
-        connections.pop(connection_id)
+        archived = dict(connections[connection_id])
+        archived["archived"] = True
+        connections[connection_id] = archived
         s.ai_connections_json = _save_provider_registry(connections)
         await db.commit()
     return await get_settings()
@@ -802,8 +829,17 @@ async def upsert_tts_connection(body: TTSConnectionRequest):
             s = UserSettings(user_id="local")
             db.add(s)
         connections = _load_tts_connections(s)
+        if body.connection_id is None and connection_id in connections and not connections[connection_id].get("archived"):
+            raise HTTPException(
+                status_code=409,
+                detail=f"TTS connection id '{connection_id}' already exists. Choose another name or edit the existing connection.",
+            )
         existing = connections.get(connection_id, {})
-        encrypted = existing.get("api_key_encrypted")
+        provider_changed = bool(
+            existing.get("provider")
+            and str(existing.get("provider")).strip().lower() != provider
+        )
+        encrypted = None if provider_changed else existing.get("api_key_encrypted")
         if body.api_key is not None:
             encrypted = encrypt(body.api_key) if body.api_key else None
         connections[connection_id] = {
@@ -814,6 +850,7 @@ async def upsert_tts_connection(body: TTSConnectionRequest):
             "base_url": body.base_url.strip() if body.base_url else None,
             "region": body.region.strip() if body.region else None,
             "api_key_encrypted": encrypted,
+            "archived": False,
         }
         s.tts_connections_json = _save_provider_registry(connections)
         if body.activate:
@@ -844,7 +881,9 @@ async def delete_tts_connection(connection_id: str):
         connections = _load_tts_connections(s)
         if connection_id not in connections:
             raise HTTPException(status_code=404, detail="TTS connection not found")
-        connections.pop(connection_id)
+        archived = dict(connections[connection_id])
+        archived["archived"] = True
+        connections[connection_id] = archived
         s.tts_connections_json = _save_provider_registry(connections)
         await db.commit()
     return await get_settings()
