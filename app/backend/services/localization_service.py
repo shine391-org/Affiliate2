@@ -714,6 +714,18 @@ async def _emit_ai_progress(progress_cb, payload: dict) -> None:
         await result
 
 
+def _attach_ai_failure_context(exc: Exception, stage: str, route_state: _AIStageRouteState | None):
+    if route_state is None:
+        return exc
+    try:
+        exc.ai_stage = stage
+        exc.ai_failure_chain = list(route_state.failure_chain)
+        exc.ai_selected_connection = getattr(route_state.current, "connection_name", None)
+    except Exception:
+        pass
+    return exc
+
+
 async def _call_ai_chat_resilient(
     ai,
     fallback_ai,
@@ -776,9 +788,10 @@ async def _call_ai_chat_resilient(
             global_remaining = deadline - loop.time()
             provider_remaining = provider_deadline - loop.time()
             if global_remaining <= 0:
-                raise TimeoutError(
+                timeout_error = TimeoutError(
                     f"{stage} AI deadline exceeded after {int(total_timeout_s)}s"
-                ) from last_error
+                )
+                raise _attach_ai_failure_context(timeout_error, stage, route_state) from last_error
             if provider_remaining <= 0:
                 break
 
@@ -866,11 +879,12 @@ async def _call_ai_chat_resilient(
             })
 
     if loop.time() >= deadline:
-        raise TimeoutError(
+        timeout_error = TimeoutError(
             f"{stage} AI deadline exceeded after {int(total_timeout_s)}s"
-        ) from last_error
+        )
+        raise _attach_ai_failure_context(timeout_error, stage, route_state) from last_error
     if last_error is not None:
-        raise last_error
+        raise _attach_ai_failure_context(last_error, stage, route_state)
     raise RuntimeError(f"{stage} AI has no usable provider")
 
 
@@ -1053,6 +1067,12 @@ async def translate_transcript(
         raise RuntimeError(
             f"Translation left {failed_total} segment(s) untranslated under strict QC."
         )
+    out.metadata["translation_ai"] = {
+        "selected_connection_id": getattr(route_state.current, "connection_name", None),
+        "route_chain": route_fingerprint,
+        "failure_chain": list(route_state.failure_chain),
+        "sticky_route_index": route_state.sticky_index,
+    }
     return out
 
 
@@ -2297,6 +2317,19 @@ async def synthesize_timed_dub(
         "rewrite_count": rewrite_count,
         "video_slowdown": video_slowdown,
         "issues": issues,
+        "rewrite_ai": {
+            "selected_connection_id": (
+                getattr(route_state.current, "connection_name", None)
+                if route_state is not None else None
+            ),
+            "failure_chain": (
+                list(route_state.failure_chain)
+                if route_state is not None else []
+            ),
+            "sticky_route_index": (
+                route_state.sticky_index if route_state is not None else None
+            ),
+        },
     }
     return TimedDubResult(
         transcript=out,
