@@ -586,8 +586,8 @@ async def prepare_semantic_transcript(
             })
         return normalized
 
-    route_state = {"sticky_index": 0}
-    return await refine_semantic_cues_with_ai(
+    route_state = {"sticky_index": 0, "failure_chain": []}
+    refined = await refine_semantic_cues_with_ai(
         normalized,
         route_clients[0],
         fallback_ai=(route_clients[1] if len(route_clients) > 1 else None),
@@ -598,6 +598,18 @@ async def prepare_semantic_transcript(
         total_timeout_s=profile.semantic_ai_total_timeout_s,
         progress_cb=progress_cb,
     )
+    selected_index = min(
+        int(route_state.get("sticky_index", 0) or 0),
+        len(route_clients) - 1,
+    )
+    refined.metadata["semantic_ai"] = {
+        "selected_connection_id": getattr(
+            route_clients[selected_index], "connection_name", None
+        ),
+        "failure_chain": list(route_state.get("failure_chain") or []),
+        "sticky_route_index": selected_index,
+    }
+    return refined
 
 
 def _strip_json_fence(raw: str) -> str:
