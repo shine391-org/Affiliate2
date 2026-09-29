@@ -518,44 +518,33 @@ async def prepare_semantic_transcript(
     if not profile.semantic_segmentation or len(normalized.segments) <= 1:
         return normalized
 
-    primary_error = None
     try:
-        ai = _profile_ai_client(user_settings, profile, "translation")
-    except Exception as exc:
-        primary_error = exc
-        ai = None
-
-    fallback_ai = None
-    try:
-        fallback_ai = _profile_ai_fallback_client(
-            user_settings,
-            profile,
-            "translation",
-            primary_ai=ai,
+        route_clients = _profile_ai_route_clients(
+            user_settings, profile, "translation"
         )
     except Exception as exc:
-        logger.warning("Semantic fallback AI configuration unavailable: %s", exc)
+        # Semantic AI is optional. Configuration errors are surfaced by the
+        # localization preflight before heavy work; if a resumed legacy job
+        # reaches here, degrade safely rather than hanging/failing the video.
+        logger.warning(
+            "Semantic AI route unavailable; using deterministic segmentation: %s",
+            exc,
+        )
+        if progress_cb is not None:
+            await _emit_ai_progress(progress_cb, {
+                "event": "deterministic_fallback",
+                "stage": "semantic",
+                "error": str(exc)[:220],
+            })
+        return normalized
 
-    if ai is None:
-        if fallback_ai is not None:
-            ai, fallback_ai = fallback_ai, None
-        else:
-            logger.warning(
-                "Semantic AI unavailable; using deterministic segmentation: %s",
-                primary_error,
-            )
-            if progress_cb is not None:
-                await _emit_ai_progress(progress_cb, {
-                    "event": "deterministic_fallback",
-                    "stage": "semantic",
-                    "error": str(primary_error or "AI unavailable")[:220],
-                })
-            return normalized
-
+    route_state = {"sticky_index": 0}
     return await refine_semantic_cues_with_ai(
         normalized,
-        ai,
-        fallback_ai=fallback_ai,
+        route_clients[0],
+        fallback_ai=(route_clients[1] if len(route_clients) > 1 else None),
+        route_clients=route_clients,
+        route_state=route_state,
         attempt_timeout_s=profile.semantic_ai_attempt_timeout_s,
         max_attempts=profile.semantic_ai_retry_attempts,
         total_timeout_s=profile.semantic_ai_total_timeout_s,
@@ -841,6 +830,7 @@ async def _translate_batch_resilient(
     ai,
     batch: list[LocalizationSegment],
     *,
+    route_state: _AIStageRouteState | None = None,
     target_language: str,
     context: str,
     profile: LocalizationProfile,
@@ -865,6 +855,7 @@ async def _translate_batch_resilient(
         total_timeout_s=profile.translation_total_timeout_s,
         progress_cb=progress_cb,
         stage="translation",
+        route_state=route_state,
     )
     try:
         return _validate_translation_payload(raw, batch), set()
@@ -880,7 +871,8 @@ async def _translate_batch_resilient(
         })
         mid = len(batch) // 2
         left, lf = await _translate_batch_resilient(
-            ai, batch[:mid], target_language=target_language, context=context,
+            ai, batch[:mid], route_state=route_state,
+            target_language=target_language, context=context,
             profile=profile, for_dub=for_dub, fallback_ai=fallback_ai,
             progress_cb=progress_cb,
         )
@@ -903,46 +895,12 @@ async def translate_transcript(
     progress_cb=None,
 ) -> LocalizationTranscript:
     import hashlib
-    primary_error = None
-    try:
-        ai = _profile_ai_client(user_settings, profile)
-    except Exception as exc:
-        primary_error = exc
-        ai = None
-
-    fallback_ai = None
-    try:
-        fallback_ai = _profile_ai_fallback_client(
-            user_settings,
-            profile,
-            "translation",
-            primary_ai=ai,
-        )
-    except Exception as exc:
-        if ai is None:
-            raise ValueError(
-                f"Primary and fallback translation AI are unavailable: primary={primary_error}; fallback={exc}"
-            ) from exc
-        logger.warning("Translation fallback AI configuration unavailable: %s", exc)
-
-    if ai is None:
-        if fallback_ai is None:
-            raise ValueError(f"Translation AI is unavailable: {primary_error}") from primary_error
-        ai, fallback_ai = fallback_ai, None
-        await _emit_ai_progress(progress_cb, {
-            "event": "switch_fallback",
-            "stage": "translation",
-            "provider": getattr(ai, "connection_name", None) or getattr(getattr(ai, "provider", None), "value", str(getattr(ai, "provider", ""))),
-            "model": getattr(ai, "model", None),
-            "reason": str(primary_error)[:220],
-        })
-
-    if hasattr(ai, "max_retries"):
-        ai.max_retries = 0
-    if fallback_ai is not None and hasattr(fallback_ai, "max_retries"):
-        fallback_ai.max_retries = 0
-
-    # Fallback credentials/base/model are resolved from the saved provider registry.
+    route_clients = _profile_ai_route_clients(
+        user_settings, profile, "translation"
+    )
+    route_state = _AIStageRouteState(route_clients)
+    ai = route_clients[0]
+    fallback_ai = route_clients[1] if len(route_clients) > 1 else None
 
     out = transcript.model_copy(deep=True)
     context = _translation_context(transcript)
@@ -954,25 +912,23 @@ async def translate_transcript(
     ).hexdigest()[:16]
     glossary_str = json.dumps(getattr(profile, "glossary", {}) or {}, sort_keys=True, ensure_ascii=False)
     glossary_hash = hashlib.sha256(glossary_str.encode("utf-8")).hexdigest()[:16]
-    provider_name = getattr(getattr(ai, "provider", None), "value", str(getattr(ai, "provider", "")))
-    fallback_provider_name = getattr(
-        getattr(fallback_ai, "provider", None),
-        "value",
-        str(getattr(fallback_ai, "provider", "")),
-    ) if fallback_ai else ""
+    route_fingerprint = [
+        {
+            "connection_id": getattr(client, "connection_name", None),
+            "provider": getattr(getattr(client, "provider", None), "value", str(getattr(client, "provider", ""))),
+            "model": getattr(client, "model", ""),
+            "base_url": str(getattr(client, "base_url", "") or "").rstrip("/"),
+        }
+        for client in route_clients
+    ]
     checkpoint_meta = {
         "semantic_hash": semantic_sig,
         "target_language": target_language,
-        "provider": provider_name,
-        "model": getattr(ai, "model", ""),
-        "base_url": str(getattr(ai, "base_url", "") or "").rstrip("/"),
+        "routes": route_fingerprint,
         "preset": profile.translation_preset,
         "instructions": (getattr(profile, "translation_instructions", "") or "").strip(),
         "guardrails": (getattr(profile, "translation_guardrails", "") or "").strip(),
         "glossary_hash": glossary_hash,
-        "fallback_provider": fallback_provider_name,
-        "fallback_model": getattr(fallback_ai, "model", "") if fallback_ai else "",
-        "fallback_base_url": str(getattr(fallback_ai, "base_url", "") or "").rstrip("/") if fallback_ai else "",
     }
     completed_batches: dict[str, dict] = {}
     if checkpoint_file and checkpoint_file.exists():
@@ -1008,7 +964,7 @@ async def translate_transcript(
                 "total_batches": total_batches,
             })
             texts, failed = await _translate_batch_resilient(
-                ai, batch,
+                ai, batch, route_state=route_state,
                 target_language=target_language,
                 context=context,
                 profile=profile,
