@@ -871,9 +871,99 @@ def _format_chain_for_source(
     resolved_via: str | None,
     format_chain: list[str],
 ) -> list[str]:
-    if resolved_via == "douyin_cdp" and "douyinvod" in str(effective_url or ""):
+    # Every douyin_cdp result is already one signed direct media object.
+    # GenericExtractor frequently exposes no height metadata for douyinvod,
+    # zjcdn, bytecdn or aweme CDN hosts, so height selectors cannot reliably
+    # select it. Download the verified object once; explicit quality ceilings
+    # are enforced on the owned file immediately afterwards.
+    if resolved_via == "douyin_cdp":
         return list(DIRECT_MEDIA_FORMAT_CHAIN)
     return format_chain
+
+
+_DIRECT_QUALITY_CAPS = {
+    "2160p": 2160,
+    "1440p": 1440,
+    "1080p": 1080,
+    "720p": 720,
+    "480p": 480,
+}
+
+
+def _enforce_direct_media_quality_cap(
+    video_path: Path,
+    requested_quality: str | None,
+) -> Path:
+    """Downscale a resolved direct media file when it exceeds an explicit cap.
+
+    A direct Douyin CDN URL has one already-selected stream, so yt-dlp cannot
+    choose a lower format by height. The user's explicit ceiling is still a
+    hard contract: if the verified media is taller, transcode once after
+    download and before audio extraction/metadata reporting.
+    """
+    cap = _DIRECT_QUALITY_CAPS.get(str(requested_quality or "").lower())
+    if not cap or not video_path or not video_path.exists():
+        return video_path
+
+    from backend.services.video_utils import probe_media_details
+
+    details = probe_media_details(video_path) or {}
+    height = int(details.get("height") or 0)
+    width = int(details.get("width") or 0)
+    if height <= 0 or height <= cap:
+        return video_path
+
+    # Preserve aspect ratio and keep encoder dimensions even.
+    if width > 0:
+        scaled_width = max(2, int(round(width * (cap / height))))
+        scaled_width -= scaled_width % 2
+    else:
+        scaled_width = -2
+
+    temp = video_path.with_name(f"{video_path.stem}.quality-cap.tmp.mp4")
+    final = video_path if video_path.suffix.lower() == ".mp4" else video_path.with_suffix(".mp4")
+    cmd = [
+        "ffmpeg", "-y", "-i", str(video_path),
+        "-map", "0:v:0", "-map", "0:a?",
+        "-vf", f"scale={scaled_width}:{cap}",
+        "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+        "-c:a", "aac", "-b:a", "192k",
+        "-movflags", "+faststart",
+        str(temp),
+    ]
+    import subprocess
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+    if result.returncode != 0 or not temp.exists() or temp.stat().st_size <= 0:
+        try:
+            temp.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise DownloadError(
+            "Downloaded verified Douyin media exceeded the requested quality "
+            f"ceiling ({height}p > {cap}p), but FFmpeg downscale failed: "
+            f"{(result.stderr or '')[-400:]}"
+        )
+
+    if final != video_path:
+        try:
+            final.unlink(missing_ok=True)
+        except Exception:
+            pass
+        temp.replace(final)
+        try:
+            video_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+    else:
+        temp.replace(video_path)
+
+    capped = probe_media_details(final) or {}
+    capped_height = int(capped.get("height") or 0)
+    if capped_height > cap:
+        raise DownloadError(
+            f"Quality cap enforcement failed: delivered {capped_height}p > {cap}p."
+        )
+    return final
 
 
 def _find_actual_video_file(output_dir: Path, filename_stem: str) -> Path | None:
@@ -1240,6 +1330,12 @@ async def download_video(
             if actual:
                 logger.info(f"Video file extension changed: expected {video_path.suffix}, found {actual.suffix}")
                 video_path = actual
+
+        if resolved_via == "douyin_cdp" and video_path and video_path.exists():
+            video_path = _enforce_direct_media_quality_cap(
+                video_path,
+                _opts.get("quality"),
+            )
 
         # Extract subtitles from downloaded files
         subtitles = _collect_subtitles(output_dir, file_stem_resolved)
