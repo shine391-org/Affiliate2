@@ -322,6 +322,9 @@ async def test_explicit_tts_rebind_updates_only_tts_and_invalidates_from_dubbing
             self.effective_profile = value
             events.append(("profile", dict(value)))
 
+        def update_request(self, value):
+            self.request = value
+
         def invalidate_from(self, stage, *, delete_artifacts, preserve_files=set()):
             events.append(("invalidate", stage, delete_artifacts, set(preserve_files)))
 
@@ -355,6 +358,7 @@ async def test_explicit_tts_rebind_updates_only_tts_and_invalidates_from_dubbing
     assert run.effective_profile["tts_provider"] == "edge_tts"
     assert run.effective_profile["tts_voice"] == "vi-VN-HoaiMyNeural"
     assert run.effective_profile["translation_model"] == "qwen-translation"
+    assert run.request["tts_binding_mode"] == "inherit"
     assert ("invalidate", "dubbing", True, set()) in events
     assert not any(event[0] == "invalidate" and event[1] != "dubbing" for event in events)
     assert events[-1] == ("dispatch", run.job_id)
@@ -371,6 +375,9 @@ async def test_tts_rebind_voice_override_still_invalidates_only_dubbing(monkeypa
 
         def update_effective_profile(self, value):
             self.effective_profile = value
+
+        def update_request(self, value):
+            self.request = value
 
         def invalidate_from(self, stage, *, delete_artifacts, preserve_files=set()):
             events.append(stage)
@@ -401,6 +408,7 @@ async def test_tts_rebind_voice_override_still_invalidates_only_dubbing(monkeypa
 
     assert events == ["dubbing"]
     assert run.effective_profile["translation_model"] == "keep-me"
+    assert run.request["tts_binding_mode"] == "inherit"
 
 
 @pytest.mark.asyncio
@@ -429,6 +437,9 @@ async def test_tts_rebind_to_other_provider_drops_provider_scoped_voice_state(mo
 
         def update_effective_profile(self, value):
             self.effective_profile = value
+
+        def update_request(self, value):
+            self.request = value
 
         def invalidate_from(self, stage, *, delete_artifacts, preserve_files=set()):
             events.append(stage)
@@ -466,6 +477,7 @@ async def test_tts_rebind_to_other_provider_drops_provider_scoped_voice_state(mo
     # Translation/ASR artifacts and configuration are untouched.
     assert profile["translation_model"] == "qwen-translation"
     assert profile["asr_model"] == "large-v3"
+    assert run.request["tts_binding_mode"] == "inherit"
     assert events == ["dubbing"]
     assert "speaker_voices" in result["cleared_profile_fields"]
 
