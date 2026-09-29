@@ -390,6 +390,15 @@ async def _semantic_chat_with_fallback(
                     route_state["sticky_index"] = route_index
                 return result
             except Exception as exc:
+                if route_clients and route_state is not None:
+                    route_state.setdefault("failure_chain", []).append({
+                        "connection_id": getattr(ai, "connection_name", None),
+                        "provider": getattr(getattr(ai, "provider", None), "value", str(getattr(ai, "provider", ""))),
+                        "model": getattr(ai, "model", None),
+                        "attempt": attempt,
+                        "error_type": type(exc).__name__,
+                        "error": str(exc)[:220],
+                    })
                 await _emit_semantic_progress(progress_cb, {
                     "event": "error",
                     "window": window_index,
