@@ -28,7 +28,7 @@ test("localization profile allows pinned Edge and clears provider-scoped TTS sta
   assert.ok(profiles.includes('ghim Edge TTS'))
   assert.ok(profiles.includes('không kế thừa API key, model, Base URL hoặc voice'))
   assert.ok(profiles.includes('Dùng TTS hiện tại cho hồ sơ'))
-  assert.ok(profiles.includes('provider hiện tại hoặc Edge TTS'))
+  assert.ok(profiles.includes('provider active hoặc Edge TTS tự chứa'))
   assert.ok(profiles.includes('speaker_voices: {}'))
   assert.ok(profiles.includes('speaker_reference_audio: {}'))
   assert.ok(profiles.includes('tts_reference_audio: null'))
