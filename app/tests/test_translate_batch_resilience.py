@@ -2164,3 +2164,91 @@ def test_materialized_env_provider_can_resolve_again_without_saved_registry(monk
     assert client.api_key == "env-openai-key"
     assert client.model == "materialized-model"
     assert client.connection_name == "openai"
+
+
+
+@pytest.mark.asyncio
+async def test_three_route_chain_sticks_to_second_fallback_after_success():
+    class Transient503(RuntimeError):
+        status_code = 503
+
+    class Client:
+        def __init__(self, name, answer=None):
+            self.connection_name = name
+            self.provider = SimpleNamespace(value="compatible")
+            self.model = name + "-model"
+            self.max_retries = None
+            self.answer = answer
+            self.calls = 0
+
+        async def chat(self, **kwargs):
+            self.calls += 1
+            if self.answer is None:
+                raise Transient503(self.connection_name + " unavailable")
+            return self.answer
+
+    primary = Client("hermes-a")
+    fallback1 = Client("hermes-b")
+    fallback2 = Client("lmstudio", "ok")
+    state = ls._AIStageRouteState([primary, fallback1, fallback2])
+
+    first = await ls._call_ai_chat_resilient(
+        primary,
+        fallback1,
+        messages=[{"role": "user", "content": "x"}],
+        max_tokens=8,
+        max_attempts=1,
+        attempt_timeout_s=0.1,
+        total_timeout_s=1,
+        route_state=state,
+    )
+    assert first == "ok"
+    assert state.sticky_index == 2
+    assert [primary.calls, fallback1.calls, fallback2.calls] == [1, 1, 1]
+
+    second = await ls._call_ai_chat_resilient(
+        primary,
+        fallback1,
+        messages=[{"role": "user", "content": "y"}],
+        max_tokens=8,
+        max_attempts=1,
+        attempt_timeout_s=0.1,
+        total_timeout_s=1,
+        route_state=state,
+    )
+    assert second == "ok"
+    assert [primary.calls, fallback1.calls, fallback2.calls] == [1, 1, 2]
+
+
+@pytest.mark.asyncio
+async def test_exhausted_route_chain_attaches_non_secret_failure_history():
+    class Dead(RuntimeError):
+        status_code = 503
+
+    class Client:
+        def __init__(self, name):
+            self.connection_name = name
+            self.provider = SimpleNamespace(value="compatible")
+            self.model = name + "-model"
+            self.max_retries = None
+
+        async def chat(self, **kwargs):
+            raise Dead(self.connection_name + " failed")
+
+    clients = [Client("a"), Client("b"), Client("c")]
+    state = ls._AIStageRouteState(clients)
+
+    with pytest.raises(Dead) as exc:
+        await ls._call_ai_chat_resilient(
+            clients[0],
+            clients[1],
+            messages=[{"role": "user", "content": "x"}],
+            max_tokens=8,
+            max_attempts=1,
+            attempt_timeout_s=0.1,
+            total_timeout_s=1,
+            route_state=state,
+        )
+
+    assert [x["connection_id"] for x in exc.value.ai_failure_chain] == ["a", "b", "c"]
+    assert all("api_key" not in item for item in exc.value.ai_failure_chain)
