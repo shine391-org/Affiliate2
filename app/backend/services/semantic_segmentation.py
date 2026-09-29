@@ -329,14 +329,21 @@ async def _semantic_chat_with_fallback(
     if fallback_ai is not None:
         clients.append(("fallback", fallback_ai))
 
-    for role, ai in clients:
-        if ai is None:
-            continue
+    usable_clients = [(role, ai) for role, ai in clients if ai is not None]
+    for client_index, (role, ai) in enumerate(usable_clients):
         if hasattr(ai, "max_retries"):
             ai.max_retries = 0
+
+        providers_left = len(usable_clients) - client_index
+        provider_deadline = min(
+            deadline_at,
+            loop.time() + max(0.0, (deadline_at - loop.time()) / max(providers_left, 1)),
+        )
+
         for attempt in range(1, max_attempts + 1):
-            remaining = deadline_at - loop.time()
-            if remaining <= 0:
+            global_remaining = deadline_at - loop.time()
+            provider_remaining = provider_deadline - loop.time()
+            if global_remaining <= 0:
                 await _emit_semantic_progress(progress_cb, {
                     "event": "budget_exhausted",
                     "window": window_index,
@@ -344,7 +351,13 @@ async def _semantic_chat_with_fallback(
                     "role": role,
                 })
                 return None
-            timeout_s = min(float(attempt_timeout_s), remaining)
+            if provider_remaining <= 0:
+                break
+            timeout_s = min(
+                float(attempt_timeout_s),
+                global_remaining,
+                provider_remaining,
+            )
             await _emit_semantic_progress(progress_cb, {
                 "event": "attempt",
                 "window": window_index,
@@ -374,7 +387,13 @@ async def _semantic_chat_with_fallback(
                 if not is_transient_ai_error(exc):
                     break
                 if attempt < max_attempts:
-                    await asyncio.sleep(min(1.5 * attempt, max(0.0, deadline_at - loop.time())))
+                    remaining = min(
+                        deadline_at - loop.time(),
+                        provider_deadline - loop.time(),
+                    )
+                    if remaining <= 0:
+                        break
+                    await asyncio.sleep(min(1.5 * attempt, max(0.0, remaining)))
 
     return None
 
