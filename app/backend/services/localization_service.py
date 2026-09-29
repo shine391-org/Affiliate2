@@ -140,18 +140,31 @@ def materialize_localization_profile(
     safe configuration and must not drift silently between resume/rerun calls.
     """
     translation_ai = _profile_ai_client(user_settings, profile, "translation")
+    translation_selector = (
+        (profile.translation_provider or "").strip().lower()
+        or (getattr(user_settings, "ai_provider", None) or "").strip().lower()
+        or translation_ai.provider.value
+    )
 
     data = profile.model_dump()
     data.update({
-        "translation_provider": translation_ai.provider.value,
+        # Preserve the user-facing connection selector (e.g. lmstudio) instead
+        # of collapsing every compatible endpoint to provider="compatible".
+        # Resume/fallback then resolves the same saved endpoint unambiguously.
+        "translation_provider": translation_selector,
         "translation_model": translation_ai.model,
         "translation_base_url": translation_ai.base_url,
     })
     if for_dub:
         rewrite_ai = _profile_ai_client(user_settings, profile, "rewrite")
+        rewrite_selector = (
+            (profile.rewrite_provider or "").strip().lower()
+            or (getattr(user_settings, "ai_provider", None) or "").strip().lower()
+            or rewrite_ai.provider.value
+        )
         tts = _tts_config(user_settings, profile, target_language)
         data.update({
-            "rewrite_provider": rewrite_ai.provider.value,
+            "rewrite_provider": rewrite_selector,
             "rewrite_model": rewrite_ai.model,
             "rewrite_base_url": rewrite_ai.base_url,
             "tts_provider": getattr(tts.provider, "value", str(tts.provider)),
@@ -204,51 +217,131 @@ async def transcribe_for_localization(
     return transcript
 
 
+def _saved_ai_provider_config(user_settings, provider_name: str) -> dict:
+    """Return one saved provider connection without exposing its secret."""
+    provider = (provider_name or "").strip().lower()
+    if not provider:
+        return {}
+    active = (getattr(user_settings, "ai_provider", None) or "").strip().lower()
+    if provider == active:
+        return {
+            "model": getattr(user_settings, "ai_model", None),
+            "base_url": getattr(user_settings, "ai_base_url", None),
+            "api_key_encrypted": getattr(user_settings, "ai_api_key_encrypted", None),
+        }
+    try:
+        registry = json.loads(
+            getattr(user_settings, "ai_provider_profiles_json", None) or "{}"
+        )
+    except (TypeError, json.JSONDecodeError):
+        registry = {}
+    value = registry.get(provider) if isinstance(registry, dict) else None
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _ai_client_for_selector(
+    user_settings,
+    selector: str | None,
+    *,
+    model: str | None = None,
+    base_url: str | None = None,
+):
+    """Resolve active OR previously-saved AI provider configuration.
+
+    This is the runtime half of the provider registry already persisted by
+    Settings. A profile can therefore use Hermes/compatible as primary and an
+    inactive LM Studio/Ollama/OpenRouter/Gemini connection as fallback without
+    switching the global active provider first.
+    """
+    from backend.core.ai_provider import get_ai_client, make_ai_client
+    from backend.core.crypto import decrypt_safe
+
+    requested = (selector or "").strip().lower()
+    active = (getattr(user_settings, "ai_provider", None) or "").strip().lower()
+
+    if not requested or requested == active:
+        ai = get_ai_client(user_settings)
+        if model:
+            ai.model = model
+        if base_url:
+            ai.base_url = base_url.rstrip("/")
+        ai.max_retries = 0
+        return ai
+
+    saved = _saved_ai_provider_config(user_settings, requested)
+    saved_model = saved.get("model")
+    saved_base = saved.get("base_url")
+    encrypted = saved.get("api_key_encrypted")
+    key = decrypt_safe(encrypted) if encrypted else ""
+
+    ai = make_ai_client(
+        provider_name=requested,
+        api_key=key or "",
+        model=(model or saved_model),
+        base_url=(base_url or saved_base),
+    )
+    ai.max_retries = 0
+    return ai
+
+
 def _profile_ai_client(
     user_settings,
     profile: LocalizationProfile,
     purpose: str = "translation",
 ):
-    """Resolve one canonical AI connection with stage-specific model routing.
-
-    Settings own credentials/provider connectivity. A profile may pin a model
-    (and compatible base URL) separately for C6 translation vs C7 duration
-    rewrite, but it may not reinterpret another provider's secret.
-    """
-    from backend.core.ai_provider import AIProvider, get_ai_client
-
-    ai = get_ai_client(user_settings)
+    """Resolve the primary AI connection selected by a localization profile."""
     if purpose == "rewrite":
-        requested = (profile.rewrite_provider or "").strip().lower()
+        selector = profile.rewrite_provider
         model = profile.rewrite_model
         base_url = profile.rewrite_base_url
-        field_prefix = "rewrite"
     else:
-        requested = (profile.translation_provider or "").strip().lower()
+        selector = profile.translation_provider
         model = profile.translation_model
         base_url = profile.translation_base_url
-        field_prefix = "translation"
+    return _ai_client_for_selector(
+        user_settings,
+        selector,
+        model=model,
+        base_url=base_url,
+    )
 
-    configured = (getattr(user_settings, "ai_provider", None) or "").strip().lower()
-    if requested:
-        generic_compatible = (
-            requested == "compatible"
-            and ai.provider == AIProvider.COMPATIBLE
+
+def _profile_ai_fallback_client(
+    user_settings,
+    profile: LocalizationProfile,
+    purpose: str = "translation",
+    *,
+    primary_ai=None,
+):
+    """Resolve a distinct saved fallback connection/model when configured."""
+    if purpose == "rewrite":
+        selector = profile.rewrite_fallback_provider
+        model = profile.rewrite_fallback_model
+        base_url = profile.rewrite_fallback_base_url
+    else:
+        selector = profile.translation_fallback_provider
+        model = profile.translation_fallback_model
+        base_url = profile.translation_fallback_base_url
+
+    if not selector and not model and not base_url:
+        return None
+
+    if not selector and primary_ai is not None:
+        from backend.core.ai_provider import AIClient
+        return AIClient(
+            provider=primary_ai.provider,
+            api_key=primary_ai.api_key,
+            model=model or primary_ai.model,
+            base_url=base_url or primary_ai.base_url,
+            max_retries=0,
         )
-        if requested != configured and requested != ai.provider.value and not generic_compatible:
-            raise ValueError(
-                f"Profile requests AI provider '{requested}' for {purpose}, but Settings "
-                f"configure '{configured or ai.provider.value}'. Configure that provider first."
-            )
-    if model:
-        ai.model = model
-    if base_url:
-        if ai.provider != AIProvider.COMPATIBLE:
-            raise ValueError(
-                f"{field_prefix}_base_url is only valid for an OpenAI-compatible AI provider"
-            )
-        ai.base_url = base_url.rstrip("/")
-    return ai
+
+    return _ai_client_for_selector(
+        user_settings,
+        selector,
+        model=model,
+        base_url=base_url,
+    )
 
 
 async def prepare_semantic_transcript(
