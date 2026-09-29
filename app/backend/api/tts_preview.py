@@ -55,11 +55,16 @@ async def tts_preview(body: _PreviewBody):
     from backend.services import tts_service
     from backend.services.elevenlabs_tts_service import ElevenLabsAPIError
 
-    saved = await settings_api._load_saved_settings()
-    connection = settings_api._tts_probe_connection(saved, settings_api.TTSProbeRequest(
-        connection_id=body.connection_id,
-        provider=body.provider,
-    )) if saved and body.connection_id else {}
+    connection = {}
+    if body.connection_id:
+        saved = await settings_api._load_saved_settings()
+        connection = settings_api._tts_probe_connection(
+            saved,
+            settings_api.TTSProbeRequest(
+                connection_id=body.connection_id,
+                provider=body.provider,
+            ),
+        ) if saved else {}
 
     provider_name = (
         (body.provider or "").strip().lower()
