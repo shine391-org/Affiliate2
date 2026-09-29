@@ -72,6 +72,32 @@ export default function LocalizationProfilesSection({ settings }) {
   const isDefault = selectedId === store.default_profile_id
   const globalProvider = settings?.ai_provider || "global AI provider"
   const globalModel = settings?.ai_model || "configured global model"
+  const availableAiProviders = useMemo(
+    () => [...new Set([
+      settings?.ai_provider,
+      ...Object.keys(settings?.ai_provider_profiles || {}),
+    ].filter(Boolean))],
+    [settings?.ai_provider, settings?.ai_provider_profiles],
+  )
+  const providerConfig = (provider) => (
+    provider
+      ? (provider === settings?.ai_provider
+        ? {
+            model: settings?.ai_model || null,
+            base_url: settings?.ai_base_url || null,
+          }
+        : (settings?.ai_provider_profiles?.[provider] || {}))
+      : {}
+  )
+  const setStageProvider = (stage, provider) => {
+    const config = providerConfig(provider)
+    setDraft((prev) => ({
+      ...prev,
+      [`${stage}_provider`]: provider || null,
+      [`${stage}_model`]: provider ? (config.model || null) : null,
+      [`${stage}_base_url`]: provider ? (config.base_url || null) : null,
+    }))
+  }
   const modelSummary = useMemo(() => {
     if (!draft) return ""
     return `C6: ${draft.translation_model || globalModel} · C7 rewrite: ${draft.rewrite_model || globalModel}`
@@ -198,9 +224,15 @@ export default function LocalizationProfilesSection({ settings }) {
       translation_provider: null,
       translation_model: null,
       translation_base_url: null,
+      translation_fallback_provider: null,
+      translation_fallback_model: null,
+      translation_fallback_base_url: null,
       rewrite_provider: null,
       rewrite_model: null,
       rewrite_base_url: null,
+      rewrite_fallback_provider: null,
+      rewrite_fallback_model: null,
+      rewrite_fallback_base_url: null,
       rewrite_instructions: "",
       translation_guardrails: base?.translation_guardrails || store.prompt_defaults?.translation_guardrails || "",
       rewrite_guardrails: base?.rewrite_guardrails || store.prompt_defaults?.rewrite_guardrails || "",
@@ -311,6 +343,70 @@ export default function LocalizationProfilesSection({ settings }) {
         </AccordionSummary>
         <AccordionDetails>
           <Stack spacing={2}>
+            <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
+              <FormControl size="small" fullWidth>
+                <InputLabel>AI chính C6</InputLabel>
+                <Select
+                  value={draft.translation_provider || ""}
+                  label="AI chính C6"
+                  onChange={(e) => setStageProvider("translation", e.target.value)}
+                >
+                  <MenuItem value=""><em>Kế thừa AI đang active ({globalProvider})</em></MenuItem>
+                  {availableAiProviders.map((value) => (
+                    <MenuItem key={value} value={value}>
+                      {value}{settings?.ai_provider_profiles?.[value] ? " · đã lưu" : value === settings?.ai_provider ? " · active" : ""}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl size="small" fullWidth>
+                <InputLabel>AI dự phòng C6</InputLabel>
+                <Select
+                  value={draft.translation_fallback_provider || ""}
+                  label="AI dự phòng C6"
+                  onChange={(e) => setStageProvider("translation_fallback", e.target.value)}
+                >
+                  <MenuItem value=""><em>Không dùng fallback provider</em></MenuItem>
+                  {availableAiProviders.map((value) => (
+                    <MenuItem key={value} value={value}>
+                      {value}{settings?.ai_provider_profiles?.[value] ? " · đã lưu" : value === settings?.ai_provider ? " · active" : ""}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Stack>
+            <Alert severity="info" variant="outlined">
+              C6 dùng AI chính → retry có giới hạn → AI dự phòng. Phân đoạn ngữ nghĩa AI cũng dùng cùng chuỗi này; nếu cả hai lỗi hoặc hết ngân sách thì tự chuyển sang phân đoạn nhanh không AI.
+            </Alert>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={draft.semantic_segmentation !== false}
+                  onChange={(e) => patch("semantic_segmentation", e.target.checked)}
+                />
+              }
+              label="Dùng AI để tinh chỉnh ranh giới câu/ngữ nghĩa (tắt = phân đoạn nhanh bằng timestamp/punctuation/speaker)"
+            />
+            <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
+              <TextField
+                size="small" type="number" fullWidth label="Semantic timeout / lần (giây)"
+                value={draft.semantic_ai_attempt_timeout_s ?? 25}
+                onChange={(e) => patch("semantic_ai_attempt_timeout_s", Number(e.target.value))}
+                inputProps={{ min: 5, max: 120, step: 5 }}
+              />
+              <TextField
+                size="small" type="number" fullWidth label="Semantic tổng ngân sách (giây)"
+                value={draft.semantic_ai_total_timeout_s ?? 60}
+                onChange={(e) => patch("semantic_ai_total_timeout_s", Number(e.target.value))}
+                inputProps={{ min: 10, max: 240, step: 5 }}
+              />
+              <TextField
+                size="small" type="number" fullWidth label="Semantic số lần thử/provider"
+                value={draft.semantic_ai_retry_attempts ?? 2}
+                onChange={(e) => patch("semantic_ai_retry_attempts", Number(e.target.value))}
+                inputProps={{ min: 1, max: 3, step: 1 }}
+              />
+            </Stack>
             <FormControl size="small" fullWidth>
               <InputLabel>Phong cách dịch</InputLabel>
               <Select value={draft.translation_preset || "natural_vietnamese"} label="Phong cách dịch" onChange={(e) => patch("translation_preset", e.target.value)}>
@@ -334,12 +430,46 @@ export default function LocalizationProfilesSection({ settings }) {
               )}
             />
             <TextField
-              size="small" fullWidth label="Ghi đè Base URL tương thích (tùy chọn)"
+              size="small" fullWidth label="Ghi đè Base URL AI chính C6 (tùy chọn)"
               value={draft.translation_base_url || ""}
-              onChange={(e) => patch("translation_base_url", e.target.value)}
-              placeholder={settings?.ai_base_url || "kế thừa endpoint trong Cài đặt"}
-              helperText="Thông tin xác thực kết nối vẫn nằm trong Kết nối AI."
+              onChange={(e) => patch("translation_base_url", e.target.value || null)}
+              placeholder={providerConfig(draft.translation_provider || settings?.ai_provider).base_url || "kế thừa endpoint đã lưu"}
+              helperText="Credential được lấy từ provider đã lưu trong Kết nối AI; không nhập key trong profile."
             />
+            <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
+              <TextField
+                size="small" fullWidth label="Model fallback C6"
+                value={draft.translation_fallback_model || ""}
+                onChange={(e) => patch("translation_fallback_model", e.target.value || null)}
+                placeholder={providerConfig(draft.translation_fallback_provider).model || "model đã lưu của provider fallback"}
+              />
+              <TextField
+                size="small" fullWidth label="Base URL fallback C6 (tùy chọn)"
+                value={draft.translation_fallback_base_url || ""}
+                onChange={(e) => patch("translation_fallback_base_url", e.target.value || null)}
+                placeholder={providerConfig(draft.translation_fallback_provider).base_url || "endpoint đã lưu"}
+              />
+            </Stack>
+            <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
+              <TextField
+                size="small" type="number" fullWidth label="Dịch timeout / lần (giây)"
+                value={draft.translation_attempt_timeout_s ?? 75}
+                onChange={(e) => patch("translation_attempt_timeout_s", Number(e.target.value))}
+                inputProps={{ min: 10, max: 300, step: 5 }}
+              />
+              <TextField
+                size="small" type="number" fullWidth label="Dịch tổng ngân sách/batch (giây)"
+                value={draft.translation_total_timeout_s ?? 180}
+                onChange={(e) => patch("translation_total_timeout_s", Number(e.target.value))}
+                inputProps={{ min: 20, max: 900, step: 10 }}
+              />
+              <TextField
+                size="small" type="number" fullWidth label="Dịch số lần thử/provider"
+                value={draft.translation_retry_attempts ?? 3}
+                onChange={(e) => patch("translation_retry_attempts", Number(e.target.value))}
+                inputProps={{ min: 1, max: 5, step: 1 }}
+              />
+            </Stack>
             <Alert severity="info" variant="outlined">
               Hướng dẫn dịch được bổ sung thêm. Quy tắc bảo vệ ngữ nghĩa có thể chỉnh ở phần bên dưới; giao thức parser (ID/thứ tự ổn định và cấu trúc JSON) vẫn do ứng dụng quản lý.
             </Alert>
@@ -371,6 +501,34 @@ export default function LocalizationProfilesSection({ settings }) {
         </AccordionSummary>
         <AccordionDetails>
           <Stack spacing={2}>
+            <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
+              <FormControl size="small" fullWidth>
+                <InputLabel>AI chính C7</InputLabel>
+                <Select
+                  value={draft.rewrite_provider || ""}
+                  label="AI chính C7"
+                  onChange={(e) => setStageProvider("rewrite", e.target.value)}
+                >
+                  <MenuItem value=""><em>Kế thừa AI đang active ({globalProvider})</em></MenuItem>
+                  {availableAiProviders.map((value) => (
+                    <MenuItem key={value} value={value}>{value}{settings?.ai_provider_profiles?.[value] ? " · đã lưu" : value === settings?.ai_provider ? " · active" : ""}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl size="small" fullWidth>
+                <InputLabel>AI dự phòng C7</InputLabel>
+                <Select
+                  value={draft.rewrite_fallback_provider || ""}
+                  label="AI dự phòng C7"
+                  onChange={(e) => setStageProvider("rewrite_fallback", e.target.value)}
+                >
+                  <MenuItem value=""><em>Không dùng fallback provider</em></MenuItem>
+                  {availableAiProviders.map((value) => (
+                    <MenuItem key={value} value={value}>{value}{settings?.ai_provider_profiles?.[value] ? " · đã lưu" : value === settings?.ai_provider ? " · active" : ""}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Stack>
             <Autocomplete
               freeSolo
               size="small"
@@ -388,11 +546,48 @@ export default function LocalizationProfilesSection({ settings }) {
               )}
             />
             <TextField
-              size="small" fullWidth label="Ghi đè Base URL tương thích (tùy chọn)"
+              size="small" fullWidth label="Ghi đè Base URL AI chính C7 (tùy chọn)"
               value={draft.rewrite_base_url || ""}
-              onChange={(e) => patch("rewrite_base_url", e.target.value)}
-              placeholder={settings?.ai_base_url || "kế thừa endpoint trong Cài đặt"}
+              onChange={(e) => patch("rewrite_base_url", e.target.value || null)}
+              placeholder={providerConfig(draft.rewrite_provider || settings?.ai_provider).base_url || "kế thừa endpoint đã lưu"}
             />
+            <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
+              <TextField
+                size="small" fullWidth label="Model fallback C7"
+                value={draft.rewrite_fallback_model || ""}
+                onChange={(e) => patch("rewrite_fallback_model", e.target.value || null)}
+                placeholder={providerConfig(draft.rewrite_fallback_provider).model || "model đã lưu của provider fallback"}
+              />
+              <TextField
+                size="small" fullWidth label="Base URL fallback C7 (tùy chọn)"
+                value={draft.rewrite_fallback_base_url || ""}
+                onChange={(e) => patch("rewrite_fallback_base_url", e.target.value || null)}
+                placeholder={providerConfig(draft.rewrite_fallback_provider).base_url || "endpoint đã lưu"}
+              />
+            </Stack>
+            <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
+              <TextField
+                size="small" type="number" fullWidth label="C7 timeout / lần (giây)"
+                value={draft.rewrite_attempt_timeout_s ?? 45}
+                onChange={(e) => patch("rewrite_attempt_timeout_s", Number(e.target.value))}
+                inputProps={{ min: 10, max: 180, step: 5 }}
+              />
+              <TextField
+                size="small" type="number" fullWidth label="C7 tổng ngân sách (giây)"
+                value={draft.rewrite_total_timeout_s ?? 90}
+                onChange={(e) => patch("rewrite_total_timeout_s", Number(e.target.value))}
+                inputProps={{ min: 20, max: 360, step: 5 }}
+              />
+              <TextField
+                size="small" type="number" fullWidth label="C7 số lần thử/provider"
+                value={draft.rewrite_retry_attempts ?? 2}
+                onChange={(e) => patch("rewrite_retry_attempts", Number(e.target.value))}
+                inputProps={{ min: 1, max: 4, step: 1 }}
+              />
+            </Stack>
+            <Alert severity="info" variant="outlined">
+              Nếu AI viết lại chính và fallback đều lỗi/hết thời gian, C7 không treo job: pipeline tiếp tục bằng timing fit/video slowdown bounded và chỉ fail nếu cuối cùng vẫn không thể fit.
+            </Alert>
             <Alert severity="info" variant="outlined">
               Hướng dẫn viết lại được bổ sung thêm. Quy tắc bảo vệ ngữ nghĩa có thể chỉnh ở phần bên dưới; giao thức parser (ID/thứ tự ổn định và cấu trúc JSON) vẫn do ứng dụng quản lý.
             </Alert>
