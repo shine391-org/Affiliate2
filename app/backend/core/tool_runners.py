@@ -1231,11 +1231,14 @@ async def run_tool_translate(
 
         if needs_separation or needs_asr:
             async with localization_gpu_gate():
-                await _run_gpu_audio_pipeline()
-                # Demucs/WhisperX GPU work is finished at this boundary. Keep
-                # the gate until unused allocator blocks are released so the
-                # next waiting localization job starts from a clean pool.
-                await asyncio.to_thread(_release_localization_torch_cache_sync)
+                try:
+                    await _run_gpu_audio_pipeline()
+                finally:
+                    # Release unused Demucs/WhisperX allocator memory even when
+                    # separation/ASR fails or the task is cancelled. Without a
+                    # finally, exactly the failure path that stops a job can
+                    # leave multi-GB resident memory pinned in the backend.
+                    await asyncio.to_thread(_release_localization_torch_cache_sync)
         else:
             await _run_gpu_audio_pipeline()
 
