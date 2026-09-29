@@ -515,3 +515,120 @@ async def test_semantic_hanging_primary_reserves_time_for_fallback():
         e.get("event") == "attempt" and e.get("role") == "fallback"
         for e in events
     )
+
+
+
+@pytest.mark.asyncio
+async def test_semantic_invalid_structured_primary_uses_next_route():
+    from backend.services.semantic_segmentation import refine_semantic_cues_with_ai
+
+    tx = LocalizationTranscript(
+        text="one two three",
+        segments=[LocalizationSegment(
+            id="raw1",
+            source_text="one two three",
+            source_start_ms=0,
+            source_end_ms=1200,
+            source_words=[
+                {"word": "one", "start": 0.0, "end": 0.3},
+                {"word": " two", "start": 0.3, "end": 0.7},
+                {"word": " three", "start": 0.7, "end": 1.2},
+            ],
+        )],
+    )
+
+    class BadPrimary:
+        connection_name = "hermes-main"
+        provider = SimpleNamespace(value="compatible")
+        model = "longcat"
+        calls = 0
+
+        async def chat(self, *args, **kwargs):
+            self.calls += 1
+            return '[{"ids":["w00003","w00001","w00002"]}]'
+
+    class GoodFallback:
+        connection_name = "lmstudio-qwen"
+        provider = SimpleNamespace(value="compatible")
+        model = "qwen3:8b"
+        calls = 0
+
+        async def chat(self, *args, **kwargs):
+            self.calls += 1
+            return '[{"ids":["w00001","w00002","w00003"]}]'
+
+    primary = BadPrimary()
+    fallback = GoodFallback()
+    state = {"sticky_index": 0, "failure_chain": []}
+    events = []
+
+    got = await refine_semantic_cues_with_ai(
+        tx,
+        primary,
+        fallback_ai=fallback,
+        route_clients=[primary, fallback],
+        route_state=state,
+        max_attempts=1,
+        attempt_timeout_s=0.5,
+        total_timeout_s=2,
+        progress_cb=lambda event: events.append(dict(event)),
+    )
+
+    assert primary.calls == 1
+    assert fallback.calls == 1
+    assert state["sticky_index"] == 1
+    assert got.segments[0].source_text == "one two three"
+    assert any(
+        item.get("error_type") == "InvalidStructuredOutput"
+        and item.get("connection_id") == "hermes-main"
+        for item in state["failure_chain"]
+    )
+    assert any(
+        event.get("event") == "switch_fallback"
+        and event.get("provider") == "lmstudio-qwen"
+        for event in events
+    )
+
+
+@pytest.mark.asyncio
+async def test_semantic_invalid_structured_single_route_stays_deterministic():
+    from backend.services.semantic_segmentation import refine_semantic_cues_with_ai
+
+    tx = LocalizationTranscript(
+        text="one two three",
+        segments=[LocalizationSegment(
+            id="raw1",
+            source_text="one two three",
+            source_start_ms=0,
+            source_end_ms=1200,
+            source_words=[
+                {"word": "one", "start": 0.0, "end": 0.3},
+                {"word": " two", "start": 0.3, "end": 0.7},
+                {"word": " three", "start": 0.7, "end": 1.2},
+            ],
+        )],
+    )
+
+    class BadOnly:
+        connection_name = "only"
+        calls = 0
+
+        async def chat(self, *args, **kwargs):
+            self.calls += 1
+            return '{"bad":"shape"}'
+
+    ai = BadOnly()
+    state = {"sticky_index": 0, "failure_chain": []}
+    got = await refine_semantic_cues_with_ai(
+        tx,
+        ai,
+        route_clients=[ai],
+        route_state=state,
+        max_attempts=1,
+        attempt_timeout_s=0.5,
+        total_timeout_s=2,
+    )
+
+    assert ai.calls == 1
+    assert got.segments
+    assert "one" in got.segments[0].source_text
