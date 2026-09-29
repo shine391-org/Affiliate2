@@ -250,98 +250,220 @@ async def transcribe_for_localization(
     return transcript
 
 
+def _load_json_map(raw: str | None) -> dict[str, dict]:
+    try:
+        value = json.loads(raw or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(key).strip().lower(): dict(cfg)
+        for key, cfg in value.items()
+        if str(key).strip() and isinstance(cfg, dict)
+    }
+
+
 def _saved_ai_provider_config(user_settings, provider_name: str) -> dict:
-    """Return one saved provider connection without exposing its secret."""
+    """Legacy provider-keyed lookup kept for stored profiles/jobs."""
     provider = (provider_name or "").strip().lower()
     if not provider:
         return {}
     active = (getattr(user_settings, "ai_provider", None) or "").strip().lower()
     if provider == active:
         return {
+            "provider": provider,
             "model": getattr(user_settings, "ai_model", None),
             "base_url": getattr(user_settings, "ai_base_url", None),
             "api_key_encrypted": getattr(user_settings, "ai_api_key_encrypted", None),
         }
-    try:
-        registry = json.loads(
-            getattr(user_settings, "ai_provider_profiles_json", None) or "{}"
-        )
-    except (TypeError, json.JSONDecodeError):
-        registry = {}
-    value = registry.get(provider) if isinstance(registry, dict) else None
-    return dict(value) if isinstance(value, dict) else {}
+    registry = _load_json_map(
+        getattr(user_settings, "ai_provider_profiles_json", None)
+    )
+    value = registry.get(provider)
+    if not isinstance(value, dict):
+        return {}
+    return {"provider": provider, **value}
 
 
-def _ai_client_for_selector(
+def _saved_ai_connection_config(user_settings, connection_id: str) -> dict:
+    """Resolve one stable connection id, falling back to legacy provider ids."""
+    connection_id = (connection_id or "").strip().lower()
+    if not connection_id:
+        return {}
+
+    active_id = (getattr(user_settings, "ai_connection_id", None) or "").strip().lower()
+    active_provider = (getattr(user_settings, "ai_provider", None) or "").strip().lower()
+    if connection_id == active_id and active_provider:
+        return {
+            "label": connection_id,
+            "provider": active_provider,
+            "model": getattr(user_settings, "ai_model", None),
+            "base_url": getattr(user_settings, "ai_base_url", None),
+            "api_key_encrypted": getattr(user_settings, "ai_api_key_encrypted", None),
+        }
+
+    registry = _load_json_map(
+        getattr(user_settings, "ai_connections_json", None)
+    )
+    value = registry.get(connection_id)
+    if isinstance(value, dict) and value.get("provider"):
+        return value
+
+    # Lazy migration compatibility: old profiles used provider name as identity.
+    return _saved_ai_provider_config(user_settings, connection_id)
+
+
+def _ai_client_for_connection(
     user_settings,
-    selector: str | None,
+    connection_id: str | None,
     *,
     model: str | None = None,
     base_url: str | None = None,
 ):
-    """Resolve active OR previously-saved AI provider configuration.
-
-    This is the runtime half of the provider registry already persisted by
-    Settings. A profile can therefore use Hermes/compatible as primary and an
-    inactive LM Studio/Ollama/OpenRouter/Gemini connection as fallback without
-    switching the global active provider first.
-    """
-    from backend.core.ai_provider import get_ai_client, make_ai_client
+    from backend.core.ai_provider import (
+        AIProvider, COMPATIBLE_PRESETS, compatible_base_url,
+        get_ai_client, make_ai_client,
+    )
     from backend.core.crypto import decrypt_safe
 
-    requested = (selector or "").strip().lower()
-    active = (getattr(user_settings, "ai_provider", None) or "").strip().lower()
+    requested = (connection_id or "").strip().lower()
+    active_id = (getattr(user_settings, "ai_connection_id", None) or "").strip().lower()
+    active_provider = (getattr(user_settings, "ai_provider", None) or "").strip().lower()
 
-    if not requested or requested == active:
+    if not requested or requested == active_id:
         ai = get_ai_client(user_settings)
         if model:
             ai.model = model
         if base_url:
             ai.base_url = base_url.rstrip("/")
         ai.max_retries = 0
-        ai.connection_name = requested or active or getattr(ai.provider, "value", str(ai.provider))
+        ai.connection_name = requested or active_id or active_provider or getattr(ai.provider, "value", str(ai.provider))
         return ai
 
-    saved = _saved_ai_provider_config(user_settings, requested)
-    saved_model = saved.get("model")
-    saved_base = saved.get("base_url")
-    encrypted = saved.get("api_key_encrypted")
-    key = decrypt_safe(encrypted) if encrypted else ""
+    saved = _saved_ai_connection_config(user_settings, requested)
+    if saved:
+        provider = str(saved.get("provider") or "").strip().lower()
+        encrypted = saved.get("api_key_encrypted")
+        key = decrypt_safe(encrypted) if encrypted else ""
+        ai = make_ai_client(
+            provider_name=provider,
+            api_key=key or "",
+            model=(model or saved.get("model")),
+            base_url=(base_url or saved.get("base_url")),
+        )
+        ai.max_retries = 0
+        ai.connection_name = requested
+        return ai
 
-    # Reproducible jobs may have materialized an environment-backed provider
-    # even when there is no Settings row/registry entry. Preserve that path on
-    # resume instead of accidentally turning "env OpenAI" into "missing key".
-    if not key and not saved:
+    # Environment-backed legacy jobs may have snapshotted provider identity
+    # without a DB connection row. Match only the exact effective env binding.
+    try:
+        env_ai = get_ai_client(None)
+        matches_env = requested == getattr(env_ai.provider, "value", "")
+        if requested in COMPATIBLE_PRESETS and env_ai.provider == AIProvider.COMPATIBLE:
+            preset_base = compatible_base_url(requested, base_url)
+            matches_env = bool(
+                preset_base
+                and str(getattr(env_ai, "base_url", "") or "").rstrip("/")
+                    == preset_base.rstrip("/")
+            )
+        if matches_env:
+            if model:
+                env_ai.model = model
+            if base_url:
+                env_ai.base_url = base_url.rstrip("/")
+            env_ai.max_retries = 0
+            env_ai.connection_name = requested
+            return env_ai
+    except Exception:
+        pass
+
+    raise ValueError(f"Unknown AI connection: {requested}")
+
+
+def _legacy_ai_route_specs(
+    user_settings,
+    profile: LocalizationProfile,
+    purpose: str,
+) -> list[dict]:
+    if purpose == "rewrite":
+        primary = {
+            "connection_id": profile.rewrite_provider
+                or getattr(user_settings, "ai_connection_id", None)
+                or getattr(user_settings, "ai_provider", None),
+            "model": profile.rewrite_model,
+            "base_url": profile.rewrite_base_url,
+        }
+        fallback = {
+            "connection_id": profile.rewrite_fallback_provider,
+            "model": profile.rewrite_fallback_model,
+            "base_url": profile.rewrite_fallback_base_url,
+        }
+    else:
+        primary = {
+            "connection_id": profile.translation_provider
+                or getattr(user_settings, "ai_connection_id", None)
+                or getattr(user_settings, "ai_provider", None),
+            "model": profile.translation_model,
+            "base_url": profile.translation_base_url,
+        }
+        fallback = {
+            "connection_id": profile.translation_fallback_provider,
+            "model": profile.translation_fallback_model,
+            "base_url": profile.translation_fallback_base_url,
+        }
+    routes = [primary]
+    if any(fallback.values()):
+        # Same connection with another model remains a valid second route.
+        fallback["connection_id"] = fallback["connection_id"] or primary["connection_id"]
+        routes.append(fallback)
+    return routes
+
+
+def _profile_ai_route_specs(
+    user_settings,
+    profile: LocalizationProfile,
+    purpose: str = "translation",
+) -> list[dict]:
+    configured = profile.rewrite_routes if purpose == "rewrite" else profile.translation_routes
+    if configured:
+        return [route.model_dump() for route in configured]
+    return _legacy_ai_route_specs(user_settings, profile, purpose)
+
+
+def _profile_ai_route_clients(
+    user_settings,
+    profile: LocalizationProfile,
+    purpose: str = "translation",
+) -> list:
+    """Resolve the complete ordered route chain and fail closed on bad config."""
+    clients = []
+    errors = []
+    for index, spec in enumerate(_profile_ai_route_specs(user_settings, profile, purpose)):
+        connection_id = str(spec.get("connection_id") or "").strip().lower()
+        if not connection_id:
+            errors.append(f"route {index + 1}: missing connection_id")
+            continue
         try:
-            from backend.core.ai_provider import AIProvider, COMPATIBLE_PRESETS, compatible_base_url
-            env_ai = get_ai_client(None)
-            matches_env = requested == getattr(env_ai.provider, "value", "")
-            if requested in COMPATIBLE_PRESETS and env_ai.provider == AIProvider.COMPATIBLE:
-                preset_base = compatible_base_url(requested, base_url)
-                matches_env = bool(
-                    preset_base
-                    and str(getattr(env_ai, "base_url", "") or "").rstrip("/") == preset_base.rstrip("/")
-                )
-            if matches_env:
-                if model:
-                    env_ai.model = model
-                if base_url:
-                    env_ai.base_url = base_url.rstrip("/")
-                env_ai.max_retries = 0
-                env_ai.connection_name = requested
-                return env_ai
-        except Exception:
-            pass
+            client = _ai_client_for_connection(
+                user_settings,
+                connection_id,
+                model=spec.get("model"),
+                base_url=spec.get("base_url"),
+            )
+        except Exception as exc:
+            errors.append(f"route {index + 1} ({connection_id}): {exc}")
+            continue
+        clients.append(client)
 
-    ai = make_ai_client(
-        provider_name=requested,
-        api_key=key or "",
-        model=(model or saved_model),
-        base_url=(base_url or saved_base),
-    )
-    ai.max_retries = 0
-    ai.connection_name = requested
-    return ai
+    if errors:
+        raise ValueError(
+            f"Invalid {purpose} AI route configuration: " + "; ".join(errors)
+        )
+    if not clients:
+        raise ValueError(f"No usable {purpose} AI route is configured.")
+    return clients
 
 
 def _profile_ai_client(
@@ -349,21 +471,8 @@ def _profile_ai_client(
     profile: LocalizationProfile,
     purpose: str = "translation",
 ):
-    """Resolve the primary AI connection selected by a localization profile."""
-    if purpose == "rewrite":
-        selector = profile.rewrite_provider
-        model = profile.rewrite_model
-        base_url = profile.rewrite_base_url
-    else:
-        selector = profile.translation_provider
-        model = profile.translation_model
-        base_url = profile.translation_base_url
-    return _ai_client_for_selector(
-        user_settings,
-        selector,
-        model=model,
-        base_url=base_url,
-    )
+    """Backward-compatible primary route accessor."""
+    return _profile_ai_route_clients(user_settings, profile, purpose)[0]
 
 
 def _profile_ai_fallback_client(
@@ -373,35 +482,24 @@ def _profile_ai_fallback_client(
     *,
     primary_ai=None,
 ):
-    """Resolve a distinct saved fallback connection/model when configured."""
-    if purpose == "rewrite":
-        selector = profile.rewrite_fallback_provider
-        model = profile.rewrite_fallback_model
-        base_url = profile.rewrite_fallback_base_url
-    else:
-        selector = profile.translation_fallback_provider
-        model = profile.translation_fallback_model
-        base_url = profile.translation_fallback_base_url
+    """Backward-compatible first fallback accessor."""
+    clients = _profile_ai_route_clients(user_settings, profile, purpose)
+    return clients[1] if len(clients) > 1 else None
 
-    if not selector and not model and not base_url:
-        return None
 
-    if not selector and primary_ai is not None:
-        from backend.core.ai_provider import AIClient
-        return AIClient(
-            provider=primary_ai.provider,
-            api_key=primary_ai.api_key,
-            model=model or primary_ai.model,
-            base_url=base_url or primary_ai.base_url,
-            max_retries=0,
-        )
+class _AIStageRouteState:
+    def __init__(self, clients: list):
+        if not clients:
+            raise ValueError("AI route state requires at least one client")
+        self.clients = list(clients)
+        self.sticky_index = 0
+        self.failure_chain: list[dict] = []
 
-    return _ai_client_for_selector(
-        user_settings,
-        selector,
-        model=model,
-        base_url=base_url,
-    )
+    @property
+    def current(self):
+        return self.clients[self.sticky_index]
+
+
 
 
 async def prepare_semantic_transcript(
