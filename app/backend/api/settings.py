@@ -496,14 +496,37 @@ async def update_settings(update: SettingsUpdate):
             new_provider = update.ai_provider.strip().lower()
             old_provider = (s.ai_provider or "").strip().lower()
             if new_provider != old_provider and update.ai_connection_id is None:
-                saved = ai_registry.get(new_provider, {})
-                s.ai_provider = new_provider
-                s.ai_model = saved.get("model")
-                s.ai_base_url = saved.get("base_url")
-                s.ai_api_key_encrypted = saved.get("api_key_encrypted")
-                # Legacy provider switching maps to a stable provider-named
-                # connection. New UI can create any number of same-provider IDs.
-                s.ai_connection_id = _safe_connection_id(new_provider)
+                # Provider-only switching is a legacy API. It is safe only when
+                # that provider maps to at most one live connection; otherwise
+                # provider name is no longer sufficient identity.
+                connection_matches = [
+                    (cid, cfg)
+                    for cid, cfg in _load_ai_connections(s).items()
+                    if not cfg.get("archived")
+                    and str(cfg.get("provider") or "").strip().lower() == new_provider
+                ]
+                if len(connection_matches) > 1:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"Multiple AI connections use provider '{new_provider}'. "
+                            "Select ai_connection_id explicitly."
+                        ),
+                    )
+                if len(connection_matches) == 1:
+                    cid, selected = connection_matches[0]
+                    s.ai_connection_id = cid
+                    s.ai_provider = new_provider
+                    s.ai_model = selected.get("model")
+                    s.ai_base_url = selected.get("base_url")
+                    s.ai_api_key_encrypted = selected.get("api_key_encrypted")
+                else:
+                    saved = ai_registry.get(new_provider, {})
+                    s.ai_provider = new_provider
+                    s.ai_model = saved.get("model")
+                    s.ai_base_url = saved.get("base_url")
+                    s.ai_api_key_encrypted = saved.get("api_key_encrypted")
+                    s.ai_connection_id = _safe_connection_id(new_provider)
             else:
                 s.ai_provider = new_provider
         if update.ai_model is not None:
@@ -637,14 +660,38 @@ async def update_settings(update: SettingsUpdate):
             new_tts_provider = update.tts_provider.strip().lower()
             old_tts_provider = (s.tts_provider or "").strip().lower()
             if new_tts_provider != old_tts_provider and update.tts_connection_id is None:
-                saved = tts_registry.get(new_tts_provider, {})
-                s.tts_provider = new_tts_provider
-                s.preferred_tts_voice = saved.get("voice")
-                s.tts_model = saved.get("model")
-                s.tts_base_url = saved.get("base_url")
-                s.tts_region = saved.get("region")
-                s.tts_api_key_encrypted = saved.get("api_key_encrypted")
-                s.tts_connection_id = _safe_connection_id(new_tts_provider)
+                connection_matches = [
+                    (cid, cfg)
+                    for cid, cfg in _load_tts_connections(s).items()
+                    if not cfg.get("archived")
+                    and str(cfg.get("provider") or "").strip().lower() == new_tts_provider
+                ]
+                if len(connection_matches) > 1:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"Multiple TTS connections use provider '{new_tts_provider}'. "
+                            "Select tts_connection_id explicitly."
+                        ),
+                    )
+                if len(connection_matches) == 1:
+                    cid, selected = connection_matches[0]
+                    s.tts_connection_id = cid
+                    s.tts_provider = new_tts_provider
+                    s.preferred_tts_voice = selected.get("voice")
+                    s.tts_model = selected.get("model")
+                    s.tts_base_url = selected.get("base_url")
+                    s.tts_region = selected.get("region")
+                    s.tts_api_key_encrypted = selected.get("api_key_encrypted")
+                else:
+                    saved = tts_registry.get(new_tts_provider, {})
+                    s.tts_provider = new_tts_provider
+                    s.preferred_tts_voice = saved.get("voice")
+                    s.tts_model = saved.get("model")
+                    s.tts_base_url = saved.get("base_url")
+                    s.tts_region = saved.get("region")
+                    s.tts_api_key_encrypted = saved.get("api_key_encrypted")
+                    s.tts_connection_id = _safe_connection_id(new_tts_provider)
             else:
                 s.tts_provider = new_tts_provider
         if update.preferred_tts_voice is not None:
