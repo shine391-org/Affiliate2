@@ -704,7 +704,14 @@ async def rerun_localization_job(job_id: str, body: RerunRequest):
 
 @router.post("/jobs/{job_id}/auto-repair")
 async def set_localization_auto_repair(job_id: str, body: AutoRepairRequest):
-    """Toggle bounded automatic repair for this persisted localization job."""
+    """Toggle bounded automatic repair for an inactive persisted job.
+
+    Active runners keep an in-memory manifest snapshot, so mutating the same
+    file concurrently would be racy and could be overwritten on the next stage
+    write. New jobs receive the choice at creation; failed/completed jobs may be
+    changed here before the next retry.
+    """
+    await _assert_job_inactive(job_id)
     run = _load_run(job_id)
     request = {
         **run.request,
