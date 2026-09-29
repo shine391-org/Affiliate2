@@ -1222,6 +1222,30 @@ async def save_localization_profile(profile: LocalizationProfile):
             s = UserSettings(user_id="local")
             db.add(s)
         store = load_profile_store(s.localization_profiles_json)
+
+        ai_connections = _load_ai_connections(s)
+        route_errors = []
+        for stage_name, routes in (
+            ("C6", profile.translation_routes),
+            ("C7", profile.rewrite_routes),
+        ):
+            for index, route in enumerate(routes, start=1):
+                cfg = ai_connections.get(route.connection_id.strip().lower())
+                if not cfg or cfg.get("archived"):
+                    route_errors.append(
+                        f"{stage_name} route {index}: AI connection '{route.connection_id}' is missing or archived"
+                    )
+        if profile.tts_connection_id:
+            tts_cfg = _load_tts_connections(s).get(
+                profile.tts_connection_id.strip().lower()
+            )
+            if not tts_cfg or tts_cfg.get("archived"):
+                route_errors.append(
+                    f"TTS connection '{profile.tts_connection_id}' is missing or archived"
+                )
+        if route_errors:
+            raise HTTPException(status_code=400, detail="; ".join(route_errors))
+
         try:
             store = upsert_profile(store, profile)
         except ValueError as exc:
