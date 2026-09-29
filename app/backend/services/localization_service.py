@@ -503,14 +503,19 @@ def _profile_ai_route_clients_compat(
         except Exception:
             raise route_exc
         clients = [primary]
-        try:
-            fallback = _profile_ai_fallback_client(
-                user_settings, profile, purpose, primary_ai=primary,
-            )
-        except Exception:
-            raise route_exc
-        if fallback is not None:
-            clients.append(fallback)
+        # Only consult the fallback accessor when the profile actually declares
+        # a second route. This preserves donor-era tests that monkeypatch only
+        # the primary accessor, while explicitly configured bad fallbacks still
+        # fail closed.
+        if len(_profile_ai_route_specs(user_settings, profile, purpose)) > 1:
+            try:
+                fallback = _profile_ai_fallback_client(
+                    user_settings, profile, purpose, primary_ai=primary,
+                )
+            except Exception:
+                raise route_exc
+            if fallback is not None:
+                clients.append(fallback)
         return clients
 
 
