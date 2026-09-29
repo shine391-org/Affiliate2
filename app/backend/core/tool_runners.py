@@ -1067,6 +1067,16 @@ async def run_tool_translate(
         else:
             profile = resolve_localization_profile(user_settings, profile_id)
 
+        if run is None:
+            # Preserve whether the SOURCE profile intentionally pinned a TTS
+            # provider or inherited Settings. materialize_localization_profile()
+            # resolves both to a concrete provider, so without this provenance
+            # a later Settings change cannot distinguish "stale inherited
+            # binding" from "intentional FAST=Edge while HQ=ElevenLabs".
+            request_snapshot["tts_binding_mode"] = (
+                "pinned" if profile.tts_provider else "inherit"
+            )
+
         # Manual tool controls are job-level overrides on the resolved profile.
         updates = {}
         if voice_id:
