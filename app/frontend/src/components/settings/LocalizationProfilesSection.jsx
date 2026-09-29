@@ -47,8 +47,69 @@ export default function LocalizationProfilesSection({ settings }) {
   const [draft, setDraft] = useState(null)
   const [glossaryText, setGlossaryText] = useState("")
   const [busy, setBusy] = useState(false)
-  const [discovering, setDiscovering] = useState(false)
-  const [discoveredModels, setDiscoveredModels] = useState([])
+  const [discovering, setDiscovering] = useState("")
+  const [discoveredByConnection, setDiscoveredByConnection] = useState({})
+
+  const aiConnections = settings?.ai_connections || {}
+  const activeAiId = settings?.ai_connection_id || Object.keys(aiConnections)[0] || ""
+  const ttsConnections = settings?.tts_connections || {}
+  const activeTtsId = settings?.tts_connection_id || Object.keys(ttsConnections)[0] || ""
+
+  const legacyAiConnectionId = (provider) => {
+    if (!provider) return activeAiId
+    if (aiConnections[provider]) return provider
+    const matches = Object.entries(aiConnections)
+      .filter(([, cfg]) => cfg?.provider === provider)
+      .map(([id]) => id)
+    if (matches.length === 1) return matches[0]
+    if (provider === settings?.ai_provider && activeAiId) return activeAiId
+    return provider
+  }
+
+  const normalizeProfile = (profile) => {
+    if (!profile) return null
+    const next = clone(profile)
+    if (!Array.isArray(next.translation_routes) || next.translation_routes.length === 0) {
+      const primary = legacyAiConnectionId(next.translation_provider)
+      const fallback = next.translation_fallback_provider
+        ? legacyAiConnectionId(next.translation_fallback_provider)
+        : ""
+      next.translation_routes = primary ? [{
+        connection_id: primary,
+        model: next.translation_model || aiConnections[primary]?.model || null,
+        base_url: next.translation_base_url || null,
+      }] : []
+      if (fallback) next.translation_routes.push({
+        connection_id: fallback,
+        model: next.translation_fallback_model || aiConnections[fallback]?.model || null,
+        base_url: next.translation_fallback_base_url || null,
+      })
+    }
+    if (!Array.isArray(next.rewrite_routes) || next.rewrite_routes.length === 0) {
+      const primary = legacyAiConnectionId(next.rewrite_provider)
+      const fallback = next.rewrite_fallback_provider
+        ? legacyAiConnectionId(next.rewrite_fallback_provider)
+        : ""
+      next.rewrite_routes = primary ? [{
+        connection_id: primary,
+        model: next.rewrite_model || aiConnections[primary]?.model || null,
+        base_url: next.rewrite_base_url || null,
+      }] : []
+      if (fallback) next.rewrite_routes.push({
+        connection_id: fallback,
+        model: next.rewrite_fallback_model || aiConnections[fallback]?.model || null,
+        base_url: next.rewrite_fallback_base_url || null,
+      })
+    }
+    if (!next.tts_connection_id && next.tts_provider) {
+      const matches = Object.entries(ttsConnections)
+        .filter(([, cfg]) => cfg?.provider === next.tts_provider)
+        .map(([id]) => id)
+      if (matches.length === 1) next.tts_connection_id = matches[0]
+      else if (next.tts_provider === settings?.tts_provider && activeTtsId) next.tts_connection_id = activeTtsId
+    }
+    return next
+  }
 
   const load = async (preferId = "") => {
     const { data } = await http.get("/api/settings/localization-profiles")
@@ -56,7 +117,8 @@ export default function LocalizationProfilesSection({ settings }) {
     const nextId = preferId || selectedId || data.default_profile_id || data.profiles?.[0]?.id || ""
     setSelectedId(nextId)
     const profile = data.profiles?.find((p) => p.id === nextId) || data.profiles?.[0] || null
-    setDraft(profile ? clone(profile) : null)
+    const normalized = normalizeProfile(profile)
+    setDraft(normalized)
     setGlossaryText(glossaryToText(profile?.glossary))
   }
 
@@ -65,73 +127,96 @@ export default function LocalizationProfilesSection({ settings }) {
   useEffect(() => {
     const profile = store.profiles?.find((p) => p.id === selectedId)
     if (!profile) return
-    setDraft(clone(profile))
+    setDraft(normalizeProfile(profile))
     setGlossaryText(glossaryToText(profile.glossary))
-  }, [selectedId])
+  }, [selectedId, settings?.ai_connections, settings?.tts_connections])
 
   const isDefault = selectedId === store.default_profile_id
-  const globalProvider = settings?.ai_provider || "global AI provider"
-  const globalModel = settings?.ai_model || "configured global model"
-  const availableAiProviders = useMemo(
-    () => [...new Set([
-      settings?.ai_provider,
-      ...Object.keys(settings?.ai_provider_profiles || {}),
-    ].filter(Boolean))],
-    [settings?.ai_provider, settings?.ai_provider_profiles],
-  )
-  const providerConfig = (provider) => (
-    provider
-      ? (provider === settings?.ai_provider
-        ? {
-            model: settings?.ai_model || null,
-            base_url: settings?.ai_base_url || null,
-          }
-        : (settings?.ai_provider_profiles?.[provider] || {}))
-      : {}
-  )
-  const setStageProvider = (stage, provider) => {
-    const config = providerConfig(provider)
-    setDraft((prev) => ({
-      ...prev,
-      [`${stage}_provider`]: provider || null,
-      [`${stage}_model`]: provider ? (config.model || null) : null,
-      [`${stage}_base_url`]: provider ? (config.base_url || null) : null,
-    }))
+  const patch = (key, value) => setDraft((prev) => ({ ...prev, [key]: value }))
+
+  const connectionLabel = (connectionId) => {
+    const cfg = aiConnections[connectionId]
+    return cfg ? `${cfg.label || connectionId} · ${cfg.provider}` : connectionId
   }
+  const routeModels = (connectionId) => [
+    ...new Set([
+      aiConnections[connectionId]?.model,
+      ...(discoveredByConnection[connectionId] || []),
+    ].filter(Boolean)),
+  ]
+
+  const updateRoute = (stage, index, values) => setDraft((prev) => {
+    const key = `${stage}_routes`
+    const routes = [...(prev?.[key] || [])]
+    const current = routes[index] || {}
+    routes[index] = { ...current, ...values }
+    return { ...prev, [key]: routes }
+  })
+
+  const addRoute = (stage) => setDraft((prev) => {
+    const key = `${stage}_routes`
+    const routes = [...(prev?.[key] || [])]
+    const fallbackId = Object.keys(aiConnections).find(
+      (id) => !routes.some((route) => route.connection_id === id)
+    ) || activeAiId
+    if (!fallbackId) return prev
+    routes.push({
+      connection_id: fallbackId,
+      model: aiConnections[fallbackId]?.model || null,
+      base_url: null,
+    })
+    return { ...prev, [key]: routes }
+  })
+
+  const removeRoute = (stage, index) => setDraft((prev) => {
+    const key = `${stage}_routes`
+    const routes = [...(prev?.[key] || [])]
+    if (routes.length <= 1) return prev
+    routes.splice(index, 1)
+    return { ...prev, [key]: routes }
+  })
+
+  const moveRoute = (stage, index, direction) => setDraft((prev) => {
+    const key = `${stage}_routes`
+    const routes = [...(prev?.[key] || [])]
+    const target = index + direction
+    if (target < 0 || target >= routes.length) return prev
+    ;[routes[index], routes[target]] = [routes[target], routes[index]]
+    return { ...prev, [key]: routes }
+  })
+
   const modelSummary = useMemo(() => {
     if (!draft) return ""
-    return `C6: ${draft.translation_model || globalModel} · C7 rewrite: ${draft.rewrite_model || globalModel}`
-  }, [draft, globalModel])
+    const c6 = (draft.translation_routes || []).map((r) =>
+      `${connectionLabel(r.connection_id)} / ${r.model || aiConnections[r.connection_id]?.model || "default"}`
+    ).join(" → ")
+    const c7 = (draft.rewrite_routes || []).map((r) =>
+      `${connectionLabel(r.connection_id)} / ${r.model || aiConnections[r.connection_id]?.model || "default"}`
+    ).join(" → ")
+    return `C6: ${c6 || "chưa cấu hình"} · C7: ${c7 || "chưa cấu hình"}`
+  }, [draft, settings?.ai_connections])
 
-  const patch = (key, value) => setDraft((prev) => ({ ...prev, [key]: value }))
   const currentTtsProvider = settings?.tts_provider || "edge_tts"
-  const pinnedTtsProvider = draft?.tts_provider || null
-  const edgeCrossProviderOverride = Boolean(
-    pinnedTtsProvider === "edge_tts" && currentTtsProvider !== "edge_tts"
-  )
-  const ttsProviderMismatch = Boolean(
-    pinnedTtsProvider &&
-    pinnedTtsProvider !== currentTtsProvider &&
-    pinnedTtsProvider !== "edge_tts"
-  )
-  const ttsVoicePlaceholder = edgeCrossProviderOverride
-    ? "vi-VN-HoaiMyNeural (mặc định Edge theo ngôn ngữ)"
-    : (settings?.preferred_tts_voice || "kế thừa mặc định ngôn ngữ/nhà cung cấp")
+  const pinnedTtsConnection = draft?.tts_connection_id || null
+  const pinnedTtsConfig = pinnedTtsConnection ? ttsConnections[pinnedTtsConnection] : null
+  const ttsConnectionMissing = Boolean(pinnedTtsConnection && !pinnedTtsConfig)
+  const ttsVoicePlaceholder = pinnedTtsConfig?.voice
+    || settings?.preferred_tts_voice
+    || "kế thừa giọng mặc định của connection"
+
   const adoptCurrentTts = () => setDraft((prev) => {
-    const providerChanged = Boolean(
-      prev?.tts_provider && prev.tts_provider !== currentTtsProvider
+    const connectionChanged = Boolean(
+      prev?.tts_connection_id && prev.tts_connection_id !== activeTtsId
     )
     return {
       ...prev,
+      tts_connection_id: activeTtsId || null,
       tts_provider: currentTtsProvider,
       tts_model: settings?.tts_model || null,
       tts_voice: settings?.preferred_tts_voice || null,
       tts_base_url: settings?.tts_base_url || null,
       tts_region: settings?.tts_region || null,
-      // Provider-scoped speaker/clone state must never survive a provider
-      // switch. _voice_for_chunk() prioritizes speaker_voices, so retaining an
-      // ElevenLabs voice id while adopting Edge would bypass the default voice.
-      ...(providerChanged ? {
+      ...(connectionChanged ? {
         speaker_voices: {},
         speaker_reference_audio: {},
         tts_reference_audio: null,
@@ -141,28 +226,109 @@ export default function LocalizationProfilesSection({ settings }) {
     }
   })
 
-  const discoverModels = async () => {
-    const provider = settings?.ai_provider || ""
-    if (!provider || provider === "anthropic") {
-      showSnackbar("Kết nối AI này không hỗ trợ dò tìm mô hình", "warning")
+  const discoverModels = async (connectionId) => {
+    const cfg = aiConnections[connectionId]
+    if (!cfg) {
+      showSnackbar("Connection AI không tồn tại", "warning")
       return
     }
-    setDiscovering(true)
+    if (cfg.provider === "anthropic") {
+      showSnackbar("Connection này không hỗ trợ dò tìm mô hình", "warning")
+      return
+    }
+    setDiscovering(connectionId)
     try {
       const { data } = await http.post("/api/settings/ai/models", {
-        provider,
-        model: settings?.ai_model || null,
-        base_url: settings?.ai_base_url || null,
+        connection_id: connectionId,
       })
       const models = data?.models || []
-      setDiscoveredModels(models)
-      showSnackbar(models.length ? `Tìm thấy ${models.length} mô hình trên kết nối đã cấu hình` : "Không có mô hình nào được trả về", models.length ? "success" : "warning")
+      setDiscoveredByConnection((prev) => ({ ...prev, [connectionId]: models }))
+      showSnackbar(
+        models.length ? `Tìm thấy ${models.length} mô hình trên ${cfg.label || connectionId}` : "Không có mô hình nào được trả về",
+        models.length ? "success" : "warning",
+      )
     } catch (err) {
       showSnackbar(err.response?.data?.detail || "Dò tìm mô hình thất bại", "error")
     } finally {
-      setDiscovering(false)
+      setDiscovering("")
     }
   }
+
+  const renderRouteChain = (stage, title) => {
+    const routes = draft?.[`${stage}_routes`] || []
+    return (
+      <Stack spacing={1.25}>
+        <Typography variant="subtitle2">{title}</Typography>
+        {routes.map((route, index) => {
+          const cfg = aiConnections[route.connection_id] || {}
+          const models = routeModels(route.connection_id)
+          return (
+            <Box key={`${stage}-${index}`} sx={{ p: 1.25, border: 1, borderColor: "divider", borderRadius: 1.5 }}>
+              <Stack direction={{ xs: "column", md: "row" }} spacing={1}>
+                <FormControl size="small" fullWidth>
+                  <InputLabel>{index === 0 ? "AI chính" : `Fallback ${index}`}</InputLabel>
+                  <Select
+                    value={route.connection_id || ""}
+                    label={index === 0 ? "AI chính" : `Fallback ${index}`}
+                    onChange={(e) => {
+                      const id = e.target.value
+                      updateRoute(stage, index, {
+                        connection_id: id,
+                        model: aiConnections[id]?.model || null,
+                        base_url: null,
+                      })
+                    }}
+                  >
+                    {Object.entries(aiConnections).map(([id, item]) => (
+                      <MenuItem key={id} value={id}>
+                        {item.label || id} · {item.provider}{id === activeAiId ? " · ACTIVE" : ""}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <Autocomplete
+                  freeSolo
+                  size="small"
+                  fullWidth
+                  options={models}
+                  value={route.model || ""}
+                  onInputChange={(_, value) => updateRoute(stage, index, { model: value || null })}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label="Model"
+                      placeholder={cfg.model || "model mặc định của connection"}
+                    />
+                  )}
+                />
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<RefreshOutlinedIcon />}
+                  onClick={() => discoverModels(route.connection_id)}
+                  disabled={!route.connection_id || discovering === route.connection_id}
+                >
+                  {discovering === route.connection_id ? "Đang dò…" : "Models"}
+                </Button>
+              </Stack>
+              <Stack direction="row" spacing={0.75} sx={{ mt: 1 }} flexWrap="wrap" useFlexGap>
+                <Button size="small" onClick={() => moveRoute(stage, index, -1)} disabled={index === 0}>Lên</Button>
+                <Button size="small" onClick={() => moveRoute(stage, index, 1)} disabled={index === routes.length - 1}>Xuống</Button>
+                <Button size="small" color="error" onClick={() => removeRoute(stage, index)} disabled={routes.length <= 1}>Bỏ route</Button>
+                <Typography variant="caption" color="text.secondary" sx={{ alignSelf: "center" }}>
+                  {cfg.base_url || "endpoint mặc định"}{cfg.api_key_set ? " · key đã lưu" : ""}
+                </Typography>
+              </Stack>
+            </Box>
+          )
+        })}
+        <Button size="small" variant="outlined" startIcon={<AddOutlinedIcon />} onClick={() => addRoute(stage)} disabled={!Object.keys(aiConnections).length}>
+          Thêm fallback
+        </Button>
+      </Stack>
+    )
+  }
+
 
   const save = async () => {
     if (!draft) return
