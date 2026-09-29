@@ -99,6 +99,8 @@ async def fetch_candidate_media(
     content_id: str,
     canonical_url: str,
     output_dir: Path,
+    *,
+    title_hint: str = "",
 ) -> dict:
     """Fetch Radar candidate media through the canonical yt-dlp service."""
     output_dir = Path(output_dir)
@@ -140,6 +142,9 @@ async def fetch_candidate_media(
             filename="source",
             extract_audio=False,
             options={"quality": "best"},
+            # Douyin exact-media recovery may need caption search when the
+            # canonical /video/<id> page serves an unrelated SPA item.
+            title_hint=(title_hint or "").strip(),
         )
         video_path = Path(result.get("video_path") or "")
         if not video_path.is_file() or video_path.stat().st_size <= 10_000:
