@@ -813,6 +813,7 @@ async def delete_ai_connection(connection_id: str):
 
 @router.post("/settings/tts/connections", response_model=SettingsResponse)
 async def upsert_tts_connection(body: TTSConnectionRequest):
+    from backend.services import tts_service
     from backend.services.tts_service import TTSProvider
 
     connection_id = _safe_connection_id(body.connection_id or body.label or body.provider)
@@ -842,13 +843,31 @@ async def upsert_tts_connection(body: TTSConnectionRequest):
         encrypted = None if provider_changed else existing.get("api_key_encrypted")
         if body.api_key is not None:
             encrypted = encrypt(body.api_key) if body.api_key else None
+
+        voice = body.voice or None
+        model = body.model or None
+        base_url = body.base_url.strip() if body.base_url else None
+        region = body.region.strip() if body.region else None
+        info = tts_service.PROVIDER_INFO[TTSProvider(provider)]
+        if info.get("needs_key") and not encrypted:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{info.get('label') or provider} requires its own API key.",
+            )
+        if provider in {"openai_compatible_tts", "gpt_sovits"} and not base_url:
+            raise HTTPException(status_code=400, detail=f"{provider} requires a Base URL.")
+        if provider == "azure_tts" and not (region or base_url):
+            raise HTTPException(status_code=400, detail="Azure Speech requires a region or custom endpoint.")
+        if provider == "elevenlabs" and not voice:
+            raise HTTPException(status_code=400, detail="ElevenLabs requires a voice ID.")
+
         connections[connection_id] = {
             "label": body.label.strip() or connection_id,
             "provider": provider,
-            "voice": body.voice or None,
-            "model": body.model or None,
-            "base_url": body.base_url.strip() if body.base_url else None,
-            "region": body.region.strip() if body.region else None,
+            "voice": voice,
+            "model": model,
+            "base_url": base_url,
+            "region": region,
             "api_key_encrypted": encrypted,
             "archived": False,
         }
