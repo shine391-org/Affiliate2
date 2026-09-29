@@ -1015,3 +1015,105 @@ async def test_archived_connection_id_cannot_be_reused(monkeypatch):
 
     assert json.loads(row.ai_connections_json)["old-hermes"]["base_url"] == "http://127.0.0.1:9000/v1"
     assert json.loads(row.tts_connections_json)["old-tts"]["voice"] == "en-US-AndrewMultilingualNeural"
+
+
+
+@pytest.mark.asyncio
+async def test_archived_or_conflicting_connection_cannot_be_activated(monkeypatch):
+    from backend.models.user_settings import UserSettings
+
+    row = UserSettings(user_id="local")
+    row.ai_provider = "compatible"
+    row.ai_connection_id = "active-ai"
+    row.ai_connections_json = json.dumps({
+        "active-ai": {
+            "label": "Active AI",
+            "provider": "compatible",
+            "model": "longcat",
+            "base_url": "http://127.0.0.1:8645/v1",
+            "api_key_encrypted": None,
+            "archived": False,
+        },
+        "archived-ai": {
+            "label": "Archived AI",
+            "provider": "compatible",
+            "model": "old",
+            "base_url": "http://127.0.0.1:9000/v1",
+            "api_key_encrypted": None,
+            "archived": True,
+        },
+    })
+    row.tts_provider = "edge_tts"
+    row.tts_connection_id = "edge-active"
+    row.tts_connections_json = json.dumps({
+        "edge-active": {
+            "label": "Edge active",
+            "provider": "edge_tts",
+            "voice": "vi-VN-HoaiMyNeural",
+            "model": None,
+            "base_url": None,
+            "region": None,
+            "api_key_encrypted": None,
+            "archived": False,
+        },
+        "archived-tts": {
+            "label": "Old edge",
+            "provider": "edge_tts",
+            "voice": "en-US-AndrewMultilingualNeural",
+            "model": None,
+            "base_url": None,
+            "region": None,
+            "api_key_encrypted": None,
+            "archived": True,
+        },
+    })
+
+    class Result:
+        def scalar_one_or_none(self):
+            return row
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+        async def execute(self, _query):
+            return Result()
+        def add(self, _row):
+            return None
+        async def commit(self):
+            return None
+
+    monkeypatch.setattr(settings_api, "AsyncSessionLocal", lambda: FakeSession())
+
+    with pytest.raises(Exception) as archived_ai:
+        await settings_api.update_settings(settings_api.SettingsUpdate(
+            ai_connection_id="archived-ai",
+        ))
+    assert getattr(archived_ai.value, "status_code", None) == 409
+    assert "archived" in str(getattr(archived_ai.value, "detail", "")).lower()
+    assert row.ai_connection_id == "active-ai"
+
+    with pytest.raises(Exception) as conflicting_ai:
+        await settings_api.update_settings(settings_api.SettingsUpdate(
+            ai_connection_id="active-ai",
+            ai_provider="openai",
+        ))
+    assert getattr(conflicting_ai.value, "status_code", None) == 409
+    assert "conflicting" in str(getattr(conflicting_ai.value, "detail", "")).lower()
+
+    with pytest.raises(Exception) as archived_tts:
+        await settings_api.update_settings(settings_api.SettingsUpdate(
+            tts_connection_id="archived-tts",
+        ))
+    assert getattr(archived_tts.value, "status_code", None) == 409
+    assert "archived" in str(getattr(archived_tts.value, "detail", "")).lower()
+    assert row.tts_connection_id == "edge-active"
+
+    with pytest.raises(Exception) as conflicting_tts:
+        await settings_api.update_settings(settings_api.SettingsUpdate(
+            tts_connection_id="edge-active",
+            tts_provider="elevenlabs",
+        ))
+    assert getattr(conflicting_tts.value, "status_code", None) == 409
+    assert "conflicting" in str(getattr(conflicting_tts.value, "detail", "")).lower()
