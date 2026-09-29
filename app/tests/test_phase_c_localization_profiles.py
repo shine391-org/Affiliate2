@@ -268,3 +268,36 @@ def test_profile_rejects_total_ai_budget_shorter_than_single_attempt():
             translation_attempt_timeout_s=90,
             translation_total_timeout_s=60,
         )
+
+
+
+def test_profile_supports_three_ordered_ai_routes_without_schema_changes():
+    profile = LocalizationProfile(
+        id="three-routes",
+        name="Three routes",
+        translation_routes=[
+            {"connection_id": "hermes-a", "model": "longcat"},
+            {"connection_id": "lmstudio-qwen", "model": "qwen3:8b"},
+            {"connection_id": "openrouter-backup", "model": "vendor/model"},
+        ],
+        rewrite_routes=[
+            {"connection_id": "lmstudio-gemma", "model": "gemma"},
+            {"connection_id": "hermes-a", "model": "longcat"},
+        ],
+    )
+    assert [r.connection_id for r in profile.translation_routes] == [
+        "hermes-a", "lmstudio-qwen", "openrouter-backup",
+    ]
+    assert len(profile.rewrite_routes) == 2
+
+
+def test_profile_rejects_exact_duplicate_route():
+    with pytest.raises(ValueError, match="duplicate route"):
+        LocalizationProfile(
+            id="dupe-route",
+            name="Duplicate route",
+            translation_routes=[
+                {"connection_id": "hermes", "model": "same"},
+                {"connection_id": "hermes", "model": "same"},
+            ],
+        )
