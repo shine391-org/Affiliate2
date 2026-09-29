@@ -16,6 +16,7 @@ class UserSettings(Base, TimestampMixin):
     ai_model = Column(String(100), nullable=True)                   # Optional model override
     ai_base_url = Column(String(500), nullable=True)                # Base URL for OpenAI-compatible provider
     ai_api_key_encrypted = Column(Text, nullable=True)              # Optional per-user key (overrides .env)
+    ai_provider_profiles_json = Column(Text, nullable=True)             # Per-provider model/base/key snapshots (keys stay encrypted)
 
     # ── Service API keys (BYOK — override .env per-user) ──
     youtube_api_key_encrypted = Column(Text, nullable=True)         # YouTube Data API v3 key
@@ -62,6 +63,7 @@ class UserSettings(Base, TimestampMixin):
     tts_base_url = Column(Text, nullable=True)
     tts_region = Column(String(100), nullable=True)
     tts_api_key_encrypted = Column(Text, nullable=True)
+    tts_provider_profiles_json = Column(Text, nullable=True)            # Per-provider voice/model/base/region/key snapshots
 
     # ── Caption Style ──────────────────────────────────
     caption_style = Column(String(20), default="viral")  # viral|classic|bold|none
