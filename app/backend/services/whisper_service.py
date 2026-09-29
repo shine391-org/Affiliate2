@@ -125,11 +125,12 @@ WHISPER_MODEL_SIZES = {
 }
 
 
-# Models heavy enough that keeping them resident after a one-off job is a real
-# memory cost (~1.5 GB / ~3 GB RSS). These get evicted after an idle period;
-# base/small are cheap enough to keep hot for the process lifetime.
-_HEAVY_MODELS = {"medium", "large-v3"}
-_IDLE_EVICT_SECONDS = 600  # 10 min
+# Desktop resource policy: every Whisper model is evicted after a short idle
+# grace period. Even "small" models keep sizeable native CTranslate2/CUDA
+# allocations resident, and a failed/finished localization job must not leave
+# multi-GB RSS pinned for the lifetime of the backend. A short grace still lets
+# back-to-back jobs reuse the model without paying a reload for every clip.
+_IDLE_EVICT_SECONDS = 45
 
 # Min seconds between on_progress emissions during a streaming transcription.
 # Module-level so tests can shrink it instead of monkeypatching time.monotonic
@@ -167,6 +168,7 @@ class WhisperService:
     _lock = threading.Lock()
     _last_used = 0.0
     _evict_task = None
+    _active_transcriptions = 0
     # Serializes the transcription COMPUTE (not the model load) for long
     # audio. The model is created with ctranslate2's default num_workers=1,
     # so two concurrent transcribe() calls never truly ran in parallel
@@ -302,9 +304,9 @@ class WhisperService:
 
     @classmethod
     def unload(cls) -> bool:
-        """Drop the resident model. Returns True if something was freed."""
+        """Drop the resident model when no transcription is using it."""
         with cls._lock:
-            if cls._model is None:
+            if cls._model is None or cls._active_transcriptions > 0:
                 return False
             freed = cls._loaded_model_name or cls._loaded_quality
             cls._model = None
@@ -313,31 +315,40 @@ class WhisperService:
             cls._loaded_device = None
         import gc
         gc.collect()
-        logger.info("Whisper model '%s' evicted (idle)", freed)
+        # Do not import torch just to clean Whisper. If Demucs/WhisperX already
+        # loaded it in this process, release only UNUSED CUDA allocator blocks.
+        # Active tensors remain valid.
+        torch = sys.modules.get("torch")
+        try:
+            if torch is not None and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
+        logger.info("Whisper model '%s' evicted after %.0fs idle", freed, _IDLE_EVICT_SECONDS)
         return True
 
     @classmethod
     async def _evict_when_idle(cls):
-        """Free a heavy model once it has gone unused for _IDLE_EVICT_SECONDS.
-
-        Without this, a single "best"-quality analyze pins ~3 GB of RSS for the
-        lifetime of the process — and the app sits in the tray holding it.
-        """
+        """Free the resident model after a short period with no active users."""
         try:
             while True:
                 with cls._lock:
-                    quality = cls._loaded_quality
                     model_name = cls._loaded_model_name
                     last = cls._last_used
-                if quality is None:
+                    active = cls._active_transcriptions
+                if model_name is None:
                     return
-                if model_name not in _HEAVY_MODELS:
-                    return
+                if active > 0:
+                    # A previous job's sweeper may still be alive while the next
+                    # transcription reuses the singleton. Never evict underneath
+                    # an active caller; re-check shortly instead.
+                    await asyncio.sleep(1)
+                    continue
                 idle = time.monotonic() - last
                 if idle >= _IDLE_EVICT_SECONDS:
                     cls.unload()
                     return
-                await asyncio.sleep(min(60, _IDLE_EVICT_SECONDS - idle + 1))
+                await asyncio.sleep(min(15, max(1, _IDLE_EVICT_SECONDS - idle + 1)))
         except asyncio.CancelledError:
             raise
         except Exception as e:  # never let the sweeper kill anything
@@ -345,7 +356,7 @@ class WhisperService:
 
     @classmethod
     def _arm_evictor(cls):
-        if cls._loaded_model_name not in _HEAVY_MODELS:
+        if cls._loaded_model_name is None:
             return
         if cls._evict_task is not None and not cls._evict_task.done():
             return
@@ -493,10 +504,16 @@ class WhisperService:
                 if gate is not None:
                     gate.release()
 
+        with type(self)._lock:
+            type(self)._active_transcriptions += 1
         try:
             return await asyncio.to_thread(_run)
         finally:
-            type(self)._last_used = time.monotonic()
+            with type(self)._lock:
+                type(self)._active_transcriptions = max(
+                    0, type(self)._active_transcriptions - 1
+                )
+                type(self)._last_used = time.monotonic()
             type(self)._arm_evictor()
 
 
