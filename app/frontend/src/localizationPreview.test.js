@@ -182,6 +182,7 @@ test("AI stage selection prefers actual fallback audit over configured primary",
     ],
     translation_ai: {
       selected_connection_id: "lmstudio-qwen",
+      attempted: true,
       failure_chain: [{ connection_id: "hermes-main", error_type: "TimeoutError" }],
     },
   }
@@ -189,6 +190,7 @@ test("AI stage selection prefers actual fallback audit over configured primary",
   assert.equal(selected.connectionId, "lmstudio-qwen")
   assert.equal(selected.model, "qwen3:8b")
   assert.equal(selected.failureCount, 1)
+  assert.equal(selected.isActual, true)
 })
 
 test("C7 stage selection still resolves actual fallback on failed dubbing metadata", () => {
@@ -201,6 +203,7 @@ test("C7 stage selection still resolves actual fallback on failed dubbing metada
     ],
     rewrite_ai: {
       selected_connection_id: "lmstudio-gemma",
+      attempted: true,
       sticky_route_index: 1,
       failure_chain: [{ connection_id: "hermes-main", error_type: "ServiceUnavailable" }],
     },
@@ -209,4 +212,25 @@ test("C7 stage selection still resolves actual fallback on failed dubbing metada
   assert.equal(selected.connectionId, "lmstudio-gemma")
   assert.equal(selected.model, "gemma-4-e4b")
   assert.equal(selected.failureCount, 1)
+  assert.equal(selected.isActual, true)
+})
+
+test("configured C7 route is not claimed as actually used before any AI call", () => {
+  const selected = resolveAiStageSelection({
+    rewrite_provider: "hermes-main",
+    rewrite_model: "longcat",
+    rewrite_routes: [{ connection_id: "hermes-main", model: "longcat" }],
+    rewrite_ai: {
+      selected_connection_id: "hermes-main",
+      attempted: false,
+      attempt_count: 0,
+      success_count: 0,
+      failure_chain: [],
+    },
+  }, {}, "rewrite")
+
+  assert.equal(selected.connectionId, "hermes-main")
+  assert.equal(selected.model, "longcat")
+  assert.equal(selected.attempted, false)
+  assert.equal(selected.isActual, false)
 })
