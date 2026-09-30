@@ -26,6 +26,7 @@ import useDocumentTitle from "../hooks/useDocumentTitle"
 import {
   canonicalChannelVideoUrl,
   channelRequestConfig,
+  channelVideoPageParams,
   reconcileSelectedChannel,
   channelsWithoutChannel,
   selectedChannelAfterDisconnect,
@@ -378,9 +379,11 @@ function ChannelDetail({ channel, onBack }) {
     setLoading(true)
     setError(null)
     try {
-      const params = { limit: requestedLimit }
-      if (refresh) params.refresh = true
-      if (isDouyin && token) params.page_token = token
+      const params = channelVideoPageParams(channel.platform, {
+        limit: requestedLimit,
+        pageToken: token,
+        refresh,
+      })
       const { data: resp } = await http.get(`/api/channels/videos/${channel.id}`, {
         ...channelRequestConfig,
         params,
