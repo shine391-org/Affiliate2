@@ -15,16 +15,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _drop_localization_workspace(job: Job) -> None:
-    if job.job_type != "tool:translate":
-        return
-    try:
-        from backend.services.localization_stage_service import cleanup_localization_workspace
-        cleanup_localization_workspace(job.id)
-    except (OSError, ValueError):
-        logger.warning("Could not remove localization workspace for job %s", job.id)
-
-
 class JobResponse(BaseModel):
     id: str
     job_type: str
