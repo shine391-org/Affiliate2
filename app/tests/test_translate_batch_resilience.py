@@ -1473,7 +1473,10 @@ def test_materialized_profile_snapshots_non_secret_runtime_bindings(monkeypatch)
     )
     assert got.translation_provider == "compatible"
     assert got.translation_model == "qwen-local"
-    assert got.translation_base_url == "http://localhost:1234/v1"
+    # Connection endpoints stay live by connection_id unless the profile
+    # explicitly pins a per-route base_url override.
+    assert got.translation_base_url is None
+    assert got.translation_routes[0].base_url is None
     assert got.tts_provider == "edge_tts"
     assert got.tts_voice == "vi-VN-HoaiMyNeural"
     assert "secret-must-not-be-persisted" not in got.model_dump_json()
@@ -2217,7 +2220,7 @@ def test_materialized_env_provider_can_resolve_again_without_saved_registry(monk
         ai_provider_profiles_json="{}",
     )
 
-    client = ls._ai_client_for_selector(
+    client = ls._ai_client_for_connection(
         settings,
         "openai",
         model="materialized-model",
