@@ -1075,10 +1075,22 @@ async def run_tool_translate(
         "TASK START tool:translate | job=%s target=%s mode=%s profile=%s aspect=%s",
         job_id[:8], target_language, mode, profile_id or "default", target_aspect or "default",
     )
-    # Consume a recovery-claim marker immediately when the coroutine REALLY
-    # starts. Until this point a process crash can safely restore the previous
-    # quiescent job state; after this point this is a real new attempt.
-    await _tool_progress(job_id, 0, "Starting localization…", user_id)
+    # Consume a recovery-claim marker only for a genuinely new/reopened
+    # attempt. Bounded auto-repair recursively re-enters this runner while the
+    # same Job is already running; emitting 0% there makes UI progress jump
+    # backwards even though completed upstream work is being preserved.
+    announce_start = True
+    try:
+        from backend.database import AsyncSessionLocal
+        from backend.models.job import Job
+        async with AsyncSessionLocal() as db:
+            row = await db.get(Job, job_id)
+            if row is not None and row.status == "running":
+                announce_start = False
+    except Exception:
+        pass
+    if announce_start:
+        await _tool_progress(job_id, 0, "Starting localization…", user_id)
 
     original_input = Path(in_path)
     cleanup: list[Path] = []
