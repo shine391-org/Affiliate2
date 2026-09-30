@@ -48,5 +48,5 @@ def test_localization_profiles_ui_exposes_ai_fallback_and_deadline_controls():
     assert "Dịch tổng ngân sách/batch" in ui
     assert "C7 tổng ngân sách" in ui
     assert 'patch("semantic_segmentation"' in ui
-    assert "phân đoạn nhanh không AI" in ui
+    assert "tắt = phân đoạn nhanh bằng timestamp/punctuation/speaker" in ui
     assert "timing fit/video slowdown bounded" in ui
