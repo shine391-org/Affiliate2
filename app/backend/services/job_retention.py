@@ -49,6 +49,11 @@ RETENTION_DAYS = 30
 # thousands inside the window. Library-backing rows are never counted or cut.
 MAX_PRUNABLE_ROWS = 2000
 
+# A Library item can live forever, but its Demucs/TTS/ASR intermediates should
+# not. After this horizon keep source + manifest + review/final artifacts and
+# drop only reconstructible heavy stage directories.
+LOCALIZATION_WORKSPACE_COMPACT_DAYS = 14
+
 TERMINAL_STATUSES = ("success", "failed", "cancelled")
 
 
@@ -174,12 +179,37 @@ async def sweep(db: AsyncSession, *, retention_days: int = RETENTION_DAYS,
             deleted_old, deleted_over_cap, kept_library,
         )
 
+    compact_cutoff = datetime.utcnow() - timedelta(
+        days=LOCALIZATION_WORKSPACE_COMPACT_DAYS
+    )
+    deleted_workspace_ids = set(localization_workspaces)
+    compacted = 0
+    from backend.services.localization_stage_service import compact_localization_workspace
+    for job in rows:
+        if (
+            job.job_type != "tool:translate"
+            or job.id in deleted_workspace_ids
+            or not job.created_at
+            or job.created_at >= compact_cutoff
+            or not is_library_item(job)
+        ):
+            continue
+        try:
+            if compact_localization_workspace(job.id):
+                compacted += 1
+        except (OSError, ValueError):
+            logger.warning(
+                "job retention: could not compact localization workspace for %s",
+                job.id,
+            )
+
     total = (await db.execute(select(func.count(Job.id)))).scalar() or 0
     return {
         "deleted_aged": deleted_old,
         "deleted_over_cap": deleted_over_cap,
         "kept_library_items": kept_library,
         "rows_remaining": total,
+        "compacted_localization_workspaces": compacted,
     }
 
 
