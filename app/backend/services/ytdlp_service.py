@@ -726,17 +726,19 @@ async def _prepare_download_source(
                     cdp_url=douyin_cdp_url,
                     title_hint=title_hint,
                 ),
-                timeout=45,
+                # CDP connect/navigation + DOM wait + detail + two caption
+                # probes are individually bounded; leave room for all stages.
+                timeout=120,
             )
         except Exception as exc:
             probe_reason = (
                 cookie_session.get("detail")
                 or cookie_session.get("error")
-                or "matching Douyin browser cookies unavailable"
+                or ("readable" if cookie_session.get("ok") else "unavailable")
             )
             raise DownloadError(
-                "Douyin download could not use the browser cookie store and the "
-                "authenticated CDP fallback could not resolve the media URL. "
+                "Douyin authenticated CDP resolver could not resolve the media URL. "
+                f"cookie_store_readable={bool(cookie_session.get('ok'))}; "
                 f"Cookie probe: {probe_reason}. "
                 f"CDP resolver: {type(exc).__name__}: {exc}"
             ) from exc

@@ -238,12 +238,14 @@ async def test_douyin_cookie_path_fails_loudly_when_identity_is_unprovable(monke
 
     monkeypatch.setattr(resolver, "resolve_douyin_media", fake_resolve)
 
-    with pytest.raises(DownloadError, match="could not resolve the media URL"):
+    with pytest.raises(DownloadError, match="could not resolve the media URL") as exc:
         await svc._prepare_download_source(
             "https://www.douyin.com/video/123",
             {"ok": True, "douyin_cookie_count": 9, "tiktok_cookie_count": 0},
             title_hint="酸辣柠檬虾",
         )
+    assert "cookie_store_readable=True" in str(exc.value)
+    assert "could not use the browser cookie store" not in str(exc.value)
 
 
 @pytest.mark.asyncio

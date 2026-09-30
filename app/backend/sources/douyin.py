@@ -188,6 +188,48 @@ class DouyinProvider:
             )
         return payload
 
+    async def _fetch_aweme_detail(self, page, aweme_id: str) -> dict:
+        """Lookup an exact aweme using the existing CDP page's request hooks.
+
+        context.request can return 403 in a healthy browser session. Page fetch
+        reuses browser hooks/cookies; the caller must verify the response ID.
+        """
+        if not aweme_id or not aweme_id.isascii() or not aweme_id.isdigit():
+            raise ValueError("An exact numeric aweme_id is required")
+        url = f"{DOUYIN_HOST}/aweme/v1/web/aweme/detail/?" + urllib.parse.urlencode({
+            "aid": "6383", "device_platform": "webapp", "aweme_id": aweme_id,
+        })
+        result = await asyncio.wait_for(page.evaluate(
+            """async ({url, timeout}) => {
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), timeout);
+                try {
+                    const response = await fetch(url, {
+                        credentials: 'include', signal: controller.signal,
+                    });
+                    const text = await response.text();
+                    let payload = null;
+                    try { payload = JSON.parse(text); } catch {}
+                    return {status: response.status, payload};
+                } finally { clearTimeout(timer); }
+            }""",
+            {"url": url, "timeout": DOUYIN_API_TIMEOUT_MS},
+        ), timeout=DOUYIN_API_TIMEOUT_MS / 1000 + 1)
+        status = result.get("status")
+        if status in _ACCESS_HTTP:
+            raise PermissionError(f"Douyin detail HTTP {status}: access/session restriction")
+        if not isinstance(status, int) or not 200 <= status < 300:
+            raise RuntimeError(f"Douyin detail HTTP {status}")
+        payload = result.get("payload")
+        if not isinstance(payload, dict):
+            raise RuntimeError("Douyin detail returned non-JSON payload")
+        code = payload.get("status_code")
+        if code in _ACCESS_API_STATUS:
+            raise PermissionError(f"Douyin detail API status {code}")
+        if code not in (None, 0):
+            raise RuntimeError(f"Douyin detail API status {code}")
+        return payload
+
     async def _fetch_creator_profile(
         self,
         context,

@@ -45,6 +45,8 @@ class _MediaCandidate:
     - ``url_aweme_ids``: the identity the media URL itself declares (``__vid``
       or a ``/video/<id>`` path). Authoritative. A DOM association can never
       override or rescue a conflicting one.
+    - ``api_aweme_id``: owning detail/search payload ID. When present, it must
+      also match the request; a conflicting media URL cannot override it.
     - ``dom_aweme_ids``: a page-association guess scraped from ancestor
       attributes / anchors. It may only establish identity when the media URL
       declares none at all.
@@ -54,21 +56,26 @@ class _MediaCandidate:
     content_length: int = 0
     url_aweme_ids: tuple[str, ...] = ()
     dom_aweme_ids: tuple[str, ...] = ()
+    api_aweme_id: str | None = None
     provenance: str = ""
     resolution_path: str = ""
 
     @property
     def identity_ids(self) -> tuple[str, ...]:
-        """The aweme ids this candidate may be claimed to be."""
-        return self.url_aweme_ids or self.dom_aweme_ids
+        """Observed IDs for diagnostics only, never a membership acceptance gate."""
+        return tuple(dict.fromkeys(
+            (*self.url_aweme_ids, self.api_aweme_id) if self.api_aweme_id
+            else self.url_aweme_ids or self.dom_aweme_ids
+        ))
 
     def matches(self, expected_aweme_id: str) -> bool:
         """Does this candidate prove it is the requested aweme?"""
+        if self.api_aweme_id is not None and self.api_aweme_id != expected_aweme_id:
+            return False
         if self.url_aweme_ids:
-            # The media URL states its own identity; a conflicting DOM
-            # association is a wrong-video signal, not a correction.
-            return expected_aweme_id in self.url_aweme_ids
-        return expected_aweme_id in self.dom_aweme_ids
+            # URL evidence cannot be rescued by a conflicting DOM/API association.
+            return set(self.url_aweme_ids) == {expected_aweme_id}
+        return self.api_aweme_id == expected_aweme_id or expected_aweme_id in self.dom_aweme_ids
 
 
 class _RedirectIdentityWatcher:
@@ -251,6 +258,8 @@ def _verified_candidate(
 def _identity_observation(
     expected_aweme_id: str | None,
     observed: list[_MediaCandidate],
+    attempted_stages: list[str],
+    outcomes: list[str],
 ) -> str:
     """One forensic string describing why identity could not be proven."""
     if not expected_aweme_id:
@@ -266,7 +275,8 @@ def _identity_observation(
         f"requested_aweme_id={expected_aweme_id}; "
         f"observed_candidate_ids={observed_ids or ['unknown']}; "
         f"provenance={provenance or ['none']}; "
-        "resolution_path=dom_then_network_then_search"
+        f"resolution_path={'_then_'.join(attempted_stages)}; "
+        f"stage_outcomes={outcomes}"
     )
 
 
@@ -281,8 +291,10 @@ def _caption_keywords(title_hint: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(keywords))
 
 
-def _aweme_play_candidates(aweme: dict) -> list[_MediaCandidate]:
-    """Signed CDN play URLs declared by one search-API aweme object."""
+def _aweme_play_candidates(
+    aweme: dict, *, resolution_path: str = "search",
+) -> list[_MediaCandidate]:
+    """Signed media URLs owned by the response aweme, never by the query ID."""
     video = aweme.get("video") or {}
     candidates: list[_MediaCandidate] = []
     for field in ("play_addr_h264", "play_addr", "play_addr_265", "download_addr"):
@@ -297,8 +309,9 @@ def _aweme_play_candidates(aweme: dict) -> list[_MediaCandidate]:
                 url=url,
                 content_length=int(height or 0),
                 url_aweme_ids=_aweme_ids_from_url(url),
-                provenance="search:play_addr",
-                resolution_path="search",
+                api_aweme_id=str(aweme.get("aweme_id") or ""),
+                provenance=f"{resolution_path}:play_addr",
+                resolution_path=resolution_path,
             ))
     return candidates
 
@@ -313,13 +326,14 @@ async def _search_caption_candidates(
 
     Douyin's /video/<id> page regularly serves a *different* aweme to an
     authenticated session, so that page's own player is not trustworthy. The
-    search API returns the aweme object keyed by its own id, which is the only
-    source here able to prove exact identity.
+    search API returns an aweme object keyed by its own id. Keep rejected
+    candidates for diagnostics; the same exact-ID gate filters all results.
     """
     from backend.sources.douyin import DouyinProvider
 
     provider = DouyinProvider(cdp_url=cdp_url)
     found: list[_MediaCandidate] = []
+    last_error: Exception | None = None
     async with open_douyin_cdp_session(cdp_url) as session:
         for keyword in _caption_keywords(title_hint):
             try:
@@ -333,26 +347,18 @@ async def _search_caption_candidates(
                     "",
                     DOUYIN_SEARCH_PAGE_SIZE,
                 )
-            except Exception:
+            except Exception as exc:
+                last_error = exc
                 continue
             for entry in payload.get("data") or []:
                 aweme = entry.get("aweme_info") if isinstance(entry, dict) else None
                 if not isinstance(aweme, dict):
                     continue
-                if str(aweme.get("aweme_id") or "") != expected_aweme_id:
-                    continue
-                for candidate in _aweme_play_candidates(aweme):
-                    found.append(_MediaCandidate(
-                        url=candidate.url,
-                        content_length=candidate.content_length,
-                        # The search API keyed this object by its own aweme_id;
-                        # that server-side identity is what proves the media.
-                        url_aweme_ids=candidate.url_aweme_ids or (expected_aweme_id,),
-                        provenance=candidate.provenance,
-                        resolution_path=candidate.resolution_path,
-                    ))
-            if found:
+                found.extend(_aweme_play_candidates(aweme))
+            if _verified_ordered(found, expected_aweme_id):
                 break
+    if not found and last_error is not None:
+        raise last_error
     return found
 
 
@@ -526,6 +532,8 @@ async def resolve_douyin_media(
                         if source_video_id in candidate.url_aweme_ids
                         else candidate.url_aweme_ids[0]
                     )
+                elif candidate.api_aweme_id:
+                    claimed = candidate.api_aweme_id
                 else:
                     claimed = (
                         source_video_id
@@ -557,7 +565,7 @@ async def resolve_douyin_media(
                             candidate_aweme_id=(
                                 source_video_id
                                 if source_video_id in (other.url_aweme_ids or ())
-                                else (other.url_aweme_ids or (other.dom_aweme_ids or (None,)))[0]
+                                else other.api_aweme_id or (other.url_aweme_ids or (other.dom_aweme_ids or (None,)))[0]
                             ),
                             provenance=other.provenance,
                             resolution_path=other.resolution_path,
@@ -567,6 +575,8 @@ async def resolve_douyin_media(
                 )
 
             observed: list[_MediaCandidate] = []
+            attempted_stages = ["dom"]
+            outcomes: list[str] = []
 
             def _read_dom_candidates(raw_candidates) -> list[_MediaCandidate]:
                 candidates = []
@@ -601,14 +611,38 @@ async def resolve_douyin_media(
             if ordered:
                 return _resolved(ordered)
 
+            attempted_stages.append("network")
             observed.extend(network_candidates)
             ordered = _verified_ordered(network_candidates, source_video_id)
             if ordered:
                 return _resolved(ordered)
 
-            # The page cannot prove identity. Fall back to the caption search
-            # OUTSIDE this CDP session (it opens its own authenticated one).
-            page_observation = _identity_observation(source_video_id, observed)
+            # Query the exact ID even for manual URLs with no caption. Keep the
+            # temporary page alive so the provider can use browser request hooks.
+            from backend.sources.douyin import DouyinProvider
+
+            attempted_stages.append("exact_aweme")
+            try:
+                payload = await DouyinProvider(cdp_url=cdp_url)._fetch_aweme_detail(
+                    page, source_video_id,
+                )
+                aweme = payload.get("aweme_detail")
+                if isinstance(aweme, dict):
+                    candidates = _aweme_play_candidates(aweme, resolution_path="exact_aweme")
+                    observed.extend(candidates)
+                    actual_id = str(aweme.get("aweme_id") or "")
+                    # A conflicting payload ID cannot be rescued by a URL ID.
+                    ordered = (_verified_ordered(candidates, source_video_id)
+                               if actual_id == source_video_id else [])
+                    if ordered:
+                        return _resolved(ordered)
+                    outcomes.append(f"exact_aweme=no_verified_media(response_aweme_id={actual_id})")
+                else:
+                    outcomes.append("exact_aweme=detail_unavailable")
+            except Exception as exc:
+                # Error type is sufficient telemetry without leaking signed URLs
+                # or cookie-bearing request diagnostics from browser exceptions.
+                outcomes.append(f"exact_aweme={type(exc).__name__}")
         finally:
             if close_page_here:
                 try:
@@ -616,14 +650,22 @@ async def resolve_douyin_media(
                 except Exception:
                     pass
 
-        if source_video_id and title_hint:
-            search_candidates = await _search_caption_candidates(
-                title_hint,
-                source_video_id,
-                cdp_url=cdp_url,
-            )
-            ordered = _verified_ordered(search_candidates, source_video_id)
-            if ordered:
-                return _resolved(ordered)
+        if source_video_id and _caption_keywords(title_hint):
+            attempted_stages.append("search")
+            try:
+                search_candidates = await _search_caption_candidates(
+                    title_hint,
+                    source_video_id,
+                    cdp_url=cdp_url,
+                )
+                observed.extend(search_candidates)
+                ordered = _verified_ordered(search_candidates, source_video_id)
+                if ordered:
+                    return _resolved(ordered)
+                outcomes.append("search=no_verified_media")
+            except Exception as exc:
+                outcomes.append(f"search={type(exc).__name__}")
 
-        raise RuntimeError(page_observation)
+        raise RuntimeError(_identity_observation(
+            source_video_id, observed, attempted_stages, outcomes,
+        ))
