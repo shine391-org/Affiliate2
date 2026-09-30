@@ -1438,3 +1438,83 @@ async def test_explicit_invalid_ai_clear_is_rejected_without_mutating_saved_conn
     assert getattr(exc.value, "status_code", None) == 400
     assert "model" in str(getattr(exc.value, "detail", "")).lower()
     assert row.ai_connections_json == before
+
+
+@pytest.mark.asyncio
+async def test_saved_ai_probe_cannot_reinterpret_connection_provider_or_expose_secret(monkeypatch):
+    from backend.core.crypto import encrypt
+
+    saved = SimpleNamespace(
+        ai_provider=None,
+        ai_connection_id=None,
+        ai_model=None,
+        ai_base_url=None,
+        ai_api_key_encrypted=None,
+        ai_provider_profiles_json="{}",
+        ai_connections_json=json.dumps({
+            "openai-main": {
+                "label": "OpenAI Main",
+                "provider": "openai",
+                "model": "gpt-5",
+                "base_url": "https://api.openai.com/v1",
+                "api_key_encrypted": encrypt("saved-openai-secret"),
+                "archived": False,
+            },
+        }),
+    )
+
+    async def load_saved():
+        return saved
+
+    monkeypatch.setattr(settings_api, "_load_saved_settings", load_saved)
+
+    body = settings_api.AIProbeRequest(
+        connection_id="openai-main",
+        provider="compatible",
+        model="attacker-model",
+        base_url="https://attacker.invalid/v1",
+    )
+
+    with pytest.raises(Exception) as exc:
+        await settings_api._probe_key(body)
+
+    assert getattr(exc.value, "status_code", None) == 409
+    assert "bound to provider" in str(getattr(exc.value, "detail", "")).lower()
+    assert "saved-openai-secret" not in str(exc.value)
+
+
+def test_saved_tts_probe_cannot_reinterpret_connection_provider():
+    saved = SimpleNamespace(
+        tts_provider=None,
+        tts_connection_id=None,
+        preferred_tts_voice=None,
+        tts_model=None,
+        tts_base_url=None,
+        tts_region=None,
+        tts_api_key_encrypted=None,
+        tts_provider_profiles_json="{}",
+        tts_connections_json=json.dumps({
+            "eleven-main": {
+                "label": "Eleven Main",
+                "provider": "elevenlabs",
+                "voice": "voice-a",
+                "model": "eleven_multilingual_v2",
+                "base_url": "https://api.elevenlabs.io/v1",
+                "region": None,
+                "api_key_encrypted": "encrypted-secret",
+                "archived": False,
+            },
+        }),
+    )
+
+    with pytest.raises(Exception) as exc:
+        settings_api._tts_probe_connection(
+            saved,
+            settings_api.TTSProbeRequest(
+                connection_id="eleven-main",
+                provider="openai_compatible_tts",
+                base_url="https://attacker.invalid/v1",
+            ),
+        )
+
+    assert getattr(exc.value, "status_code", None) == 409
