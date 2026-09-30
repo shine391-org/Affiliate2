@@ -632,3 +632,19 @@ async def test_semantic_invalid_structured_single_route_stays_deterministic():
     assert ai.calls == 1
     assert got.segments
     assert "one" in got.segments[0].source_text
+
+
+def test_semantic_failure_history_is_bounded_to_recent_events():
+    from backend.services import semantic_segmentation as sem
+
+    state = {"sticky_index": 0, "failure_chain": []}
+    for index in range(100):
+        sem._record_semantic_failure(state, {
+            "connection_id": "semantic",
+            "attempt": index,
+            "error": f"failure-{index}",
+        })
+
+    assert len(state["failure_chain"]) == sem._MAX_SEMANTIC_FAILURE_HISTORY
+    assert state["failure_chain"][0]["attempt"] == 36
+    assert state["failure_chain"][-1]["attempt"] == 99
