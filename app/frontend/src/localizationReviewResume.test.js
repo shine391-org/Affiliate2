@@ -25,7 +25,8 @@ test("review-paused jobs are action-needed instead of fake-complete", () => {
   assert.ok(activity.includes('Section label="Cần thao tác"'))
   assert.ok(read("./pages/Library.jsx").includes("Mở việc cần xử lý"))
   assert.ok(activity.includes('job.state === "attention"'))
-  assert.ok(activity.includes("Duyệt & tiếp tục"))
+  assert.ok(activity.includes("job.action_label"))
+  assert.ok(assetModel.includes('"Duyệt & tiếp tục"'))
 })
 
 test("review pause has realtime navigation back to Studio", () => {
