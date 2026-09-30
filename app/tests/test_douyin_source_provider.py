@@ -642,3 +642,49 @@ async def test_creator_snapshot_partial_native_page_does_not_mix_dom_fallback(mo
     assert history.next_cursor is None
     assert dom_called is False
     assert "999" not in [row["video_id"] for row in history.items]
+
+
+@pytest.mark.asyncio
+async def test_creator_history_starts_from_zero_cursor_and_bounds_final_request(monkeypatch):
+    provider = DouyinProvider()
+    calls = []
+    session = SimpleNamespace(
+        context=object(),
+        page=object(),
+        cookie_dict={"UIFID": "session-derived"},
+        ms_token="token",
+    )
+
+    @asynccontextmanager
+    async def fake_session(*args, **kwargs):
+        yield session
+
+    async def fake_posts(
+        _context, _page, _cookies, _token, _creator_id, cursor, count,
+    ):
+        calls.append((cursor, count))
+        page_no = len(calls)
+        start = 1 if page_no == 1 else 19
+        return {
+            "aweme_list": [
+                {
+                    "aweme_id": str(start + i),
+                    "desc": f"Video {start + i}",
+                    "author": {"sec_uid": "creator", "nickname": "Creator"},
+                    "statistics": {},
+                    "video": {},
+                }
+                for i in range(count)
+            ],
+            "has_more": True,
+            "max_cursor": f"cursor-{page_no}",
+        }
+
+    monkeypatch.setattr("backend.sources.douyin.asyncio.sleep", AsyncMock())
+    with patch("backend.sources.douyin.open_douyin_cdp_session", fake_session), \
+         patch.object(provider, "_fetch_creator_posts", new=fake_posts):
+        history = await provider.creator_history("creator", limit=20)
+
+    assert history.status == ProviderStatus.SUCCESS
+    assert calls == [("0", 18), ("cursor-1", 2)]
+    assert len(history.items) == 20
