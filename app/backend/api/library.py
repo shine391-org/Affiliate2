@@ -282,42 +282,6 @@ def _drop_poster_cache(job_id: str) -> None:
         logger.warning("Could not remove poster cache for job %s", job_id)
 
 
-def _drop_localization_workspace(job: Job) -> None:
-    if job.job_type != "tool:translate":
-        return
-    try:
-        from backend.services.localization_stage_service import cleanup_localization_workspace
-        cleanup_localization_workspace(job.id)
-    except (OSError, ValueError):
-        logger.warning("Could not remove localization workspace for job %s", job.id)
-
-
-def _unlink_job_output(job: Job) -> None:
-    """Best-effort removal of the file a job wrote.
-
-    Traversal-rejected or already-missing paths are skipped rather than raised:
-    the ROW still has to disappear, or the Library keeps a tile for a file the
-    user asked to be rid of.
-    """
-    if not job.output_json:
-        return
-    try:
-        out = json.loads(job.output_json)
-    except json.JSONDecodeError:
-        return
-    file_str = (out or {}).get("file")
-    if not file_str:
-        return
-    from backend.api.videos import _safe_resolve_path
-    try:
-        path = _safe_resolve_path(file_str)
-    except HTTPException:
-        logger.warning("Skipped unsafe file delete for job %s", job.id)
-        return
-    if path.is_file():
-        path.unlink(missing_ok=True)
-
-
 def _job_output_path(job: Job) -> Path | None:
     if not job.output_json:
         return None
