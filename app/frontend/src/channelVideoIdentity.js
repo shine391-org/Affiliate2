@@ -2,6 +2,16 @@ export const channelRequestConfig = Object.freeze({
   timeout: 50_000,
 })
 
+export function channelVideoPageParams(
+  platform,
+  { limit = 18, pageToken = null, refresh = false } = {},
+) {
+  const params = { limit }
+  if (refresh) params.refresh = true
+  if (platform === "douyin" && pageToken) params.page_token = pageToken
+  return params
+}
+
 export function canonicalChannelVideoUrl(platform, video = {}) {
   if (platform !== "douyin") {
     return String(video.url || video.source_url || "").trim()
