@@ -617,6 +617,63 @@ async def test_c7_over_max_after_rewrite_fails_without_retime(monkeypatch, tmp_p
 
 
 @pytest.mark.asyncio
+async def test_c7_timing_failure_preserves_actual_fallback_route_audit(monkeypatch, tmp_path):
+    tx = LocalizationTranscript(segments=[
+        LocalizationSegment(
+            id="s1", source_text="x", translated_text="dịch",
+            source_start_ms=0, source_end_ms=500, translation_status="success",
+        ),
+    ])
+    _patch_dub_io(monkeypatch, tmp_path, [2000])
+    monkeypatch.setattr(
+        "backend.services.video_utils.probe_duration",
+        lambda *a, **k: 0.5,
+    )
+
+    primary = SimpleNamespace(connection_name="hermes-main")
+    fallback = SimpleNamespace(connection_name="lmstudio-qwen")
+    monkeypatch.setattr(
+        ls,
+        "_profile_ai_route_clients_compat",
+        lambda *_args, **_kwargs: [primary, fallback],
+    )
+
+    async def failover_without_fit(*args, route_state=None, **kwargs):
+        if route_state is not None:
+            route_state.failure_chain = [{
+                "connection_id": "hermes-main",
+                "provider": "compatible",
+                "model": "longcat",
+                "attempt": 1,
+                "error_type": "TimeoutError",
+                "error": "timed out",
+            }]
+            route_state.sticky_index = 1
+        return False
+
+    monkeypatch.setattr(ls, "_adapt_chunk_items", failover_without_fit)
+
+    with pytest.raises(ls.LocalizationTimingError) as exc:
+        await ls.synthesize_timed_dub(
+            tx,
+            source_media=tmp_path / "source.mp4",
+            target_language="Vietnamese",
+            profile=_profile(
+                dub_rewrite_attempts=1,
+                dub_speed_max=1.30,
+                video_retime_mode="off",
+            ),
+            user_settings=object(),
+            work_dir=tmp_path / "work",
+        )
+
+    audit = exc.value.rewrite_ai
+    assert audit["selected_connection_id"] == "lmstudio-qwen"
+    assert audit["sticky_route_index"] == 1
+    assert audit["failure_chain"][0]["connection_id"] == "hermes-main"
+
+
+@pytest.mark.asyncio
 async def test_c7_targeted_regeneration_reuses_other_raw_chunks(monkeypatch, tmp_path):
     tx = LocalizationTranscript(segments=[
         LocalizationSegment(
