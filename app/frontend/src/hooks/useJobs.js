@@ -17,7 +17,8 @@ function sameJobs(a, b) {
   for (let i = 0; i < a.length; i++) {
     const x = a[i], y = b[i]
     if (x.id !== y.id || x.status !== y.status ||
-        x.progress_pct !== y.progress_pct || x.current_step !== y.current_step) {
+        x.progress_pct !== y.progress_pct || x.current_step !== y.current_step ||
+        x.output_json !== y.output_json || x.error_message !== y.error_message) {
       return false
     }
   }
@@ -44,8 +45,22 @@ export default function useJobs(pollInterval = 5000, pageSize = 20) {
     try {
       const { data } = await http.get("/api/jobs", { params: { limit, offset } })
       const next = data.jobs || []
-      const prev = useAppStore.getState().jobs
+      const store = useAppStore.getState()
+      const prev = store.jobs
       if (!sameJobs(prev, next)) setJobs(next)
+
+      // The poll is the safety net for missed WebSocket terminal/attention
+      // events. Without this, a socket drop exactly when localization pauses
+      // leaves activeJobs saying "running" forever even though the DB row is
+      // awaiting_review (same problem for missed success/failure events).
+      const byId = new Map(next.map((job) => [job.id, job]))
+      Object.keys(store.activeJobs || {}).forEach((jobId) => {
+        const persisted = byId.get(jobId)
+        if (persisted && !ACTIVE_STATUSES.has(persisted.status)) {
+          store.removeJob(jobId)
+        }
+      })
+
       setJobTotal(data.total || 0)
       return next
     } catch (err) {

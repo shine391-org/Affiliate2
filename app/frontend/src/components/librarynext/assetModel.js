@@ -117,6 +117,7 @@ export const PRODUCERS = {
   // source_downloaded_video_id so Library lineage needs no second asset model.
   smart_cut: { label: "Cắt thông minh", media: "video", origin: "edited" },
   creative_remake: { label: "Làm lại sáng tạo", media: "video", origin: "edited" },
+  localization: { label: "Bản địa hóa", media: "video", origin: "edited" },
 
   // Made here from nothing you already owned.
   "tool:voiceover": { label: "Lồng tiếng", media: "audio", origin: "created" },
@@ -134,7 +135,7 @@ export const PRODUCERS = {
   "tool:remove_silence": { label: "Cắt khoảng lặng", media: "video", origin: "edited" },
   "tool:compress": { label: "Nén", media: "video", origin: "edited" },
   "tool:crop": { label: "Cắt khung", media: "video", origin: "edited" },
-  "tool:translate": { label: "Dịch", media: "video", origin: "edited" },
+  "tool:translate": { label: "Bản địa hóa", media: "video", origin: "edited" },
   "tool:music_visualizer": { label: "Trực quan hóa", media: "video", origin: "edited" },
   "tool:audio_enhance": { label: "Đã cải thiện", media: "video", origin: "edited" },
   "tool:gif": { label: "GIF", media: "image", origin: "edited" },
@@ -263,6 +264,7 @@ const JOB_STATE = {
   running: "running",
   pending: "running",
   queued: "running",
+  awaiting_review: "attention",
   success: "done",
   failed: "failed",
   // Its own state, NOT "failed": a deliberate cancel in the red failure strip
@@ -369,17 +371,40 @@ export function activityFromJob(job) {
   let p = classify(job.job_type)
   let resultKey = null
   let input = null
+  let out = null
   try { input = job.input_json ? JSON.parse(job.input_json) : null } catch { /* label falls back */ }
   try {
-    const out = job.output_json ? JSON.parse(job.output_json) : null
+    out = job.output_json ? JSON.parse(job.output_json) : null
     if (out?.generated_video_id) resultKey = `gv:${out.generated_video_id}`
     else if (Array.isArray(out?.clip_ids) && out.clip_ids[0]) resultKey = `gv:${out.clip_ids[0]}`
     else if (out?.file && !p.unmapped) resultKey = `job:${job.id}`
   } catch { /* malformed output_json — no result link, nothing else breaks */ }
+
+  // New runs use awaiting_review. Older builds marked the exact same C6 gate
+  // as success + a JSON "file"; recognize both so existing stuck jobs recover
+  // immediately after upgrading instead of remaining fake-complete forever.
+  const reviewPending = norm === "tool:translate" && (
+    job.status === "awaiting_review"
+    || (job.status === "success" && out?.translation_review_pending === true)
+  )
+  const qcStatus = String(out?.qc_status || "").toUpperCase()
+  // Rendering can finish successfully while QC still blocks release. That is
+  // not an execution failure (the MP4 exists), but it is action-needed work and
+  // must not look like an ordinary green "done" row.
+  const qcAttention = norm === "tool:translate"
+    && job.status === "success"
+    && (
+      qcStatus === "FAILED"
+      || (qcStatus === "NEEDS_REVIEW" && out?.qc_human_approved !== true)
+    )
+  const needsAttention = reviewPending || qcAttention
+  if (reviewPending) resultKey = null
+
   let label = JOB_ONLY_LABELS[norm] || p?.label || job.job_type
   // Render jobs land in the Library even though the JOB type doesn't classify
   // (the generated_videos row each one registers is the library item).
   let bound = norm in RENDER_JOB_TYPES || (!p.unmapped && !(norm in JOB_ONLY_LABELS))
+  if (reviewPending) bound = false
   if (norm in RENDER_JOB_TYPES) p = { ...p, ...RENDER_JOB_TYPES[norm] }
   // Clipper and Smart Cut both ride job_type "generate" because they share
   // the same renderer. The input producer identity tells Activity/Library
@@ -389,27 +414,55 @@ export function activityFromJob(job) {
     label = p?.label || (input.type === "smart_cut" ? "Cắt thông minh" : "Cắt clip")
     bound = true
   }
+  const sourceId = input?.downloaded_video_id || out?.downloaded_video_id || ""
+  const actionHref = reviewPending
+    ? `/studio/localize?${sourceId ? `source=${encodeURIComponent(sourceId)}&` : ""}job=${encodeURIComponent(job.id)}&step=translation`
+    : qcAttention
+      ? `/review?job=${encodeURIComponent(job.id)}`
+      : null
+  const attentionKind = reviewPending ? "translation_review" : qcAttention ? "qc_review" : null
+  const attentionLabel = reviewPending
+    ? "Bản dịch cần duyệt"
+    : qcStatus === "FAILED"
+      ? "QC phát hiện lỗi"
+      : qcAttention
+        ? "QC cần duyệt"
+        : null
+  const attentionStep = reviewPending
+    ? "Bản dịch đã xong — duyệt để tiếp tục lồng tiếng"
+    : qcStatus === "FAILED"
+      ? "Video đã kết xuất nhưng QC phát hiện lỗi — mở Duyệt để xử lý"
+      : qcAttention
+        ? "Video đã kết xuất — QC cần duyệt trước khi dùng tiếp"
+        : null
+
   // Headline precedence matches the old Jobs tab: the stored title, else what
   // the input says it's working on, else the type label — `where` keeps the
   // type explicit even when the headline is a video name.
   const detail = jobDetail(job, input)
   return {
     id: job.id,
-    state: JOB_STATE[job.status] || "done",
-    label: job.title || detail || label,
-    where: label,
+    state: needsAttention ? "attention" : (JOB_STATE[job.status] || "done"),
+    label: job.title || detail || attentionLabel || label,
+    where: reviewPending ? "Bản địa hóa · chờ duyệt bản dịch"
+      : qcAttention ? "Bản địa hóa · QC cần xử lý"
+      : label,
     percent: job.progress_pct != null ? Math.round(job.progress_pct) : null,
-    step: job.current_step || "Đang xử lý\u2026",
+    step: attentionStep || job.current_step || "Đang xử lý\u2026",
     error: job.error_message || null,
     at: job.completed_at || job.started_at || job.created_at,
     // Raw pair for "done in 2m 14s" — the panel formats it with the shared
     // formatDuration (this file stays import-free as the taxonomy mirror).
     started: job.started_at || null,
-    completed: job.completed_at || null,
+    completed: reviewPending ? null : (job.completed_at || null),
     media: p?.media || "video",
     origin: p?.origin || "created",
     producer: label,
     result_key: resultKey,
+    action_href: actionHref,
+    action_label: reviewPending ? "Duyệt & tiếp tục" : qcAttention ? "Mở Duyệt QC" : null,
+    attention_kind: attentionKind,
+    qc_status: qcStatus || null,
     libraryBound: bound,
   }
 }

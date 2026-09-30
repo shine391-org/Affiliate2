@@ -174,3 +174,141 @@ async def test_scout_rows_something_points_at_are_kept():
                 await db.delete(r)
         await db.commit()
         await db.close()
+
+async def test_failed_localization_last_good_file_is_not_pruned():
+    from backend.models.job import Job
+    from backend.services import job_retention
+
+    db = await _session()
+    f = _real_file(f"{PREFIX}localize-last-good.mp4")
+    old = datetime.utcnow() - timedelta(days=400)
+    try:
+        db.add(Job(
+            id=f"{PREFIX}localize-last-good",
+            job_type="tool:translate",
+            status="failed",
+            output_json=json.dumps({"file": str(f), "qc_status": "READY"}),
+            created_at=old,
+        ))
+        await db.commit()
+
+        await job_retention.sweep(db)
+        assert await db.get(Job, f"{PREFIX}localize-last-good") is not None
+        assert f.is_file()
+    finally:
+        await _cleanup(db)
+        f.unlink(missing_ok=True)
+        await db.close()
+
+async def test_old_localization_library_item_compacts_heavy_workspace_but_keeps_source():
+    from backend.config import settings
+    from backend.models.job import Job
+    from backend.services import job_retention
+
+    db = await _session()
+    job_id = f"{PREFIX}compact-localize"
+    f = _real_file(f"{PREFIX}compact-final.mp4")
+    root = settings.STORAGE_ROOT / "localization_jobs" / job_id
+    source = root / "source.mp4"
+    old = datetime.utcnow() - timedelta(days=400)
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(b"source")
+        for stage in ("separation", "asr", "semantic"):
+            d = root / stage
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "blob.bin").write_bytes(b"x" * 64)
+
+        dubbing = root / "dubbing"
+        dubbing.mkdir(parents=True, exist_ok=True)
+        dub_track = dubbing / "dub_track.wav"
+        transcript = dubbing / "transcript.json"
+        plan = dubbing / "plan.json"
+        chunks = dubbing / "chunks.json"
+        for artifact in (dub_track, transcript, plan, chunks):
+            artifact.write_bytes(b"keep")
+        (dubbing / "chunk_0001.wav").write_bytes(b"raw-tts")
+        fitted = dubbing / "fitted"
+        fitted.mkdir()
+        (fitted / "chunk_0001.wav").write_bytes(b"fitted")
+
+        audio_mix = root / "audio_mix"
+        audio_mix.mkdir(parents=True, exist_ok=True)
+        mixed_audio = audio_mix / "mixed_audio.wav"
+        mixed_audio.write_bytes(b"keep")
+        (audio_mix / "scratch.wav").write_bytes(b"scratch")
+
+        (root / "manifest.json").write_text(json.dumps({
+            "stages": {
+                "dubbing": {"artifacts": {
+                    "transcript": str(transcript),
+                    "dub_track": str(dub_track),
+                    "plan": str(plan),
+                    "chunks": str(chunks),
+                }},
+                "audio_mix": {"artifacts": {
+                    "mixed_audio": str(mixed_audio),
+                }},
+            },
+        }), encoding="utf-8")
+
+        db.add(Job(
+            id=job_id,
+            job_type="tool:translate",
+            status="success",
+            output_json=json.dumps({"file": str(f), "qc_status": "READY"}),
+            created_at=old,
+        ))
+        await db.commit()
+
+        stats = await job_retention.sweep(db)
+        assert stats["compacted_localization_workspaces"] >= 1
+        assert await db.get(Job, job_id) is not None
+        assert source.is_file()
+        for stage in ("separation", "asr", "semantic"):
+            assert not (root / stage).exists()
+        for artifact in (dub_track, transcript, plan, chunks, mixed_audio):
+            assert artifact.is_file()
+        assert not (dubbing / "chunk_0001.wav").exists()
+        assert not fitted.exists()
+        assert not (audio_mix / "scratch.wav").exists()
+        assert f.is_file()
+    finally:
+        await _cleanup(db)
+        f.unlink(missing_ok=True)
+        import shutil
+        shutil.rmtree(root, ignore_errors=True)
+        await db.close()
+
+
+async def test_conditional_retention_delete_cannot_remove_a_reclaimed_job():
+    from sqlalchemy import delete
+    from backend.models.job import Job
+
+    db = await _session()
+    job_id = f"{PREFIX}retention-race"
+    try:
+        db.add(Job(id=job_id, job_type="scout", status="failed"))
+        await db.commit()
+
+        snapshot = await db.get(Job, job_id)
+        assert snapshot.status == "failed"
+
+        from backend.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as other:
+            current = await other.get(Job, job_id)
+            current.status = "pending"
+            await other.commit()
+
+        result = await db.execute(
+            delete(Job).where(Job.id == job_id, Job.status == snapshot.status)
+        )
+        await db.commit()
+        assert result.rowcount == 0
+        current = await db.get(Job, job_id)
+        assert current is not None
+        assert current.status == "pending"
+    finally:
+        await _cleanup(db)
+        await db.close()
+

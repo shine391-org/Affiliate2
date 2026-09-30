@@ -45,7 +45,13 @@ const STEP_FOR_FAILED_STAGE = {
 
 function StageChip({ name, record }) {
   const status = record?.status || "pending"
-  return <Chip size="small" variant="outlined" color={status === "complete" ? "success" : status === "failed" ? "error" : "default"} label={`${name}: ${STAGE_STATUS_LABELS[status] || status}`} />
+  const skipped = status === "complete" && record?.metadata?.skipped
+  return <Chip
+    size="small"
+    variant="outlined"
+    color={skipped ? "default" : status === "complete" ? "success" : status === "failed" ? "error" : "default"}
+    label={`${name}: ${skipped ? "Bỏ qua" : (STAGE_STATUS_LABELS[status] || status)}`}
+  />
 }
 
 export default function StudioLocalize({ source, sourcesLoading }) {
@@ -57,10 +63,11 @@ export default function StudioLocalize({ source, sourcesLoading }) {
   const [profileId, setProfileId] = useState("")
   const [target, setTarget] = useState("vi")
   const [mode, setMode] = useState("full_dub")
-  const [reviewTranslation, setReviewTranslation] = useState(true)
+  const [reviewTranslation, setReviewTranslation] = useState(false)
   const [autoRepair, setAutoRepair] = useState(false)
   const [autoRepairBusy, setAutoRepairBusy] = useState(false)
   const [retryingFailure, setRetryingFailure] = useState(false)
+  const [continuingReview, setContinuingReview] = useState(false)
   const [focusedFailureKey, setFocusedFailureKey] = useState("")
   const [detail, setDetail] = useState(null)
   const [detailError, setDetailError] = useState("")
@@ -89,6 +96,7 @@ export default function StudioLocalize({ source, sourcesLoading }) {
   const [captionPlacementMode, setCaptionPlacementMode] = useState("mask_region")
   const [captionVerticalOffset, setCaptionVerticalOffset] = useState(0)
   const [rerendering, setRerendering] = useState(false)
+  const [publishRegistrationBusy, setPublishRegistrationBusy] = useState(false)
   const [hydratedJobId, setHydratedJobId] = useState("")
 
   useEffect(() => {
@@ -168,6 +176,8 @@ export default function StudioLocalize({ source, sourcesLoading }) {
   )
   const activeLocalization = Boolean(jobId)
     && ["pending", "running"].includes(detail?.job_status)
+  const reviewPaused = Boolean(jobId && detail?.translation_review_pending)
+  const workflowOccupied = activeLocalization || reviewPaused
   const canRerender = canRerenderLocalization(detail)
   const jobFailure = localizationJobFailure(detail)
   const stepAvailable = {
@@ -186,6 +196,12 @@ export default function StudioLocalize({ source, sourcesLoading }) {
   }
 
   useEffect(() => {
+    if (jobId || !hydratedJobId) return
+    setHydratedJobId("")
+    setReviewTranslation(false)
+  }, [hydratedJobId, jobId])
+
+  useEffect(() => {
     if (!jobId || hydratedJobId === jobId || !detail?.manifest) return
     const config = hydrateLocalizationJobConfig(detail)
     if (!config || config.jobId !== jobId) return
@@ -202,6 +218,12 @@ export default function StudioLocalize({ source, sourcesLoading }) {
     setCaptionVerticalOffset(config.captionVerticalOffset)
     setHydratedJobId(jobId)
   }, [detail, hydratedJobId, jobId])
+
+  const sourceStreamUrl = source?.id
+    ? `/api/downloaded/${source.id}/stream`
+    : jobId
+      ? `/api/localization/jobs/${jobId}/source`
+      : ""
 
   const previewMethod = useMemo(() => pickPreviewReframeMethod(
     source?.media_metadata?.width,
@@ -257,17 +279,22 @@ export default function StudioLocalize({ source, sourcesLoading }) {
       form.append("review_translation", String(mode === "full_dub" && reviewTranslation))
       form.append("auto_repair", String(autoRepair))
       const { data } = await http.post("/api/tools/translate", form, { headers: { "Content-Type": "multipart/form-data" }, timeout: 120000 })
-      startJob(data.job_id, "tool:translate", "Đang bắt đầu bản địa hóa HQ…")
+      const reusedReview = data.reused && data.status === "awaiting_review"
+      if (!reusedReview) {
+        startJob(data.job_id, "tool:translate", data.reused ? "Đang mở tác vụ bản địa hóa hiện có…" : "Đang bắt đầu bản địa hóa HQ…")
+      }
       setParams((previous) => {
         const next = new URLSearchParams(previous)
         next.set("job", data.job_id)
-        next.set("step", "source")
+        next.set("step", reusedReview ? "translation" : "source")
         return next
       })
       showSnackbar(
-        data.reused
-          ? "Tác vụ giống hệt đang chạy — đã mở tác vụ hiện tại thay vì tạo bản sao."
-          : "Đã bắt đầu tác vụ bản địa hóa từ nguồn đã chọn trong Thư viện",
+        reusedReview
+          ? "Tác vụ này đã dịch xong và đang chờ duyệt — đã mở đúng bước Bản dịch."
+          : data.reused
+            ? "Tác vụ giống hệt đang chạy — đã mở tác vụ hiện tại thay vì tạo bản sao."
+            : "Đã bắt đầu tác vụ bản địa hóa từ nguồn đã chọn trong Thư viện",
         data.reused ? "info" : "success",
       )
     } catch (error) {
@@ -327,6 +354,25 @@ export default function StudioLocalize({ source, sourcesLoading }) {
     }
   }
 
+  const continueAfterTranslationReview = async () => {
+    if (!jobId || !detail?.translation_review_pending || continuingReview) return
+    setContinuingReview(true)
+    try {
+      await http.post(
+        `/api/localization/jobs/${jobId}/continue-after-translation`,
+        { revision: detail?.translation_review_revision },
+      )
+      startJob(jobId, "tool:translate", "Bản dịch đã duyệt · đang tiếp tục lồng tiếng HQ…")
+      showSnackbar("Đã duyệt bản dịch — tác vụ tiếp tục từ bước Lồng tiếng, không chạy lại ASR/dịch.", "success")
+      setStep("voice-timing")
+      await loadDetail()
+    } catch (error) {
+      showSnackbar(error.response?.data?.detail || "Không thể tiếp tục lồng tiếng", "error")
+    } finally {
+      setContinuingReview(false)
+    }
+  }
+
   const rerender = async () => {
     if (!jobId) return
     setRerendering(true)
@@ -350,9 +396,9 @@ export default function StudioLocalize({ source, sourcesLoading }) {
             <Box sx={{ position: "relative", width: "100%", maxHeight: 460, bgcolor: "#000", borderRadius: 1.5, overflow: "hidden", display: "flex", justifyContent: "center", alignItems: "center" }}>
               <Box sx={{ position: "relative", width: "auto", height: 460, maxHeight: 460, maxWidth: "100%", aspectRatio: previewAspect, bgcolor: "#050505", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
                 {previewMethod === "blur_fill" && (
-                  <Box component="video" muted preload="metadata" src={`/api/downloaded/${source.id}/stream`} sx={{ position: "absolute", inset: -12, width: "calc(100% + 24px)", height: "calc(100% + 24px)", objectFit: "cover", filter: "blur(18px) brightness(.65)", display: "block" }} />
+                  <Box component="video" muted preload="metadata" src={sourceStreamUrl} sx={{ position: "absolute", inset: -12, width: "calc(100% + 24px)", height: "calc(100% + 24px)", objectFit: "cover", filter: "blur(18px) brightness(.65)", display: "block" }} />
                 )}
-                <Box component="video" controls preload="metadata" src={`/api/downloaded/${source.id}/stream`} sx={{ position: "relative", width: "100%", height: "100%", objectFit: previewObjectFit(previewMethod), display: "block", zIndex: 1 }} />
+                <Box component="video" controls preload="metadata" src={sourceStreamUrl} sx={{ position: "relative", width: "100%", height: "100%", objectFit: previewObjectFit(previewMethod), display: "block", zIndex: 1 }} />
                 {enableMask && (
                   <Box
                     sx={{
@@ -447,7 +493,7 @@ export default function StudioLocalize({ source, sourcesLoading }) {
               <Switch
                 checked={autoRepair}
                 onChange={(e) => toggleAutoRepair(e.target.checked)}
-                disabled={autoRepairBusy || activeLocalization}
+                disabled={autoRepairBusy || workflowOccupied}
               />
             }
             label={
@@ -555,8 +601,14 @@ export default function StudioLocalize({ source, sourcesLoading }) {
           {selectedProfile && <Alert severity="info" variant="outlined">C6 <strong>{selectedProfile.translation_model || "mặc định kết nối"}</strong> · C7 <strong>{selectedProfile.rewrite_model || "mặc định kết nối"}</strong>. Đây là hai mô hình độc lập.</Alert>}
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
             <Button variant="outlined" onClick={() => navigate("/settings?section=localization")}>Quản lý hồ sơ</Button>
-            <Button variant="contained" onClick={start} disabled={!source || !profileId || starting || activeLocalization}>
-              {starting ? "Đang bắt đầu…" : activeLocalization ? "Tác vụ này đang xử lý…" : "Bắt đầu bản địa hóa"}
+            <Button variant="contained" onClick={start} disabled={!source || !profileId || starting || workflowOccupied}>
+              {starting
+                ? "Đang bắt đầu…"
+                : reviewPaused
+                  ? "Tác vụ đang chờ duyệt bản dịch"
+                  : activeLocalization
+                    ? "Tác vụ này đang xử lý…"
+                    : "Bắt đầu bản địa hóa"}
             </Button>
           </Stack>
         </Stack>
@@ -570,16 +622,44 @@ export default function StudioLocalize({ source, sourcesLoading }) {
 
   const translationPanel = (
     <Stack spacing={2}>
-      {detail?.translation_review_pending && <Alert severity="warning">Đang chờ duyệt bản dịch C6. C7/TTS chưa bắt đầu. Hãy sửa các dòng chưa chính xác rồi chủ động tiếp tục lồng tiếng.</Alert>}
+      {detail?.translation_review_pending && (
+        <Alert
+          severity="warning"
+          action={
+            <Button
+              color="inherit"
+              size="small"
+              onClick={continueAfterTranslationReview}
+              disabled={continuingReview || activeLocalization}
+              sx={{ whiteSpace: "nowrap", fontWeight: 700 }}
+            >
+              {continuingReview ? "Đang tiếp tục…" : "Duyệt xong · Tiếp tục lồng tiếng"}
+            </Button>
+          }
+        >
+          <strong>Bản dịch C6 đã hoàn tất.</strong> Quy trình đang tạm dừng để bạn duyệt; C7/TTS chưa chạy. Nếu bản dịch ổn, bấm nút bên phải để tiếp tục đúng tác vụ này từ bước Lồng tiếng — không chạy lại ASR hay dịch.
+        </Alert>
+      )}
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "minmax(220px,.7fr) minmax(0,1.6fr) minmax(260px,.7fr)" }, gap: 2 }}>
-        <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>{source ? <Box component="video" controls src={`/api/downloaded/${source.id}/stream`} sx={{ width: "100%", bgcolor: "#000", borderRadius: 1 }} /> : <Typography variant="body2">Không có nguồn</Typography>}</Paper>
+        <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>{sourceStreamUrl ? <Box component="video" controls src={sourceStreamUrl} sx={{ width: "100%", bgcolor: "#000", borderRadius: 1 }} /> : <Typography variant="body2">Không có nguồn</Typography>}</Paper>
         <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, maxHeight: 560, overflow: "auto" }}><Stack spacing={1}>{segments.map((segment) => <Box key={segment.id} sx={{ pb: 1, borderBottom: 1, borderColor: "divider" }}><Typography variant="caption" color="text.secondary">{segment.id} · {formatMs(segment.source_start_ms)}–{formatMs(segment.source_end_ms)}</Typography><Typography variant="body2">{segment.source_text}</Typography><Typography variant="body2" sx={{ color: "primary.main", fontWeight: 600 }}>{segment.translated_text || "Chưa dịch"}</Typography></Box>)}</Stack></Paper>
         <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}><Typography variant="subtitle2">Bản dịch C6</Typography><Typography variant="body2" sx={{ mt: 1 }}>{translationSelection.isActual ? "Mô hình thực tế" : "Mô hình cấu hình"}: <strong>{translationSelection.model || "mặc định kết nối"}</strong></Typography><Typography variant="body2">{translationSelection.isActual ? "Kết nối thực tế" : "Kết nối cấu hình"}: <strong>{translationSelection.connectionId || "kết nối trong Cài đặt"}</strong></Typography>{translationSelection.failureCount > 0 && <Typography variant="caption" color="warning.main">Đã fallback sau {translationSelection.failureCount} lỗi provider/route trước đó.</Typography>}<Typography variant="body2">Preset: <strong>{effective.translation_preset || "natural_vietnamese"}</strong></Typography><Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>{effective.translation_instructions || "Không có hướng dẫn riêng"}</Typography><Typography variant="caption" color="text.secondary">Thuật ngữ: {Object.keys(effective.glossary || {}).length} mục</Typography></Paper>
       </Box>
       {jobId && (
-        <Button variant="outlined" startIcon={<TuneOutlinedIcon />} onClick={() => setExpertOpen(true)} sx={{ alignSelf: "flex-start" }}>
-          Xem & chỉnh sửa bản dịch
-        </Button>
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ alignSelf: "flex-start" }}>
+          <Button variant="outlined" startIcon={<TuneOutlinedIcon />} onClick={() => setExpertOpen(true)}>
+            Xem & chỉnh sửa bản dịch
+          </Button>
+          {detail?.translation_review_pending && (
+            <Button
+              variant="contained"
+              onClick={continueAfterTranslationReview}
+              disabled={continuingReview || activeLocalization}
+            >
+              {continuingReview ? "Đang tiếp tục…" : "Duyệt xong · Tiếp tục C7"}
+            </Button>
+          )}
+        </Stack>
       )}
     </Stack>
   )
@@ -629,7 +709,122 @@ export default function StudioLocalize({ source, sourcesLoading }) {
     </Stack>
   )
 
-  const qcPanel = <Stack spacing={2}>{qc ? <Alert severity={qc.status === "READY" ? "success" : qc.status === "FAILED" ? "error" : "warning"}><strong>{QC_STATUS_LABELS[qc.status] || qc.status}</strong> · {(qc.failures || []).length} lỗi · {(qc.warnings || []).length} cảnh báo</Alert> : <Alert severity="info">QC chưa hoàn tất.</Alert>}{qc && [...(qc.failures || []), ...(qc.warnings || [])].map((issue, index) => <Paper key={index} variant="outlined" sx={{ p: 1.5 }}><Typography variant="body2">{typeof issue === "string" ? issue : issue.message || JSON.stringify(issue)}</Typography></Paper>)}<Stack direction={{ xs: "column", sm: "row" }} spacing={1}>{qc?.status === "READY" && <Button variant="contained" onClick={() => navigate("/library")}>Mở đầu ra cuối trong Thư viện</Button>}{qc?.status && qc.status !== "READY" && <Button variant="contained" color="warning" startIcon={<FactCheckOutlinedIcon />} onClick={() => navigate(`/review?job=${encodeURIComponent(jobId)}`)}>Mở trong Duyệt</Button>}</Stack>{jobId && <Button variant="outlined" startIcon={<TuneOutlinedIcon />} onClick={() => setExpertOpen(true)} sx={{ alignSelf: "flex-start" }}>Mở duyệt nâng cao</Button>}</Stack>
+  const retryPublishRegistration = async () => {
+    if (!jobId || publishRegistrationBusy) return
+    setPublishRegistrationBusy(true)
+    try {
+      const { data } = await http.post(`/api/localization/jobs/${jobId}/publish-registration`)
+      showSnackbar("Đã đưa video sang quy trình Xuất bản.", "success")
+      await loadDetail()
+      if (data?.generated_video_id) {
+        navigate(`/publish?video=${encodeURIComponent(data.generated_video_id)}`)
+      }
+    } catch (error) {
+      showSnackbar(
+        error.response?.data?.detail || "Không thể đăng ký video cho Xuất bản",
+        "error",
+      )
+    } finally {
+      setPublishRegistrationBusy(false)
+    }
+  }
+
+  const qcResolved = Boolean(
+    qc?.status === "READY"
+    || (qc?.status === "NEEDS_REVIEW" && detail?.qc_human_approved)
+  )
+
+  const qcPanel = (
+    <Stack spacing={2}>
+      {qc ? (
+        <Alert
+          severity={
+            qc.status === "FAILED"
+              ? "error"
+              : qcResolved
+                ? "success"
+                : "warning"
+          }
+        >
+          <strong>{QC_STATUS_LABELS[qc.status] || qc.status}</strong>
+          {" · " + (qc.failures || []).length + " lỗi · " + (qc.warnings || []).length + " cảnh báo"}
+          {detail?.qc_human_approved ? " · Đã được người dùng duyệt" : ""}
+        </Alert>
+      ) : (
+        <Alert severity="info">QC chưa hoàn tất.</Alert>
+      )}
+
+      {qc && [...(qc.failures || []), ...(qc.warnings || [])].map((issue, index) => (
+        <Paper key={index} variant="outlined" sx={{ p: 1.5 }}>
+          <Typography variant="body2">
+            {typeof issue === "string" ? issue : issue.message || JSON.stringify(issue)}
+          </Typography>
+        </Paper>
+      ))}
+
+      {detail?.publish_registration_error && (
+        <Alert
+          severity="error"
+          action={
+            <Button
+              color="inherit"
+              size="small"
+              disabled={publishRegistrationBusy}
+              onClick={retryPublishRegistration}
+            >
+              {publishRegistrationBusy ? "Đang thử…" : "Thử lại"}
+            </Button>
+          }
+        >
+          Video đã hoàn tất nhưng chưa nối được sang Xuất bản: {detail.publish_registration_error}
+        </Alert>
+      )}
+
+      <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+        {detail?.publish_ready && detail?.generated_video_id ? (
+          <Button
+            variant="contained"
+            onClick={() => navigate(`/publish?video=${encodeURIComponent(detail.generated_video_id)}`)}
+          >
+            Mở trong Xuất bản
+          </Button>
+        ) : qcResolved ? (
+          <>
+            <Button
+              variant="contained"
+              disabled={publishRegistrationBusy}
+              onClick={retryPublishRegistration}
+            >
+              {publishRegistrationBusy ? "Đang nối…" : "Đưa sang Xuất bản"}
+            </Button>
+            <Button variant="outlined" onClick={() => navigate("/library")}>
+              Mở đầu ra cuối trong Thư viện
+            </Button>
+          </>
+        ) : qc?.status ? (
+          <Button
+            variant="contained"
+            color="warning"
+            startIcon={<FactCheckOutlinedIcon />}
+            onClick={() => navigate(`/review?job=${encodeURIComponent(jobId)}`)}
+          >
+            Mở trong Duyệt
+          </Button>
+        ) : null}
+      </Stack>
+
+      {jobId && (
+        <Button
+          variant="outlined"
+          startIcon={<TuneOutlinedIcon />}
+          onClick={() => setExpertOpen(true)}
+          sx={{ alignSelf: "flex-start" }}
+        >
+          Mở duyệt nâng cao
+        </Button>
+      )}
+    </Stack>
+  )
 
   const panels = { source: sourcePanel, transcript: transcriptPanel, translation: translationPanel, "voice-timing": voicePanel, render: renderPanel, qc: qcPanel }
 
@@ -639,7 +834,7 @@ export default function StudioLocalize({ source, sourcesLoading }) {
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }}>
           <Box sx={{ flex: 1 }}><Typography variant="h6" sx={{ fontWeight: 800 }}>Bản địa hóa</Typography><Typography variant="caption" color="text.secondary">Một tác vụ Phase C xuyên suốt Nguồn → Bản chép lời → Bản dịch → Giọng & Nhịp → Kết xuất → QC</Typography></Box>
           <FormControlLabel
-            control={<Switch size="small" checked={autoRepair} onChange={(e) => toggleAutoRepair(e.target.checked)} disabled={autoRepairBusy || activeLocalization} />}
+            control={<Switch size="small" checked={autoRepair} onChange={(e) => toggleAutoRepair(e.target.checked)} disabled={autoRepairBusy || workflowOccupied} />}
             label={<Typography variant="body2">Tự động sửa lỗi</Typography>}
           />
           <Button variant="outlined" startIcon={<BatchPredictionOutlinedIcon />} onClick={() => setBatchOpen(true)}>Chạy hàng loạt</Button>
@@ -685,7 +880,7 @@ export default function StudioLocalize({ source, sourcesLoading }) {
             </Stack>
           </Alert>
         )}
-        {jobId && <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap><Chip label={`Tác vụ ${jobId}`} size="small" /><StageChip name="Bản dịch" record={stages.translation} /><StageChip name="Lồng tiếng" record={stages.dubbing} /><StageChip name="QC" record={stages.qc} /><Box sx={{ flex: 1 }} /><Button size="small" variant="outlined" startIcon={<TuneOutlinedIcon />} onClick={() => setExpertOpen(true)}>Nâng cao / Chuyên gia</Button></Stack>}
+        {jobId && <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap><Chip label={`Tác vụ ${jobId}`} size="small" />{detail?.translation_review_pending && <Chip label="Chờ duyệt bản dịch" size="small" color="warning" />}<StageChip name="Bản dịch" record={stages.translation} /><StageChip name="Lồng tiếng" record={stages.dubbing} /><StageChip name="QC" record={stages.qc} /><Box sx={{ flex: 1 }} /><Button size="small" variant="outlined" startIcon={<TuneOutlinedIcon />} onClick={() => setExpertOpen(true)}>Nâng cao / Chuyên gia</Button></Stack>}
         {panels[activeStep]}
       </Stack>
       <Dialog open={batchOpen} onClose={closeBatch} keepMounted maxWidth="md" fullWidth>

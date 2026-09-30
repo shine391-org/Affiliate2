@@ -26,6 +26,7 @@ import ReplayRoundedIcon from "@mui/icons-material/ReplayRounded"
 import ErrorOutlineRoundedIcon from "@mui/icons-material/ErrorOutlineRounded"
 import CheckCircleOutlineRoundedIcon from "@mui/icons-material/CheckCircleOutlineRounded"
 import RemoveCircleOutlineRoundedIcon from "@mui/icons-material/RemoveCircleOutlineRounded"
+import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined"
 import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded"
 import NorthEastRoundedIcon from "@mui/icons-material/NorthEastRounded"
 import { fmtDay } from "./assetModel"
@@ -47,21 +48,23 @@ function elapsed(job) {
 // install had 2,260 rows; rendering all of them would make opening the panel the
 // slowest thing in the app. The DB side is bounded separately by
 // services/job_retention.py — this is just what one glance needs.
-const MAX_PER_SECTION = { failed: 20, running: 20, done: 15 }
+const MAX_PER_SECTION = { attention: 20, failed: 20, running: 20, done: 15 }
 
 export default function ActivityPanel({
-  open, onClose, jobs, total = 0, onOpenResult, onCancel, onDelete, onClearSection, onToast,
+  open, onClose, jobs, total = 0, onOpenResult, onOpenAction, onCancel, onDelete, onClearSection, onToast,
 }) {
   const theme = useTheme()
   // "Show all" per section — the caps keep the first paint cheap, but the old
   // Jobs tab could page through everything, so a cap must be expandable, not
   // a wall.
   const [showAll, setShowAll] = useState({})
+  const allAttention = jobs.filter((j) => j.state === "attention")
   const allFailed = jobs.filter((j) => j.state === "failed")
   const allRunning = jobs.filter((j) => j.state === "running")
   // Cancelled rides with the finished work: a deliberate cancel is terminal,
   // not something that "needs attention".
   const allDone = jobs.filter((j) => j.state === "done" || j.state === "cancelled")
+  const attention = showAll.attention ? allAttention : allAttention.slice(0, MAX_PER_SECTION.attention)
   const failed = showAll.failed ? allFailed : allFailed.slice(0, MAX_PER_SECTION.failed)
   const running = showAll.running ? allRunning : allRunning.slice(0, MAX_PER_SECTION.running)
   const done = showAll.done ? allDone : allDone.slice(0, MAX_PER_SECTION.done)
@@ -75,7 +78,7 @@ export default function ActivityPanel({
         <Box sx={{ flex: 1 }}>
           <Typography sx={{ fontSize: "1rem", fontWeight: 700, letterSpacing: "-0.02em" }}>Hoạt động</Typography>
           <Typography sx={{ fontSize: "0.72rem", color: "text.secondary" }}>
-            {allRunning.length} đang chạy · {allFailed.length} thất bại · {allDone.length} hoàn tất
+            {allRunning.length} đang chạy · {allAttention.length} chờ thao tác · {allFailed.length} thất bại · {allDone.length} hoàn tất
           </Typography>
         </Box>
         <IconButton size="small" onClick={onClose} aria-label="Đóng">
@@ -84,6 +87,16 @@ export default function ActivityPanel({
       </Stack>
 
       <Box sx={{ flex: 1, overflow: "auto", px: 2, py: 2 }}>
+        {attention.length > 0 && (
+          <Section label="Cần thao tác" tone={theme.palette.warning.main}
+            more={allAttention.length - attention.length}
+            onShowAll={() => setShowAll((s) => ({ ...s, attention: true }))}>
+            {attention.map((j) => (
+              <JobRow key={j.id} job={j} onToast={onToast} onOpenAction={onOpenAction}
+                onCancel={onCancel} onDelete={onDelete} />
+            ))}
+          </Section>
+        )}
         {failed.length > 0 && (
           <Section label="Cần xử lý" tone={theme.palette.error.main}
             more={allFailed.length - failed.length}
@@ -169,22 +182,24 @@ function Section({ label, tone, more = 0, onShowAll, onClear, clearLabel, childr
   )
 }
 
-function JobRow({ job, onToast, onOpenResult, onCancel, onDelete }) {
+function JobRow({ job, onToast, onOpenResult, onOpenAction, onCancel, onDelete }) {
   const theme = useTheme()
   const isDark = theme.palette.mode === "dark"
   const tone = job.state === "failed" ? theme.palette.error.main
+    : job.state === "attention" ? theme.palette.warning.main
     : job.state === "running" ? theme.palette.primary.main
     : job.state === "cancelled" ? theme.palette.text.disabled
     : theme.palette.success.main
   const Icon = job.state === "failed" ? ErrorOutlineRoundedIcon
+    : job.state === "attention" ? FactCheckOutlinedIcon
     : job.state === "cancelled" ? RemoveCircleOutlineRoundedIcon
     : CheckCircleOutlineRoundedIcon
 
   return (
     <Box data-testid={`job-row-${job.id}`} sx={{
       p: 1.25, borderRadius: "12px", border: 1,
-      borderColor: job.state === "failed" ? alpha(tone, 0.4) : "divider",
-      bgcolor: job.state === "failed" ? alpha(tone, isDark ? 0.1 : 0.05) : "background.paper",
+      borderColor: ["failed", "attention"].includes(job.state) ? alpha(tone, 0.4) : "divider",
+      bgcolor: ["failed", "attention"].includes(job.state) ? alpha(tone, isDark ? 0.1 : 0.05) : "background.paper",
     }}>
       <Stack direction="row" alignItems="center" spacing={1}>
         {job.state !== "running" && <Icon sx={{ fontSize: 16, color: tone, flexShrink: 0 }} />}
@@ -201,6 +216,12 @@ function JobRow({ job, onToast, onOpenResult, onCancel, onDelete }) {
           <Button size="small" sx={{ minWidth: 0, fontSize: "0.7rem" }}
             onClick={() => onCancel?.(job.id)}>
             Hủy
+          </Button>
+        )}
+        {job.state === "attention" && job.action_href && (
+          <Button size="small" sx={{ fontSize: "0.7rem", whiteSpace: "nowrap" }}
+            onClick={() => onOpenAction?.(job.action_href)}>
+            {job.action_label || "Mở để tiếp tục"}
           </Button>
         )}
         {job.state === "failed" && (
@@ -222,7 +243,7 @@ function JobRow({ job, onToast, onOpenResult, onCancel, onDelete }) {
             and losing that was a regression. For a RUNNING job this cancels first
             and then removes the row (the endpoint cancels a live job rather than
             deleting it, by design). */}
-        <Tooltip title={job.state === "running" ? "Hủy và xóa" : "Xóa khỏi nhật ký"}>
+        <Tooltip title={job.state === "running" || job.attention_kind === "translation_review" ? "Hủy và xóa" : "Xóa khỏi nhật ký"}>
           <IconButton size="small" aria-label="Xóa tác vụ"
             onClick={() => onDelete?.(job)}>
             <DeleteOutlineRoundedIcon sx={{ fontSize: 15 }} />
@@ -241,6 +262,11 @@ function JobRow({ job, onToast, onOpenResult, onCancel, onDelete }) {
             </Typography>
           )}
         </>
+      )}
+      {job.state === "attention" && job.step && (
+        <Typography sx={{ mt: 0.75, fontSize: "0.72rem", color: "warning.main" }}>
+          {localizeUiMessage(job.step)}
+        </Typography>
       )}
       {job.state === "failed" && job.error && (
         <ExpandableError message={localizeUiMessage(job.error)} />

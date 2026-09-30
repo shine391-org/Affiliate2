@@ -186,6 +186,19 @@ export default function useWebSocket() {
         updateJobProgress(msg.job_id, msg.percent, localizeUiMessage(msg.step))
       }),
 
+      ws.on("job_attention", (msg) => {
+        // Human review is an intentional pause, not a completed job and not
+        // work still consuming CPU. Remove it from the active-job badge; the
+        // Activity poll will surface it under "Cần thao tác".
+        removeJob(msg.job_id)
+        const href = msg.action_url || `/studio/localize?job=${encodeURIComponent(msg.job_id)}&step=translation`
+        const message = localizeUiMessage(
+          msg.message || "Bản dịch đã xong — cần duyệt trước khi tiếp tục.",
+        )
+        addMessage({ role: "system", content: message })
+        showSnackbar(message, "warning", { label: "Mở bản dịch", href })
+      }),
+
       ws.on("job_complete", (msg) => {
         completeJob(msg.job_id)
         // Auto-remove from sidebar after 10s
@@ -193,7 +206,18 @@ export default function useWebSocket() {
         const result = msg.result || {}
         // Determine job type from active jobs store
         const jobInfo = useAppStore.getState().activeJobs[msg.job_id]
-        const jobType = jobInfo?.type || msg.job_type || ""
+        const jobType = jobInfo?.jobType || msg.job_type || ""
+        const qcStatus = String(result.qc_status || "").toUpperCase()
+        if (jobType === "tool:translate" && ["NEEDS_REVIEW", "FAILED"].includes(qcStatus)) {
+          const failed = qcStatus === "FAILED"
+          showSnackbar(
+            failed
+              ? "Video đã kết xuất nhưng QC phát hiện lỗi — cần xử lý trước khi dùng tiếp."
+              : "Video đã kết xuất nhưng QC cần bạn duyệt.",
+            failed ? "error" : "warning",
+            { label: "Mở Duyệt QC", href: `/review?job=${encodeURIComponent(msg.job_id)}` },
+          )
+        }
 
         if (result.total_results !== undefined) {
           const total = result.total_results

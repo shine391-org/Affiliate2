@@ -278,22 +278,37 @@ async def _job_items(db: AsyncSession) -> tuple[list[dict], set[str]]:
     honours it so the first one that does cannot double-count.
     """
     rows = (
-        await db.execute(select(Job).where(Job.status == "success"))
+        await db.execute(
+            select(Job).where(
+                Job.status.in_(["success", "failed", "cancelled"])
+            )
+        )
     ).scalars().all()
     items: list[dict] = []
     music_copies: set[str] = set()
     for j in rows:
+        if j.status != "success" and j.job_type != "tool:translate":
+            continue
         out = _json_or_none(j.output_json)
         if not out:
+            continue
+        # A C6 translation review checkpoint is not a user asset. Older builds
+        # marked that pause as a successful .json output; keep those rows
+        # recoverable in Activity/Studio but never show the checkpoint in Library.
+        if out.get("translation_review_pending"):
             continue
         file_str = out.get("file")
         if not file_str or not _exists(file_str):
             continue
-        # A clip job ALSO registers a GeneratedVideo row for the same file.
-        # That row is the richer record (aspect, scores, thumbnail), so the job
-        # copy is dropped here rather than double-counted.
-        if out.get("generated_video_id"):
-            continue
+        # A job may ALSO register a GeneratedVideo row for the same file.
+        # Suppress the job copy only while that richer row still exists AND its
+        # artifact exists. A stale/deleted generated_video_id must not hide a
+        # perfectly valid last-good job output from the Library.
+        generated_id = out.get("generated_video_id")
+        if generated_id:
+            generated = await db.get(GeneratedVideo, str(generated_id))
+            if generated is not None and _exists(generated.video_path):
+                continue
         p = classify(j.job_type)
         if p is None:
             # scout / analyze / download / render jobs — activity, not a file
@@ -308,6 +323,8 @@ async def _job_items(db: AsyncSession) -> tuple[list[dict], set[str]]:
         suffix_media = _suffix_media(path.suffix)
         inp = _json_or_none(j.input_json) or {}
         duration = out.get("duration_seconds")
+        if duration is None:
+            duration = out.get("final_duration")
         if duration is None:
             duration = out.get("duration")
         items.append({
@@ -337,7 +354,7 @@ async def _job_items(db: AsyncSession) -> tuple[list[dict], set[str]]:
             # extraction isn't cached, so the miss repeated on every render.
             "thumb_url": _job_thumb_url(j.id, suffix_media or p.media, path),
             "stream_url": f"/api/library/asset/{j.id}",
-            "aspect": inp.get("aspect_ratio"),
+            "aspect": out.get("target_aspect") or inp.get("target_aspect") or inp.get("aspect_ratio"),
             "duration_seconds": duration if isinstance(duration, (int, float)) else None,
             "size_mb": out.get("file_size_mb") or _size_mb(file_str),
             "ext": path.suffix.lstrip(".") or None,

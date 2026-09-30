@@ -34,6 +34,7 @@ def localization_queue(tmp_path, monkeypatch):
         *,
         qc_status: str | None = None,
         failed_stage: bool = False,
+        qc_human_approved: bool = False,
         raw: str | None = None,
     ) -> None:
         manifest_dir = storage_root / "localization_jobs" / (job_id or f"missing-{uuid4()}")
@@ -53,7 +54,10 @@ def localization_queue(tmp_path, monkeypatch):
                 "job_id": job_id,
                 "updated_at": "2026-09-28T08:00:00Z",
                 "stages": stages,
-                "request": {"source_title": job_id or "missing"},
+                "request": {
+                    "source_title": job_id or "missing",
+                    "qc_human_approved": qc_human_approved,
+                },
             }),
             encoding="utf-8",
         )
@@ -116,3 +120,27 @@ def test_manifest_without_job_id_is_skipped_safely(localization_queue):
     write_manifest(None, qc_status="FAILED")
 
     assert load_items() == []
+
+def test_human_approved_warning_only_qc_leaves_review_queue(localization_queue):
+    write_manifest, add_job, load_items = localization_queue
+    add_job("approved-review", status="success")
+    write_manifest(
+        "approved-review",
+        qc_status="NEEDS_REVIEW",
+        qc_human_approved=True,
+    )
+
+    assert [item["job_id"] for item in load_items()] == []
+
+
+def test_failed_qc_cannot_be_hidden_by_human_approval_flag(localization_queue):
+    write_manifest, add_job, load_items = localization_queue
+    add_job("failed-even-approved", status="success")
+    write_manifest(
+        "failed-even-approved",
+        qc_status="FAILED",
+        qc_human_approved=True,
+    )
+
+    assert [item["job_id"] for item in load_items()] == ["failed-even-approved"]
+

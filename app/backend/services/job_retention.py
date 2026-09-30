@@ -32,7 +32,7 @@ import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.job import Job
@@ -49,6 +49,11 @@ RETENTION_DAYS = 30
 # thousands inside the window. Library-backing rows are never counted or cut.
 MAX_PRUNABLE_ROWS = 2000
 
+# A Library item can live forever, but its Demucs/TTS/ASR intermediates should
+# not. After this horizon keep source + manifest + review/final artifacts and
+# drop only reconstructible heavy stage directories.
+LOCALIZATION_WORKSPACE_COMPACT_DAYS = 14
+
 TERMINAL_STATUSES = ("success", "failed", "cancelled")
 
 
@@ -59,7 +64,14 @@ def is_library_item(job: Job) -> bool:
     delete it and the file is orphaned on disk while disappearing from the
     Library and the asset endpoint that serves it.
     """
-    if job.status != "success" or not job.output_json:
+    owns_last_good_localization = (
+        job.job_type == "tool:translate"
+        and job.status in {"failed", "cancelled"}
+    )
+    if (
+        job.status != "success"
+        and not owns_last_good_localization
+    ) or not job.output_json:
         return False
     if classify(job.job_type) is None:
         return False  # scout / analyze / download / render — activity, not a file
@@ -68,6 +80,10 @@ def is_library_item(job: Job) -> bool:
     except (json.JSONDecodeError, TypeError):
         return False
     if not isinstance(out, dict):
+        return False
+    # Legacy localization review gates were incorrectly persisted as successful
+    # JSON tool outputs. They are workflow checkpoints, never Library assets.
+    if out.get("translation_review_pending"):
         return False
     # NOTE: the INDEX drops a job whose output also registered a generated_videos
     # row, to avoid showing the same bytes twice. Retention must NOT copy that
@@ -121,16 +137,87 @@ async def sweep(db: AsyncSession, *, retention_days: int = RETENTION_DAYS,
     kept_library = len(rows) - len(prunable)
 
     aged, over_cap = plan_deletions(prunable, cutoff, max_prunable)
-    for job in [*aged, *over_cap]:
-        await db.delete(job)
-    deleted_old, deleted_over_cap = len(aged), len(over_cap)
+    localization_workspaces: list[str] = []
+    deleted_old = 0
+    deleted_over_cap = 0
+
+    # Conditional DELETE closes the race with an explicit rerun claim. Recovery
+    # always changes a terminal Job to pending before touching its manifest; if
+    # that happened after our SELECT, status no longer matches and retention
+    # leaves the resurrected row/workspace alone.
+    for bucket, jobs in (("aged", aged), ("over", over_cap)):
+        for job in jobs:
+            result = await db.execute(
+                delete(Job).where(
+                    Job.id == job.id,
+                    Job.status == job.status,
+                )
+            )
+            if not result.rowcount:
+                continue
+            if bucket == "aged":
+                deleted_old += 1
+            else:
+                deleted_over_cap += 1
+            if job.job_type == "tool:translate":
+                localization_workspaces.append(job.id)
+
+    # End the pruning transaction before filesystem maintenance. This also
+    # releases any SQLite read/write locks before the per-workspace CAS below.
+    await db.commit()
 
     if deleted_old or deleted_over_cap:
-        await db.commit()
+        if localization_workspaces:
+            from backend.services.localization_stage_service import cleanup_localization_workspace
+            for job_id in localization_workspaces:
+                try:
+                    cleanup_localization_workspace(job_id)
+                except (OSError, ValueError):
+                    logger.warning(
+                        "job retention: could not remove localization workspace for %s",
+                        job_id,
+                    )
         logger.info(
             "job retention: deleted %d aged + %d over-cap; kept %d library-backing row(s)",
             deleted_old, deleted_over_cap, kept_library,
         )
+
+    compact_cutoff = datetime.utcnow() - timedelta(
+        days=LOCALIZATION_WORKSPACE_COMPACT_DAYS
+    )
+    deleted_workspace_ids = set(localization_workspaces)
+    compacted = 0
+    from backend.services.localization_stage_service import compact_localization_workspace
+    for snapshot in rows:
+        if (
+            snapshot.job_type != "tool:translate"
+            or snapshot.id in deleted_workspace_ids
+            or not snapshot.created_at
+            or snapshot.created_at >= compact_cutoff
+        ):
+            continue
+        try:
+            # A stale terminal snapshot is not enough: an explicit rerun may
+            # have claimed it after the first SELECT. BEGIN IMMEDIATE blocks the
+            # recovery CAS while we re-read and compact this one workspace.
+            await db.execute(text("BEGIN IMMEDIATE"))
+            current = await db.get(Job, snapshot.id, populate_existing=True)
+            if (
+                current is None
+                or current.status not in TERMINAL_STATUSES
+                or not is_library_item(current)
+            ):
+                await db.rollback()
+                continue
+            if compact_localization_workspace(current.id):
+                compacted += 1
+            await db.commit()
+        except (OSError, ValueError):
+            await db.rollback()
+            logger.warning(
+                "job retention: could not compact localization workspace for %s",
+                snapshot.id,
+            )
 
     total = (await db.execute(select(func.count(Job.id)))).scalar() or 0
     return {
@@ -138,6 +225,7 @@ async def sweep(db: AsyncSession, *, retention_days: int = RETENTION_DAYS,
         "deleted_over_cap": deleted_over_cap,
         "kept_library_items": kept_library,
         "rows_remaining": total,
+        "compacted_localization_workspaces": compacted,
     }
 
 

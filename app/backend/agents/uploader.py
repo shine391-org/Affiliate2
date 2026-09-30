@@ -17,7 +17,7 @@ from backend.models.phase_g import PublicationRecord
 from backend.models.user_settings import UserSettings
 from backend.core.crypto import decrypt, DecryptionError
 from backend.core.ws_manager import ws_manager
-from backend.agents.job_helper import update_job_status
+from backend.agents.job_helper import job_cancelled, update_job_status
 from backend.core.exceptions import UploadAuthError, UploadOutcomeUncertainError, safe_json_loads
 
 logger = logging.getLogger(__name__)
@@ -34,8 +34,25 @@ def file_sha256(path: str | Path) -> str:
     return digest.hexdigest()
 
 
+def localization_qc_publish_error(video: GeneratedVideo) -> str | None:
+    """Fail closed when a localized artifact has not cleared localization QC."""
+    if str(video.source_type or "").strip().lower() != "localization":
+        return None
+    if str(video.review_status or "").strip().lower() not in {
+        "qc_ready", "qc_human_approved",
+    }:
+        return (
+            "Localized video has not cleared localization QC. "
+            "Resolve QC in Studio/Review before publishing."
+        )
+    return None
+
+
 def approved_artifact_error(video: GeneratedVideo) -> str | None:
     """Return why the current bytes are not the exact approved artifact."""
+    qc_error = localization_qc_publish_error(video)
+    if qc_error:
+        return qc_error
     if not video.video_path:
         return "Video file path is missing"
     path = Path(video.video_path)
@@ -207,6 +224,8 @@ class UploadAgent:
     ):
         """Upload a generated video to specified platforms."""
         await update_job_status(job_id, "running", progress_pct=0, current_step="Preparing upload...")
+        if await job_cancelled(job_id):
+            return
 
         try:
             platforms = normalize_publish_platforms(platforms)
@@ -287,6 +306,8 @@ class UploadAgent:
         total_platforms = len(platforms)
 
         for i, platform in enumerate(platforms):
+            if await job_cancelled(job_id):
+                return
             platform_options = publish_options.get(platform, {})
             if not isinstance(platform_options, dict):
                 platform_options = {}
@@ -296,6 +317,14 @@ class UploadAgent:
             publication_id = await self._create_publication_record(
                 video, job_id, platform, user_settings, platform_options
             )
+            if await job_cancelled(job_id):
+                await self._finish_publication_record(
+                    publication_id,
+                    platform,
+                    "FAILED",
+                    error_message="Cancelled before provider upload",
+                )
+                return
             provider_result = None
             try:
                 if platform == "youtube":

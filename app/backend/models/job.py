@@ -17,7 +17,7 @@ class Job(Base):
     # job_types: scout | download | analyze | generate | upload
 
     status = Column(String(20), default="pending", index=True)
-    # statuses: pending | running | success | failed | cancelled
+    # statuses: pending | running | awaiting_review | success | failed | cancelled
 
     title = Column(String(500), nullable=True)           # human-readable description
     progress_pct = Column(Float, default=0.0)            # 0-100
