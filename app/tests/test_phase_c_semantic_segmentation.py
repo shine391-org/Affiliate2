@@ -421,7 +421,7 @@ async def test_semantic_primary_failure_uses_fallback_before_deterministic():
     assert primary.calls == 1
     assert fallback.calls == 1
     assert got.segments[0].source_text == "hello there yes indeed"
-    assert any(e.get("role") == "fallback" and e.get("event") == "attempt" for e in events)
+    assert any(e.get("role") == "fallback-1" and e.get("event") == "attempt" for e in events)
     assert not any(e.get("event") == "deterministic_fallback" for e in events)
 
 
@@ -513,7 +513,7 @@ async def test_semantic_hanging_primary_reserves_time_for_fallback():
     assert fallback.calls == 1
     assert got.segments[0].source_text == "one two three"
     assert any(
-        e.get("event") == "attempt" and e.get("role") == "fallback"
+        e.get("event") == "attempt" and e.get("role") == "fallback-1"
         for e in events
     )
 
