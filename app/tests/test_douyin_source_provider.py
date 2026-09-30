@@ -562,3 +562,83 @@ async def test_creator_snapshot_partial_last_native_page_does_not_skip_cursor_ro
     assert len(history.items) == 50
     assert history.has_more is True
     assert history.next_cursor == "cursor-3"
+
+
+
+@pytest.mark.asyncio
+async def test_creator_snapshot_partial_native_page_does_not_mix_dom_fallback(monkeypatch):
+    provider = DouyinProvider()
+    dom_called = False
+
+    session = SimpleNamespace(
+        context=object(),
+        page=object(),
+        created_page=True,
+        cookie_dict={"UIFID": "session-derived"},
+        ms_token="token",
+    )
+
+    @asynccontextmanager
+    async def fake_session(*args, **kwargs):
+        yield session
+
+    first_page = {
+        "aweme_list": [{
+            "aweme_id": str(i),
+            "desc": f"Video {i}",
+            "author": {"sec_uid": "creator", "nickname": "Creator"},
+            "statistics": {},
+            "video": {},
+        } for i in range(1, 19)],
+        "has_more": True,
+        "max_cursor": "cursor-1",
+    }
+
+    calls = 0
+
+    async def fake_posts(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return first_page
+        raise PermissionError("risk control on next cursor")
+
+    async def fake_dom(*args, **kwargs):
+        nonlocal dom_called
+        dom_called = True
+        return [{
+            "platform": "douyin",
+            "requested_platform": "douyin",
+            "video_id": "999",
+            "video_url": "https://www.douyin.com/video/999",
+            "title": "DOM duplicate/fallback",
+            "description": "",
+            "thumbnail_url": None,
+            "cover_url": None,
+            "author": "Creator",
+            "creator_id": "creator",
+            "author_url": "https://www.douyin.com/user/creator",
+            "views": 0,
+            "likes": 0,
+            "comments": 0,
+            "shares": 0,
+            "upload_date": None,
+            "duration_seconds": None,
+            "radar_metrics": {},
+            "metadata_source": "creator_page_dom",
+        }]
+
+    monkeypatch.setattr("backend.sources.douyin.asyncio.sleep", AsyncMock())
+    with patch("backend.sources.douyin.open_douyin_cdp_session", fake_session), \
+         patch.object(provider, "_fetch_creator_profile", new=AsyncMock(return_value={
+             "user": {"nickname": "Creator"}, "stats": {"aweme_count": 100},
+         })), \
+         patch.object(provider, "_fetch_creator_posts", new=fake_posts), \
+         patch.object(provider, "_fetch_creator_dom_items", new=fake_dom):
+        _info, history = await provider.creator_snapshot("creator", limit=36)
+
+    assert len(history.items) == 18
+    assert history.has_more is False
+    assert history.next_cursor is None
+    assert dom_called is False
+    assert "999" not in [row["video_id"] for row in history.items]
