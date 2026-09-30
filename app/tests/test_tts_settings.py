@@ -1364,7 +1364,7 @@ async def test_ai_connection_probe_has_hard_timeout_and_disables_sdk_retry(monke
     client = HangingClient()
 
     async def no_saved_settings():
-        return None
+        raise AssertionError("unsaved AI probe must not read saved settings")
 
     monkeypatch.setattr(settings_api, "_load_saved_settings", no_saved_settings)
     monkeypatch.setattr(settings_api, "_AI_PROBE_TIMEOUT_S", 0.01)
@@ -1547,3 +1547,17 @@ async def test_unsaved_openai_tts_probe_uses_only_environment_fallback(monkeypat
     assert await settings_api._tts_probe_key(settings_api.TTSProbeRequest(
         provider="openai_tts",
     )) == "env-openai-key"
+
+
+@pytest.mark.asyncio
+async def test_unsaved_keyless_local_ai_probe_never_reads_saved_credentials(monkeypatch):
+    async def no_saved_settings():
+        raise AssertionError("new local AI form must not load saved settings")
+
+    monkeypatch.setattr(settings_api, "_load_saved_settings", no_saved_settings)
+
+    assert await settings_api._probe_key(settings_api.AIProbeRequest(
+        provider="lmstudio",
+        model="local-model",
+        base_url="http://127.0.0.1:1234/v1",
+    )) == ""
