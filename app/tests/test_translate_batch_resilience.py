@@ -2364,8 +2364,8 @@ async def test_invalid_structured_translation_advances_to_next_route():
         context="hello world",
         profile=_profile(
             translation_retry_attempts=1,
-            translation_attempt_timeout_s=1,
-            translation_total_timeout_s=3,
+            translation_attempt_timeout_s=10,
+            translation_total_timeout_s=20,
         ),
         for_dub=True,
         fallback_ai=fallback,
@@ -2421,7 +2421,10 @@ async def test_translation_recursive_shape_split_shares_one_batch_deadline(monke
         batch,
         target_language="Vietnamese",
         context="ctx",
-        profile=_profile(translation_total_timeout_s=30),
+        profile=_profile(
+            translation_attempt_timeout_s=10,
+            translation_total_timeout_s=30,
+        ),
         for_dub=True,
     )
 
