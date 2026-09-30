@@ -1136,13 +1136,21 @@ def _tts_probe_connection(saved, body: TTSProbeRequest) -> dict:
 
 
 async def _tts_probe_key(body: TTSProbeRequest) -> str:
-    """Resolve probe credentials through the same ownership chain as runtime."""
+    """Resolve probe credentials without borrowing unrelated saved connections."""
     if body.api_key is not None:
         return body.api_key.strip()
+
+    requested_provider = (body.provider or "").strip().lower()
+    if not body.connection_id:
+        # A brand-new form must test exactly what it contains. Do not silently
+        # borrow a saved account's credential merely because the provider name
+        # matches. OpenAI TTS retains its explicit environment-key fallback.
+        return app_settings.OPENAI_API_KEY if requested_provider == "openai_tts" else ""
+
     saved = await _load_saved_tts_settings()
     connection = _tts_probe_connection(saved, body) if saved else {}
     provider = (
-        (body.provider or "").strip().lower()
+        requested_provider
         or str(connection.get("provider") or "").strip().lower()
     )
     if not saved:
