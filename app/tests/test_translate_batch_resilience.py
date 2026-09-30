@@ -2464,3 +2464,59 @@ async def test_ai_failure_provenance_redacts_api_key():
     })
     assert "super-secret-key" not in serialized
     assert "***" in serialized
+
+
+@pytest.mark.asyncio
+async def test_eight_route_chain_reaches_last_healthy_fallback_without_starvation():
+    class Transient503(RuntimeError):
+        status_code = 503
+
+    class Client:
+        def __init__(self, name, answer=None):
+            self.connection_name = name
+            self.provider = SimpleNamespace(value="compatible")
+            self.model = name + "-model"
+            self.max_retries = None
+            self.answer = answer
+            self.calls = 0
+
+        async def chat(self, **kwargs):
+            self.calls += 1
+            if self.answer is None:
+                raise Transient503(self.connection_name + " unavailable")
+            return self.answer
+
+    clients = [Client(f"route-{i}") for i in range(7)] + [Client("route-7", "ok")]
+    state = ls._AIStageRouteState(clients)
+
+    result = await ls._call_ai_chat_resilient(
+        clients[0],
+        clients[1],
+        messages=[{"role": "user", "content": "x"}],
+        max_tokens=8,
+        max_attempts=1,
+        attempt_timeout_s=1,
+        total_timeout_s=8,
+        route_state=state,
+    )
+
+    assert result == "ok"
+    assert state.sticky_index == 7
+    assert [client.calls for client in clients] == [1] * 8
+    assert [item["connection_id"] for item in state.failure_chain] == [
+        f"route-{i}" for i in range(7)
+    ]
+
+
+def test_ai_failure_history_is_bounded_to_recent_events():
+    state = ls._AIStageRouteState([SimpleNamespace(connection_name="only")])
+    for index in range(100):
+        ls._append_ai_failure(state, {
+            "connection_id": "only",
+            "attempt": index,
+            "error": f"failure-{index}",
+        })
+
+    assert len(state.failure_chain) == ls._MAX_AI_FAILURE_HISTORY
+    assert state.failure_chain[0]["attempt"] == 36
+    assert state.failure_chain[-1]["attempt"] == 99
