@@ -471,3 +471,44 @@ async def test_stale_pre_dispatch_claim_fails_explicitly_without_rewinding_parti
                 await db.delete(row)
                 await db.commit()
 
+@pytest.mark.asyncio
+async def test_progress_websocket_is_suppressed_after_cancellation(monkeypatch):
+    from backend.core.ws_manager import ws_manager
+
+    job_id = str(uuid.uuid4())
+    async with AsyncSessionLocal() as db:
+        db.add(Job(
+            id=job_id,
+            job_type="tool:translate",
+            status="cancelled",
+            progress_pct=42,
+            current_step="Cancelled",
+        ))
+        await db.commit()
+
+    sent = []
+
+    async def fake_send(message, user_id="local"):
+        sent.append(message)
+
+    monkeypatch.setattr(ws_manager, "send", fake_send)
+
+    try:
+        accepted = await ws_manager.send_progress(
+            job_id, 90, "Late native callback", "local",
+        )
+        assert accepted is False
+        assert sent == []
+
+        async with AsyncSessionLocal() as db:
+            row = await db.get(Job, job_id)
+            assert row.status == "cancelled"
+            assert row.progress_pct == 42
+            assert row.current_step == "Cancelled"
+    finally:
+        async with AsyncSessionLocal() as db:
+            row = await db.get(Job, job_id)
+            if row:
+                await db.delete(row)
+                await db.commit()
+
