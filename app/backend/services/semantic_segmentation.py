@@ -455,9 +455,6 @@ async def _advance_semantic_route_on_invalid(
     if not route_clients or route_state is None:
         return False
     current_index = int(route_state.get("sticky_index", 0) or 0)
-    if current_index + 1 >= len(route_clients):
-        return False
-
     current = route_clients[current_index]
     _record_semantic_failure(route_state, {
         "connection_id": getattr(current, "connection_name", None),
@@ -467,6 +464,9 @@ async def _advance_semantic_route_on_invalid(
         "error_type": "InvalidStructuredOutput",
         "error": str(error)[:220],
     })
+    if current_index + 1 >= len(route_clients):
+        return False
+
     route_state["sticky_index"] = current_index + 1
     next_client = route_clients[current_index + 1]
     await _emit_semantic_progress(progress_cb, {
@@ -615,9 +615,15 @@ Every input word ID must appear exactly once and in the same order."""
                     ):
                         continue
                     # With no healthy route left, deterministic grouping is the
-                    # semantic safety net. Later windows may still use the same
-                    # final route because malformed output is not a transport outage.
+                    # semantic safety net. Record that the AI result was rejected
+                    # so manifests/UI can distinguish this from successful refinement.
                     groups = _deterministic_word_groups(window)
+                    await _emit_semantic_progress(progress_cb, {
+                        "event": "deterministic_fallback",
+                        "window": window_index,
+                        "total": window_total,
+                        "reason": "invalid_structured_output",
+                    })
                     break
 
         generated = _word_groups_to_segments(
@@ -777,6 +783,12 @@ Every input ID must appear exactly once and in the same order."""
                 ):
                     continue
                 groups = [[seg.id] for seg in window]
+                await _emit_semantic_progress(progress_cb, {
+                    "event": "deterministic_fallback",
+                    "window": window_index,
+                    "total": window_total,
+                    "reason": "invalid_structured_output",
+                })
                 break
 
         by_id = {seg.id: seg for seg in window}
