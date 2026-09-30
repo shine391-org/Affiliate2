@@ -449,8 +449,12 @@ async def test_checkpoint_invalidated_on_config_change(tmp_path, monkeypatch):
     checkpoint_data = {
         "semantic_hash": "different-hash",
         "target_language": "vi",
-        "provider": "compatible",
-        "model": "gemini-2.5-flash",
+        "routes": [{
+            "connection_id": "compatible",
+            "provider": "compatible",
+            "model": "gemini-2.5-flash",
+            "base_url_override": "",
+        }],
         "preset": "natural_vietnamese",
         "instructions": "",
         "guardrails": profile.translation_guardrails.strip(),
@@ -460,7 +464,13 @@ async def test_checkpoint_invalidated_on_config_change(tmp_path, monkeypatch):
                 "texts": ["Stale translation"],
                 "failed": [],
             }
-        }
+        },
+        "route_state": {
+            "sticky_index": 0,
+            "failure_chain": [],
+            "attempt_count": 1,
+            "success_count": 1,
+        },
     }
     checkpoint_file.write_text(json.dumps(checkpoint_data, ensure_ascii=False), encoding="utf-8")
 
