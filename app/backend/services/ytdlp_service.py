@@ -1537,6 +1537,21 @@ async def download_video(
             from backend.services.video_utils import probe_media_details
             media_metadata = probe_media_details(video_path)
 
+        # A resolved direct-media URL (Douyin CDN, any signed CDN) goes to the
+        # GENERIC extractor, which reports no duration at all. Reporting 0 here
+        # is not cosmetic: `duration_seconds` is what disables the manual
+        # time-range guard, floors auto_clip_count, bounds AI clip selection,
+        # and scales the clip timeline. ffprobe has already measured the real
+        # value for `media_metadata`, so prefer the extractor's number when it
+        # exists and fall back to the bytes we actually own when it does not.
+        probed_duration = media_metadata.get("duration_seconds") or 0
+        if not duration and probed_duration > 0:
+            logger.info(
+                "yt-dlp reported no duration; using probed media duration "
+                "%.3fs", probed_duration,
+            )
+            duration = probed_duration
+
         return {
             "video_path": str(video_path) if video_path else None,
             "audio_path": str(audio_path) if audio_path and audio_path.exists() else None,
