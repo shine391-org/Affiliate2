@@ -305,7 +305,9 @@ export default function LocalizationExpertPanel({ jobId }) {
             <Typography variant="subtitle2">C7 · Viết lại thời lượng</Typography>
             <Typography variant="body2">
               {"Đã viết lại: " + Number(dubbingMeta.rewrite_count || 0) + " đoạn" +
-                (rewriteSelection.connectionId ? " · kết nối thực tế " + rewriteSelection.connectionId : "") +
+                (rewriteSelection.connectionId
+                  ? (rewriteSelection.isActual ? " · kết nối thực tế " : " · kết nối cấu hình ") + rewriteSelection.connectionId
+                  : "") +
                 (rewriteSelection.model ? " · model " + rewriteSelection.model : "")}
             </Typography>
             {rewriteSelection.failureCount > 0 && (
