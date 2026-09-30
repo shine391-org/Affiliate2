@@ -421,7 +421,12 @@ async def test_semantic_primary_failure_uses_fallback_before_deterministic():
     assert primary.calls == 1
     assert fallback.calls == 1
     assert got.segments[0].source_text == "hello there yes indeed"
-    assert any(e.get("role") == "fallback-1" and e.get("event") == "attempt" for e in events)
+    # N-route taxonomy: the first fallback route is index 1, labelled
+    # "fallback-1". Assert the INDEX, not the literal string, so this test
+    # stays valid for any route count.
+    attempt_roles = [e.get("role") for e in events if e.get("event") == "attempt"]
+    assert "primary" in attempt_roles
+    assert "fallback-1" in attempt_roles
     assert not any(e.get("event") == "deterministic_fallback" for e in events)
 
 
@@ -512,10 +517,9 @@ async def test_semantic_hanging_primary_reserves_time_for_fallback():
 
     assert fallback.calls == 1
     assert got.segments[0].source_text == "one two three"
-    assert any(
-        e.get("event") == "attempt" and e.get("role") == "fallback-1"
-        for e in events
-    )
+    # N-route taxonomy: the reserved-time fallback route is index 1.
+    attempt_roles = [e.get("role") for e in events if e.get("event") == "attempt"]
+    assert "fallback-1" in attempt_roles
 
 
 

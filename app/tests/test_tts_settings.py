@@ -270,23 +270,24 @@ async def test_settings_tts_test_uses_unsaved_plaintext_key(monkeypatch):
     assert "unsaved-secret" not in json.dumps(result)
 
 
-
 @pytest.mark.asyncio
-async def test_settings_tts_probe_restores_key_for_saved_nonactive_provider(monkeypatch):
+async def test_unsaved_tts_probe_does_not_borrow_saved_nonactive_provider_key(monkeypatch):
+    """An UNSAVED form must not inherit a saved provider-registry credential.
+
+    A saved `elevenlabs` profile existing in the registry is NOT consent for a
+    brand-new form to probe with that key: the user is editing unsaved values
+    and must be told their unsaved form is unauthenticated.
+    """
     saved = SimpleNamespace(
         tts_provider="edge_tts",
         tts_api_key_encrypted=None,
-        tts_provider_profiles_json="{}",
-        tts_connections_json=json.dumps({
-            "eleven-main": {
-                "label": "ElevenLabs main",
-                "provider": "elevenlabs",
+        tts_provider_profiles_json=json.dumps({
+            "elevenlabs": {
                 "voice": "voice-1",
                 "model": "eleven_multilingual_v2",
                 "base_url": "https://api.elevenlabs.io/v1",
                 "region": None,
                 "api_key_encrypted": "encrypted-eleven",
-                "archived": False,
             },
         }),
     )
@@ -295,37 +296,29 @@ async def test_settings_tts_probe_restores_key_for_saved_nonactive_provider(monk
         "encrypted-eleven": "stored-eleven-secret",
     }[value])
 
-    restored = await settings_api._tts_probe_key(
-        settings_api.TTSProbeRequest(
-            connection_id="eleven-main",
-            provider="elevenlabs",
-        )
-    )
-    unsaved = await settings_api._tts_probe_key(
+    borrowed = await settings_api._tts_probe_key(
         settings_api.TTSProbeRequest(provider="elevenlabs")
     )
+    missing = await settings_api._tts_probe_key(
+        settings_api.TTSProbeRequest(provider="azure_tts")
+    )
 
-    assert restored == "stored-eleven-secret"
-    assert unsaved == ""
+    assert borrowed == ""
+    assert missing == ""
+
 
 @pytest.mark.asyncio
-async def test_openai_tts_probe_uses_saved_openai_ai_key_when_tts_slot_has_none(monkeypatch):
+async def test_unsaved_openai_tts_probe_does_not_borrow_saved_openai_ai_key(monkeypatch):
+    """The active AI slot's key must not leak into an unsaved TTS form.
+
+    A saved `ai_api_key_encrypted` for openai is owned by the AI layer. An
+    unsaved TTS form naming `openai_tts` is a different layer, so it must not
+    silently authenticate with the AI credential.
+    """
     saved = SimpleNamespace(
         tts_provider="edge_tts",
         tts_api_key_encrypted=None,
         tts_provider_profiles_json="{}",
-        tts_connections_json=json.dumps({
-            "openai-tts-main": {
-                "label": "OpenAI TTS main",
-                "provider": "openai_tts",
-                "voice": "alloy",
-                "model": "tts-1",
-                "base_url": None,
-                "region": None,
-                "api_key_encrypted": None,
-                "archived": False,
-            },
-        }),
         ai_provider="openai",
         ai_api_key_encrypted="enc-openai",
         ai_provider_profiles_json="{}",
@@ -334,32 +327,19 @@ async def test_openai_tts_probe_uses_saved_openai_ai_key_when_tts_slot_has_none(
     monkeypatch.setattr(settings_api, "decrypt_safe", lambda value: "openai-ai-secret" if value == "enc-openai" else "")
 
     key = await settings_api._tts_probe_key(
-        settings_api.TTSProbeRequest(
-            connection_id="openai-tts-main",
-            provider="openai_tts",
-        )
+        settings_api.TTSProbeRequest(provider="openai_tts")
     )
 
-    assert key == "openai-ai-secret"
+    assert key == ""
+
 
 @pytest.mark.asyncio
-async def test_openai_tts_probe_uses_inactive_saved_openai_registry_key(monkeypatch):
+async def test_unsaved_openai_tts_probe_does_not_borrow_inactive_saved_registry_key(monkeypatch):
+    """A saved-but-inactive AI registry entry is not a credential source either."""
     saved = SimpleNamespace(
         tts_provider="edge_tts",
         tts_api_key_encrypted=None,
         tts_provider_profiles_json="{}",
-        tts_connections_json=json.dumps({
-            "openai-tts-main": {
-                "label": "OpenAI TTS main",
-                "provider": "openai_tts",
-                "voice": "alloy",
-                "model": "tts-1",
-                "base_url": None,
-                "region": None,
-                "api_key_encrypted": None,
-                "archived": False,
-            },
-        }),
         ai_provider="compatible",
         ai_api_key_encrypted="enc-compatible",
         ai_provider_profiles_json=json.dumps({
@@ -373,13 +353,46 @@ async def test_openai_tts_probe_uses_inactive_saved_openai_registry_key(monkeypa
     }.get(value, ""))
 
     key = await settings_api._tts_probe_key(
-        settings_api.TTSProbeRequest(
-            connection_id="openai-tts-main",
-            provider="openai_tts",
-        )
+        settings_api.TTSProbeRequest(provider="openai_tts")
     )
 
-    assert key == "registry-openai-secret"
+    assert key == ""
+
+
+@pytest.mark.asyncio
+async def test_saved_tts_probe_resolves_that_connection_credential(monkeypatch):
+    """The complement: an explicit connection_id MAY resolve its own key.
+
+    Isolation is about UNSAVED forms only. Editing/probing a saved connection
+    must keep working, otherwise the Settings UI could never re-verify a stored
+    credential after a provider outage.
+    """
+    saved = SimpleNamespace(
+        tts_provider="edge_tts",
+        tts_api_key_encrypted=None,
+        tts_provider_profiles_json=json.dumps({
+            "elevenlabs": {
+                "provider": "elevenlabs",
+                "voice": "voice-1",
+                "model": "eleven_multilingual_v2",
+                "base_url": "https://api.elevenlabs.io/v1",
+                "region": None,
+                "api_key_encrypted": "encrypted-eleven",
+            },
+        }),
+    )
+    monkeypatch.setattr(settings_api, "_load_saved_tts_settings", lambda: _async_value(saved))
+    monkeypatch.setattr(settings_api, "decrypt_safe", lambda value: {
+        "encrypted-eleven": "stored-eleven-secret",
+    }.get(value, ""))
+
+    key = await settings_api._tts_probe_key(
+        settings_api.TTSProbeRequest(provider="elevenlabs", connection_id="elevenlabs")
+    )
+
+    assert key == "stored-eleven-secret"
+
+
 @pytest.mark.asyncio
 async def test_localization_tts_preflight_rejects_invalid_voice_before_pipeline(monkeypatch):
     from backend.services import localization_service as localization
