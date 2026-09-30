@@ -97,7 +97,9 @@ async def test_douyin_channel_video_response_preserves_exact_identity(monkeypatc
     assert video["video_id"] == "123"
     assert video["source_url"] == "https://www.douyin.com/video/123"
     assert video["url"] == video["source_url"]
-    provider.creator_snapshot.assert_awaited_once_with("creator-sec-id", limit=18)
+    provider.creator_snapshot.assert_awaited_once_with(
+        "creator-sec-id", limit=18, cursor="0"
+    )
 
 
 @pytest.mark.asyncio
@@ -137,3 +139,45 @@ async def test_douyin_provider_failure_is_explicit_502(monkeypatch):
 
     assert exc.value.status_code == 502
     assert "provider rejected request" in str(exc.value.detail).lower()
+
+
+
+@pytest.mark.asyncio
+async def test_douyin_channel_cursor_is_forwarded_and_returned(monkeypatch):
+    provider = _provider_with_snapshot()
+    info, history = provider.creator_snapshot.return_value
+    history.has_more = True
+    history.next_cursor = "cursor-2"
+
+    monkeypatch.setattr(channels, "AsyncSessionLocal", lambda: _DbSession(_channel()))
+    monkeypatch.setattr(channels, "_get_douyin_provider", AsyncMock(return_value=provider))
+
+    result = await channels.get_channel_videos(
+        "db-channel",
+        page_token="cursor-1",
+        limit=36,
+    )
+
+    provider.creator_snapshot.assert_awaited_once_with(
+        "creator-sec-id",
+        limit=36,
+        cursor="cursor-1",
+    )
+    assert result["has_more"] is True
+    assert result["next_page_token"] == "cursor-2"
+
+
+@pytest.mark.asyncio
+async def test_douyin_channel_last_page_has_no_next_token(monkeypatch):
+    provider = _provider_with_snapshot()
+    monkeypatch.setattr(channels, "AsyncSessionLocal", lambda: _DbSession(_channel()))
+    monkeypatch.setattr(channels, "_get_douyin_provider", AsyncMock(return_value=provider))
+
+    result = await channels.get_channel_videos(
+        "db-channel",
+        page_token="last",
+        limit=50,
+    )
+
+    assert result["has_more"] is False
+    assert result["next_page_token"] is None
