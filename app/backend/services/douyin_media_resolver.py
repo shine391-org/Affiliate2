@@ -29,6 +29,11 @@ class ResolvedDouyinMedia:
     candidate_aweme_id: str | None = None
     provenance: str = ""
     resolution_path: str = ""
+    #: Other renditions of THIS SAME verified aweme, best-first, excluding
+    #: `url`. Used only to recover AUDIO when the primary rendition turns out
+    #: to be video-only. Every entry already passed the exact-identity filter,
+    #: so consuming one cannot substitute a different video.
+    alternates: tuple["ResolvedDouyinMedia", ...] = ()
 
 
 @dataclass(frozen=True)
@@ -200,10 +205,19 @@ def _normalize_dom_candidate(raw) -> _MediaCandidate | None:
     )
 
 
-def _verified_candidate(
+def _verified_ordered(
     candidates: list[_MediaCandidate],
     expected_aweme_id: str | None,
-) -> _MediaCandidate | None:
+) -> list[_MediaCandidate]:
+    """Every candidate whose identity is EXACTLY the requested aweme, best first.
+
+    The identity filter is the same one the single-candidate path used, so
+    widening the RETURN to a list cannot admit a different aweme — it only
+    exposes the other renditions of the same, already-verified video. That
+    distinction matters: Douyin serves video-only and muxed A/V renditions of
+    one aweme, and picking a different rendition to obtain audio is legitimate
+    while picking a different VIDEO is not.
+    """
     # Fail closed: an unproven requested identity can never be satisfied by an
     # arbitrary DOM/network candidate, so this gate refuses to run without one.
     if not expected_aweme_id:
@@ -212,21 +226,26 @@ def _verified_candidate(
             "requested aweme_id"
         )
     if not candidates:
-        return None
-    if expected_aweme_id:
-        candidates = [
-            candidate
-            for candidate in candidates
-            if candidate.matches(expected_aweme_id)
-        ]
-        if not candidates:
-            return None
-    return max(
-        candidates,
+        return []
+    verified = [
+        candidate for candidate in candidates
+        if candidate.matches(expected_aweme_id)
+    ]
+    return sorted(
+        verified,
         key=lambda candidate: _candidate_score(
             candidate.url, candidate.content_length, expected_aweme_id
         ),
+        reverse=True,
     )
+
+
+def _verified_candidate(
+    candidates: list[_MediaCandidate],
+    expected_aweme_id: str | None,
+) -> _MediaCandidate | None:
+    ordered = _verified_ordered(candidates, expected_aweme_id)
+    return ordered[0] if ordered else None
 
 
 def _identity_observation(
@@ -495,11 +514,12 @@ async def resolve_douyin_media(
                     })"""
                 )
 
-            def _resolved(candidate: _MediaCandidate) -> ResolvedDouyinMedia:
-                # Only a candidate that already passed _verified_candidate()
-                # reaches here, so its identity equals the requested id. Derive
-                # the reported id from the authoritative evidence, never from a
+            def _resolved(ordered: list[_MediaCandidate]) -> ResolvedDouyinMedia:
+                # Every entry in `ordered` already passed the exact-identity
+                # filter, so its identity equals the requested id. Derive the
+                # reported id from the authoritative evidence, never from a
                 # DOM guess that could contradict the media URL.
+                candidate = ordered[0]
                 if candidate.url_aweme_ids:
                     claimed = (
                         source_video_id
@@ -512,17 +532,38 @@ async def resolve_douyin_media(
                         if source_video_id in candidate.dom_aweme_ids
                         else candidate.dom_aweme_ids[0] if candidate.dom_aweme_ids else None
                     )
+                shared_headers = {
+                    **({"User-Agent": session.user_agent} if session.user_agent else {}),
+                    "Referer": source_url,
+                }
                 return ResolvedDouyinMedia(
                     url=candidate.url,
-                    headers={
-                        **({"User-Agent": session.user_agent} if session.user_agent else {}),
-                        "Referer": source_url,
-                    },
+                    headers=dict(shared_headers),
                     source_url=source_url,
                     requested_aweme_id=source_video_id,
                     candidate_aweme_id=claimed,
                     provenance=candidate.provenance,
                     resolution_path=candidate.resolution_path,
+                    # Same verified aweme, other renditions. Douyin commonly
+                    # serves a video-only rendition alongside a muxed A/V one;
+                    # this is how the downloader recovers audio without ever
+                    # widening identity.
+                    alternates=tuple(
+                        ResolvedDouyinMedia(
+                            url=other.url,
+                            headers=dict(shared_headers),
+                            source_url=source_url,
+                            requested_aweme_id=source_video_id,
+                            candidate_aweme_id=(
+                                source_video_id
+                                if source_video_id in (other.url_aweme_ids or ())
+                                else (other.url_aweme_ids or (other.dom_aweme_ids or (None,)))[0]
+                            ),
+                            provenance=other.provenance,
+                            resolution_path=other.resolution_path,
+                        )
+                        for other in ordered[1:]
+                    ),
                 )
 
             observed: list[_MediaCandidate] = []
@@ -540,9 +581,9 @@ async def resolve_douyin_media(
             # must prove the candidate belongs to that exact aweme.
             dom_candidates = _read_dom_candidates(await _dom_media_urls())
             observed.extend(dom_candidates)
-            candidate = _verified_candidate(dom_candidates, source_video_id)
-            if candidate:
-                return _resolved(candidate)
+            ordered = _verified_ordered(dom_candidates, source_video_id)
+            if ordered:
+                return _resolved(ordered)
 
             try:
                 await page.wait_for_function(
@@ -556,14 +597,14 @@ async def resolve_douyin_media(
 
             dom_candidates = _read_dom_candidates(await _dom_media_urls())
             observed.extend(dom_candidates)
-            candidate = _verified_candidate(dom_candidates, source_video_id)
-            if candidate:
-                return _resolved(candidate)
+            ordered = _verified_ordered(dom_candidates, source_video_id)
+            if ordered:
+                return _resolved(ordered)
 
             observed.extend(network_candidates)
-            candidate = _verified_candidate(network_candidates, source_video_id)
-            if candidate:
-                return _resolved(candidate)
+            ordered = _verified_ordered(network_candidates, source_video_id)
+            if ordered:
+                return _resolved(ordered)
 
             # The page cannot prove identity. Fall back to the caption search
             # OUTSIDE this CDP session (it opens its own authenticated one).
@@ -581,8 +622,8 @@ async def resolve_douyin_media(
                 source_video_id,
                 cdp_url=cdp_url,
             )
-            candidate = _verified_candidate(search_candidates, source_video_id)
-            if candidate:
-                return _resolved(candidate)
+            ordered = _verified_ordered(search_candidates, source_video_id)
+            if ordered:
+                return _resolved(ordered)
 
         raise RuntimeError(page_observation)

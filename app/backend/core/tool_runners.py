@@ -1069,16 +1069,58 @@ async def run_tool_translate(
     run = None
 
     try:
-        user_settings = await _load_user_settings(user_id)
-
         # Existing reruns use their effective profile snapshot. An explicit
-        # profile_override is the C11 expert path.
+        # profile_override is the C11 expert path. Loaded BEFORE the A/V
+        # preflight so a resumed job can record why it stopped.
         try:
             run = LocalizationRun.load(job_id)
             stored_profile = run.effective_profile
         except ValueError:
             run = None
             stored_profile = {}
+
+        # ── Source A/V preflight (before any provider or GPU work) ───────────
+        # A video-only source cannot be dubbed, separated, or transcribed.
+        # Without this gate the failure surfaced as a raw ffmpeg traceback
+        # ("Stream map '0:a:0' matches no streams") from deep inside Demucs
+        # extraction, AFTER the htdemucs_ft model had already been loaded onto
+        # the GPU — a long, expensive, completely wasted unit of work whose
+        # error told the user nothing actionable.
+        #
+        # Runs before profile materialization and the GPU gate, so a
+        # video-only source is rejected while the fix is still a one-click
+        # re-download rather than after credentials and models are involved.
+        #
+        # Scoped to full_dub deliberately: a subtitle-only run over a silent
+        # clip is legitimate, so this asserts nothing about other modes. The
+        # probe is one ffprobe call on a file we are about to copy anyway.
+        if is_dub:
+            from backend.core.exceptions import MissingSourceAudioError
+            from backend.services.video_utils import probe_stream_inventory
+            _preflight_inventory = await asyncio.to_thread(
+                probe_stream_inventory, original_input
+            )
+            if (
+                _preflight_inventory.readable
+                and _preflight_inventory.has_video
+                and not _preflight_inventory.has_audio
+            ):
+                _error = MissingSourceAudioError(original_input)
+                # On a RESUME the manifest already exists, and it is what a
+                # human reads to find out why a job stopped. Record the reason
+                # there before raising, or the resumed job fails with a stage
+                # record that still says "pending" and points nowhere.
+                if run is not None:
+                    try:
+                        run.fail("separation", _error)
+                    except Exception:
+                        logger.debug(
+                            "Could not record missing-audio on the resumed manifest",
+                            exc_info=True,
+                        )
+                raise _error
+
+        user_settings = await _load_user_settings(user_id)
 
         if profile_override:
             profile = LocalizationProfile.model_validate(profile_override)

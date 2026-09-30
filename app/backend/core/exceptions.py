@@ -52,6 +52,40 @@ class VideoUnavailableError(DownloadError):
     pass
 
 
+class SourceMediaContractError(ViralMintError):
+    """A media asset does not satisfy the contract its consumer requires.
+
+    Distinct from DownloadError: nothing failed to download. The bytes landed
+    and are a valid file, but they are the WRONG KIND of file for the stage
+    that was asked to consume them (a video-only file offered to a dubbing
+    pipeline). Subclassing ViralMintError keeps every existing
+    `except ViralMintError` job-failure handler working unchanged.
+    """
+
+    #: Operator-facing diagnosis, kept out of the user-facing message on
+    #: purpose so the user is told what to DO, not what the codec is.
+    user_hint = (
+        "Hãy tải lại nguồn có audio hoặc chọn chế độ chỉ phụ đề."
+    )
+
+    def __init__(self, source, missing: str = "audio"):
+        self.source = str(source)
+        self.missing = missing
+        super().__init__(
+            f"Video nguồn không có luồng {missing}. "
+            f"Không thể lồng tiếng/full dub. "
+            f"{self.user_hint} "
+            f"[source={self.source}]"
+        )
+
+
+class MissingSourceAudioError(SourceMediaContractError):
+    """The localization source has a video stream but no audio stream."""
+
+    def __init__(self, source):
+        super().__init__(source, missing="audio")
+
+
 # ── Job lifecycle ─────────────────────────────────────────────────────────────
 class JobCancelledError(ViralMintError):
     """The user cancelled the job while it was running.

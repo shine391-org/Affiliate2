@@ -704,6 +704,7 @@ async def _prepare_download_source(
     cookie_session: dict,
     douyin_cdp_url: str | None = None,
     title_hint: str = "",
+    alternates_out: list | None = None,
 ) -> tuple[str, dict[str, str] | None, str | None, dict | None]:
     """Choose the URL that the canonical yt-dlp pipeline will download.
 
@@ -750,6 +751,15 @@ async def _prepare_download_source(
             "provenance": resolved.provenance,
             "resolution_path": resolved.resolution_path,
         }
+        # The primary URL first; the other renditions of THIS SAME verified
+        # aweme go to `alternates_out`. Douyin regularly serves a video-only
+        # rendition next to a muxed A/V one, so a video-only download is a
+        # recoverable rendition choice — never a reason to widen identity.
+        # Passed via an out-param rather than a 5th tuple element so the
+        # function's return arity (and every existing caller/test unpack)
+        # stays exactly as it was.
+        if alternates_out is not None:
+            alternates_out.extend(getattr(resolved, "alternates", ()) or ())
         return resolved.url, dict(resolved.headers), "douyin_cdp", identity
 
     if _is_tiktok_url(url):
@@ -864,6 +874,12 @@ FORMAT_FALLBACK_CHAIN = [
 #: not available" even though the bytes are fetchable. One direct rung is the
 #: only ladder that can succeed for that input.
 DIRECT_MEDIA_FORMAT_CHAIN = ["best"]
+
+#: How many other verified renditions of the SAME aweme to try when the first
+#: one lands video-only. Douyin typically offers a handful of play_addr
+#: renditions, so this covers the realistic set while keeping the worst case
+#: (N extra CDN fetches) bounded.
+MAX_DOUYIN_AUDIO_FALLBACKS = 4
 
 
 def _format_chain_for_source(
@@ -1076,8 +1092,10 @@ async def download_video(
         _inspect_browser_session, cookie_browser, cookie_profile
     )
     cookie_session_ok = bool(cookie_session.get("ok"))
+    _douyin_alternates: list = []
     effective_url, resolved_headers, resolved_via, resolved_identity = await _prepare_download_source(
-        url, cookie_session, douyin_cdp_url=douyin_cdp_url, title_hint=title_hint
+        url, cookie_session, douyin_cdp_url=douyin_cdp_url, title_hint=title_hint,
+        alternates_out=_douyin_alternates,
     )
     use_browser_cookies = cookie_session_ok and resolved_via is None
     _format_chain = _format_chain_for_source(
@@ -1143,12 +1161,6 @@ async def download_video(
                 *_opt_postprocessors,
             ]
 
-        def _attempt_download(opts):
-            """Single download attempt — raises on failure."""
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(effective_url, download=True)
-                return Path(ydl.prepare_filename(info)), info
-
         def _classify_and_raise(error):
             """Classify a yt-dlp error and raise the appropriate exception type."""
             error_str = str(error).lower()
@@ -1164,8 +1176,6 @@ async def download_video(
             _record_download_failure()
             raise DownloadError(f"Download failed: {error}")
 
-        # ── Main download with multi-layer retry ────────────────────────────
-        last_error = None
         # Whether the per-download optional postprocessors (embed thumbnail /
         # subtitles / metadata from `options`) were dropped after a
         # postprocessing failure. Lives OUTSIDE the format loop: once an extra
@@ -1173,163 +1183,284 @@ async def download_video(
         # format rung would just fail the same way.
         opt_pps_dropped = False
 
-        # `_format_chain` is FORMAT_FALLBACK_CHAIN unless the caller asked for
-        # a specific quality — see download_options.format_chain() on why an
-        # unrequested download must keep the module-level chain verbatim.
-        for fmt_idx, fmt in enumerate(_format_chain):
-            video_opts = {**base_opts, "format": fmt}
+        def _download_from_url(target_url: str, target_headers: dict):
+            """Full format ladder + retry policy against ONE concrete media URL.
 
-            # Up to 2 attempts per format (original + 1 retry for transient errors)
-            for attempt in range(2):
-                try:
-                    video_path, info = _attempt_download(video_opts)
-                    duration = info.get("duration", 0)
-                    _record_success()
-                    global _consecutive_download_failures
-                    _consecutive_download_failures = 0
-                    last_error = None
-                    break  # Success — exit retry loop
+            Extracted so the audio-recovery fallback re-runs the identical
+            proven download path on another rendition instead of hand-rolling
+            a second, weaker one.
+            """
+            # The postprocessor-drop flag is owned by the enclosing download and
+            # must stay SHARED across renditions: it records that an optional
+            # embed extra was proven un-embeddable FOR THIS SOURCE, and that
+            # verdict does not become false again because a different
+            # rendition was fetched. Without `nonlocal` the assignment below
+            # would make this a fresh per-rendition local and silently undo
+            # the once-only guarantee the rung exists to provide.
+            nonlocal opt_pps_dropped
 
-                except yt_dlp.utils.DownloadError as e:
-                    last_error = e
-                    error_str = str(e).lower()
+            attempt_base = {**base_opts, "http_headers": target_headers}
+            video_path = None
+            info: dict = {}
 
-                    # ── Permanent errors: don't retry, raise immediately ────
-                    if _is_permanent_error(error_str):
-                        _cleanup_partial_files(output_dir, file_stem)
-                        raise VideoUnavailableError(f"Video unavailable: {e}")
+            def _attempt_download(opts):
+                """Single download attempt — raises on failure."""
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(target_url, download=True)
+                    return Path(ydl.prepare_filename(info)), info
 
-                    if "429" in error_str or "rate" in error_str:
-                        # Subtitle-specific 429: retry without subtitles, don't give up
-                        if ("subtitle" in error_str or "subtitles" in error_str):
-                            logger.warning(f"Subtitle download rate-limited, retrying without subtitles")
+            # `_format_chain` is FORMAT_FALLBACK_CHAIN unless the caller asked
+            # for a specific quality — see download_options.format_chain() on
+            # why an unrequested download must keep the module-level chain
+            # verbatim.
+            last_error = None
+            for fmt_idx, fmt in enumerate(_format_chain):
+                video_opts = {**attempt_base, "format": fmt}
+
+                # Up to 2 attempts per format (original + 1 retry for transient errors)
+                for attempt in range(2):
+                    try:
+                        video_path, info = _attempt_download(video_opts)
+                        _record_success()
+                        global _consecutive_download_failures
+                        _consecutive_download_failures = 0
+                        last_error = None
+                        break  # Success — exit retry loop
+
+                    except yt_dlp.utils.DownloadError as e:
+                        last_error = e
+                        error_str = str(e).lower()
+
+                        # ── Permanent errors: don't retry, raise immediately ────
+                        if _is_permanent_error(error_str):
                             _cleanup_partial_files(output_dir, file_stem)
-                            video_opts["writesubtitles"] = False
-                            video_opts["writeautomaticsub"] = False
-                            continue  # Retry same format without subtitles
+                            raise VideoUnavailableError(f"Video unavailable: {e}")
 
-                        # Full 429 rate limit — no point retrying
-                        _cleanup_partial_files(output_dir, file_stem)
-                        _record_rate_limit()
-                        raise RateLimitError(
-                            f"The source site is rate-limiting downloads from this IP. "
-                            f"Try again in a few minutes. (Error: {e})"
-                        )
+                        if "429" in error_str or "rate" in error_str:
+                            # Subtitle-specific 429: retry without subtitles, don't give up
+                            if ("subtitle" in error_str or "subtitles" in error_str):
+                                logger.warning(f"Subtitle download rate-limited, retrying without subtitles")
+                                _cleanup_partial_files(output_dir, file_stem)
+                                video_opts["writesubtitles"] = False
+                                video_opts["writeautomaticsub"] = False
+                                continue  # Retry same format without subtitles
 
-                    # ── HTTP 403 with cookies applied: retry WITHOUT them ────
-                    # A 403 is often caused BY the cookie jar (see
-                    # _drop_cookies_for_403). Retrying the same configuration
-                    # can only fail the same way, so drop the jar once and try
-                    # again — including across the format fallbacks, hence the
-                    # mirror onto base_opts, which every later format is
-                    # rebuilt from.
-                    if _is_youtube_url(url) \
-                            and ("http error 403" in error_str or "403: forbidden" in error_str) \
-                            and _drop_cookies_for_403(video_opts):
-                        for _ck in ("cookiefile", "cookiesfrombrowser"):
-                            base_opts.pop(_ck, None)
-                        logger.warning(
-                            "HTTP 403 with cookies applied — retrying without them "
-                            "(re-enables the token-free player clients)"
-                        )
-                        _cleanup_partial_files(output_dir, file_stem)
-                        continue
+                            # Full 429 rate limit — no point retrying
+                            _cleanup_partial_files(output_dir, file_stem)
+                            _record_rate_limit()
+                            raise RateLimitError(
+                                f"The source site is rate-limiting downloads from this IP. "
+                                f"Try again in a few minutes. (Error: {e})"
+                            )
 
-                    # ── Bot detection: retry with fresh cookies ────
-                    if resolved_via is None and _is_bot_detection_error(str(e)) and attempt == 0:
-                        browser = _resolve_cookie_browser(cookie_browser)
-                        if browser:
+                        # ── HTTP 403 with cookies applied: retry WITHOUT them ────
+                        # A 403 is often caused BY the cookie jar (see
+                        # _drop_cookies_for_403). Retrying the same configuration
+                        # can only fail the same way, so drop the jar once and try
+                        # again — including across the format fallbacks, hence the
+                        # mirror onto attempt_base, which every later format is
+                        # rebuilt from.
+                        if _is_youtube_url(url) \
+                                and ("http error 403" in error_str or "403: forbidden" in error_str) \
+                                and _drop_cookies_for_403(video_opts):
+                            for _ck in ("cookiefile", "cookiesfrombrowser"):
+                                attempt_base.pop(_ck, None)
                             logger.warning(
-                                "Bot detection triggered, retrying with configured %s session",
-                                browser,
+                                "HTTP 403 with cookies applied — retrying without them "
+                                "(re-enables the token-free player clients)"
                             )
                             _cleanup_partial_files(output_dir, file_stem)
-                            _apply_cookies(
-                                video_opts, cookie_browser, cookie_profile,
-                                session_ok=cookie_session_ok,
-                            )
+                            continue
+
+                        # ── Bot detection: retry with fresh cookies ────
+                        if resolved_via is None and _is_bot_detection_error(str(e)) and attempt == 0:
+                            browser = _resolve_cookie_browser(cookie_browser)
+                            if browser:
+                                logger.warning(
+                                    "Bot detection triggered, retrying with configured %s session",
+                                    browser,
+                                )
+                                _cleanup_partial_files(output_dir, file_stem)
+                                _apply_cookies(
+                                    video_opts, cookie_browser, cookie_profile,
+                                    session_ok=cookie_session_ok,
+                                )
+                                import time as _time
+                                _time.sleep(3)
+                                continue  # Retry with the same configured session
+                            else:
+                                _cleanup_partial_files(output_dir, file_stem)
+                                raise DownloadError(
+                                    "This site requires a logged-in browser session. "
+                                    "Configure Settings > Source Providers > Download Browser Session, then retry."
+                                )
+
+                        # ── Transient errors: retry once after delay ────
+                        if _is_transient_error(error_str) and attempt == 0:
+                            logger.warning(f"Transient error (attempt {attempt + 1}), retrying in 5s: {e}")
+                            _cleanup_partial_files(output_dir, file_stem)
                             import time as _time
-                            _time.sleep(3)
-                            continue  # Retry with the same configured session
-                        else:
+                            _time.sleep(5)
+                            continue  # Retry
+
+                        # ── Format-related errors: try next format ────
+                        if any(s in error_str for s in ["no video formats", "requested format", "format is not available", "merge"]):
+                            logger.warning(f"Format '{fmt}' failed, trying next fallback: {e}")
                             _cleanup_partial_files(output_dir, file_stem)
-                            raise DownloadError(
-                                "This site requires a logged-in browser session. "
-                                "Configure Settings > Source Providers > Download Browser Session, then retry."
+                            break  # Break retry loop, try next format
+
+                        # ── Optional-postprocessor failure: drop extras, keep video ──
+                        # Postprocessor errors fire AFTER the video is fully on
+                        # disk — failing the download over cover art would break
+                        # the options contract (degrade, never fail; see
+                        # download_options). Known offender: EmbedThumbnail
+                        # hard-raises on webm (single-stream downloads dodge the
+                        # merge_output_format steer). Drop OUR appended
+                        # postprocessors and retry the same format — yt-dlp sees
+                        # the finished file and skips straight to postprocessing,
+                        # so the retry costs no bandwidth. Runs AFTER the
+                        # format/merge predicate on purpose: yt-dlp's merger is
+                        # also a postprocessor, and a merge failure must keep its
+                        # walk down the format chain.
+                        if (_opt_postprocessors and not opt_pps_dropped
+                                and "postprocessing" in error_str):
+                            opt_pps_dropped = True
+                            remaining = [pp for pp in (attempt_base.get("postprocessors") or [])
+                                         if pp not in _opt_postprocessors]
+                            # attempt_base too: video_opts is rebuilt from it on
+                            # the next format rung, which would resurrect the extras.
+                            attempt_base["postprocessors"] = remaining
+                            video_opts["postprocessors"] = remaining
+                            # Sweep the failed postprocessor's `<stem>.temp.*`
+                            # leftovers; the patterns never match the finished
+                            # video, which the retry deliberately reuses.
+                            _cleanup_partial_files(output_dir, file_stem)
+                            logger.warning(
+                                "Optional postprocessor failed, retrying without embed extras: %s", e
                             )
+                            continue  # Retry same format without the extras
 
-                    # ── Transient errors: retry once after delay ────
-                    if _is_transient_error(error_str) and attempt == 0:
-                        logger.warning(f"Transient error (attempt {attempt + 1}), retrying in 5s: {e}")
-                        _cleanup_partial_files(output_dir, file_stem)
-                        import time as _time
-                        _time.sleep(5)
-                        continue  # Retry
+                        # ── Unknown error on first attempt: retry once ────
+                        if attempt == 0:
+                            logger.warning(f"Download error (attempt 1), retrying in 5s: {e}")
+                            _cleanup_partial_files(output_dir, file_stem)
+                            import time as _time
+                            _time.sleep(5)
+                            continue
 
-                    # ── Format-related errors: try next format ────
-                    if any(s in error_str for s in ["no video formats", "requested format", "format is not available", "merge"]):
-                        logger.warning(f"Format '{fmt}' failed, trying next fallback: {e}")
+                        # Second attempt also failed — try next format
+                        logger.warning(f"Download failed on attempt 2 with format '{fmt}': {e}")
                         _cleanup_partial_files(output_dir, file_stem)
-                        break  # Break retry loop, try next format
+                        break  # Try next format
 
-                    # ── Optional-postprocessor failure: drop extras, keep video ──
-                    # Postprocessor errors fire AFTER the video is fully on
-                    # disk — failing the download over cover art would break
-                    # the options contract (degrade, never fail; see
-                    # download_options). Known offender: EmbedThumbnail
-                    # hard-raises on webm (single-stream downloads dodge the
-                    # merge_output_format steer). Drop OUR appended
-                    # postprocessors and retry the same format — yt-dlp sees
-                    # the finished file and skips straight to postprocessing,
-                    # so the retry costs no bandwidth. Runs AFTER the
-                    # format/merge predicate on purpose: yt-dlp's merger is
-                    # also a postprocessor, and a merge failure must keep its
-                    # walk down the format chain.
-                    if (_opt_postprocessors and not opt_pps_dropped
-                            and "postprocessing" in error_str):
-                        opt_pps_dropped = True
-                        remaining = [pp for pp in (base_opts.get("postprocessors") or [])
-                                     if pp not in _opt_postprocessors]
-                        # base_opts too: video_opts is rebuilt from it on the
-                        # next format rung, which would resurrect the extras.
-                        base_opts["postprocessors"] = remaining
-                        video_opts["postprocessors"] = remaining
-                        # Sweep the failed postprocessor's `<stem>.temp.*`
-                        # leftovers; the patterns never match the finished
-                        # video, which the retry deliberately reuses.
-                        _cleanup_partial_files(output_dir, file_stem)
-                        logger.warning(
-                            "Optional postprocessor failed, retrying without embed extras: %s", e
-                        )
-                        continue  # Retry same format without the extras
+                if last_error is None:
+                    break  # Download succeeded
 
-                    # ── Unknown error on first attempt: retry once ────
-                    if attempt == 0:
-                        logger.warning(f"Download error (attempt 1), retrying in 5s: {e}")
-                        _cleanup_partial_files(output_dir, file_stem)
-                        import time as _time
-                        _time.sleep(5)
+            # All formats exhausted — raise the last error
+            if last_error is not None:
+                _classify_and_raise(last_error)
+            return video_path, info
+
+        def _resolve_landed_file(path, info_dict):
+            """The file that actually landed, after any extension change."""
+            stem = file_stem or info_dict.get("id", "")
+            if path and not path.exists():
+                actual = _find_actual_video_file(output_dir, stem)
+                if actual:
+                    logger.info(
+                        "Video file extension changed: expected %s, found %s",
+                        path.suffix, actual.suffix,
+                    )
+                    path = actual
+            return path, stem
+
+        video_path, info = _download_from_url(effective_url, effective_headers)
+        duration = info.get("duration", 0)
+        video_path, file_stem_resolved = _resolve_landed_file(video_path, info)
+
+        # ── Douyin A/V contract: a "video" download must be playable ───────
+        # Douyin serves video-only renditions of an aweme alongside muxed A/V
+        # ones. yt-dlp's generic extractor hands back the direct file as a
+        # single format, so nothing in the ladder ever asked for audio — the
+        # download SUCCEEDED and stored a file with no audio stream at all.
+        # Every A/V consumer downstream then failed with an opaque subprocess
+        # error (Demucs: "Stream map '0:a:0' matches no streams"), long after
+        # the expensive work had already started.
+        #
+        # Scoped to the douyin_cdp path on purpose: this asserts the product
+        # contract for a Douyin "video" asset, and deliberately says nothing
+        # about other sources where a video-only download may be legitimate.
+        if resolved_via == "douyin_cdp" and video_path and video_path.exists():
+            from backend.core.exceptions import SourceMediaContractError
+            from backend.services.video_utils import probe_stream_inventory
+
+            inventory = probe_stream_inventory(video_path)
+            if inventory.readable and inventory.has_video and not inventory.has_audio:
+                logger.warning(
+                    "Douyin rendition for aweme %s downloaded video-only "
+                    "(%dx%d, %s) — trying other verified renditions of the SAME "
+                    "aweme to recover audio",
+                    (resolved_identity or {}).get("requested_aweme_id"),
+                    inventory.width or 0, inventory.height or 0,
+                    inventory.video_codec,
+                )
+                # Bounded, identity-preserving: every alternate already passed
+                # the exact-aweme filter in the resolver, so this can only
+                # change the RENDITION, never the video.
+                for alternate in _douyin_alternates[:MAX_DOUYIN_AUDIO_FALLBACKS]:
+                    alt_url = getattr(alternate, "url", None)
+                    if not alt_url or alt_url == effective_url:
                         continue
-
-                    # Second attempt also failed — try next format
-                    logger.warning(f"Download failed on attempt 2 with format '{fmt}': {e}")
+                    alt_headers = {
+                        **_yt_dlp_http_headers(),
+                        **(getattr(alternate, "headers", None) or {}),
+                    }
                     _cleanup_partial_files(output_dir, file_stem)
-                    break  # Try next format
+                    try:
+                        alt_path, alt_info = _download_from_url(alt_url, alt_headers)
+                    except Exception as exc:
+                        # One rendition failing is not a reason to abandon the
+                        # ones after it; a signed CDN URL can simply expire.
+                        logger.warning(
+                            "Audio-recovery rendition failed for aweme %s: %s",
+                            (resolved_identity or {}).get("requested_aweme_id"), exc,
+                        )
+                        continue
+                    alt_path, alt_stem = _resolve_landed_file(alt_path, alt_info)
+                    if not alt_path or not alt_path.exists():
+                        continue
+                    alt_inv = probe_stream_inventory(alt_path)
+                    if alt_inv.readable and alt_inv.is_playable_full_video():
+                        logger.info(
+                            "Recovered audio from another verified rendition of "
+                            "aweme %s (video %s + audio %s)",
+                            (resolved_identity or {}).get("requested_aweme_id"),
+                            alt_inv.video_codec, alt_inv.audio_codec,
+                        )
+                        video_path = alt_path
+                        info = alt_info
+                        file_stem_resolved = alt_stem
+                        inventory = alt_inv
+                        duration = alt_info.get("duration", duration)
+                        break
+                    logger.warning(
+                        "Audio-recovery rendition for aweme %s is also video-only — "
+                        "continuing to the next candidate",
+                        (resolved_identity or {}).get("requested_aweme_id"),
+                    )
+                    alt_path.unlink(missing_ok=True)
 
-            if last_error is None:
-                break  # Download succeeded
-
-        # All formats exhausted — raise the last error
-        if last_error is not None:
-            _classify_and_raise(last_error)
-
-        # Resolve actual video file (yt-dlp may change extension after merging)
-        file_stem_resolved = file_stem or info.get("id", "")
-        if video_path and not video_path.exists():
-            actual = _find_actual_video_file(output_dir, file_stem_resolved)
-            if actual:
-                logger.info(f"Video file extension changed: expected {video_path.suffix}, found {actual.suffix}")
-                video_path = actual
+                if inventory.readable and not inventory.is_playable_full_video():
+                    # Fail closed. Storing this file would only move the
+                    # failure downstream to a place where it costs real time
+                    # and hides the actual cause.
+                    _cleanup_partial_files(output_dir, file_stem)
+                    if video_path and video_path.exists():
+                        video_path.unlink(missing_ok=True)
+                    raise SourceMediaContractError(
+                        video_path or url,
+                        missing=inventory.describe_missing() or "audio",
+                    )
 
         if resolved_via == "douyin_cdp" and video_path and video_path.exists():
             video_path = _enforce_direct_media_quality_cap(

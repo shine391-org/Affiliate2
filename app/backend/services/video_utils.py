@@ -5,9 +5,160 @@ import json
 import logging
 import math
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class MediaStreamInventory:
+    """What a media file actually contains, measured — never assumed.
+
+    `has_video` / `has_audio` are the two facts downstream stages gate on. A
+    container that ffprobe cannot open reports `readable=False` and both flags
+    False, which callers MUST NOT confuse with "successfully probed and found
+    to have no audio": that is what `readable` is for.
+    """
+
+    has_video: bool = False
+    has_audio: bool = False
+    video_codec: str | None = None
+    audio_codec: str | None = None
+    duration: float | None = None
+    width: int | None = None
+    height: int | None = None
+    fps: float | None = None
+    bitrate_bps: int | None = None
+    container: str | None = None
+    readable: bool = False
+
+    def is_playable_full_video(self) -> bool:
+        """Video AND audio both present in one container.
+
+        The product contract for a "video" asset Studio accepts: a file with
+        only a video stream is not a playable video, it is a video track, and
+        every A/V consumer downstream (Demucs, Whisper, Clip Studio) fails on
+        it with an opaque subprocess error.
+        """
+        return self.has_video and self.has_audio
+
+    def describe_missing(self) -> str:
+        """One short clause naming exactly which stream is absent."""
+        if not self.has_video and not self.has_audio:
+            return "không có luồng hình lẫn luồng âm thanh"
+        if not self.has_audio:
+            return "không có luồng âm thanh"
+        if not self.has_video:
+            return "không có luồng hình"
+        return ""
+
+
+def _ffprobe_json(file_path: Path | str, show_entries: str) -> dict:
+    """ONE ffprobe JSON call, shared by every probe in this module.
+
+    Every separate ffprobe implementation is a place where two call sites can
+    drift on what "has audio" means. Return `{}` on any failure so callers
+    treat an unreadable file as unmeasured, not as empty.
+    """
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "quiet",
+                "-show_entries", show_entries,
+                "-of", "json",
+                str(file_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode != 0:
+            return {}
+        payload = json.loads(result.stdout or "{}")
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _as_int(value):
+    try:
+        n = int(value)
+        return n if n >= 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _as_float(value):
+    try:
+        n = float(value)
+        return n if math.isfinite(n) and n >= 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _as_fps(value):
+    if not value or value in ("0/0", "N/A"):
+        return None
+    try:
+        num, den = str(value).split("/", 1)
+        den_f = float(den)
+        if den_f == 0:
+            return None
+        n = float(num) / den_f
+        return round(n, 3) if math.isfinite(n) and n > 0 else None
+    except (TypeError, ValueError):
+        return _as_float(value)
+
+
+def probe_stream_inventory(file_path: Path | str) -> MediaStreamInventory:
+    """Measure a file's stream inventory in a single ffprobe call.
+
+    The canonical "does this asset contain audio?" gate. Scoped per call site
+    — a missing audio stream is a defect for a localization full_dub source
+    and for a Douyin "video" download, but perfectly legitimate for an
+    audio-only or deliberately silent asset, so this never asserts a policy
+    on its own.
+    """
+    # Deliberately NO pre-flight `Path.exists()` check: ffprobe is the
+    # authority on whether a file is readable, and an existence check in front
+    # of it both duplicates that work and makes the probe untestable against a
+    # stubbed ffprobe. A missing file simply makes ffprobe fail, which is the
+    # same `readable=False` result.
+    payload = _ffprobe_json(
+        file_path,
+        "stream=codec_type,codec_name,width,height,avg_frame_rate,bit_rate:"
+        "format=duration,bit_rate,format_name",
+    )
+    if not payload:
+        return MediaStreamInventory(readable=False)
+
+    streams = payload.get("streams")
+    streams = streams if isinstance(streams, list) else []
+    video = next(
+        (s for s in streams if isinstance(s, dict) and s.get("codec_type") == "video"),
+        {},
+    )
+    audio = next(
+        (s for s in streams if isinstance(s, dict) and s.get("codec_type") == "audio"),
+        {},
+    )
+    fmt = payload.get("format")
+    fmt = fmt if isinstance(fmt, dict) else {}
+
+    return MediaStreamInventory(
+        has_video=bool(video),
+        has_audio=bool(audio),
+        video_codec=video.get("codec_name") or None,
+        audio_codec=audio.get("codec_name") or None,
+        duration=_as_float(fmt.get("duration")),
+        width=_as_int(video.get("width")),
+        height=_as_int(video.get("height")),
+        fps=_as_fps(video.get("avg_frame_rate")),
+        bitrate_bps=_as_int(fmt.get("bit_rate")) or _as_int(video.get("bit_rate")),
+        container=fmt.get("format_name") or None,
+        readable=True,
+    )
 
 
 def probe_duration(file_path: Path | str, default: float = 0.0) -> float:
@@ -40,73 +191,20 @@ def probe_media_details(file_path: Path | str) -> dict:
     One ffprobe call, JSON output, no guessed defaults. Unknown fields remain
     None so QA can distinguish "not measured" from a real zero.
     """
-    try:
-        result = subprocess.run(
-            [
-                "ffprobe", "-v", "quiet",
-                "-show_entries",
-                "stream=codec_type,codec_name,width,height,avg_frame_rate,bit_rate:"
-                "format=duration,bit_rate,format_name",
-                "-of", "json",
-                str(file_path),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        if result.returncode != 0:
-            return {}
-        payload = json.loads(result.stdout or "{}")
-    except Exception:
+    inv = probe_stream_inventory(file_path)
+    if not inv.readable:
         return {}
-
-    streams = payload.get("streams") if isinstance(payload, dict) else []
-    streams = streams if isinstance(streams, list) else []
-    video = next((s for s in streams if s.get("codec_type") == "video"), {})
-    audio = next((s for s in streams if s.get("codec_type") == "audio"), {})
-    fmt = payload.get("format") if isinstance(payload, dict) else {}
-    fmt = fmt if isinstance(fmt, dict) else {}
-
-    def _int(value):
-        try:
-            n = int(value)
-            return n if n >= 0 else None
-        except (TypeError, ValueError):
-            return None
-
-    def _float(value):
-        try:
-            n = float(value)
-            return n if math.isfinite(n) and n >= 0 else None
-        except (TypeError, ValueError):
-            return None
-
-    def _fps(value):
-        if not value or value in ("0/0", "N/A"):
-            return None
-        try:
-            num, den = str(value).split("/", 1)
-            den_f = float(den)
-            if den_f == 0:
-                return None
-            n = float(num) / den_f
-            return round(n, 3) if math.isfinite(n) and n > 0 else None
-        except (TypeError, ValueError):
-            return _float(value)
-
-    stream_bitrate = _int(video.get("bit_rate"))
-    format_bitrate = _int(fmt.get("bit_rate"))
     return {
-        "width": _int(video.get("width")),
-        "height": _int(video.get("height")),
-        "fps": _fps(video.get("avg_frame_rate")),
-        "has_video": bool(video),
-        "has_audio": bool(audio),
-        "video_codec": video.get("codec_name") or None,
-        "audio_codec": audio.get("codec_name") or None,
-        "bitrate_bps": format_bitrate or stream_bitrate,
-        "duration_seconds": _float(fmt.get("duration")),
-        "container": fmt.get("format_name") or None,
+        "has_video": inv.has_video,
+        "has_audio": inv.has_audio,
+        "width": inv.width,
+        "height": inv.height,
+        "fps": inv.fps,
+        "video_codec": inv.video_codec,
+        "audio_codec": inv.audio_codec,
+        "bitrate_bps": inv.bitrate_bps,
+        "duration_seconds": inv.duration,
+        "container": inv.container,
     }
 
 def probe_media(file_path: Path | str) -> tuple[int, int, float]:
