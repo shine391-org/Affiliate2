@@ -346,6 +346,31 @@ async def upload_video(video_id: str, body: dict, db: AsyncSession = Depends(get
             if value is not None
         }
 
+    # Hash/validate the approved artifact before taking SQLite's global
+    # write lock. UploadAgent repeats the exact-artifact check at execution time,
+    # so a file mutation after this preflight still fails closed before provider
+    # side effects.
+    from backend.database import AsyncSessionLocal
+    async with AsyncSessionLocal() as pre_db:
+        pre_video = await pre_db.get(GeneratedVideo, video_id)
+        if not pre_video:
+            raise HTTPException(status_code=404, detail="Video not found")
+        if pre_video.status not in ("ready", "uploaded"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Video status is '{pre_video.status}', must be 'ready' or 'uploaded'",
+            )
+        if not pre_video.publish_approved_at:
+            raise HTTPException(
+                status_code=403,
+                detail="Video must be explicitly approved for publishing first.",
+            )
+        pre_path = str(Path(pre_video.video_path).resolve()) if pre_video.video_path else None
+        pre_approval_hash = pre_video.publish_approval_artifact_sha256
+        artifact_error = await asyncio.to_thread(approved_artifact_error, pre_video)
+        if artifact_error:
+            raise HTTPException(status_code=409, detail=artifact_error)
+
     for meta_platform in ("facebook", "instagram"):
         if meta_platform not in platforms:
             continue
@@ -373,19 +398,29 @@ async def upload_video(video_id: str, body: dict, db: AsyncSession = Depends(get
         await db.execute(text("BEGIN IMMEDIATE"))
         video = await db.get(GeneratedVideo, video_id)
         if not video:
+            await db.rollback()
             raise HTTPException(status_code=404, detail="Video not found")
         await db.refresh(video)
         if video.status not in ("ready", "uploaded"):
-            raise HTTPException(status_code=400,
-                                detail=f"Video status is '{video.status}', must be 'ready' or 'uploaded'")
-        if not video.publish_approved_at:
-            raise HTTPException(status_code=403,
-                                detail="Video must be explicitly approved for publishing first.")
-        if not video.video_path:
-            raise HTTPException(status_code=400, detail="Video file path is missing")
-        artifact_error = approved_artifact_error(video)
-        if artifact_error:
-            raise HTTPException(status_code=409, detail=artifact_error)
+            await db.rollback()
+            raise HTTPException(status_code=409,
+                                detail="Video changed while publish was being queued; refresh and try again.")
+        if (
+            not video.publish_approved_at
+            or not video.video_path
+            or str(Path(video.video_path).resolve()) != pre_path
+            or video.publish_approval_artifact_sha256 != pre_approval_hash
+        ):
+            await db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="Video approval/artifact changed while publish was being queued; refresh and review it again.",
+            )
+        from backend.agents.uploader import localization_qc_publish_error
+        qc_error = localization_qc_publish_error(video)
+        if qc_error:
+            await db.rollback()
+            raise HTTPException(status_code=409, detail=qc_error)
         duplicates = set(platforms) & published_destinations(video)
         if duplicates:
             raise HTTPException(status_code=409,
