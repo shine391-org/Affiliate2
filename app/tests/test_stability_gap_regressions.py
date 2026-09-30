@@ -427,7 +427,7 @@ async def test_fallback_provider_missing_credentials_fails_closed(tmp_path):
     )
     mock_ai = SimpleNamespace(provider=AIProvider.COMPATIBLE, model="gemini-2.5-flash", api_key="dummy", base_url=None)
     with patch.object(ls, "_profile_ai_client", return_value=mock_ai):
-        with pytest.raises(ValueError, match="Invalid fallback AI provider configuration"):
+        with pytest.raises(ValueError, match="Invalid translation AI route configuration"):
             await ls.translate_transcript(
                 transcript,
                 target_language="vi",
@@ -470,8 +470,13 @@ async def test_checkpoint_invalidated_on_config_change(tmp_path, monkeypatch):
         return ["Fresh translation"], set()
 
     with patch.object(ls, "_translate_batch_resilient", side_effect=mock_batch_translate):
-        mock_ai = SimpleNamespace(provider=AIProvider.COMPATIBLE, model="gemini-2.5-flash")
-        with patch.object(ls, "_profile_ai_client", return_value=mock_ai):
+        mock_ai = SimpleNamespace(
+            connection_name="compatible",
+            provider=AIProvider.COMPATIBLE,
+            model="gemini-2.5-flash",
+            base_url=None,
+        )
+        with patch.object(ls, "_profile_ai_route_clients_compat", return_value=[mock_ai]):
             out = await ls.translate_transcript(
                 transcript,
                 target_language="vi",
@@ -549,7 +554,7 @@ async def test_checkpoint_records_only_successful_batches_and_retries_failed_bat
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("changed_config", ["primary_base_url", "fallback_model"])
+@pytest.mark.parametrize("changed_config", ["profile_base_url_override", "fallback_model"])
 async def test_checkpoint_identity_binds_endpoint_and_fallback_config(tmp_path, monkeypatch, changed_config):
     trans_dir = tmp_path / "translation"
     transcript = LocalizationTranscript(
@@ -588,8 +593,10 @@ async def test_checkpoint_identity_binds_endpoint_and_fallback_config(tmp_path, 
     )
     assert calls == ["s0"]
 
-    if changed_config == "primary_base_url":
-        primary.base_url = "https://primary-b.example/v1"
+    if changed_config == "profile_base_url_override":
+        profile = profile.model_copy(update={
+            "translation_base_url": "https://profile-pinned-b.example/v1",
+        })
     else:
         profile = profile.model_copy(update={"translation_fallback_model": "fallback-b"})
 
@@ -633,22 +640,28 @@ async def test_rerun_preserves_translation_checkpoint_and_skips_finished_batches
     checkpoint_data = {
         "semantic_hash": semantic_sig,
         "target_language": "vi",
-        "provider": "compatible",
-        "model": "gemini-2.5-flash",
-        "base_url": "",
+        "routes": [{
+            "connection_id": "compatible",
+            "provider": "compatible",
+            "model": "gemini-2.5-flash",
+            "base_url_override": "",
+        }],
         "preset": "natural_vietnamese",
         "instructions": "",
         "guardrails": profile.translation_guardrails.strip(),
         "glossary_hash": ls.hashlib.sha256(b"{}").hexdigest()[:16],
-        "fallback_provider": "",
-        "fallback_model": "",
-        "fallback_base_url": "",
         "batches": {
             "0": {
                 "texts": [f"Dịch {i}" for i in range(12)],
                 "failed": [],
             }
-        }
+        },
+        "route_state": {
+            "sticky_index": 0,
+            "failure_chain": [],
+            "attempt_count": 1,
+            "success_count": 1,
+        },
     }
     checkpoint_file.write_text(json.dumps(checkpoint_data, ensure_ascii=False), encoding="utf-8")
     final_tr = trans_dir / "transcript.json"
