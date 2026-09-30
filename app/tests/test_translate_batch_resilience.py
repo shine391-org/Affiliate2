@@ -649,6 +649,8 @@ async def test_c7_timing_failure_preserves_actual_fallback_route_audit(monkeypat
                 "error": "timed out",
             }]
             route_state.sticky_index = 1
+            route_state.attempt_count = 2
+            route_state.success_count = 1
         return False
 
     monkeypatch.setattr(ls, "_adapt_chunk_items", failover_without_fit)
@@ -670,6 +672,9 @@ async def test_c7_timing_failure_preserves_actual_fallback_route_audit(monkeypat
     audit = exc.value.rewrite_ai
     assert audit["selected_connection_id"] == "lmstudio-qwen"
     assert audit["sticky_route_index"] == 1
+    assert audit["attempted"] is True
+    assert audit["attempt_count"] == 2
+    assert audit["success_count"] == 1
     assert audit["failure_chain"][0]["connection_id"] == "hermes-main"
 
 
