@@ -32,7 +32,7 @@ import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.job import Job
@@ -162,8 +162,11 @@ async def sweep(db: AsyncSession, *, retention_days: int = RETENTION_DAYS,
             if job.job_type == "tool:translate":
                 localization_workspaces.append(job.id)
 
+    # End the pruning transaction before filesystem maintenance. This also
+    # releases any SQLite read/write locks before the per-workspace CAS below.
+    await db.commit()
+
     if deleted_old or deleted_over_cap:
-        await db.commit()
         if localization_workspaces:
             from backend.services.localization_stage_service import cleanup_localization_workspace
             for job_id in localization_workspaces:
@@ -185,22 +188,35 @@ async def sweep(db: AsyncSession, *, retention_days: int = RETENTION_DAYS,
     deleted_workspace_ids = set(localization_workspaces)
     compacted = 0
     from backend.services.localization_stage_service import compact_localization_workspace
-    for job in rows:
+    for snapshot in rows:
         if (
-            job.job_type != "tool:translate"
-            or job.id in deleted_workspace_ids
-            or not job.created_at
-            or job.created_at >= compact_cutoff
-            or not is_library_item(job)
+            snapshot.job_type != "tool:translate"
+            or snapshot.id in deleted_workspace_ids
+            or not snapshot.created_at
+            or snapshot.created_at >= compact_cutoff
         ):
             continue
         try:
-            if compact_localization_workspace(job.id):
+            # A stale terminal snapshot is not enough: an explicit rerun may
+            # have claimed it after the first SELECT. BEGIN IMMEDIATE blocks the
+            # recovery CAS while we re-read and compact this one workspace.
+            await db.execute(text("BEGIN IMMEDIATE"))
+            current = await db.get(Job, snapshot.id, populate_existing=True)
+            if (
+                current is None
+                or current.status not in TERMINAL_STATUSES
+                or not is_library_item(current)
+            ):
+                await db.rollback()
+                continue
+            if compact_localization_workspace(current.id):
                 compacted += 1
+            await db.commit()
         except (OSError, ValueError):
+            await db.rollback()
             logger.warning(
                 "job retention: could not compact localization workspace for %s",
-                job.id,
+                snapshot.id,
             )
 
     total = (await db.execute(select(func.count(Job.id)))).scalar() or 0
