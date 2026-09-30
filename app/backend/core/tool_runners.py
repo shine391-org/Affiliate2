@@ -1480,6 +1480,29 @@ async def run_tool_translate(
                     "ai_selected_connection": getattr(
                         exc, "ai_selected_connection", None
                     ),
+                    "translation_ai": {
+                        "selected_connection_id": getattr(
+                            exc, "ai_selected_connection", None
+                        ),
+                        "route_chain": [
+                            route.model_dump() for route in profile.translation_routes
+                        ],
+                        "failure_chain": list(
+                            getattr(exc, "ai_failure_chain", None) or []
+                        ),
+                        "sticky_route_index": getattr(
+                            exc, "ai_sticky_route_index", None
+                        ),
+                        "attempted": int(
+                            getattr(exc, "ai_attempt_count", 0) or 0
+                        ) > 0,
+                        "attempt_count": int(
+                            getattr(exc, "ai_attempt_count", 0) or 0
+                        ),
+                        "success_count": int(
+                            getattr(exc, "ai_success_count", 0) or 0
+                        ),
+                    },
                 }
                 run.fail("translation", exc)
                 raise
