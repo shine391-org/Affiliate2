@@ -339,6 +339,10 @@ class DouyinProvider:
                 seen_cursor: set[str] = set()
 
                 while len(raw_awemes) < limit:
+                    # Never over-fetch the last native page. Advancing the
+                    # cursor after 18 rows while returning only the remaining
+                    # 14 would permanently skip four videos on the next UI page.
+                    request_count = max(1, min(18, limit - len(raw_awemes)))
                     payload = await self._fetch_creator_posts(
                         session.context,
                         session.page,
@@ -346,7 +350,7 @@ class DouyinProvider:
                         session.ms_token,
                         creator_id,
                         cursor_value,
-                        page_size,
+                        request_count,
                     )
                     page_items = payload.get("aweme_list") or []
                     if not isinstance(page_items, list) or not page_items:
@@ -511,7 +515,6 @@ class DouyinProvider:
             info = self._creator_info_from_payload(profile_payload, creator_id)
 
             cursor_value = str(cursor or "0")
-            page_size = max(1, min(limit, 18))
             seen_cursor: set[str] = set()
             next_cursor: str | None = None
             has_more = False
