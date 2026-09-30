@@ -305,8 +305,11 @@ async def _resolve_current_tts_binding(
         "tts_provider": getattr(runtime.provider, "value", str(runtime.provider)),
         "tts_model": runtime.model,
         "tts_voice": runtime.default_voice or None,
-        "tts_base_url": runtime.base_url,
-        "tts_region": runtime.region,
+        # Keep connection-owned infrastructure live. Persisting the resolved
+        # endpoint here would turn a rebind into a stale per-job override and
+        # defeat later endpoint/region repairs on the same connection ID.
+        "tts_base_url": None,
+        "tts_region": None,
     }
 
 
