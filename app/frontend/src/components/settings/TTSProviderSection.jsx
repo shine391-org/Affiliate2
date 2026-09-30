@@ -267,6 +267,16 @@ export default function TTSProviderSection({ settings, updateSettings }) {
   return (
     <Stack spacing={2}>
       <Alert severity="info" variant="outlined">
+        <Typography variant="body2" sx={{ fontWeight: 700 }}>Đây chỉ là kết nối TTS dùng chung</Typography>
+        <Typography variant="caption" color="text.secondary" component="div">
+          Bản địa hóa gồm 4 lớp độc lập:
+        </Typography>
+        <Typography variant="caption" color="text.secondary" component="div">
+          1. AI dịch C6 · 2. AI viết lại C7 · 3. TTS tạo giọng · 4. Audio / render / QC
+        </Typography>
+      </Alert>
+
+      <Alert severity="info" variant="outlined">
         <Typography variant="body2" sx={{ fontWeight: 700 }}>TTS Connection Registry</Typography>
         <Typography variant="caption" color="text.secondary">
           Mỗi account/endpoint có connection ID riêng. Profile ghim connection cụ thể; TTS không tự failover sang provider khác vì đổi provider có thể đổi giọng/chất lượng.
