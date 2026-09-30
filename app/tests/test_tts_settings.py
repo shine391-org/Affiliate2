@@ -1518,3 +1518,32 @@ def test_saved_tts_probe_cannot_reinterpret_connection_provider():
         )
 
     assert getattr(exc.value, "status_code", None) == 409
+
+
+@pytest.mark.asyncio
+async def test_unsaved_keyless_tts_probe_never_borrows_saved_credentials(monkeypatch):
+    async def no_db_lookup():
+        raise AssertionError("new keyless TTS form must not load saved settings")
+
+    monkeypatch.setattr(settings_api, "_load_saved_tts_settings", no_db_lookup)
+
+    assert await settings_api._tts_probe_key(settings_api.TTSProbeRequest(
+        provider="edge_tts",
+    )) == ""
+    assert await settings_api._tts_probe_key(settings_api.TTSProbeRequest(
+        provider="gpt_sovits",
+        base_url="http://127.0.0.1:9880",
+    )) == ""
+
+
+@pytest.mark.asyncio
+async def test_unsaved_openai_tts_probe_uses_only_environment_fallback(monkeypatch):
+    async def no_db_lookup():
+        raise AssertionError("new OpenAI TTS form must not load saved settings")
+
+    monkeypatch.setattr(settings_api, "_load_saved_tts_settings", no_db_lookup)
+    monkeypatch.setattr(settings_api.app_settings, "OPENAI_API_KEY", "env-openai-key")
+
+    assert await settings_api._tts_probe_key(settings_api.TTSProbeRequest(
+        provider="openai_tts",
+    )) == "env-openai-key"
