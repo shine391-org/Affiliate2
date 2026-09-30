@@ -214,10 +214,43 @@ async def test_old_localization_library_item_compacts_heavy_workspace_but_keeps_
     try:
         root.mkdir(parents=True, exist_ok=True)
         source.write_bytes(b"source")
-        for stage in ("separation", "asr", "semantic", "dubbing", "audio_mix"):
+        for stage in ("separation", "asr", "semantic"):
             d = root / stage
             d.mkdir(parents=True, exist_ok=True)
             (d / "blob.bin").write_bytes(b"x" * 64)
+
+        dubbing = root / "dubbing"
+        dubbing.mkdir(parents=True, exist_ok=True)
+        dub_track = dubbing / "dub_track.wav"
+        transcript = dubbing / "transcript.json"
+        plan = dubbing / "plan.json"
+        chunks = dubbing / "chunks.json"
+        for artifact in (dub_track, transcript, plan, chunks):
+            artifact.write_bytes(b"keep")
+        (dubbing / "chunk_0001.wav").write_bytes(b"raw-tts")
+        fitted = dubbing / "fitted"
+        fitted.mkdir()
+        (fitted / "chunk_0001.wav").write_bytes(b"fitted")
+
+        audio_mix = root / "audio_mix"
+        audio_mix.mkdir(parents=True, exist_ok=True)
+        mixed_audio = audio_mix / "mixed_audio.wav"
+        mixed_audio.write_bytes(b"keep")
+        (audio_mix / "scratch.wav").write_bytes(b"scratch")
+
+        (root / "manifest.json").write_text(json.dumps({
+            "stages": {
+                "dubbing": {"artifacts": {
+                    "transcript": str(transcript),
+                    "dub_track": str(dub_track),
+                    "plan": str(plan),
+                    "chunks": str(chunks),
+                }},
+                "audio_mix": {"artifacts": {
+                    "mixed_audio": str(mixed_audio),
+                }},
+            },
+        }), encoding="utf-8")
 
         db.add(Job(
             id=job_id,
@@ -232,8 +265,13 @@ async def test_old_localization_library_item_compacts_heavy_workspace_but_keeps_
         assert stats["compacted_localization_workspaces"] >= 1
         assert await db.get(Job, job_id) is not None
         assert source.is_file()
-        for stage in ("separation", "asr", "semantic", "dubbing", "audio_mix"):
+        for stage in ("separation", "asr", "semantic"):
             assert not (root / stage).exists()
+        for artifact in (dub_track, transcript, plan, chunks, mixed_audio):
+            assert artifact.is_file()
+        assert not (dubbing / "chunk_0001.wav").exists()
+        assert not fitted.exists()
+        assert not (audio_mix / "scratch.wav").exists()
         assert f.is_file()
     finally:
         await _cleanup(db)
