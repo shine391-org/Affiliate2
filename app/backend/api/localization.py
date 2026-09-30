@@ -280,20 +280,14 @@ def _review_revision(run: LocalizationRun, stage: str, artifact: str) -> str | N
 
 
 def _qc_review_revision(run: LocalizationRun) -> str | None:
-    """Revision token for the exact QC report + rendered video version."""
+    """Revision token for the exact QC report AND exact rendered video bytes."""
     report_revision = _review_revision(run, "qc", "report")
-    video = run.artifact("final_render", "final_video")
-    if not report_revision or video is None or not video.is_file():
+    video_revision = _review_revision(run, "final_render", "final_video")
+    if not report_revision or not video_revision:
         return None
-    try:
-        stat = video.stat()
-        identity = (
-            f"{report_revision}|{video.resolve()}|"
-            f"{stat.st_size}|{stat.st_mtime_ns}"
-        )
-    except OSError:
-        return None
-    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    return hashlib.sha256(
+        f"{report_revision}|{video_revision}".encode("utf-8")
+    ).hexdigest()
 
 
 def _job_detail(run: LocalizationRun) -> dict:
