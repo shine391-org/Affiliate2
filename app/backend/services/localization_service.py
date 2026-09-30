@@ -139,9 +139,11 @@ def materialize_localization_profile(
 ) -> LocalizationProfile:
     """Resolve non-secret route identities once for a reproducible job snapshot.
 
-    Credentials remain encrypted/live so rotating a key can recover the same
-    job. Connection ids/model/base URLs are snapshotted so a later global
-    Settings switch cannot silently move an in-flight job to another endpoint.
+    Connection IDs and selected models are snapshotted. Credentials and the
+    endpoint owned by a saved connection remain live so key rotation or an
+    endpoint repair can recover an in-flight job without rebinding it to a new
+    identity. A profile-level per-route base_url override is snapshotted
+    because that override is part of the profile itself.
     """
     translation_clients = _profile_ai_route_clients_compat(
         user_settings, profile, "translation"
