@@ -345,7 +345,7 @@ class DouyinProvider:
                         session.cookie_dict,
                         session.ms_token,
                         creator_id,
-                        cursor,
+                        cursor_value,
                         page_size,
                     )
                     page_items = payload.get("aweme_list") or []
@@ -354,15 +354,20 @@ class DouyinProvider:
                     raw_awemes.extend(
                         item for item in page_items if isinstance(item, dict)
                     )
-                    if not payload.get("has_more"):
+                    has_more = bool(payload.get("has_more"))
+                    next_cursor = str(payload.get("max_cursor") or "") or None
+                    if not has_more:
+                        next_cursor = None
                         break
-                    next_cursor = str(payload.get("max_cursor") or "")
                     if not next_cursor or next_cursor in seen_cursor:
+                        has_more = False
+                        next_cursor = None
                         break
                     seen_cursor.add(next_cursor)
-                    cursor = next_cursor
-                    if len(raw_awemes) < limit:
-                        await asyncio.sleep(0.4)
+                    if len(raw_awemes) >= limit:
+                        break
+                    cursor_value = next_cursor
+                    await asyncio.sleep(0.4)
 
         except PermissionError as exc:
             return SourceProviderResult(
@@ -483,6 +488,7 @@ class DouyinProvider:
         creator_id: str,
         *,
         limit: int = 18,
+        cursor: str | None = None,
     ) -> tuple[dict, SourceProviderResult]:
         """Fetch profile and initial posts through one authenticated session."""
         creator_id = str(creator_id or "").strip()
@@ -504,9 +510,11 @@ class DouyinProvider:
             )
             info = self._creator_info_from_payload(profile_payload, creator_id)
 
-            cursor = "0"
+            cursor_value = str(cursor or "0")
             page_size = max(1, min(limit, 18))
             seen_cursor: set[str] = set()
+            next_cursor: str | None = None
+            has_more = False
             try:
                 while len(raw_awemes) < limit:
                     payload = await self._fetch_creator_posts(
@@ -586,6 +594,8 @@ class DouyinProvider:
             status=ProviderStatus.SUCCESS if items else ProviderStatus.EMPTY,
             items=items,
             provider=self.name,
+            has_more=bool(has_more and next_cursor) if raw_awemes else False,
+            next_cursor=(next_cursor if raw_awemes and has_more else None),
         )
         return info, history
 
