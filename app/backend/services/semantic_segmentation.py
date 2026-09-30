@@ -304,12 +304,24 @@ async def _emit_semantic_progress(progress_cb, payload: dict) -> None:
         await result
 
 
+_MAX_SEMANTIC_FAILURE_HISTORY = 64
+
+
 def _safe_semantic_error_text(exc: Exception, ai=None, limit: int = 220) -> str:
     text = str(exc)
     key = str(getattr(ai, "api_key", "") or "")
     if key and len(key) >= 4:
         text = text.replace(key, "***")
     return text[:limit]
+
+
+def _record_semantic_failure(route_state, failure: dict) -> None:
+    if route_state is None:
+        return
+    history = route_state.setdefault("failure_chain", [])
+    history.append(dict(failure))
+    if len(history) > _MAX_SEMANTIC_FAILURE_HISTORY:
+        del history[:-_MAX_SEMANTIC_FAILURE_HISTORY]
 
 
 async def _semantic_chat_with_fallback(
@@ -399,7 +411,7 @@ async def _semantic_chat_with_fallback(
                 return result
             except Exception as exc:
                 if route_clients and route_state is not None:
-                    route_state.setdefault("failure_chain", []).append({
+                    _record_semantic_failure(route_state, {
                         "connection_id": getattr(ai, "connection_name", None),
                         "provider": getattr(getattr(ai, "provider", None), "value", str(getattr(ai, "provider", ""))),
                         "model": getattr(ai, "model", None),
@@ -447,7 +459,7 @@ async def _advance_semantic_route_on_invalid(
         return False
 
     current = route_clients[current_index]
-    route_state.setdefault("failure_chain", []).append({
+    _record_semantic_failure(route_state, {
         "connection_id": getattr(current, "connection_name", None),
         "provider": getattr(getattr(current, "provider", None), "value", str(getattr(current, "provider", ""))),
         "model": getattr(current, "model", None),
