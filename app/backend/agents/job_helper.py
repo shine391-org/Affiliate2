@@ -253,7 +253,11 @@ async def update_job_status(
         job.updated_at = datetime.utcnow()
         if progress_pct is not None:
             # Prevent progress regression (e.g. 95% → 50%) unless explicitly restarting
-            is_restart = status == "running" and progress_pct == 0
+            is_restart = (
+                prev_status != "running"
+                and status == "running"
+                and progress_pct == 0
+            )
             if is_restart or progress_pct >= (job.progress_pct or 0):
                 job.progress_pct = progress_pct
         if current_step is not None:
