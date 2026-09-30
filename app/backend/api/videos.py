@@ -187,35 +187,71 @@ async def set_publish_approval(
     body: PublishApprovalRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """Explicit human gate for Phase-F publishing.
+    """Record/revoke approval for the exact GeneratedVideo artifact.
 
-    Approval never starts an upload. It only records that the operator reviewed
-    this exact GeneratedVideo and allows a later /upload action to run.
+    Expensive SHA-256 work happens outside SQLite's global write lock. The
+    locked phase re-reads canonical identity before committing the approval, so
+    a concurrent localization promotion cannot swap the row underneath it.
     """
     approved = body.approved
-    await db.execute(text("BEGIN IMMEDIATE"))
-    result = await db.execute(
-        select(GeneratedVideo).where(GeneratedVideo.id == video_id)
-    )
-    video = result.scalar_one_or_none()
-    if not video:
-        raise HTTPException(status_code=404, detail="Video not found")
+
+    artifact_hash = None
+    pre_path = None
     if approved:
-        if video.status not in ("ready", "uploaded"):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Video status is '{video.status}', must be 'ready' or 'uploaded' before approval",
-            )
-        if not video.video_path or not Path(video.video_path).is_file():
-            raise HTTPException(status_code=400, detail="Video file not found on disk")
         from backend.agents.uploader import (
             file_sha256,
             localization_qc_publish_error,
         )
+        from backend.database import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as pre_db:
+            pre_video = await pre_db.get(GeneratedVideo, video_id)
+            if not pre_video:
+                raise HTTPException(status_code=404, detail="Video not found")
+            if pre_video.status not in ("ready", "uploaded"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Video status is '{pre_video.status}', must be 'ready' or 'uploaded' before approval",
+                )
+            if not pre_video.video_path or not Path(pre_video.video_path).is_file():
+                raise HTTPException(status_code=400, detail="Video file not found on disk")
+            qc_error = localization_qc_publish_error(pre_video)
+            if qc_error:
+                raise HTTPException(status_code=409, detail=qc_error)
+            pre_path = str(Path(pre_video.video_path).resolve())
+
+        artifact_hash = await asyncio.to_thread(file_sha256, pre_path)
+
+    await db.execute(text("BEGIN IMMEDIATE"))
+    video = await db.get(GeneratedVideo, video_id)
+    if not video:
+        await db.rollback()
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    if approved:
+        from backend.agents.uploader import localization_qc_publish_error
+
+        if video.status not in ("ready", "uploaded"):
+            await db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="Video changed while approval was being prepared; refresh and review it again.",
+            )
+        if (
+            not video.video_path
+            or str(Path(video.video_path).resolve()) != pre_path
+            or not Path(video.video_path).is_file()
+        ):
+            await db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="Video artifact changed while approval was being prepared; refresh and review it again.",
+            )
         qc_error = localization_qc_publish_error(video)
         if qc_error:
+            await db.rollback()
             raise HTTPException(status_code=409, detail=qc_error)
-        artifact_hash = file_sha256(video.video_path)
+
         video.artifact_sha256 = artifact_hash
         video.publish_approval_artifact_sha256 = artifact_hash
         video.publish_approved_at = datetime.utcnow()
@@ -261,6 +297,7 @@ async def set_publish_approval(
 
         video.publish_approved_at = None
         video.publish_approval_artifact_sha256 = None
+
     await db.commit()
     await db.refresh(video)
     return {
@@ -271,7 +308,6 @@ async def set_publish_approval(
         ),
         "publish_approval_artifact_sha256": video.publish_approval_artifact_sha256,
     }
-
 
 @router.post("/videos/{video_id}/upload")
 async def upload_video(video_id: str, body: dict, db: AsyncSession = Depends(get_db)):
