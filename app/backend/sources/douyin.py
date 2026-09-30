@@ -334,8 +334,7 @@ class DouyinProvider:
         raw_awemes: list[dict] = []
         try:
             async with open_douyin_cdp_session(self.cdp_url) as session:
-                cursor = "0"
-                page_size = max(1, min(limit, 18))
+                cursor_value = "0"
                 seen_cursor: set[str] = set()
 
                 while len(raw_awemes) < limit:
@@ -520,6 +519,7 @@ class DouyinProvider:
             has_more = False
             try:
                 while len(raw_awemes) < limit:
+                    request_count = max(1, min(18, limit - len(raw_awemes)))
                     payload = await self._fetch_creator_posts(
                         session.context,
                         session.page,
@@ -527,7 +527,7 @@ class DouyinProvider:
                         session.ms_token,
                         creator_id,
                         cursor_value,
-                        page_size,
+                        request_count,
                     )
                     page_items = payload.get("aweme_list") or []
                     if not isinstance(page_items, list) or not page_items:
