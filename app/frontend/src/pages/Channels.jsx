@@ -536,30 +536,38 @@ function ChannelDetail({ channel, onBack }) {
           return !isNaN(d.getTime()) && (Date.now() - d.getTime()) < 30 * 86400000
         })
 
+        const scopeSuffix = isDouyin ? " · trang này" : ""
         const stats = [
-          { label: "Tổng lượt xem", value: formatCount(totalViews) },
-          { label: "Lượt xem TB", value: formatCount(avgViews) },
-          { label: "Trung vị lượt xem", value: formatCount(medianViews) },
-          { label: "Engagement", value: `${engagementRate}%` },
-          { label: "30 ngày qua", value: `${recentVideos.length} video` },
-          { label: "Video nổi bật", value: formatCount(topPerformer?.view_count || 0) + " lượt xem" },
+          { label: `Tổng lượt xem${scopeSuffix}`, value: formatCount(totalViews) },
+          { label: `Lượt xem TB${scopeSuffix}`, value: formatCount(avgViews) },
+          { label: `Trung vị lượt xem${scopeSuffix}`, value: formatCount(medianViews) },
+          { label: `Engagement${scopeSuffix}`, value: `${engagementRate}%` },
+          { label: `30 ngày qua${scopeSuffix}`, value: `${recentVideos.length} video` },
+          { label: `Video nổi bật${scopeSuffix}`, value: formatCount(topPerformer?.view_count || 0) + " lượt xem" },
         ]
 
         return (
-          <Box sx={{
-            display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
-            gap: 1.5, mb: 2,
-          }}>
-            {stats.map(s => (
-              <Paper key={s.label} variant="outlined" sx={{ p: 1.5, borderRadius: 2, textAlign: "center" }}>
-                <Typography variant="h6" sx={{ fontWeight: 700, fontSize: "1.1rem", lineHeight: 1.2 }}>
-                  {s.value}
-                </Typography>
-                <Typography variant="caption" sx={{ color: "text.secondary", fontSize: "0.68rem" }}>
-                  {s.label}
-                </Typography>
-              </Paper>
-            ))}
+          <Box sx={{ mb: 2 }}>
+            {isDouyin && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+                Thống kê Douyin bên dưới chỉ tính các video đang hiển thị trên trang hiện tại.
+              </Typography>
+            )}
+            <Box sx={{
+              display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+              gap: 1.5,
+            }}>
+              {stats.map(s => (
+                <Paper key={s.label} variant="outlined" sx={{ p: 1.5, borderRadius: 2, textAlign: "center" }}>
+                  <Typography variant="h6" sx={{ fontWeight: 700, fontSize: "1.1rem", lineHeight: 1.2 }}>
+                    {s.value}
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: "text.secondary", fontSize: "0.68rem" }}>
+                    {s.label}
+                  </Typography>
+                </Paper>
+              ))}
+            </Box>
           </Box>
         )
       })()}
