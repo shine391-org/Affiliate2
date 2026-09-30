@@ -391,6 +391,7 @@ function ChannelDetail({ channel, onBack }) {
       setVideos(resp.videos || [])
       setChannelInfo(resp.channel || resp.user || null)
       if (isDouyin) {
+        setPage(targetPage)
         const more = Boolean(resp.has_more && resp.next_page_token)
         setHasMore(more)
         setNextPageToken(resp.next_page_token || null)
@@ -405,7 +406,7 @@ function ChannelDetail({ channel, onBack }) {
     } finally {
       setLoading(false)
     }
-  }, [channel.id, isDouyin, rowsPerPage])
+  }, [channel.id, channel.platform, isDouyin, rowsPerPage])
 
   useEffect(() => {
     setPage(0)
@@ -429,7 +430,6 @@ function ChannelDetail({ channel, onBack }) {
     }
     const token = pageTokens[targetPage]
     if (targetPage > page && !token) return
-    setPage(targetPage)
     fetchData(false, targetPage, token || null, rowsPerPage)
   }
 
