@@ -620,6 +620,7 @@ async def test_semantic_invalid_structured_single_route_stays_deterministic():
 
     ai = BadOnly()
     state = {"sticky_index": 0, "failure_chain": []}
+    events = []
     got = await refine_semantic_cues_with_ai(
         tx,
         ai,
@@ -628,11 +629,19 @@ async def test_semantic_invalid_structured_single_route_stays_deterministic():
         max_attempts=1,
         attempt_timeout_s=0.5,
         total_timeout_s=2,
+        progress_cb=lambda event: events.append(dict(event)),
     )
 
     assert ai.calls == 1
     assert got.segments
     assert "one" in got.segments[0].source_text
+    assert state["failure_chain"][-1]["connection_id"] == "only"
+    assert state["failure_chain"][-1]["error_type"] == "InvalidStructuredOutput"
+    assert any(
+        event.get("event") == "deterministic_fallback"
+        and event.get("reason") == "invalid_structured_output"
+        for event in events
+    )
 
 
 def test_semantic_failure_history_is_bounded_to_recent_events():
