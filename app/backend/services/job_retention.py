@@ -32,7 +32,7 @@ import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.job import Job
@@ -132,19 +132,33 @@ async def sweep(db: AsyncSession, *, retention_days: int = RETENTION_DAYS,
     kept_library = len(rows) - len(prunable)
 
     aged, over_cap = plan_deletions(prunable, cutoff, max_prunable)
-    deleting = [*aged, *over_cap]
-    localization_workspaces = [
-        job.id for job in deleting if job.job_type == "tool:translate"
-    ]
-    for job in deleting:
-        await db.delete(job)
-    deleted_old, deleted_over_cap = len(aged), len(over_cap)
+    localization_workspaces: list[str] = []
+    deleted_old = 0
+    deleted_over_cap = 0
+
+    # Conditional DELETE closes the race with an explicit rerun claim. Recovery
+    # always changes a terminal Job to pending before touching its manifest; if
+    # that happened after our SELECT, status no longer matches and retention
+    # leaves the resurrected row/workspace alone.
+    for bucket, jobs in (("aged", aged), ("over", over_cap)):
+        for job in jobs:
+            result = await db.execute(
+                delete(Job).where(
+                    Job.id == job.id,
+                    Job.status == job.status,
+                )
+            )
+            if not result.rowcount:
+                continue
+            if bucket == "aged":
+                deleted_old += 1
+            else:
+                deleted_over_cap += 1
+            if job.job_type == "tool:translate":
+                localization_workspaces.append(job.id)
 
     if deleted_old or deleted_over_cap:
         await db.commit()
-        # Delete large media workspaces only AFTER the DB deletion committed.
-        # A transient DB failure must never strand a still-live job row after
-        # its resumable Demucs/TTS/source artifacts have already been erased.
         if localization_workspaces:
             from backend.services.localization_stage_service import cleanup_localization_workspace
             for job_id in localization_workspaces:
