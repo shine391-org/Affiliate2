@@ -9,6 +9,7 @@ import ReplayOutlinedIcon from "@mui/icons-material/ReplayOutlined"
 import SaveOutlinedIcon from "@mui/icons-material/SaveOutlined"
 import http from "../../api/http"
 import useAppStore from "../../store/appStore"
+import { resolveAiStageSelection } from "../../localizationPreview"
 
 const STAGE_LABELS = {
   separation: "Tách âm thanh",
@@ -218,11 +219,13 @@ export default function LocalizationExpertPanel({ jobId }) {
 
   const manifest = detail?.manifest || {}
   const stages = manifest.stages || {}
+  const effective = manifest.effective_profile || {}
   const transcript = detail?.transcript?.segments || []
   const chunks = detail?.chunks || []
   const qc = detail?.qc
   const ttsBinding = detail?.tts_binding
   const dubbingMeta = stages?.dubbing?.metadata || {}
+  const rewriteSelection = resolveAiStageSelection(dubbingMeta, effective, "rewrite")
   const rewriteIssues = (dubbingMeta.issues || []).filter((item) =>
     String(item?.reason || "").startsWith("rewrite_")
   )
@@ -302,9 +305,14 @@ export default function LocalizationExpertPanel({ jobId }) {
             <Typography variant="subtitle2">C7 · Viết lại thời lượng</Typography>
             <Typography variant="body2">
               {"Đã viết lại: " + Number(dubbingMeta.rewrite_count || 0) + " đoạn" +
-                (dubbingMeta.rewrite_provider ? " · provider " + dubbingMeta.rewrite_provider : "") +
-                (dubbingMeta.rewrite_model ? " · model " + dubbingMeta.rewrite_model : "")}
+                (rewriteSelection.connectionId ? " · kết nối thực tế " + rewriteSelection.connectionId : "") +
+                (rewriteSelection.model ? " · model " + rewriteSelection.model : "")}
             </Typography>
+            {rewriteSelection.failureCount > 0 && (
+              <Typography variant="caption" color="warning.main">
+                {"Fallback sau " + rewriteSelection.failureCount + " lỗi provider/route trước đó."}
+              </Typography>
+            )}
             {dubbingMeta.max_raw_required_speed != null && (
               <Typography variant="caption" color="text.secondary">
                 {"Tốc độ yêu cầu lớn nhất: " + Number(dubbingMeta.max_raw_required_speed || 1).toFixed(2) + "×" +
