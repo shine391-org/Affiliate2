@@ -205,7 +205,11 @@ def _active_ai_connection_id(settings_row) -> str | None:
         return explicit
     provider = (getattr(settings_row, "ai_provider", None) or "").strip().lower()
     candidate = _safe_connection_id(provider) if provider else None
-    return candidate if candidate in connections else None
+    return (
+        candidate
+        if candidate in connections and not connections[candidate].get("archived")
+        else None
+    )
 
 
 def _active_tts_connection_id(settings_row) -> str | None:
@@ -215,7 +219,11 @@ def _active_tts_connection_id(settings_row) -> str | None:
         return explicit
     provider = (getattr(settings_row, "tts_provider", None) or "").strip().lower()
     candidate = _safe_connection_id(provider) if provider else None
-    return candidate if candidate in connections else None
+    return (
+        candidate
+        if candidate in connections and not connections[candidate].get("archived")
+        else None
+    )
 
 
 def _capture_ai_provider(registry: dict[str, dict], settings_row) -> None:
