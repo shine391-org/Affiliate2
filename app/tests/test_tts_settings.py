@@ -270,18 +270,23 @@ async def test_settings_tts_test_uses_unsaved_plaintext_key(monkeypatch):
     assert "unsaved-secret" not in json.dumps(result)
 
 
+
 @pytest.mark.asyncio
 async def test_settings_tts_probe_restores_key_for_saved_nonactive_provider(monkeypatch):
     saved = SimpleNamespace(
         tts_provider="edge_tts",
         tts_api_key_encrypted=None,
-        tts_provider_profiles_json=json.dumps({
-            "elevenlabs": {
+        tts_provider_profiles_json="{}",
+        tts_connections_json=json.dumps({
+            "eleven-main": {
+                "label": "ElevenLabs main",
+                "provider": "elevenlabs",
                 "voice": "voice-1",
                 "model": "eleven_multilingual_v2",
                 "base_url": "https://api.elevenlabs.io/v1",
                 "region": None,
                 "api_key_encrypted": "encrypted-eleven",
+                "archived": False,
             },
         }),
     )
@@ -291,15 +296,17 @@ async def test_settings_tts_probe_restores_key_for_saved_nonactive_provider(monk
     }[value])
 
     restored = await settings_api._tts_probe_key(
-        settings_api.TTSProbeRequest(provider="elevenlabs")
+        settings_api.TTSProbeRequest(
+            connection_id="eleven-main",
+            provider="elevenlabs",
+        )
     )
-    missing = await settings_api._tts_probe_key(
-        settings_api.TTSProbeRequest(provider="azure_tts")
+    unsaved = await settings_api._tts_probe_key(
+        settings_api.TTSProbeRequest(provider="elevenlabs")
     )
 
     assert restored == "stored-eleven-secret"
-    assert missing == ""
-
+    assert unsaved == ""
 
 @pytest.mark.asyncio
 async def test_openai_tts_probe_uses_saved_openai_ai_key_when_tts_slot_has_none(monkeypatch):
@@ -307,6 +314,18 @@ async def test_openai_tts_probe_uses_saved_openai_ai_key_when_tts_slot_has_none(
         tts_provider="edge_tts",
         tts_api_key_encrypted=None,
         tts_provider_profiles_json="{}",
+        tts_connections_json=json.dumps({
+            "openai-tts-main": {
+                "label": "OpenAI TTS main",
+                "provider": "openai_tts",
+                "voice": "alloy",
+                "model": "tts-1",
+                "base_url": None,
+                "region": None,
+                "api_key_encrypted": None,
+                "archived": False,
+            },
+        }),
         ai_provider="openai",
         ai_api_key_encrypted="enc-openai",
         ai_provider_profiles_json="{}",
@@ -315,11 +334,13 @@ async def test_openai_tts_probe_uses_saved_openai_ai_key_when_tts_slot_has_none(
     monkeypatch.setattr(settings_api, "decrypt_safe", lambda value: "openai-ai-secret" if value == "enc-openai" else "")
 
     key = await settings_api._tts_probe_key(
-        settings_api.TTSProbeRequest(provider="openai_tts")
+        settings_api.TTSProbeRequest(
+            connection_id="openai-tts-main",
+            provider="openai_tts",
+        )
     )
 
     assert key == "openai-ai-secret"
-
 
 @pytest.mark.asyncio
 async def test_openai_tts_probe_uses_inactive_saved_openai_registry_key(monkeypatch):
@@ -327,6 +348,18 @@ async def test_openai_tts_probe_uses_inactive_saved_openai_registry_key(monkeypa
         tts_provider="edge_tts",
         tts_api_key_encrypted=None,
         tts_provider_profiles_json="{}",
+        tts_connections_json=json.dumps({
+            "openai-tts-main": {
+                "label": "OpenAI TTS main",
+                "provider": "openai_tts",
+                "voice": "alloy",
+                "model": "tts-1",
+                "base_url": None,
+                "region": None,
+                "api_key_encrypted": None,
+                "archived": False,
+            },
+        }),
         ai_provider="compatible",
         ai_api_key_encrypted="enc-compatible",
         ai_provider_profiles_json=json.dumps({
@@ -340,12 +373,13 @@ async def test_openai_tts_probe_uses_inactive_saved_openai_registry_key(monkeypa
     }.get(value, ""))
 
     key = await settings_api._tts_probe_key(
-        settings_api.TTSProbeRequest(provider="openai_tts")
+        settings_api.TTSProbeRequest(
+            connection_id="openai-tts-main",
+            provider="openai_tts",
+        )
     )
 
     assert key == "registry-openai-secret"
-
-
 @pytest.mark.asyncio
 async def test_localization_tts_preflight_rejects_invalid_voice_before_pipeline(monkeypatch):
     from backend.services import localization_service as localization
