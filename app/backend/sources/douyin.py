@@ -552,36 +552,42 @@ class DouyinProvider:
                     cursor_value = next_cursor
                     await asyncio.sleep(0.4)
             except PermissionError:
-                # Never navigate the user's already-open authenticated Douyin
-                # tab just to perform DOM recovery. Borrow the session cookies
-                # and create a temporary owned page; if the session itself
-                # already owns its probe page, reusing that page is safe.
-                dom_page = session.page
-                close_dom_page = False
-                if not getattr(session, "created_page", False):
-                    new_page = getattr(session.context, "new_page", None)
-                    if not callable(new_page):
-                        raise RuntimeError(
-                            "Douyin DOM fallback needs a temporary CDP page; "
-                            "refusing to navigate the user's existing tab."
+                # A cursor cannot be reconstructed from the DOM. If one or more
+                # native pages already succeeded, keep that exact partial page
+                # and stop cleanly instead of mixing first-page DOM cards into
+                # cursor results (duplicates + a fake next cursor).
+                has_more = False
+                next_cursor = None
+                if not raw_awemes:
+                    # Never navigate the user's already-open authenticated
+                    # Douyin tab just to perform DOM recovery. Borrow session
+                    # cookies and create a temporary owned page.
+                    dom_page = session.page
+                    close_dom_page = False
+                    if not getattr(session, "created_page", False):
+                        new_page = getattr(session.context, "new_page", None)
+                        if not callable(new_page):
+                            raise RuntimeError(
+                                "Douyin DOM fallback needs a temporary CDP page; "
+                                "refusing to navigate the user's existing tab."
+                            )
+                        dom_page = await new_page()
+                        close_dom_page = True
+                    try:
+                        dom_items = await self._fetch_creator_dom_items(
+                            dom_page,
+                            creator_id,
+                            creator_name=info.get("display_name") or "",
+                            limit=limit,
                         )
-                    dom_page = await new_page()
-                    close_dom_page = True
-                try:
-                    dom_items = await self._fetch_creator_dom_items(
-                        dom_page,
-                        creator_id,
-                        creator_name=info.get("display_name") or "",
-                        limit=limit,
-                    )
-                finally:
-                    if close_dom_page:
-                        try:
-                            await dom_page.close()
-                        except Exception:
-                            pass
-                if not dom_items:
-                    raise
+                    finally:
+                        if close_dom_page:
+                            try:
+                                await dom_page.close()
+                            except Exception:
+                                pass
+                    if not dom_items:
+                        raise
 
         items: list[dict] = list(dom_items)
         seen: set[str] = set()
