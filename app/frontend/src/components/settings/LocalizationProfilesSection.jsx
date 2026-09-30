@@ -661,10 +661,11 @@ export default function LocalizationProfilesSection({ settings }) {
             />
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
               <FormControl size="small" fullWidth>
-                <InputLabel>Kết nối TTS cho hồ sơ</InputLabel>
+                <InputLabel>Ghi đè TTS cho hồ sơ</InputLabel>
                 <Select
                   value={draft.tts_connection_id || ""}
-                  label="Kết nối TTS cho hồ sơ"
+                  label="Ghi đè TTS cho hồ sơ"
+                  helperText="Kết nối TTS cho hồ sơ: ghim một kết nối TTS cụ thể cho hồ sơ này. Để trống = kế thừa kết nối TTS đang active. Hồ sơ ghim connection ID (không phụ thuộc connection TTS đang active) nên job cũ luôn resolve đúng credential/giọng sau khi đổi kết nối."
                   onChange={(e) => {
                     const id = e.target.value
                     const cfg = id ? ttsConnections[id] : null
