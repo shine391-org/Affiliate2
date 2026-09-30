@@ -567,6 +567,8 @@ class _AIStageRouteState:
         self.clients = list(clients)
         self.sticky_index = 0
         self.failure_chain: list[dict] = []
+        self.attempt_count = 0
+        self.success_count = 0
 
     @property
     def current(self):
@@ -864,12 +866,15 @@ async def _call_ai_chat_resilient(
                 "timeout_s": round(timeout_s, 1),
             })
             try:
+                if route_state is not None:
+                    route_state.attempt_count += 1
                 result = await asyncio.wait_for(
                     client.chat(messages=messages, max_tokens=max_tokens),
                     timeout=timeout_s,
                 )
                 if route_state is not None:
                     route_state.sticky_index = route_index
+                    route_state.success_count += 1
                 return result
             except Exception as exc:
                 last_error = exc
@@ -1165,6 +1170,9 @@ async def translate_transcript(
         "route_chain": route_fingerprint,
         "failure_chain": list(route_state.failure_chain),
         "sticky_route_index": route_state.sticky_index,
+        "attempted": route_state.attempt_count > 0,
+        "attempt_count": route_state.attempt_count,
+        "success_count": route_state.success_count,
     }
     return out
 
@@ -2463,6 +2471,15 @@ async def synthesize_timed_dub(
                 "sticky_route_index": (
                     route_state.sticky_index if route_state is not None else None
                 ),
+                "attempted": (
+                    route_state.attempt_count > 0 if route_state is not None else False
+                ),
+                "attempt_count": (
+                    route_state.attempt_count if route_state is not None else 0
+                ),
+                "success_count": (
+                    route_state.success_count if route_state is not None else 0
+                ),
             },
         )
     issues.extend(unresolved)
@@ -2540,6 +2557,15 @@ async def synthesize_timed_dub(
             ),
             "sticky_route_index": (
                 route_state.sticky_index if route_state is not None else None
+            ),
+            "attempted": (
+                route_state.attempt_count > 0 if route_state is not None else False
+            ),
+            "attempt_count": (
+                route_state.attempt_count if route_state is not None else 0
+            ),
+            "success_count": (
+                route_state.success_count if route_state is not None else 0
             ),
         },
     }
