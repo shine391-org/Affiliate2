@@ -2091,7 +2091,7 @@ async def test_translation_retry_switches_to_saved_fallback_provider(monkeypatch
     assert primary.max_retries == 0
     assert fallback.max_retries == 0
     assert any(e["event"] == "switch_fallback" and e["provider"] == "lmstudio" for e in events)
-    assert any(e["event"] == "attempt" and e["role"] == "fallback" for e in events)
+    assert any(e["event"] == "attempt" and e["role"] == "fallback-1" for e in events)
 
 
 @pytest.mark.asyncio
