@@ -2314,6 +2314,10 @@ async def test_exhausted_route_chain_attaches_non_secret_failure_history():
 
     assert [x["connection_id"] for x in exc.value.ai_failure_chain] == ["a", "b", "c"]
     assert all("api_key" not in item for item in exc.value.ai_failure_chain)
+    assert exc.value.ai_selected_connection == "c"
+    assert exc.value.ai_sticky_route_index == 0
+    assert exc.value.ai_attempt_count == 3
+    assert exc.value.ai_success_count == 0
 
 
 
