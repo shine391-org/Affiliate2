@@ -1102,6 +1102,16 @@ def _ai_probe_connection(saved, body: AIProbeRequest) -> dict:
     cfg = _load_ai_connections(saved).get(connection_id)
     if not cfg:
         raise HTTPException(status_code=404, detail=f"AI connection not found: {connection_id}")
+    saved_provider = str(cfg.get("provider") or "").strip().lower()
+    requested_provider = str(body.provider or "").strip().lower()
+    if requested_provider and saved_provider and requested_provider != saved_provider:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"AI connection '{connection_id}' is bound to provider "
+                f"'{saved_provider}' and cannot be probed as '{requested_provider}'."
+            ),
+        )
     return cfg
 
 
@@ -1112,6 +1122,16 @@ def _tts_probe_connection(saved, body: TTSProbeRequest) -> dict:
     cfg = _load_tts_connections(saved).get(connection_id)
     if not cfg:
         raise HTTPException(status_code=404, detail=f"TTS connection not found: {connection_id}")
+    saved_provider = str(cfg.get("provider") or "").strip().lower()
+    requested_provider = str(body.provider or "").strip().lower()
+    if requested_provider and saved_provider and requested_provider != saved_provider:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"TTS connection '{connection_id}' is bound to provider "
+                f"'{saved_provider}' and cannot be probed as '{requested_provider}'."
+            ),
+        )
     return cfg
 
 
