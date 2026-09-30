@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 import pytest
+from types import SimpleNamespace
 
 from backend.core.localization import LocalizationSegment, LocalizationTranscript
 from backend.services.semantic_segmentation import normalize_semantic_cues
