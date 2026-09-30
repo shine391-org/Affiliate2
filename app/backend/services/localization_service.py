@@ -576,7 +576,7 @@ class _AIStageRouteState:
 def _append_ai_failure(route_state: _AIStageRouteState | None, failure: dict) -> None:
     if route_state is None:
         return
-    _append_ai_failure(route_state, dict(failure))
+    route_state.failure_chain.append(dict(failure))
     if len(route_state.failure_chain) > _MAX_AI_FAILURE_HISTORY:
         del route_state.failure_chain[:-_MAX_AI_FAILURE_HISTORY]
 
