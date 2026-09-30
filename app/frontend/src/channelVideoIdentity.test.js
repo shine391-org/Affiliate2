@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
+import { readFileSync } from "node:fs"
 
 import {
   canonicalChannelVideoUrl,
@@ -94,4 +95,11 @@ test("non-Douyin channel requests never leak a Douyin cursor", () => {
     }),
     { limit: 36 },
   )
+})
+
+
+test("Douyin paginated performance cards are explicitly page-local", () => {
+  const source = readFileSync(new URL("./pages/Channels.jsx", import.meta.url), "utf8")
+  assert.ok(source.includes("Thống kê Douyin bên dưới chỉ tính các video đang hiển thị trên trang hiện tại."))
+  assert.ok(source.includes('const scopeSuffix = isDouyin ? " · trang này" : ""'))
 })
