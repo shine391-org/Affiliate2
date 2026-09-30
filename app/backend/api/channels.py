@@ -381,7 +381,11 @@ async def get_channel_videos(
 
         try:
             info, history = await asyncio.wait_for(
-                provider.creator_snapshot(creator_id, limit=limit),
+                provider.creator_snapshot(
+                    creator_id,
+                    limit=limit,
+                    cursor=(page_token or "0"),
+                ),
                 timeout=45,
             )
         except asyncio.TimeoutError as exc:
@@ -443,7 +447,8 @@ async def get_channel_videos(
                 ),
             },
             "videos": videos,
-            "has_more": len(videos) >= limit,
+            "has_more": bool(history.has_more),
+            "next_page_token": history.next_cursor,
         }
 
 
