@@ -153,6 +153,10 @@ export default function Library() {
   const jobs = useAppStore((s) => s.jobs)
   const activity = useMemo(() => jobs.map(activityFromJob), [jobs])
   const runningCount = activity.filter((a) => a.state === "running").length
+  const attentionJobs = useMemo(() => activity.filter((a) => a.state === "attention"), [activity])
+  const attentionCount = attentionJobs.length
+  const translationReviewCount = attentionJobs.filter((a) => a.attention_kind === "translation_review").length
+  const qcReviewCount = attentionJobs.filter((a) => a.attention_kind === "qc_review").length
 
   // Work in flight sits in the grid it will land in. Only jobs the current
   // facets would admit are shown, so a filter never hides what you are waiting
@@ -452,13 +456,13 @@ export default function Library() {
             <Button size="small" variant="outlined" onClick={openActivity}
               startIcon={<BoltRoundedIcon sx={{ fontSize: 17 }} />}>
               Hoạt động
-              {(runningCount > 0 || recentFailures.length > 0) && (
+              {(runningCount > 0 || attentionCount > 0 || recentFailures.length > 0) && (
                 <Box component="span" sx={{
                   ml: 0.7, px: 0.6, borderRadius: "999px", fontSize: "0.68rem", fontWeight: 700,
-                  bgcolor: runningCount > 0 ? "primary.main" : "error.main",
+                  bgcolor: attentionCount > 0 ? "warning.main" : runningCount > 0 ? "primary.main" : "error.main",
                   color: "primary.contrastText",
                 }}>
-                  {runningCount > 0 ? runningCount : recentFailures.length}
+                  {attentionCount > 0 ? attentionCount : runningCount > 0 ? runningCount : recentFailures.length}
                 </Box>
               )}
             </Button>
@@ -533,6 +537,35 @@ export default function Library() {
             ))}
             {facets.producers.length > 5 && ` · +${facets.producers.length - 5} công cụ khác`}
           </Typography>
+        )}
+
+        {attentionCount > 0 && (
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1.25} alignItems={{ sm: "center" }} sx={{
+            mb: 2.5, px: 1.5, py: 1.1, borderRadius: "12px",
+            border: 1, borderColor: alpha(theme.palette.warning.main, 0.45),
+            bgcolor: alpha(theme.palette.warning.main, theme.palette.mode === "dark" ? 0.12 : 0.07),
+          }}>
+            <BoltRoundedIcon sx={{ fontSize: 18, color: "warning.main" }} />
+            <Typography sx={{ flex: 1, fontSize: "0.8rem", color: "text.secondary" }}>
+              <strong>{attentionCount} tác vụ bản địa hóa cần thao tác.</strong>{" "}
+              {translationReviewCount > 0 && `${translationReviewCount} bản dịch đang chờ duyệt`}
+              {translationReviewCount > 0 && qcReviewCount > 0 && " · "}
+              {qcReviewCount > 0 && `${qcReviewCount} đầu ra cần xử lý QC`}
+              {translationReviewCount === 0 && qcReviewCount === 0 && "Mở Hoạt động để xem chi tiết."}
+            </Typography>
+            <Button
+              size="small"
+              variant="contained"
+              color="warning"
+              onClick={() => {
+                const first = attentionJobs[0]
+                if (first?.action_href) navigate(first.action_href)
+                else openActivity()
+              }}
+            >
+              Mở việc cần xử lý
+            </Button>
+          </Stack>
         )}
 
         {recentFailures.length > 0 && (

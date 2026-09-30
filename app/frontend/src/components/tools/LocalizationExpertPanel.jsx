@@ -119,7 +119,7 @@ export default function LocalizationExpertPanel({ jobId }) {
       await new Promise((resolve) => setTimeout(resolve, 2000))
       try {
         const { data } = await http.get("/api/jobs/" + jobId)
-        if (["success", "failed", "cancelled"].includes(data.status)) {
+        if (["success", "failed", "cancelled", "awaiting_review"].includes(data.status)) {
           await load()
           return data.status
         }
@@ -159,10 +159,15 @@ export default function LocalizationExpertPanel({ jobId }) {
   const rebindTts = async () => {
     setBusy(true)
     try {
-      await http.post("/api/localization/jobs/" + jobId + "/rebind-tts", { source: "settings" })
-      showSnackbar("Đã dùng TTS hiện tại; tác vụ đang tiếp tục từ bước Lồng tiếng", "info")
-      // Rebinding only dispatches the resumed job. Release the UI immediately
-      // instead of keeping every recovery action disabled until render/QC ends.
+      const { data } = await http.post("/api/localization/jobs/" + jobId + "/rebind-tts", { source: "settings" })
+      showSnackbar(
+        data?.awaiting_translation_review
+          ? "Đã cập nhật TTS. Bản dịch vẫn đang chờ duyệt; duyệt xong mới bắt đầu lồng tiếng."
+          : "Đã dùng TTS hiện tại; tác vụ đang tiếp tục từ bước Lồng tiếng",
+        "info",
+      )
+      // A review-paused job only updates its TTS binding here; it must not
+      // secretly dispatch and immediately hit the same review gate again.
       await load()
     } catch (err) {
       const detailMessage = err.response?.data?.detail
@@ -175,7 +180,10 @@ export default function LocalizationExpertPanel({ jobId }) {
   const saveSegment = async (change) => {
     setBusy(true)
     try {
-      await http.post("/api/localization/jobs/" + jobId + "/override", { segments: [change] })
+      await http.post(
+        "/api/localization/jobs/" + jobId + "/override",
+        { segments: [change], revision: detail?.translation_review_revision },
+      )
       if (detail?.translation_review_pending) {
         showSnackbar("Đã lưu bản dịch. Hãy duyệt các dòng còn lại rồi tiếp tục lồng tiếng.", "success")
         await load()
@@ -194,11 +202,51 @@ export default function LocalizationExpertPanel({ jobId }) {
   const continueAfterTranslation = async () => {
     setBusy(true)
     try {
-      await http.post("/api/localization/jobs/" + jobId + "/continue-after-translation")
+      await http.post(
+        "/api/localization/jobs/" + jobId + "/continue-after-translation",
+        { revision: detail?.translation_review_revision },
+      )
       showSnackbar("Đã duyệt bản dịch; tiếp tục lồng tiếng HQ từ C7", "info")
       await pollUntilTerminal()
     } catch (err) {
       showSnackbar(err.response?.data?.detail || "Không thể tiếp tục lồng tiếng", "error")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const setQcApproval = async (approved) => {
+    setBusy(true)
+    try {
+      await http.post(
+        "/api/localization/jobs/" + jobId + "/qc-approval",
+        { approved, revision: detail?.qc_review_revision },
+      )
+      showSnackbar(
+        approved
+          ? "Đã chấp nhận các cảnh báo QC cho đúng đầu ra hiện tại. Việc này không tự xuất bản video."
+          : "Đã thu hồi xác nhận QC.",
+        approved ? "success" : "info",
+      )
+      await load()
+    } catch (err) {
+      showSnackbar(err.response?.data?.detail || "Không thể cập nhật xác nhận QC", "error")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const retryPublishRegistration = async () => {
+    setBusy(true)
+    try {
+      await http.post("/api/localization/jobs/" + jobId + "/publish-registration")
+      showSnackbar("Đã đưa đầu ra bản địa hóa sang khu vực Xuất bản.", "success")
+      await load()
+    } catch (err) {
+      showSnackbar(
+        err.response?.data?.detail || "Không thể đăng ký đầu ra cho Xuất bản",
+        "error",
+      )
     } finally {
       setBusy(false)
     }
@@ -233,6 +281,10 @@ export default function LocalizationExpertPanel({ jobId }) {
     item?.reason === "timing_overflow"
   )
   const reviewPending = !!detail?.translation_review_pending
+  const qcResolved = Boolean(
+    qc?.status === "READY"
+    || (qc?.status === "NEEDS_REVIEW" && detail?.qc_human_approved)
+  )
   const finalReady = stages?.final_render?.status === "complete"
   const stageEntries = useMemo(() => Object.entries(stages), [stages])
 
@@ -265,11 +317,69 @@ export default function LocalizationExpertPanel({ jobId }) {
       </Stack>
 
       {qc && ((qc.failures?.length || 0) > 0 || (qc.warnings?.length || 0) > 0) && (
-        <Alert severity={qc.status === "FAILED" ? "error" : "warning"}>
+        <Alert
+          severity={qc.status === "FAILED" ? "error" : detail?.qc_human_approved ? "success" : "warning"}
+          action={qc.status === "NEEDS_REVIEW" ? (
+            <Button
+              color="inherit"
+              size="small"
+              disabled={busy}
+              onClick={() => setQcApproval(!detail?.qc_human_approved)}
+              sx={{ whiteSpace: "nowrap", fontWeight: 700 }}
+            >
+              {detail?.qc_human_approved ? "Thu hồi duyệt" : "Chấp nhận cảnh báo QC"}
+            </Button>
+          ) : null}
+        >
           {(qc.failures?.length || 0) + " lỗi · " + (qc.warnings?.length || 0) + " cảnh báo"}
           {qc.metrics?.speech_coverage_ratio != null
             ? " · tỷ lệ giọng đọc " + Math.round(qc.metrics.speech_coverage_ratio * 100) + "%"
             : ""}
+          {detail?.qc_human_approved ? " · Đã được người dùng duyệt" : ""}
+        </Alert>
+      )}
+
+      {detail?.publish_registration_error && (
+        <Alert
+          severity="error"
+          action={
+            <Button color="inherit" size="small" disabled={busy} onClick={retryPublishRegistration}>
+              Thử lại
+            </Button>
+          }
+        >
+          Video đã hoàn tất nhưng chưa đăng ký được sang Xuất bản: {detail.publish_registration_error}
+        </Alert>
+      )}
+
+      {qcResolved && !detail?.publish_ready && !detail?.publish_registration_error && (
+        <Alert
+          severity="info"
+          action={
+            <Button color="inherit" size="small" disabled={busy} onClick={retryPublishRegistration}>
+              Đưa sang Xuất bản
+            </Button>
+          }
+        >
+          QC đã đạt nhưng đầu ra chưa có bản ghi Xuất bản. Có thể khôi phục bước đăng ký này mà không chạy lại media.
+        </Alert>
+      )}
+
+      {detail?.publish_ready && detail?.generated_video_id && (
+        <Alert
+          severity="success"
+          action={
+            <Button
+              color="inherit"
+              size="small"
+              component="a"
+              href={"/publish?video=" + encodeURIComponent(detail.generated_video_id)}
+            >
+              Mở Xuất bản
+            </Button>
+          }
+        >
+          Đầu ra này đã sẵn sàng trong quy trình Xuất bản. Việc tải lên vẫn cần duyệt đúng tệp và xác nhận riêng.
         </Alert>
       )}
 
@@ -343,15 +453,24 @@ export default function LocalizationExpertPanel({ jobId }) {
       <Box>
         <Typography variant="caption" color="text.secondary">Các bước</Typography>
         <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 0.75 }}>
-          {stageEntries.map(([name, record]) => (
-            <Chip
-              key={name}
-              size="small"
-              variant="outlined"
-              color={record.status === "complete" ? "success" : record.status === "failed" ? "error" : "default"}
-              label={(STAGE_LABELS[name] || name) + ": " + record.status}
-            />
-          ))}
+          {stageEntries.map(([name, record]) => {
+            const skipped = record.status === "complete" && record?.metadata?.skipped
+            const statusLabel = skipped ? "Bỏ qua"
+              : record.status === "complete" ? "Hoàn tất"
+                : record.status === "failed" ? "Thất bại"
+                  : record.status === "running" ? "Đang chạy"
+                    : record.status === "invalidated" ? "Cần chạy lại"
+                      : "Đang chờ"
+            return (
+              <Chip
+                key={name}
+                size="small"
+                variant="outlined"
+                color={skipped ? "default" : record.status === "complete" ? "success" : record.status === "failed" ? "error" : "default"}
+                label={(STAGE_LABELS[name] || name) + ": " + statusLabel}
+              />
+            )
+          })}
         </Stack>
       </Box>
 

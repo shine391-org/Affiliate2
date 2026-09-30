@@ -266,11 +266,23 @@ async def _tool_success(
     output_data = {"file": str(out_path)}
     if extra_output:
         output_data.update(extra_output)
-    await update_job_status(job_id, "success", progress_pct=100, current_step="Done",
-                            output_data=output_data)
+    accepted = await update_job_status(
+        job_id, "success", progress_pct=100, current_step="Done",
+        output_data=output_data,
+    )
+    if not accepted:
+        logger.info(
+            "tool job %s terminal success suppressed because canonical state is paused/cancelled",
+            job_id,
+        )
+        _cleanup_paths(*cleanup)
+        return False
     await ws_manager.send({
         "type": "job_complete", "job_id": job_id,
-        "result": {"download_url": f"/api/tools/download/{job_id}"},
+        "result": {
+            "download_url": f"/api/tools/download/{job_id}",
+            **(extra_output or {}),
+        },
     }, user_id)
     _cleanup_paths(*cleanup)
     return True
@@ -281,8 +293,14 @@ async def _tool_fail(job_id: str, err: Exception, cleanup: list[Path], user_id: 
     from backend.agents.job_helper import update_job_status
     from backend.core.ws_manager import ws_manager
     logger.error("TASK FAIL  tool:%s | job=%s: %s", tool, job_id[:8], err, exc_info=True)
-    await update_job_status(job_id, "failed", error_message=str(err))
-    await ws_manager.send({"type": "job_failed", "job_id": job_id, "error": str(err)}, user_id)
+    accepted = await update_job_status(job_id, "failed", error_message=str(err))
+    if accepted:
+        await ws_manager.send({"type": "job_failed", "job_id": job_id, "error": str(err)}, user_id)
+    else:
+        logger.info(
+            "tool job %s failure event suppressed because canonical state is paused/cancelled",
+            job_id,
+        )
     _cleanup_paths(*cleanup)
 
 
@@ -1009,8 +1027,10 @@ async def run_tool_translate(
     import shutil
     from dataclasses import asdict
 
+    from backend.agents.job_helper import job_cancelled
     from backend.api.tools import tool_out_path
     from backend.config import settings
+    from backend.core.exceptions import JobCancelledError
     from backend.core.localization import LocalizationProfile, LocalizationTranscript
     from backend.services.localization_qc_service import evaluate_localization_qc
     from backend.services.localization_service import (
@@ -1026,6 +1046,10 @@ async def run_tool_translate(
         validate_localization_tts_preflight,
     )
     from backend.services.localization_stage_service import LocalizationRun
+
+    async def _cancel_checkpoint(label: str) -> None:
+        if await job_cancelled(job_id):
+            raise JobCancelledError(f"Localization cancelled before {label}")
 
     target_language = _LANG_NAME_MAP.get(
         target_language.strip().lower(), target_language.strip()
@@ -1051,6 +1075,10 @@ async def run_tool_translate(
         "TASK START tool:translate | job=%s target=%s mode=%s profile=%s aspect=%s",
         job_id[:8], target_language, mode, profile_id or "default", target_aspect or "default",
     )
+    # Consume a recovery-claim marker immediately when the coroutine REALLY
+    # starts. Until this point a process crash can safely restore the previous
+    # quiescent job state; after this point this is a real new attempt.
+    await _tool_progress(job_id, 0, "Starting localization…", user_id)
 
     original_input = Path(in_path)
     cleanup: list[Path] = []
@@ -1067,6 +1095,52 @@ async def run_tool_translate(
             pass
     current_stage = "separation"
     run = None
+
+    # Snapshot the last delivered artifact BEFORE this attempt writes anything.
+    # restart_job() deliberately keeps output_json, so a failed rerun can retain
+    # the previous successful version. Also backfill the Publish bridge for
+    # pre-upgrade successful localization jobs before a new attempt starts.
+    previous_output: dict = {}
+    previous_output_path: Path | None = None
+    previous_generated_video_id: str | None = None
+    try:
+        from backend.services.localization_publish_service import (
+            promote_localization_output,
+        )
+        await promote_localization_output(job_id)
+    except Exception:
+        # A brand-new job has no publishable output, and a promotion failure must
+        # never prevent localization itself from running.
+        logger.debug(
+            "No previous localization output to promote for job %s",
+            job_id[:8],
+            exc_info=True,
+        )
+    try:
+        from backend.database import AsyncSessionLocal
+        from backend.models.job import Job
+        async with AsyncSessionLocal() as db:
+            previous_job = await db.get(Job, job_id)
+            if previous_job and previous_job.output_json:
+                try:
+                    previous_output = _json.loads(previous_job.output_json)
+                except (TypeError, ValueError):
+                    previous_output = {}
+        if isinstance(previous_output, dict):
+            previous_generated_video_id = (
+                str(previous_output.get("generated_video_id"))
+                if previous_output.get("generated_video_id")
+                else None
+            )
+            previous_file = previous_output.get("file")
+            if previous_file:
+                candidate_previous = Path(previous_file)
+                if candidate_previous.is_file():
+                    previous_output_path = candidate_previous
+    except Exception:
+        previous_output = {}
+        previous_output_path = None
+        previous_generated_video_id = None
 
     try:
         # Existing reruns use their effective profile snapshot. An explicit
@@ -1199,6 +1273,7 @@ async def run_tool_translate(
         # Source content, not its pathname, is the resume boundary. A file may
         # be overwritten in-place while stale C5/C6 artifacts still exist.
         run.verify_source_identity()
+        await _cancel_checkpoint("media processing")
 
         # Never clean the persisted source snapshot.
         cleanup = [
@@ -1314,6 +1389,7 @@ async def run_tool_translate(
         else:
             await _run_gpu_audio_pipeline()
 
+        await _cancel_checkpoint("semantic segmentation")
         source_segment_count = len(transcript.segments)
 
         # ── C6 semantic segmentation ────────────────────────────────────
@@ -1397,6 +1473,8 @@ async def run_tool_translate(
             except Exception as exc:
                 run.fail("semantic", exc)
                 raise
+
+        await _cancel_checkpoint("translation")
 
         # ── C6 contextual translation ───────────────────────────────────
         current_stage = "translation"
@@ -1549,6 +1627,8 @@ async def run_tool_translate(
                 run.fail("translation", exc)
                 raise
 
+        await _cancel_checkpoint("translation review / dubbing")
+
         # Optional human quality gate: stop after C6 and expose source/target
         # pairs before spending on TTS/render. The same manifest/job resumes at
         # C7 after approval; no second pipeline or duplicate ASR is created.
@@ -1557,51 +1637,50 @@ async def run_tool_translate(
             and bool(run.request.get("review_translation"))
             and not bool(run.request.get("translation_review_approved"))
         ):
-            review_rows = [
-                {
-                    "id": seg.id,
-                    "speaker_id": seg.speaker_id,
-                    "source_start_ms": seg.source_start_ms,
-                    "source_end_ms": seg.source_end_ms,
-                    "source_text": seg.source_text,
-                    "translated_text": seg.translated_text,
-                    "translation_status": seg.translation_status,
-                }
-                for seg in localized.segments
-            ]
-            review_path = tool_out_path(job_id, ".json")
-            review_path.write_text(
-                _json.dumps(
-                    {
-                        "job_id": job_id,
-                        "target_language": target_language,
-                        "profile_id": profile.id,
-                        "translation_model": profile.translation_model,
-                        "translation_preset": profile.translation_preset,
-                        "segments": review_rows,
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                ) + "\n",
-                encoding="utf-8",
-            )
+            # This is a HUMAN GATE, not a completed tool result. Previously this
+            # wrote a review .json through _tool_success(), which marked the job
+            # 100% success, emitted job_complete and made Library index the JSON
+            # as a finished "Dịch" asset. The workflow then looked dead even
+            # though the same persisted run was waiting to resume at C7.
+            from backend.agents.job_helper import update_job_status
+            from backend.core.ws_manager import ws_manager
+
+            source_id = str(run.request.get("downloaded_video_id") or "")
             run.update_request({
                 **run.request,
                 "translation_review_pending": True,
                 "translation_review_approved": False,
             })
-            await _tool_success(
+            await update_job_status(
                 job_id,
-                review_path,
-                cleanup,
-                user_id,
-                extra_output={
+                "awaiting_review",
+                progress_pct=50,
+                current_step="Chờ duyệt bản dịch",
+                output_data={
                     "translation_review_pending": True,
                     "translation_model": profile.translation_model,
                     "translation_preset": profile.translation_preset,
                     "semantic_cue_count": len(localized.segments),
+                    "downloaded_video_id": source_id or None,
                 },
             )
+            action_url = (
+                f"/studio/localize?source={source_id}&job={job_id}&step=translation"
+                if source_id
+                else f"/studio/localize?job={job_id}&step=translation"
+            )
+            await ws_manager.send({
+                "type": "job_attention",
+                "job_id": job_id,
+                "job_type": "tool:translate",
+                "reason": "translation_review",
+                "message": "Bản dịch đã xong — cần duyệt trước khi lồng tiếng.",
+                "source_id": source_id or None,
+                "action_url": action_url,
+            }, user_id)
+            # The immutable source snapshot lives under localization_jobs/<id>,
+            # so ephemeral upload/download scratch can be released at the gate.
+            _cleanup_paths(*cleanup)
             logger.info(
                 "TASK PAUSED tool:translate | job=%s awaiting translation review",
                 job_id[:8],
@@ -1814,6 +1893,8 @@ async def run_tool_translate(
                 "dubbing", metadata={"skipped": True, "mode": mode}
             )
 
+        await _cancel_checkpoint("audio mix")
+
         # ── C8 clean audio mix; still no video encode ───────────────────
         current_stage = "audio_mix"
         mixed_audio = None
@@ -1849,6 +1930,8 @@ async def run_tool_translate(
                 "audio_mix", metadata={"skipped": True, "mode": mode}
             )
 
+        await _cancel_checkpoint("final render")
+
         # ── C8 one and only lossy visual encode ─────────────────────────
         current_stage = "final_render"
         from backend.services.caption_service import generate_captions_ass, burn_captions
@@ -1859,10 +1942,11 @@ async def run_tool_translate(
 
         effective_aspect = profile.target_aspect
         if run.is_complete("final_render", ("final_video",)):
-            persisted_final = run.artifact("final_render", "final_video")
-            out_path = tool_out_path(job_id, ".mp4")
-            if persisted_final.resolve() != out_path.resolve():
-                shutil.copy2(persisted_final, out_path)
+            # A completed stage may point either at a legacy tools/out delivery
+            # or at the new workspace candidate. Do not copy it over the last
+            # successful delivery yet; QC and terminal validation still have to
+            # succeed for THIS attempt.
+            out_path = run.artifact("final_render", "final_video")
         else:
             async with localization_gpu_gate():
                 await _tool_progress(job_id, 84, "Rendering final localized video...", user_id)
@@ -1883,11 +1967,14 @@ async def run_tool_translate(
                         mask_box=mask_box,
                         caption_placement=caption_placement,
                     )
-                    out_path = tool_out_path(job_id, ".mp4")
+                    # The render candidate remains isolated inside the durable
+                    # workspace until QC AND the generic output validator pass.
+                    # This is the key last-known-good boundary.
+                    candidate_path = run.artifact_path("final_render", "candidate.mp4")
                     rendered = await burn_captions(
                         source_path,
                         ass_path,
-                        out_path,
+                        candidate_path,
                         render_profile=profile.render_profile,
                         target_aspect=effective_aspect,
                         reframe_method="auto",
@@ -1895,12 +1982,13 @@ async def run_tool_translate(
                         video_slowdown=video_slowdown if is_dub else 1.0,
                         mask_box=mask_box,
                     )
-                    if rendered != out_path or not out_path.exists():
+                    if rendered != candidate_path or not candidate_path.exists():
                         raise RuntimeError("Final localization render failed.")
+                    out_path = candidate_path
                     run.complete(
                         "final_render",
                         artifacts={
-                            "final_video": out_path,
+                            "final_video": candidate_path,
                             "captions": ass_path,
                         },
                         metadata={
@@ -1911,6 +1999,8 @@ async def run_tool_translate(
                 except Exception as exc:
                     run.fail("final_render", exc)
                     raise
+
+        await _cancel_checkpoint("quality checks")
 
         # ── C10 automatic QC + exception gate ───────────────────────────
         current_stage = "qc"
@@ -1941,52 +2031,167 @@ async def run_tool_translate(
                 run.fail("qc", exc)
                 raise
 
+        await _cancel_checkpoint("completion")
+
         from backend.services.video_utils import probe_duration
         src_dur = await asyncio.to_thread(probe_duration, source_path)
         final_dur = await asyncio.to_thread(probe_duration, out_path)
 
-        await _tool_success(
+        # Deliver each newly rendered version to an immutable path. The Job row
+        # keeps pointing at the PREVIOUS successful file until _tool_success()
+        # accepts this exact version, so a QC/probe/validation/cancellation
+        # failure cannot erase or overwrite the last-known-good artifact.
+        from uuid import uuid4
+        delivery_path = out_path
+        delivery_is_new = False
+        same_as_previous = bool(
+            previous_output_path is not None
+            and out_path.resolve() == previous_output_path.resolve()
+        )
+        if not same_as_previous:
+            delivery_path = tool_out_path(
+                f"{job_id}_{uuid4().hex[:10]}",
+                ".mp4",
+            )
+            staged_delivery = delivery_path.with_suffix(
+                delivery_path.suffix + ".next"
+            )
+            staged_delivery.unlink(missing_ok=True)
+            shutil.copy2(out_path, staged_delivery)
+            staged_delivery.replace(delivery_path)
+            delivery_is_new = True
+
+        output_meta = {
+            "target_language": target_language,
+            "mode": mode,
+            "localization_profile": profile.id,
+            "localization_manifest": str(run.manifest_path),
+            "asr_quality": profile.asr_quality,
+            "asr_model": profile.asr_model,
+            "alignment_mode": profile.alignment_mode,
+            "diarization_mode": profile.diarization_mode,
+            "render_profile": profile.render_profile,
+            "audio_mode": profile.audio_mode if is_dub else None,
+            "source_asr_segment_count": source_segment_count,
+            "semantic_cue_count": len(localized.segments),
+            "dubbing_chunk_count": dub_chunk_count,
+            "max_dubbing_speed_factor": max_dubbing_speed,
+            "max_fitted_dubbing_speed_factor": max_fitted_dubbing_speed,
+            "dubbing_rewrite_count": dubbing_rewrite_count,
+            "translation_provider": profile.translation_provider,
+            "translation_model": profile.translation_model,
+            "translation_preset": profile.translation_preset,
+            "rewrite_provider": profile.rewrite_provider if is_dub else None,
+            "rewrite_model": profile.rewrite_model if is_dub else None,
+            "video_slowdown": video_slowdown,
+            "timing_issue_count": len(timing_issues),
+            "qc_status": qc.get("status"),
+            "qc_failures": qc.get("failures", []),
+            "qc_warnings": qc.get("warnings", []),
+            "qc_human_approved": bool(run.request.get("qc_human_approved")),
+            "source_duration": src_dur,
+            "final_duration": final_dur,
+            "duration_seconds": final_dur,
+            "target_aspect": effective_aspect,
+            "downloaded_video_id": downloaded_video_id,
+            "duration_ratio": round(final_dur / src_dur, 4) if src_dur > 0 else 1.0,
+            "localization_delivery_version": delivery_path.stem,
+        }
+        if previous_generated_video_id:
+            output_meta["supersedes_generated_video_id"] = (
+                previous_generated_video_id
+            )
+
+        delivered = await _tool_success(
             job_id,
-            out_path,
+            delivery_path,
             cleanup,
             user_id,
-            extra_output={
-                "target_language": target_language,
-                "mode": mode,
-                "localization_profile": profile.id,
-                "localization_manifest": str(run.manifest_path),
-                "asr_quality": profile.asr_quality,
-                "asr_model": profile.asr_model,
-                "alignment_mode": profile.alignment_mode,
-                "diarization_mode": profile.diarization_mode,
-                "render_profile": profile.render_profile,
-                "audio_mode": profile.audio_mode if is_dub else None,
-                "source_asr_segment_count": source_segment_count,
-                "semantic_cue_count": len(localized.segments),
-                "dubbing_chunk_count": dub_chunk_count,
-                "max_dubbing_speed_factor": max_dubbing_speed,
-                "max_fitted_dubbing_speed_factor": max_fitted_dubbing_speed,
-                "dubbing_rewrite_count": dubbing_rewrite_count,
-                "translation_provider": profile.translation_provider,
-                "translation_model": profile.translation_model,
-                "translation_preset": profile.translation_preset,
-                "rewrite_provider": profile.rewrite_provider if is_dub else None,
-                "rewrite_model": profile.rewrite_model if is_dub else None,
-                "video_slowdown": video_slowdown,
-                "timing_issue_count": len(timing_issues),
-                "qc_status": qc.get("status"),
-                "qc_failures": qc.get("failures", []),
-                "qc_warnings": qc.get("warnings", []),
-                "source_duration": src_dur,
-                "final_duration": final_dur,
-                "duration_ratio": round(final_dur / src_dur, 4) if src_dur > 0 else 1.0,
-            },
+            extra_output=output_meta,
         )
+        if not delivered:
+            if delivery_is_new:
+                delivery_path.unlink(missing_ok=True)
+            return
+
+        # The manifest may have pointed at a workspace candidate. Once the
+        # terminal delivery is accepted, bind final_render to the immutable
+        # delivered file so later QC-only retries do not need a duplicate copy.
+        final_record = run.record("final_render")
+        final_meta = dict(final_record.get("metadata") or {})
+        final_artifacts = {"final_video": delivery_path}
+        captions_path = run.artifact("final_render", "captions")
+        if captions_path is not None:
+            final_artifacts["captions"] = captions_path
+        run.complete(
+            "final_render",
+            artifacts=final_artifacts,
+            metadata=final_meta,
+        )
+        if (
+            out_path.resolve() != delivery_path.resolve()
+            and out_path.resolve().is_relative_to(run.root.resolve())
+        ):
+            out_path.unlink(missing_ok=True)
+
+        # P1 handoff: only QC-ready (or explicitly human-acknowledged warning)
+        # outputs become GeneratedVideo rows consumed by Publish. FAILED and
+        # unreviewed NEEDS_REVIEW outputs remain reviewable Library job assets.
+        try:
+            from backend.services.localization_publish_service import (
+                promote_localization_output,
+            )
+            promotion = await promote_localization_output(
+                job_id,
+                existing_generated_video_id=previous_generated_video_id,
+                previous_output_path=previous_output_path,
+                expected_output_path=delivery_path,
+            )
+        except Exception as promotion_error:
+            logger.error(
+                "Localization output is valid but Publish registration failed "
+                "for job %s: %s",
+                job_id[:8],
+                promotion_error,
+                exc_info=True,
+            )
+            from backend.database import AsyncSessionLocal
+            from backend.models.job import Job
+            async with AsyncSessionLocal() as db:
+                job_row = await db.get(Job, job_id)
+                if job_row is not None:
+                    try:
+                        persisted = _json.loads(job_row.output_json or "{}")
+                    except (TypeError, ValueError):
+                        persisted = {}
+                    if not isinstance(persisted, dict):
+                        persisted = {}
+                    persisted["publish_registration_error"] = str(
+                        promotion_error
+                    )[:1000]
+                    job_row.output_json = _json.dumps(persisted)
+                    await db.commit()
+            promotion = {"promoted": False}
+
         logger.info(
-            "TASK DONE tool:translate | job=%s qc=%s",
-            job_id[:8], qc.get("status"),
+            "TASK DONE tool:translate | job=%s qc=%s publish=%s",
+            job_id[:8],
+            qc.get("status"),
+            "ready" if promotion.get("publish_ready") else "blocked",
         )
     except Exception as e:
+        # DELETE /jobs/{id} only flips persisted state; long media calls cannot
+        # always be interrupted mid-frame. Once control returns to the runner,
+        # cancellation wins: no auto-repair, no job_failed event, no late
+        # success, and no extra expensive downstream stage.
+        if isinstance(e, JobCancelledError) or await job_cancelled(job_id):
+            _cleanup_paths(*cleanup)
+            logger.info(
+                "TASK CANCELLED tool:translate | job=%s stage=%s",
+                job_id[:8], current_stage,
+            )
+            return
+
         if run is not None:
             try:
                 run.fail(current_stage, e)

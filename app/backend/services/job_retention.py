@@ -59,7 +59,14 @@ def is_library_item(job: Job) -> bool:
     delete it and the file is orphaned on disk while disappearing from the
     Library and the asset endpoint that serves it.
     """
-    if job.status != "success" or not job.output_json:
+    owns_last_good_localization = (
+        job.job_type == "tool:translate"
+        and job.status in {"failed", "cancelled"}
+    )
+    if (
+        job.status != "success"
+        and not owns_last_good_localization
+    ) or not job.output_json:
         return False
     if classify(job.job_type) is None:
         return False  # scout / analyze / download / render — activity, not a file
@@ -68,6 +75,10 @@ def is_library_item(job: Job) -> bool:
     except (json.JSONDecodeError, TypeError):
         return False
     if not isinstance(out, dict):
+        return False
+    # Legacy localization review gates were incorrectly persisted as successful
+    # JSON tool outputs. They are workflow checkpoints, never Library assets.
+    if out.get("translation_review_pending"):
         return False
     # NOTE: the INDEX drops a job whose output also registered a generated_videos
     # row, to avoid showing the same bytes twice. Retention must NOT copy that
@@ -121,12 +132,29 @@ async def sweep(db: AsyncSession, *, retention_days: int = RETENTION_DAYS,
     kept_library = len(rows) - len(prunable)
 
     aged, over_cap = plan_deletions(prunable, cutoff, max_prunable)
-    for job in [*aged, *over_cap]:
+    deleting = [*aged, *over_cap]
+    localization_workspaces = [
+        job.id for job in deleting if job.job_type == "tool:translate"
+    ]
+    for job in deleting:
         await db.delete(job)
     deleted_old, deleted_over_cap = len(aged), len(over_cap)
 
     if deleted_old or deleted_over_cap:
         await db.commit()
+        # Delete large media workspaces only AFTER the DB deletion committed.
+        # A transient DB failure must never strand a still-live job row after
+        # its resumable Demucs/TTS/source artifacts have already been erased.
+        if localization_workspaces:
+            from backend.services.localization_stage_service import cleanup_localization_workspace
+            for job_id in localization_workspaces:
+                try:
+                    cleanup_localization_workspace(job_id)
+                except (OSError, ValueError):
+                    logger.warning(
+                        "job retention: could not remove localization workspace for %s",
+                        job_id,
+                    )
         logger.info(
             "job retention: deleted %d aged + %d over-cap; kept %d library-backing row(s)",
             deleted_old, deleted_over_cap, kept_library,

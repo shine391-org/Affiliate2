@@ -530,7 +530,7 @@ async def translate_tool(
     if reused:
         if staged_upload is not None:
             staged_upload.unlink(missing_ok=True)
-        return {"job_id": job.id, "reused": True}
+        return {"job_id": job.id, "reused": True, "status": job.status}
 
     if persisted_source_path is not None:
         in_path = persisted_source_path
@@ -561,7 +561,7 @@ async def translate_tool(
         caption_placement=parsed_caption_placement,
         downloaded_video_id=stripped_source_id or None,
     ))
-    return {"job_id": job.id, "reused": False}
+    return {"job_id": job.id, "reused": False, "status": job.status}
 
 
 @router.post("/hook-analysis")

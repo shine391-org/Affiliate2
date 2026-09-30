@@ -116,6 +116,7 @@ PRODUCERS: dict[str, Producer] = {
     # shared Clipper renderer; Creative Remake remains reserved for Phase E.
     "smart_cut": _p("smart_cut", "Cắt thông minh", MEDIA_VIDEO, ORIGIN_EDITED),
     "creative_remake": _p("creative_remake", "Làm lại sáng tạo", MEDIA_VIDEO, ORIGIN_EDITED),
+    "localization": _p("localization", "Bản địa hóa", MEDIA_VIDEO, ORIGIN_EDITED),
     "tool:captions": _p("tool:captions", "Phụ đề", MEDIA_VIDEO, ORIGIN_EDITED),
     "tool:reframe": _p("tool:reframe", "Đổi khung", MEDIA_VIDEO, ORIGIN_EDITED),
     "tool:trim": _p("tool:trim", "Cắt đoạn", MEDIA_VIDEO, ORIGIN_EDITED),
@@ -127,7 +128,7 @@ PRODUCERS: dict[str, Producer] = {
     "tool:remove_silence": _p("tool:remove_silence", "Cắt khoảng lặng", MEDIA_VIDEO, ORIGIN_EDITED),
     "tool:compress": _p("tool:compress", "Nén", MEDIA_VIDEO, ORIGIN_EDITED),
     "tool:crop": _p("tool:crop", "Cắt khung", MEDIA_VIDEO, ORIGIN_EDITED),
-    "tool:translate": _p("tool:translate", "Dịch", MEDIA_VIDEO, ORIGIN_EDITED),
+    "tool:translate": _p("tool:translate", "Bản địa hóa", MEDIA_VIDEO, ORIGIN_EDITED),
     "tool:music_visualizer": _p("tool:music_visualizer", "Trực quan hóa", MEDIA_VIDEO, ORIGIN_EDITED),
     # Audio Enhance returns an mp3 for a bare audio input and an mp4 when the
     # input carried a picture. The index lets the file extension win over this

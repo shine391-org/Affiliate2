@@ -9,7 +9,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, StrictBool, StrictInt
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db
@@ -207,7 +207,13 @@ async def set_publish_approval(
             )
         if not video.video_path or not Path(video.video_path).is_file():
             raise HTTPException(status_code=400, detail="Video file not found on disk")
-        from backend.agents.uploader import file_sha256
+        from backend.agents.uploader import (
+            file_sha256,
+            localization_qc_publish_error,
+        )
+        qc_error = localization_qc_publish_error(video)
+        if qc_error:
+            raise HTTPException(status_code=409, detail=qc_error)
         artifact_hash = file_sha256(video.video_path)
         video.artifact_sha256 = artifact_hash
         video.publish_approval_artifact_sha256 = artifact_hash
@@ -437,25 +443,167 @@ async def regenerate_thumbnail(video_id: str, db: AsyncSession = Depends(get_db)
     return {"ok": True, "thumbnail_path": str(thumb_path)}
 
 
+async def _generated_path_still_referenced(db: AsyncSession, path: Path) -> bool:
+    """True when another canonical row/job still owns these exact local bytes."""
+    resolved = path.resolve()
+    generated = (await db.execute(select(GeneratedVideo))).scalars().all()
+    for row in generated:
+        for candidate in (row.video_path, row.audio_path, row.thumbnail_path):
+            if not candidate:
+                continue
+            try:
+                if Path(candidate).resolve() == resolved:
+                    return True
+            except (OSError, ValueError):
+                continue
+
+    from backend.models.job import Job
+    jobs = (await db.execute(
+        select(Job).where(Job.output_json.isnot(None))
+    )).scalars().all()
+    for row in jobs:
+        try:
+            output = json.loads(row.output_json or "{}")
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(output, dict) or not output.get("file"):
+            continue
+        try:
+            if Path(output["file"]).resolve() == resolved:
+                return True
+        except (OSError, ValueError):
+            continue
+    return False
+
+
 @router.delete("/videos/{video_id}")
 async def delete_video(video_id: str, db: AsyncSession = Depends(get_db)):
-    """Delete a generated video and its files."""
-    result = await db.execute(
-        select(GeneratedVideo).where(GeneratedVideo.id == video_id)
-    )
-    video = result.scalar_one_or_none()
+    """Delete a generated video only when no publication/recovery is in flight."""
+    from backend.models.job import Job
+    from backend.models.phase_g import PublicationRecord
+
+    # Serialize the whole destructive preflight with any localization
+    # promotion/recovery write. Without the SQLite write lock, a rerun could
+    # claim the owning job immediately after this endpoint observed it idle.
+    await db.execute(text("BEGIN IMMEDIATE"))
+
+    video = await db.get(GeneratedVideo, video_id)
     if not video:
+        await db.rollback()
         raise HTTPException(status_code=404, detail="Video not found")
 
-    # Clean up files
-    for path_str in [video.video_path, video.audio_path, video.thumbnail_path]:
-        if path_str:
-            p = Path(path_str)
-            if p.exists():
-                p.unlink(missing_ok=True)
+    # Provider side effects may already be happening. Never remove the local
+    # artifact/row while an upload is queued/running or while provider outcome
+    # is uncertain; that destroys the evidence needed to reconcile the result.
+    active_uploads = (await db.execute(
+        select(Job).where(
+            Job.job_type == "upload",
+            Job.status.in_(["pending", "running"]),
+        )
+    )).scalars().all()
+    for upload_job in active_uploads:
+        try:
+            submitted = json.loads(upload_job.input_json or "{}")
+        except (TypeError, ValueError):
+            continue
+        if (
+            isinstance(submitted, dict)
+            and str(submitted.get("generated_video_id") or "") == video_id
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Video đang có tác vụ xuất bản chạy/chờ. Hãy chờ hoàn tất hoặc hủy tác vụ trước khi xóa.",
+            )
 
+    risky_publication = (await db.execute(
+        select(PublicationRecord.id).where(
+            PublicationRecord.generated_video_id == video_id,
+            PublicationRecord.status.in_(
+                ["PUBLISHING", "PERSISTENCE_ERROR", "OUTCOME_UNKNOWN"]
+            ),
+        )
+    )).first()
+    if risky_publication:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Kết quả xuất bản của video này chưa xác định chắc chắn. "
+                "Hãy đối soát nền tảng trước khi xóa."
+            ),
+        )
+
+    owner_job = None
+    if str(video.source_type or "").strip().lower() == "localization":
+        localization_jobs = (await db.execute(
+            select(Job).where(Job.job_type == "tool:translate")
+        )).scalars().all()
+        for candidate in localization_jobs:
+            try:
+                out = json.loads(candidate.output_json or "{}")
+            except (TypeError, ValueError):
+                continue
+            if (
+                isinstance(out, dict)
+                and str(out.get("generated_video_id") or "") == video_id
+            ):
+                owner_job = candidate
+                break
+
+        if owner_job is not None and owner_job.status in {
+            "pending", "running", "awaiting_review",
+        }:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Video này thuộc một tác vụ bản địa hóa chưa kết thúc. "
+                    "Hãy hủy/hoàn tất tác vụ đó trước khi xóa."
+                ),
+            )
+
+    paths = [
+        Path(path_str)
+        for path_str in (video.video_path, video.audio_path, video.thumbnail_path)
+        if path_str
+    ]
+    owner_job_id = owner_job.id if owner_job is not None else None
+
+    if owner_job is not None:
+        await db.delete(owner_job)
     await db.delete(video)
     await db.commit()
+
+    # Delete bytes only after canonical DB deletion commits AND only when no
+    # remaining GeneratedVideo/Job still references that exact path. Legacy data
+    # can contain duplicate rows pointing at one physical file; deleting either
+    # row must not punch a hole in the other asset.
+    for path in paths:
+        try:
+            resolved = _safe_resolve_path(str(path))
+        except HTTPException:
+            logger.warning(
+                "Refusing to delete generated artifact outside storage: %s",
+                path,
+            )
+            continue
+        if await _generated_path_still_referenced(db, resolved):
+            continue
+        try:
+            resolved.unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Could not delete generated video artifact %s", resolved)
+
+    if owner_job_id:
+        try:
+            from backend.services.localization_stage_service import (
+                cleanup_localization_workspace,
+            )
+            cleanup_localization_workspace(owner_job_id)
+        except (OSError, ValueError):
+            logger.warning(
+                "Could not remove localization workspace for deleted video %s",
+                video_id,
+            )
+
     return {"ok": True}
 
 

@@ -15,6 +15,16 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _drop_localization_workspace(job: Job) -> None:
+    if job.job_type != "tool:translate":
+        return
+    try:
+        from backend.services.localization_stage_service import cleanup_localization_workspace
+        cleanup_localization_workspace(job.id)
+    except (OSError, ValueError):
+        logger.warning("Could not remove localization workspace for job %s", job.id)
+
+
 class JobResponse(BaseModel):
     id: str
     job_type: str
@@ -133,8 +143,9 @@ async def delete_job(job_id: str):
         if not j:
             raise HTTPException(status_code=404, detail="Job not found")
 
-        if j.status in ("running", "pending"):
+        if j.status in ("running", "pending", "awaiting_review"):
             j.status = "cancelled"
+            j.task_id = None
             await db.commit()
             return {"message": "Job cancelled"}
 
@@ -151,6 +162,7 @@ async def delete_job(job_id: str):
                         "there (that removes the file too)."),
             )
 
+        _drop_localization_workspace(j)
         await db.delete(j)
         await db.commit()
         return {"message": "Job deleted"}
@@ -178,12 +190,14 @@ async def bulk_delete_jobs(body: BulkDeleteRequest):
         result = await db.execute(select(Job).where(Job.id.in_(body.job_ids)))
         jobs = result.scalars().all()
         for j in jobs:
-            if j.status in ("running", "pending"):
+            if j.status in ("running", "pending", "awaiting_review"):
                 j.status = "cancelled"
+                j.task_id = None
                 cancelled += 1
             elif is_library_item(j):
                 kept_library += 1
             else:
+                _drop_localization_workspace(j)
                 await db.delete(j)
                 deleted += 1
         await db.commit()

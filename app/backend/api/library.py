@@ -203,7 +203,16 @@ async def resolve_asset_path(job_id: str, db: AsyncSession) -> Path:
     classification and the same traversal-safe path resolution.
     """
     job = await db.get(Job, job_id)
-    if not job or job.status != "success" or classify(job.job_type) is None:
+    last_good_localization = bool(
+        job
+        and job.job_type == "tool:translate"
+        and job.status in {"failed", "cancelled"}
+    )
+    if (
+        not job
+        or (job.status != "success" and not last_good_localization)
+        or classify(job.job_type) is None
+    ):
         raise HTTPException(status_code=404, detail="Asset not found")
     if not job.output_json:
         raise HTTPException(status_code=404, detail="Asset has no output")
@@ -272,6 +281,16 @@ def _drop_poster_cache(job_id: str) -> None:
         logger.warning("Could not remove poster cache for job %s", job_id)
 
 
+def _drop_localization_workspace(job: Job) -> None:
+    if job.job_type != "tool:translate":
+        return
+    try:
+        from backend.services.localization_stage_service import cleanup_localization_workspace
+        cleanup_localization_workspace(job.id)
+    except (OSError, ValueError):
+        logger.warning("Could not remove localization workspace for job %s", job.id)
+
+
 def _unlink_job_output(job: Job) -> None:
     """Best-effort removal of the file a job wrote.
 
@@ -310,6 +329,7 @@ async def delete_asset(job_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Asset not found")
     _unlink_job_output(job)
     _drop_poster_cache(job_id)
+    _drop_localization_workspace(job)
     await db.delete(job)
     await db.commit()
     return {"ok": True}
@@ -338,6 +358,7 @@ async def bulk_delete_assets(body: dict, db: AsyncSession = Depends(get_db)):
     for job in rows:
         _unlink_job_output(job)
         _drop_poster_cache(job.id)
+        _drop_localization_workspace(job)
         await db.delete(job)
         deleted += 1
     await db.commit()

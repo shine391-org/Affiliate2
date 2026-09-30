@@ -174,3 +174,29 @@ async def test_scout_rows_something_points_at_are_kept():
                 await db.delete(r)
         await db.commit()
         await db.close()
+
+async def test_failed_localization_last_good_file_is_not_pruned():
+    from backend.models.job import Job
+    from backend.services import job_retention
+
+    db = await _session()
+    f = _real_file(f"{PREFIX}localize-last-good.mp4")
+    old = datetime.utcnow() - timedelta(days=400)
+    try:
+        db.add(Job(
+            id=f"{PREFIX}localize-last-good",
+            job_type="tool:translate",
+            status="failed",
+            output_json=json.dumps({"file": str(f), "qc_status": "READY"}),
+            created_at=old,
+        ))
+        await db.commit()
+
+        await job_retention.sweep(db)
+        assert await db.get(Job, f"{PREFIX}localize-last-good") is not None
+        assert f.is_file()
+    finally:
+        await _cleanup(db)
+        f.unlink(missing_ok=True)
+        await db.close()
+

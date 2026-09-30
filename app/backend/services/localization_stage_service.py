@@ -36,6 +36,24 @@ def _utc() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def cleanup_localization_workspace(job_id: str) -> bool:
+    """Delete one durable localization workspace after the owning job is deleted.
+
+    Cancellation alone intentionally keeps it resumable. This is only for an
+    explicit DELETE of the job/Library asset; otherwise Demucs stems, TTS chunks,
+    source snapshots and render candidates would survive forever after the row
+    that can reach them is gone.
+    """
+    parent = (settings.STORAGE_ROOT / "localization_jobs").resolve()
+    root = (parent / str(job_id)).resolve()
+    if not root.is_relative_to(parent) or root == parent:
+        raise ValueError("Unsafe localization workspace path")
+    if not root.exists():
+        return False
+    shutil.rmtree(root)
+    return True
+
+
 def _source_identity(path: Path) -> dict[str, Any]:
     """Return the content identity used to decide whether resume is safe.
 

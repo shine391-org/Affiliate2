@@ -299,3 +299,91 @@ async def test_the_asset_endpoint_serves_what_the_library_shows():
         await _cleanup(db)
         f.unlink(missing_ok=True)
         await db.close()
+
+async def test_translation_review_checkpoint_is_not_a_library_asset():
+    """Legacy C6 pauses wrote a .json and marked success; upgrading must hide
+    that workflow checkpoint while leaving the job available for resume."""
+    from backend.models.job import Job
+    from backend.services import library_index
+
+    db = await _session()
+    review = _real_file(f"{PREFIX}translation-review.json", b'{"segments":[]}')
+    try:
+        db.add(Job(
+            id=f"{PREFIX}review",
+            job_type="tool:translate",
+            status="success",
+            output_json=json.dumps({
+                "file": str(review),
+                "translation_review_pending": True,
+                "downloaded_video_id": "source-1",
+            }),
+        ))
+        await db.commit()
+
+        items = await library_index.gather(db)
+        assert _by_key(items, f"job:{PREFIX}review") is None
+        assert await db.get(Job, f"{PREFIX}review") is not None
+    finally:
+        await _cleanup(db)
+        review.unlink(missing_ok=True)
+        await db.close()
+
+async def test_failed_localization_rerun_keeps_last_good_output_in_library():
+    from backend.api.library import resolve_asset_path
+    from backend.models.job import Job
+    from backend.services import library_index
+
+    db = await _session()
+    f = _real_file(f"{PREFIX}localize-last-good.mp4")
+    try:
+        db.add(Job(
+            id=f"{PREFIX}localize-failed",
+            job_type="tool:translate",
+            status="failed",
+            error_message="new rerun failed",
+            output_json=json.dumps({
+                "file": str(f),
+                "qc_status": "READY",
+                "target_aspect": "9:16",
+            }),
+        ))
+        await db.commit()
+
+        items = await library_index.gather(db)
+        item = _by_key(items, f"job:{PREFIX}localize-failed")
+        assert item is not None
+        assert item["producer"] == "Bản địa hóa"
+        assert await resolve_asset_path(f"{PREFIX}localize-failed", db) == f
+    finally:
+        await _cleanup(db)
+        f.unlink(missing_ok=True)
+        await db.close()
+
+
+async def test_stale_generated_video_reference_does_not_hide_last_good_job_file():
+    from backend.models.job import Job
+    from backend.services import library_index
+
+    db = await _session()
+    f = _real_file(f"{PREFIX}stale-gv-last-good.mp4")
+    try:
+        db.add(Job(
+            id=f"{PREFIX}stale-gv-job",
+            job_type="tool:translate",
+            status="failed",
+            output_json=json.dumps({
+                "file": str(f),
+                "generated_video_id": f"{PREFIX}missing-gv",
+                "qc_status": "READY",
+            }),
+        ))
+        await db.commit()
+
+        items = await library_index.gather(db)
+        assert _by_key(items, f"job:{PREFIX}stale-gv-job") is not None
+    finally:
+        await _cleanup(db)
+        f.unlink(missing_ok=True)
+        await db.close()
+
