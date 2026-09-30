@@ -267,6 +267,26 @@ export default function TTSProviderSection({ settings, updateSettings }) {
   return (
     <Stack spacing={2}>
       <Alert severity="info" variant="outlined">
+        <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>
+          Đây chỉ là kết nối TTS dùng chung
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          Provider / API key / Base URL / model / giọng mặc định nằm ở đây. AI dịch C6 và AI viết lại C7 nằm trong Kết nối AI + Hồ sơ bản địa hóa. Audio ducking, giữ nhạc nền, render và QC là lớp khác — không phải TTS.
+        </Typography>
+      </Alert>
+
+      <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+        <Typography variant="caption" color="text.secondary">Luồng cấu hình:</Typography>
+        <Typography variant="caption"><strong>1. AI dịch C6</strong></Typography>
+        <Typography variant="caption">→</Typography>
+        <Typography variant="caption"><strong>2. AI viết lại C7</strong></Typography>
+        <Typography variant="caption">→</Typography>
+        <Typography variant="caption"><strong>3. TTS tạo giọng</strong></Typography>
+        <Typography variant="caption">→</Typography>
+        <Typography variant="caption"><strong>4. Audio / render / QC</strong></Typography>
+      </Stack>
+
+      <Alert severity="info" variant="outlined">
         <Typography variant="body2" sx={{ fontWeight: 700 }}>TTS Connection Registry</Typography>
         <Typography variant="caption" color="text.secondary">
           Mỗi account/endpoint có connection ID riêng. Profile ghim connection cụ thể; TTS không tự failover sang provider khác vì đổi provider có thể đổi giọng/chất lượng.

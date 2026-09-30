@@ -17,6 +17,7 @@ from backend.core.http_range import (
     parse_range,
 )
 
+APP_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SIZE = 1000
 
 
@@ -162,7 +163,7 @@ def test_the_tool_download_route_is_range_aware_too():
     `<video src>`, so it is scrubbed as often as it is saved — it belongs on
     the shared streamer with the other four. This was missed on the first pass
     and found by asking which OTHER routes a `<video>` points at."""
-    src = pathlib.Path("backend/api/tools.py").read_text()
+    src = (APP_ROOT / "backend/api/tools.py").read_text()
     assert "serve_media_with_range" in src
     assert "request: Request" in src
 
@@ -182,7 +183,7 @@ def test_every_route_a_player_points_at_shares_one_streamer():
         "backend/api/tools.py": 1,       # /tools/download/{job_id}
     }
     for path, expected in players.items():
-        src = pathlib.Path(path).read_text()
+        src = (APP_ROOT / path).read_text()
         n = len(re.findall(r"serve_media_with_range\(", src))
         # videos.py also DEFINES it, so allow the definition line there.
         n -= 1 if path.endswith("videos.py") else 0

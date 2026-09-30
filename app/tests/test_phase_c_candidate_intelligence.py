@@ -154,11 +154,16 @@ async def test_radar_pipeline_passes_candidate_title_to_media_fetch(monkeypatch,
 
     seen = {}
 
-    monkeypatch.setattr(
-        pipeline,
-        "candidate_dir",
-        lambda platform, content_id: tmp_path / f"{platform}_{content_id}",
-    )
+    def fake_candidate_dir(platform, content_id):
+        # The real candidate_dir() owns directory creation (mkdir parents
+        # exist_ok). A stub that only returns a path silently drops that
+        # side effect, so the pipeline's metadata.json write fails with
+        # FileNotFoundError. Reproduce the contract, not just the return value.
+        path = tmp_path / f"{platform}_{content_id}"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    monkeypatch.setattr(pipeline, "candidate_dir", fake_candidate_dir)
 
     async def fake_media(platform, content_id, canonical_url, *, title_hint=""):
         seen.update({

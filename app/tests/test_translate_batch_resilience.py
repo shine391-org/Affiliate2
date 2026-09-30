@@ -2091,7 +2091,12 @@ async def test_translation_retry_switches_to_saved_fallback_provider(monkeypatch
     assert primary.max_retries == 0
     assert fallback.max_retries == 0
     assert any(e["event"] == "switch_fallback" and e["provider"] == "lmstudio" for e in events)
-    assert any(e["event"] == "attempt" and e["role"] == "fallback" for e in events)
+    # N-route taxonomy: the first fallback route is index 1, labelled
+    # "fallback-1". Assert the role set rather than a single literal, so the
+    # assertion holds for any route count.
+    attempt_roles = [e["role"] for e in events if e["event"] == "attempt"]
+    assert "primary" in attempt_roles
+    assert "fallback-1" in attempt_roles
 
 
 @pytest.mark.asyncio
