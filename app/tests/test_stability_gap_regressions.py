@@ -569,12 +569,23 @@ async def test_checkpoint_identity_binds_endpoint_and_fallback_config(tmp_path, 
         translation_fallback_provider="lmstudio",
         translation_fallback_model="fallback-a",
     )
-    primary = SimpleNamespace(
-        provider=AIProvider.COMPATIBLE,
-        model="primary-model",
-        base_url="https://primary-a.example/v1",
-    )
-    monkeypatch.setattr(ls, "_profile_ai_client", lambda *args: primary)
+    def route_clients(_settings, current_profile, _purpose="translation"):
+        return [
+            SimpleNamespace(
+                connection_name="compatible",
+                provider=AIProvider.COMPATIBLE,
+                model="primary-model",
+                base_url="https://primary-live.example/v1",
+            ),
+            SimpleNamespace(
+                connection_name="lmstudio",
+                provider=AIProvider.COMPATIBLE,
+                model=current_profile.translation_fallback_model,
+                base_url="http://127.0.0.1:1234/v1",
+            ),
+        ]
+
+    monkeypatch.setattr(ls, "_profile_ai_route_clients_compat", route_clients)
 
     calls = []
 
