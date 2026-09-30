@@ -30,6 +30,7 @@ from backend.services.download_browser_session import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+_AI_PROBE_TIMEOUT_S = 20.0
 
 
 def _validated_browser_override(browser: str, override: str | None) -> str | None:
@@ -860,13 +861,28 @@ async def upsert_ai_connection(body: AIConnectionRequest):
         encrypted = existing.get("api_key_encrypted")
         if body.api_key is not None:
             encrypted = encrypt(body.api_key) if body.api_key else None
+
+        # Edit semantics are PATCH-like even though this endpoint is POST:
+        # omitted optional fields preserve the existing connection, while an
+        # explicitly supplied null/blank value clears that field.
+        fields_set = body.model_fields_set
+        model = (
+            existing.get("model")
+            if "model" not in fields_set
+            else (body.model.strip() if body.model and body.model.strip() else None)
+        )
+        base_url = (
+            existing.get("base_url")
+            if "base_url" not in fields_set
+            else (body.base_url.strip() if body.base_url and body.base_url.strip() else None)
+        )
         key = decrypt_safe(encrypted) if encrypted else ""
         try:
             make_ai_client(
                 provider_name=provider,
                 api_key=key or "",
-                model=body.model or existing.get("model"),
-                base_url=body.base_url or existing.get("base_url"),
+                model=model,
+                base_url=base_url,
             )
         except Exception as exc:
             # Missing key is permitted while editing an already-stored keyed
@@ -877,8 +893,8 @@ async def upsert_ai_connection(body: AIConnectionRequest):
         connections[connection_id] = {
             "label": body.label.strip() or connection_id,
             "provider": provider,
-            "model": body.model or None,
-            "base_url": body.base_url.strip() if body.base_url else None,
+            "model": model,
+            "base_url": base_url,
             "api_key_encrypted": encrypted,
             "archived": False,
         }
@@ -968,10 +984,27 @@ async def upsert_tts_connection(body: TTSConnectionRequest):
         if body.api_key is not None:
             encrypted = encrypt(body.api_key) if body.api_key else None
 
-        voice = body.voice or None
-        model = body.model or None
-        base_url = body.base_url.strip() if body.base_url else None
-        region = body.region.strip() if body.region else None
+        fields_set = body.model_fields_set
+        voice = (
+            existing.get("voice")
+            if "voice" not in fields_set
+            else (body.voice.strip() if body.voice and body.voice.strip() else None)
+        )
+        model = (
+            existing.get("model")
+            if "model" not in fields_set
+            else (body.model.strip() if body.model and body.model.strip() else None)
+        )
+        base_url = (
+            existing.get("base_url")
+            if "base_url" not in fields_set
+            else (body.base_url.strip() if body.base_url and body.base_url.strip() else None)
+        )
+        region = (
+            existing.get("region")
+            if "region" not in fields_set
+            else (body.region.strip() if body.region and body.region.strip() else None)
+        )
         info = tts_service.PROVIDER_INFO[TTSProvider(provider)]
         if info.get("needs_key") and not encrypted:
             raise HTTPException(
@@ -1219,11 +1252,23 @@ async def test_ai_connection(body: AIProbeRequest):
             model=model,
             base_url=base_url,
         )
-        reply = await client.chat(
-            messages=[{"role": "user", "content": "Reply with exactly OK."}],
-            max_tokens=8,
+        # Probe owns its retry/timeout policy just like C6/C7. Do not let an SDK
+        # retry loop or a half-open local endpoint make the Settings UI hang.
+        client.max_retries = 0
+        reply = await asyncio.wait_for(
+            client.chat(
+                messages=[{"role": "user", "content": "Reply with exactly OK."}],
+                max_tokens=8,
+            ),
+            timeout=_AI_PROBE_TIMEOUT_S,
         )
         return {"ok": True, "response": (reply or "").strip()[:80]}
+    except asyncio.TimeoutError as exc:
+        logger.warning("AI connection test timed out after %.1fs", _AI_PROBE_TIMEOUT_S)
+        raise HTTPException(
+            status_code=408,
+            detail=f"Connection timed out after {int(_AI_PROBE_TIMEOUT_S)}s.",
+        ) from exc
     except Exception as exc:
         logger.warning("AI connection test failed: %s", exc)
         raise HTTPException(status_code=400, detail=f"Connection failed: {str(exc)[:200]}")
