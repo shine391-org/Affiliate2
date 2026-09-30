@@ -5,7 +5,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from backend.database import AsyncSessionLocal
 from backend.models.job import Job
@@ -135,12 +135,18 @@ async def get_job(job_id: str):
 
 @router.delete("/jobs/{job_id}")
 async def delete_job(job_id: str):
-    """Cancel a running job or delete a completed one."""
+    """Cancel a live job or delete an inactive activity row without rerun races."""
+    workspace_job = None
     async with AsyncSessionLocal() as db:
+        # Recovery claims also write the Job row. The SQLite write lock makes
+        # "observe state -> cancel/delete" atomic across predecessor/replacement
+        # backend processes, so a rerun cannot be claimed underneath deletion.
+        await db.execute(text("BEGIN IMMEDIATE"))
         result = await db.execute(select(Job).where(Job.id == job_id))
         j = result.scalar_one_or_none()
 
         if not j:
+            await db.rollback()
             raise HTTPException(status_code=404, detail="Job not found")
 
         if j.status in ("running", "pending", "awaiting_review"):
@@ -149,23 +155,26 @@ async def delete_job(job_id: str):
             await db.commit()
             return {"message": "Job cancelled"}
 
-        # A successful tool run is not a log entry — it IS the Library item for
-        # the file it wrote, and the asset endpoint resolves that file BY THIS
-        # ROW's id. Deleting it here would take the user's captioned cut off
-        # every surface while the bytes sat on disk forever. Point at the door
-        # that removes both.
         from backend.services.job_retention import is_library_item
         if is_library_item(j):
+            await db.rollback()
             raise HTTPException(
                 status_code=409,
                 detail=("This job produced a file in your Library. Delete it from "
                         "there (that removes the file too)."),
             )
 
-        _drop_localization_workspace(j)
+        workspace_job = j.id if j.job_type == "tool:translate" else None
         await db.delete(j)
         await db.commit()
-        return {"message": "Job deleted"}
+
+    if workspace_job:
+        try:
+            from backend.services.localization_stage_service import cleanup_localization_workspace
+            cleanup_localization_workspace(workspace_job)
+        except (OSError, ValueError):
+            logger.warning("Could not remove localization workspace for job %s", workspace_job)
+    return {"message": "Job deleted"}
 
 
 class BulkDeleteRequest(BaseModel):
@@ -186,7 +195,9 @@ async def bulk_delete_jobs(body: BulkDeleteRequest):
     deleted = 0
     cancelled = 0
     kept_library = 0
+    cleanup_ids: list[str] = []
     async with AsyncSessionLocal() as db:
+        await db.execute(text("BEGIN IMMEDIATE"))
         result = await db.execute(select(Job).where(Job.id.in_(body.job_ids)))
         jobs = result.scalars().all()
         for j in jobs:
@@ -197,8 +208,17 @@ async def bulk_delete_jobs(body: BulkDeleteRequest):
             elif is_library_item(j):
                 kept_library += 1
             else:
-                _drop_localization_workspace(j)
+                if j.job_type == "tool:translate":
+                    cleanup_ids.append(j.id)
                 await db.delete(j)
                 deleted += 1
         await db.commit()
+
+    if cleanup_ids:
+        from backend.services.localization_stage_service import cleanup_localization_workspace
+        for job_id in cleanup_ids:
+            try:
+                cleanup_localization_workspace(job_id)
+            except (OSError, ValueError):
+                logger.warning("Could not remove localization workspace for job %s", job_id)
     return {"deleted": deleted, "cancelled": cancelled, "kept_library": kept_library}
