@@ -17,7 +17,8 @@ from backend.core.http_range import (
     parse_range,
 )
 
-APP_ROOT = pathlib.Path(__file__).resolve().parents[1]\nSIZE = 1000
+APP_ROOT = pathlib.Path(__file__).resolve().parents[1]
+SIZE = 1000
 
 
 def test_no_header_means_serve_the_whole_file():
