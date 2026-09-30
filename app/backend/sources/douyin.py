@@ -523,24 +523,31 @@ class DouyinProvider:
                         session.cookie_dict,
                         session.ms_token,
                         creator_id,
-                        cursor,
+                        cursor_value,
                         page_size,
                     )
                     page_items = payload.get("aweme_list") or []
                     if not isinstance(page_items, list) or not page_items:
+                        has_more = False
+                        next_cursor = None
                         break
                     raw_awemes.extend(
                         item for item in page_items if isinstance(item, dict)
                     )
-                    if not payload.get("has_more"):
+                    has_more = bool(payload.get("has_more"))
+                    next_cursor = str(payload.get("max_cursor") or "") or None
+                    if not has_more:
+                        next_cursor = None
                         break
-                    next_cursor = str(payload.get("max_cursor") or "")
                     if not next_cursor or next_cursor in seen_cursor:
+                        has_more = False
+                        next_cursor = None
                         break
                     seen_cursor.add(next_cursor)
-                    cursor = next_cursor
-                    if len(raw_awemes) < limit:
-                        await asyncio.sleep(0.4)
+                    if len(raw_awemes) >= limit:
+                        break
+                    cursor_value = next_cursor
+                    await asyncio.sleep(0.4)
             except PermissionError:
                 # Never navigate the user's already-open authenticated Douyin
                 # tab just to perform DOM recovery. Borrow the session cookies
