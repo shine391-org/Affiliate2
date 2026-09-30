@@ -140,6 +140,10 @@ async def test_elevenlabs_voice_discovery_also_returns_selectable_models(monkeyp
         assert api_key == "secret"
         return [{"model_id": "eleven_multilingual_v2", "name": "Multilingual v2"}]
 
+    async def no_db_lookup():
+        raise AssertionError("unsaved TTS discovery must not read UserSettings")
+
+    monkeypatch.setattr(settings_api, "_load_saved_settings", no_db_lookup)
     monkeypatch.setattr(settings_api, "_tts_probe_key", lambda body: _async_value("secret"))
     monkeypatch.setattr(tts_service, "list_voices", fake_voices)
     monkeypatch.setattr(eleven, "list_models", fake_models)
@@ -248,6 +252,10 @@ async def test_settings_tts_test_uses_unsaved_plaintext_key(monkeypatch):
         seen.update(kwargs)
         return {"ok": True, "provider": "elevenlabs", "authenticated": True, "message": "ready"}
 
+    async def no_db_lookup():
+        raise AssertionError("unsaved TTS test must not read UserSettings")
+
+    monkeypatch.setattr(settings_api, "_load_saved_settings", no_db_lookup)
     monkeypatch.setattr(tts_service, "test_tts_connection", fake_test)
     body = settings_api.TTSProbeRequest(
         provider="elevenlabs",
