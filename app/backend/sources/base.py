@@ -25,6 +25,8 @@ class SourceProviderResult:
     items: list[dict] = field(default_factory=list)
     error: str | None = None
     provider: str | None = None
+    has_more: bool = False
+    next_cursor: str | None = None
 
     def __post_init__(self) -> None:
         # A provider result may never claim another platform's rows.
