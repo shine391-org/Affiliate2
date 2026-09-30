@@ -30,9 +30,9 @@ test("different Douyin cards retain different canonical identities", () => {
 })
 
 
-test("channel detail requests outlive the bounded backend operation", () => {
+test("channel detail requests outlive the bounded backend operation without hard-coding the first 18 videos", () => {
   assert.equal(channelRequestConfig.timeout, 50_000)
-  assert.equal(channelRequestConfig.params.limit, 18)
+  assert.equal("params" in channelRequestConfig, false)
 })
 
 
