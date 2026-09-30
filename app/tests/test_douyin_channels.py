@@ -88,7 +88,11 @@ async def test_douyin_channel_video_response_preserves_exact_identity(monkeypatc
     monkeypatch.setattr(channels, "AsyncSessionLocal", lambda: _DbSession(_channel()))
     monkeypatch.setattr(channels, "_get_douyin_provider", AsyncMock(return_value=provider))
 
-    result = await channels.get_channel_videos("db-channel", limit=18)
+    # page_token is declared with a FastAPI Query(None) default. Calling the
+    # handler directly (as this unit test does) bypasses FastAPI's dependency
+    # resolution, so the sentinel object itself would arrive here. Pass the
+    # resolved default explicitly, exactly as the framework would.
+    result = await channels.get_channel_videos("db-channel", page_token=None, limit=18)
 
     video = result["videos"][0]
     assert video["platform"] == "douyin"
