@@ -1,6 +1,5 @@
 export const channelRequestConfig = Object.freeze({
   timeout: 50_000,
-  params: Object.freeze({ limit: 18 }),
 })
 
 export function canonicalChannelVideoUrl(platform, video = {}) {
