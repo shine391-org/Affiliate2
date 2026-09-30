@@ -193,6 +193,7 @@ async def set_publish_approval(
     this exact GeneratedVideo and allows a later /upload action to run.
     """
     approved = body.approved
+    await db.execute(text("BEGIN IMMEDIATE"))
     result = await db.execute(
         select(GeneratedVideo).where(GeneratedVideo.id == video_id)
     )
@@ -242,7 +243,6 @@ async def upload_video(video_id: str, body: dict, db: AsyncSession = Depends(get
         normalize_publish_platforms, published_destinations, disconnected_destinations,
         approved_artifact_error, uncertain_publication_destinations,
     )
-    from backend.agents.job_helper import create_job
     from backend.core.task_runner import run_upload as task_upload, dispatch
     from backend.models.user_settings import UserSettings
     from backend.models.job import Job
@@ -292,6 +292,10 @@ async def upload_video(video_id: str, body: dict, db: AsyncSession = Depends(get
         }
 
     async with _publish_queue_lock:
+        # asyncio.Lock only covers this interpreter. BEGIN IMMEDIATE serializes
+        # predecessor + replacement backends too, so duplicate-check and Job
+        # insertion are one cross-process critical section.
+        await db.execute(text("BEGIN IMMEDIATE"))
         video = await db.get(GeneratedVideo, video_id)
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
@@ -341,11 +345,20 @@ async def upload_video(video_id: str, body: dict, db: AsyncSession = Depends(get
                     and set(submitted.get("platforms", [])) & set(platforms)):
                 raise HTTPException(status_code=409,
                                     detail=f"Publish job already pending/running: {existing.id}")
-        job = await create_job("upload", user_id, {
-            "generated_video_id": video_id,
-            "platforms": platforms,
-            "publish_options": publish_options,
-        })
+        job = Job(
+            user_id=user_id,
+            job_type="upload",
+            status="pending",
+            input_json=json.dumps({
+                "generated_video_id": video_id,
+                "platforms": platforms,
+                "publish_options": publish_options,
+            }),
+        )
+        db.add(job)
+        await db.commit()
+        await db.refresh(job)
+
         dispatch(task_upload(
             job_id=job.id,
             generated_video_id=video_id,
