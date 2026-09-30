@@ -2635,3 +2635,118 @@ async def test_translation_checkpoint_restores_sticky_fallback_and_audit(monkeyp
     assert audit["attempt_count"] == 2
     assert audit["success_count"] == 1
     assert audit["failure_chain"][0]["connection_id"] == "primary"
+
+
+@pytest.mark.asyncio
+async def test_c7_timing_failure_reports_last_attempted_route_when_all_rewrite_routes_fail(monkeypatch, tmp_path):
+    tx = LocalizationTranscript(segments=[
+        LocalizationSegment(
+            id="s1", source_text="x", translated_text="dịch",
+            source_start_ms=0, source_end_ms=500, translation_status="success",
+        ),
+    ])
+    _patch_dub_io(monkeypatch, tmp_path, [2000])
+    monkeypatch.setattr(
+        "backend.services.video_utils.probe_duration",
+        lambda *a, **k: 0.5,
+    )
+
+    primary = SimpleNamespace(connection_name="hermes-main")
+    fallback = SimpleNamespace(connection_name="lmstudio-qwen")
+    monkeypatch.setattr(
+        ls,
+        "_profile_ai_route_clients_compat",
+        lambda *_args, **_kwargs: [primary, fallback],
+    )
+
+    async def all_routes_failed_without_fit(*args, route_state=None, **kwargs):
+        if route_state is not None:
+            route_state.failure_chain = [
+                {"connection_id": "hermes-main", "error_type": "TimeoutError", "error": "down"},
+                {"connection_id": "lmstudio-qwen", "error_type": "ConnectionError", "error": "down"},
+            ]
+            # Transport exhaustion does not make any failed route sticky.
+            route_state.sticky_index = 0
+            route_state.attempt_count = 2
+            route_state.success_count = 0
+        return False
+
+    monkeypatch.setattr(ls, "_adapt_chunk_items", all_routes_failed_without_fit)
+
+    with pytest.raises(ls.LocalizationTimingError) as exc:
+        await ls.synthesize_timed_dub(
+            tx,
+            source_media=tmp_path / "source.mp4",
+            target_language="Vietnamese",
+            profile=_profile(
+                dub_rewrite_attempts=1,
+                dub_speed_max=1.30,
+                video_retime_mode="off",
+            ),
+            user_settings=object(),
+            work_dir=tmp_path / "work",
+        )
+
+    audit = exc.value.rewrite_ai
+    assert audit["selected_connection_id"] == "lmstudio-qwen"
+    assert audit["sticky_route_index"] == 0
+    assert audit["attempted"] is True
+    assert audit["success_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_all_malformed_translation_routes_attach_terminal_route_audit(monkeypatch):
+    class InvalidClient:
+        provider = SimpleNamespace(value="compatible")
+        max_retries = None
+
+        def __init__(self, name):
+            self.connection_name = name
+            self.model = name + "-model"
+            self.calls = 0
+
+        async def chat(self, **kwargs):
+            self.calls += 1
+            return '{"not":"a translation array"}'
+
+    primary = InvalidClient("hermes-main")
+    fallback = InvalidClient("lmstudio-qwen")
+    monkeypatch.setattr(
+        ls,
+        "_profile_ai_route_clients_compat",
+        lambda *_args, **_kwargs: [primary, fallback],
+    )
+
+    profile = _profile(
+        translation_routes=[
+            {"connection_id": "hermes-main", "model": "hermes-main-model"},
+            {"connection_id": "lmstudio-qwen", "model": "lmstudio-qwen-model"},
+        ],
+        translation_retry_attempts=1,
+        translation_attempt_timeout_s=10,
+        translation_total_timeout_s=20,
+    )
+    transcript = LocalizationTranscript(segments=[
+        LocalizationSegment(
+            id="s1", source_text="hello",
+            source_start_ms=0, source_end_ms=500,
+        ),
+    ])
+
+    with pytest.raises(RuntimeError, match="failed for every segment") as exc:
+        await ls.translate_transcript(
+            transcript,
+            target_language="Vietnamese",
+            profile=profile,
+            user_settings=SimpleNamespace(ai_provider="compatible"),
+            for_dub=True,
+        )
+
+    assert primary.calls == 1
+    assert fallback.calls == 1
+    assert [item["connection_id"] for item in exc.value.ai_failure_chain] == [
+        "hermes-main", "lmstudio-qwen",
+    ]
+    assert exc.value.ai_selected_connection == "lmstudio-qwen"
+    assert exc.value.ai_attempt_count == 2
+    assert exc.value.ai_success_count == 2
