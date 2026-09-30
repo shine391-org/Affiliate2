@@ -501,3 +501,64 @@ async def test_creator_dom_fallback_rejects_unassociated_footer_links():
 
     assert items == []
 
+
+
+
+@pytest.mark.asyncio
+async def test_creator_snapshot_partial_last_native_page_does_not_skip_cursor_rows(monkeypatch):
+    provider = DouyinProvider()
+    counts = []
+    cursors = []
+
+    session = SimpleNamespace(
+        context=object(),
+        page=object(),
+        created_page=True,
+        cookie_dict={"UIFID": "session-derived"},
+        ms_token="token",
+    )
+
+    @asynccontextmanager
+    async def fake_session(*args, **kwargs):
+        yield session
+
+    async def fake_posts(
+        _context, _page, _cookies, _token, _creator_id, cursor, count,
+    ):
+        cursors.append(cursor)
+        counts.append(count)
+        page_no = len(counts)
+        start = (page_no - 1) * 18 + 1
+        return {
+            "aweme_list": [
+                {
+                    "aweme_id": str(start + i),
+                    "desc": f"Video {start + i}",
+                    "author": {"sec_uid": "creator", "nickname": "Creator"},
+                    "statistics": {},
+                    "video": {},
+                }
+                for i in range(count)
+            ],
+            "has_more": True,
+            "max_cursor": f"cursor-{page_no}",
+        }
+
+    monkeypatch.setattr("backend.sources.douyin.asyncio.sleep", AsyncMock())
+    with patch("backend.sources.douyin.open_douyin_cdp_session", fake_session), \
+         patch.object(provider, "_fetch_creator_profile", new=AsyncMock(return_value={
+             "user": {"nickname": "Creator"},
+             "stats": {"aweme_count": 100},
+         })), \
+         patch.object(provider, "_fetch_creator_posts", new=fake_posts):
+        _info, history = await provider.creator_snapshot(
+            "creator",
+            limit=50,
+            cursor="cursor-start",
+        )
+
+    assert cursors == ["cursor-start", "cursor-1", "cursor-2"]
+    assert counts == [18, 18, 14]
+    assert len(history.items) == 50
+    assert history.has_more is True
+    assert history.next_cursor == "cursor-3"
