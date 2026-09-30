@@ -1375,3 +1375,58 @@ async def test_ai_connection_probe_has_hard_timeout_and_disables_sdk_retry(monke
     assert getattr(exc.value, "status_code", None) == 408
     assert "timed out" in str(getattr(exc.value, "detail", "")).lower()
     assert client.max_retries == 0
+
+
+@pytest.mark.asyncio
+async def test_explicit_invalid_ai_clear_is_rejected_without_mutating_saved_connection(monkeypatch):
+    from backend.core.crypto import encrypt
+    from backend.models.user_settings import UserSettings
+
+    row = UserSettings(user_id="local")
+    row.ai_provider = "compatible"
+    row.ai_connection_id = "cloud-compatible"
+    row.ai_model = "model-x"
+    row.ai_base_url = "https://api.example.com/v1"
+    row.ai_api_key_encrypted = encrypt("saved-key")
+    row.ai_connections_json = json.dumps({
+        "cloud-compatible": {
+            "label": "Cloud Compatible",
+            "provider": "compatible",
+            "model": "model-x",
+            "base_url": "https://api.example.com/v1",
+            "api_key_encrypted": row.ai_api_key_encrypted,
+            "archived": False,
+        },
+    })
+
+    class Result:
+        def scalar_one_or_none(self):
+            return row
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+        async def execute(self, _query):
+            return Result()
+        def add(self, _row):
+            return None
+        async def commit(self):
+            return None
+
+    monkeypatch.setattr(settings_api, "AsyncSessionLocal", lambda: FakeSession())
+    before = row.ai_connections_json
+
+    with pytest.raises(Exception) as exc:
+        await settings_api.upsert_ai_connection(settings_api.AIConnectionRequest(
+            connection_id="cloud-compatible",
+            label="Cloud Compatible",
+            provider="compatible",
+            model=None,
+            activate=False,
+        ))
+
+    assert getattr(exc.value, "status_code", None) == 400
+    assert "model" in str(getattr(exc.value, "detail", "")).lower()
+    assert row.ai_connections_json == before
