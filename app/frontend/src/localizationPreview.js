@@ -163,7 +163,9 @@ export function resolveAiStageSelection(metadata = {}, effective = {}, stage = "
   const routesKey = rewrite ? "rewrite_routes" : "translation_routes"
   const audit = metadata?.[aiKey] || {}
   const routes = audit.route_chain || metadata?.[routesKey] || effective?.[routesKey] || []
-  const connectionId = audit.selected_connection_id || metadata?.[providerKey] || effective?.[providerKey] || null
+  const attempted = audit.attempted === true
+  const auditedConnectionId = attempted ? (audit.selected_connection_id || null) : null
+  const connectionId = auditedConnectionId || metadata?.[providerKey] || effective?.[providerKey] || null
   const selectedRoute = Array.isArray(routes)
     ? routes.find((route) => route?.connection_id === connectionId)
     : null
@@ -171,6 +173,8 @@ export function resolveAiStageSelection(metadata = {}, effective = {}, stage = "
   return {
     connectionId,
     model: selectedRoute?.model || metadata?.[modelKey] || effective?.[modelKey] || null,
+    attempted,
+    isActual: Boolean(auditedConnectionId),
     failureChain,
     failureCount: failureChain.length,
   }
