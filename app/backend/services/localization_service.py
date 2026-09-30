@@ -585,6 +585,15 @@ def _append_ai_failure(route_state: _AIStageRouteState | None, failure: dict) ->
         del route_state.failure_chain[:-_MAX_AI_FAILURE_HISTORY]
 
 
+def _selected_ai_connection_id(route_state: _AIStageRouteState | None) -> str | None:
+    """Return only a connection that was actually attempted by the stage."""
+    if route_state is None or route_state.attempt_count <= 0:
+        return None
+    if route_state.success_count <= 0 and route_state.failure_chain:
+        return route_state.failure_chain[-1].get("connection_id")
+    return getattr(route_state.current, "connection_name", None)
+
+
 async def prepare_semantic_transcript(
     transcript: LocalizationTranscript,
     *,
@@ -1003,7 +1012,7 @@ async def _translate_batch_resilient(
         # before recursively shrinking the batch; otherwise one unhealthy model
         # can silently degrade every singleton back to source text while a
         # configured fallback is never tried.
-        if route_state is not None and route_state.sticky_index + 1 < len(route_state.clients):
+        if route_state is not None:
             current = route_state.current
             _append_ai_failure(route_state, {
                 "connection_id": getattr(current, "connection_name", None),
@@ -1013,21 +1022,22 @@ async def _translate_batch_resilient(
                 "error_type": "InvalidStructuredOutput",
                 "error": str(exc)[:240],
             })
-            route_state.sticky_index += 1
-            next_client = route_state.current
-            await _emit_ai_progress(progress_cb, {
-                "event": "switch_fallback",
-                "stage": "translation",
-                "reason": "invalid_structured_output",
-                "provider": getattr(next_client, "connection_name", None) or getattr(getattr(next_client, "provider", None), "value", str(getattr(next_client, "provider", ""))),
-                "model": getattr(next_client, "model", None),
-            })
-            return await _translate_batch_resilient(
-                ai, batch, route_state=route_state,
-                target_language=target_language, context=context,
-                profile=profile, for_dub=for_dub, fallback_ai=fallback_ai,
-                progress_cb=progress_cb, deadline_at=deadline_at,
-            )
+            if route_state.sticky_index + 1 < len(route_state.clients):
+                route_state.sticky_index += 1
+                next_client = route_state.current
+                await _emit_ai_progress(progress_cb, {
+                    "event": "switch_fallback",
+                    "stage": "translation",
+                    "reason": "invalid_structured_output",
+                    "provider": getattr(next_client, "connection_name", None) or getattr(getattr(next_client, "provider", None), "value", str(getattr(next_client, "provider", ""))),
+                    "model": getattr(next_client, "model", None),
+                })
+                return await _translate_batch_resilient(
+                    ai, batch, route_state=route_state,
+                    target_language=target_language, context=context,
+                    profile=profile, for_dub=for_dub, fallback_ai=fallback_ai,
+                    progress_cb=progress_cb, deadline_at=deadline_at,
+                )
 
         if len(batch) == 1:
             logger.warning("Translation shape failed for %s: %s", batch[0].id, exc)
@@ -1197,13 +1207,15 @@ async def translate_transcript(
                 seg.qc_status = "review" if idx in failed else "pass"
 
     if failed_total == len(out.segments):
-        raise RuntimeError("Translation failed for every segment.")
+        exc = RuntimeError("Translation failed for every segment.")
+        raise _attach_ai_failure_context(exc, "translation", route_state)
     if failed_total and profile.qc_profile == "strict":
-        raise RuntimeError(
+        exc = RuntimeError(
             f"Translation left {failed_total} segment(s) untranslated under strict QC."
         )
+        raise _attach_ai_failure_context(exc, "translation", route_state)
     out.metadata["translation_ai"] = {
-        "selected_connection_id": getattr(route_state.current, "connection_name", None),
+        "selected_connection_id": _selected_ai_connection_id(route_state),
         "route_chain": route_fingerprint,
         "failure_chain": list(route_state.failure_chain),
         "sticky_route_index": route_state.sticky_index,
@@ -2497,10 +2509,7 @@ async def synthesize_timed_dub(
             rewrite_count=rewrite_count,
             all_issues=[*issues, *unresolved],
             rewrite_ai={
-                "selected_connection_id": (
-                    getattr(route_state.current, "connection_name", None)
-                    if route_state is not None else None
-                ),
+                "selected_connection_id": _selected_ai_connection_id(route_state),
                 "failure_chain": (
                     list(route_state.failure_chain)
                     if route_state is not None else []
@@ -2584,10 +2593,7 @@ async def synthesize_timed_dub(
         "video_slowdown": video_slowdown,
         "issues": issues,
         "rewrite_ai": {
-            "selected_connection_id": (
-                getattr(route_state.current, "connection_name", None)
-                if route_state is not None else None
-            ),
+            "selected_connection_id": _selected_ai_connection_id(route_state),
             "failure_chain": (
                 list(route_state.failure_chain)
                 if route_state is not None else []
