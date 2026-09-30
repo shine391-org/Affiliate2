@@ -10,6 +10,7 @@ import {
   maskPreset,
   pickPreviewReframeMethod,
   previewObjectFit,
+  resolveAiStageSelection,
   resolveProfileTargetAspect,
 } from "./localizationPreview.js"
 
@@ -168,4 +169,44 @@ test("canonical backend fields win over the manifest stage fallback", () => {
   })
   assert.equal(failure.step, "final_render")
   assert.equal(failure.message, "ffmpeg exit code 1")
+})
+
+
+test("AI stage selection prefers actual fallback audit over configured primary", () => {
+  const metadata = {
+    translation_provider: "hermes-main",
+    translation_model: "longcat",
+    translation_routes: [
+      { connection_id: "hermes-main", model: "longcat" },
+      { connection_id: "lmstudio-qwen", model: "qwen3:8b" },
+    ],
+    translation_ai: {
+      selected_connection_id: "lmstudio-qwen",
+      failure_chain: [{ connection_id: "hermes-main", error_type: "TimeoutError" }],
+    },
+  }
+  const selected = resolveAiStageSelection(metadata, {}, "translation")
+  assert.equal(selected.connectionId, "lmstudio-qwen")
+  assert.equal(selected.model, "qwen3:8b")
+  assert.equal(selected.failureCount, 1)
+})
+
+test("C7 stage selection still resolves actual fallback on failed dubbing metadata", () => {
+  const metadata = {
+    rewrite_provider: "hermes-main",
+    rewrite_model: "longcat",
+    rewrite_routes: [
+      { connection_id: "hermes-main", model: "longcat" },
+      { connection_id: "lmstudio-gemma", model: "gemma-4-e4b" },
+    ],
+    rewrite_ai: {
+      selected_connection_id: "lmstudio-gemma",
+      sticky_route_index: 1,
+      failure_chain: [{ connection_id: "hermes-main", error_type: "ServiceUnavailable" }],
+    },
+  }
+  const selected = resolveAiStageSelection(metadata, {}, "rewrite")
+  assert.equal(selected.connectionId, "lmstudio-gemma")
+  assert.equal(selected.model, "gemma-4-e4b")
+  assert.equal(selected.failureCount, 1)
 })
