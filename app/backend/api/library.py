@@ -25,10 +25,11 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db
+from backend.models.generated_video import GeneratedVideo
 from backend.models.job import Job
 from backend.services import library_index
 from backend.services.library_taxonomy import classify, taxonomy_payload
@@ -317,49 +318,126 @@ def _unlink_job_output(job: Job) -> None:
         path.unlink(missing_ok=True)
 
 
+def _job_output_path(job: Job) -> Path | None:
+    if not job.output_json:
+        return None
+    try:
+        out = json.loads(job.output_json)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(out, dict) or not out.get("file"):
+        return None
+    from backend.api.videos import _safe_resolve_path
+    try:
+        return _safe_resolve_path(str(out["file"]))
+    except HTTPException:
+        logger.warning("Skipped unsafe file path for job %s", job.id)
+        return None
+
+
+async def _job_generated_video_exists(job: Job, db: AsyncSession) -> bool:
+    if not job.output_json:
+        return False
+    try:
+        out = json.loads(job.output_json)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    generated_id = out.get("generated_video_id") if isinstance(out, dict) else None
+    return bool(generated_id and await db.get(GeneratedVideo, str(generated_id)))
+
+
+async def _unlink_if_unreferenced(path: Path | None, db: AsyncSession) -> None:
+    if path is None or not path.is_file():
+        return
+    from backend.api.videos import _generated_path_still_referenced
+    if await _generated_path_still_referenced(db, path):
+        return
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        logger.warning("Could not delete Library artifact %s", path)
+
+
 @router.delete("/asset/{job_id}")
 async def delete_asset(job_id: str, db: AsyncSession = Depends(get_db)):
-    """Delete a tool output's file and its job row.
-
-    Idempotent in the way that matters: a stale UI calling twice gets a 404 on
-    the second call, but the first always cleans up everything it could.
-    """
+    """Delete a tool asset atomically with respect to recovery/promotion."""
+    await db.execute(text("BEGIN IMMEDIATE"))
     job = await db.get(Job, job_id)
     if not job or classify(job.job_type) is None:
+        await db.rollback()
         raise HTTPException(status_code=404, detail="Asset not found")
-    _unlink_job_output(job)
-    _drop_poster_cache(job_id)
-    _drop_localization_workspace(job)
+    if job.status in {"running", "pending", "awaiting_review"}:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Asset đang được xử lý/chờ duyệt; hãy hủy hoặc hoàn tất tác vụ trước khi xóa.",
+        )
+    if await _job_generated_video_exists(job, db):
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Đầu ra này đã có bản ghi video Xuất bản. Hãy xóa video đó thay vì xóa job nền.",
+        )
+
+    file_path = _job_output_path(job)
+    workspace_id = job.id if job.job_type == "tool:translate" else None
     await db.delete(job)
     await db.commit()
+
+    _drop_poster_cache(job_id)
+    if workspace_id:
+        try:
+            from backend.services.localization_stage_service import cleanup_localization_workspace
+            cleanup_localization_workspace(workspace_id)
+        except (OSError, ValueError):
+            logger.warning("Could not remove localization workspace for job %s", workspace_id)
+    await _unlink_if_unreferenced(file_path, db)
     return {"ok": True}
 
 
 @router.post("/bulk-delete")
 async def bulk_delete_assets(body: dict, db: AsyncSession = Depends(get_db)):
-    """Delete many tool outputs at once. Body: {"job_ids": [...]}.
-
-    404 only when NONE of the requested ids exist; a partial match succeeds
-    with `deleted` reflecting what actually went, because a selection spanning
-    several stores is normal and failing the whole call would strand it.
-    """
+    """Delete many tool outputs without racing live recovery/promotion."""
     job_ids = body.get("job_ids", [])
     if not job_ids or not isinstance(job_ids, list):
         raise HTTPException(status_code=400, detail="job_ids must be a non-empty list")
     if len(job_ids) > 200:
         raise HTTPException(status_code=400, detail="Cannot delete more than 200 assets at once")
 
+    await db.execute(text("BEGIN IMMEDIATE"))
     rows = (await db.execute(select(Job).where(Job.id.in_(job_ids)))).scalars().all()
     rows = [j for j in rows if classify(j.job_type) is not None]
     if not rows:
+        await db.rollback()
         raise HTTPException(status_code=404, detail="No matching assets found")
 
-    deleted = 0
+    cleanup: list[tuple[str, Path | None, bool]] = []
+    blocked = 0
     for job in rows:
-        _unlink_job_output(job)
-        _drop_poster_cache(job.id)
-        _drop_localization_workspace(job)
+        if job.status in {"running", "pending", "awaiting_review"}:
+            blocked += 1
+            continue
+        if await _job_generated_video_exists(job, db):
+            blocked += 1
+            continue
+        cleanup.append((
+            job.id,
+            _job_output_path(job),
+            job.job_type == "tool:translate",
+        ))
         await db.delete(job)
-        deleted += 1
+
     await db.commit()
-    return {"ok": True, "deleted": deleted}
+
+    for job_id, file_path, is_localization in cleanup:
+        _drop_poster_cache(job_id)
+        if is_localization:
+            try:
+                from backend.services.localization_stage_service import cleanup_localization_workspace
+                cleanup_localization_workspace(job_id)
+            except (OSError, ValueError):
+                logger.warning("Could not remove localization workspace for job %s", job_id)
+        await _unlink_if_unreferenced(file_path, db)
+
+    return {"ok": True, "deleted": len(cleanup), "blocked": blocked}
+
