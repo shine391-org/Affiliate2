@@ -1187,10 +1187,16 @@ async def _probe_key(body: AIProbeRequest) -> str:
     if body.api_key is not None:
         return body.api_key.strip()
 
+    requested_provider = (body.provider or "").lower().strip()
+    if not body.connection_id:
+        # A brand-new AI form must not borrow a saved account's credential.
+        # Local compatible runtimes remain keyless; cloud forms supply a key.
+        return ""
+
     s = await _load_saved_settings()
     connection = _ai_probe_connection(s, body) if s else {}
     provider = (
-        (body.provider or "").lower().strip()
+        requested_provider
         or str(connection.get("provider") or "").lower().strip()
     )
     if provider in {"ollama", "lmstudio", "vllm"}:
@@ -1229,7 +1235,7 @@ async def discover_ai_models(body: AIProbeRequest):
         COMPATIBLE_PRESETS, compatible_base_url, list_openai_compatible_models,
     )
 
-    saved = await _load_saved_settings()
+    saved = await _load_saved_settings() if body.connection_id else None
     connection = _ai_probe_connection(saved, body) if saved else {}
     provider = (
         (body.provider or "").lower().strip()
@@ -1264,7 +1270,7 @@ async def test_ai_connection(body: AIProbeRequest):
     """Test the exact provider/base/model values the user is editing."""
     from backend.core.ai_provider import make_ai_client
 
-    saved = await _load_saved_settings()
+    saved = await _load_saved_settings() if body.connection_id else None
     connection = _ai_probe_connection(saved, body) if saved else {}
     key = await _probe_key(body)
     provider_name = (body.provider or connection.get("provider") or "").strip().lower()
