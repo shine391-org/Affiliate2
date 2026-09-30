@@ -220,6 +220,45 @@ async def set_publish_approval(
         video.publish_approval_artifact_sha256 = artifact_hash
         video.publish_approved_at = datetime.utcnow()
     else:
+        from backend.models.job import Job
+        from backend.models.phase_g import PublicationRecord
+
+        active_uploads = (await db.execute(
+            select(Job).where(
+                Job.job_type == "upload",
+                Job.status.in_(["pending", "running"]),
+            )
+        )).scalars().all()
+        for upload_job in active_uploads:
+            try:
+                submitted = json.loads(upload_job.input_json or "{}")
+            except (TypeError, ValueError):
+                continue
+            if (
+                isinstance(submitted, dict)
+                and str(submitted.get("generated_video_id") or "") == video_id
+            ):
+                await db.rollback()
+                raise HTTPException(
+                    status_code=409,
+                    detail="Không thể thu hồi duyệt khi video đang có tác vụ xuất bản chạy/chờ.",
+                )
+
+        uncertain = (await db.execute(
+            select(PublicationRecord.id).where(
+                PublicationRecord.generated_video_id == video_id,
+                PublicationRecord.status.in_(
+                    ["PUBLISHING", "PERSISTENCE_ERROR", "OUTCOME_UNKNOWN"]
+                ),
+            )
+        )).first()
+        if uncertain:
+            await db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="Không thể thu hồi duyệt khi kết quả xuất bản chưa chắc chắn; hãy đối soát nền tảng trước.",
+            )
+
         video.publish_approved_at = None
         video.publish_approval_artifact_sha256 = None
     await db.commit()
@@ -539,11 +578,11 @@ async def delete_video(video_id: str, db: AsyncSession = Depends(get_db)):
             VideoMetrics.generated_video_id == video_id,
         )
     )).first()
-    action_history = (await db.execute(
-        select(ContentAction.id).where(
+    action_rows = (await db.execute(
+        select(ContentAction).where(
             ContentAction.generated_video_id == video_id,
         )
-    )).first()
+    )).scalars().all()
     legacy_published = bool(
         video.status == "uploaded"
         or video.youtube_video_id
@@ -551,7 +590,7 @@ async def delete_video(video_id: str, db: AsyncSession = Depends(get_db)):
         or video.instagram_media_id
         or bool(_safe_json(video.uploaded_platforms_json, []))
     )
-    if publication_history or metrics_history or action_history or legacy_published:
+    if publication_history or metrics_history or legacy_published:
         await db.rollback()
         raise HTTPException(
             status_code=409,
@@ -598,6 +637,9 @@ async def delete_video(video_id: str, db: AsyncSession = Depends(get_db)):
 
     if owner_job is not None:
         await db.delete(owner_job)
+    for action in action_rows:
+        action.generated_video_id = None
+        action.mapping_status = "unmapped_deleted"
     await db.delete(video)
     await db.commit()
 
