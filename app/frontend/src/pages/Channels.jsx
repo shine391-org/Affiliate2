@@ -362,34 +362,81 @@ function ChannelDetail({ channel, onBack }) {
   // Videos open in browser (no embedded iframe — avoids YouTube bot detection)
   const [page, setPage] = useState(0)
   const [rowsPerPage, setRowsPerPage] = useState(18)
+  const [pageTokens, setPageTokens] = useState({ 0: null })
+  const [hasMore, setHasMore] = useState(false)
+  const [nextPageToken, setNextPageToken] = useState(null)
   const showSnackbar = useAppStore((s) => s.showSnackbar)
   const isYT = channel.platform === "youtube"
+  const isDouyin = channel.platform === "douyin"
 
-  const fetchData = useCallback(async (refresh = false) => {
+  const fetchData = useCallback(async (
+    refresh = false,
+    targetPage = 0,
+    token = null,
+    requestedLimit = rowsPerPage,
+  ) => {
     setLoading(true)
     setError(null)
     try {
-      const params = {}
+      const params = { limit: requestedLimit }
       if (refresh) params.refresh = true
+      if (isDouyin && token) params.page_token = token
       const { data: resp } = await http.get(`/api/channels/videos/${channel.id}`, {
         ...channelRequestConfig,
-        params: { ...channelRequestConfig.params, ...params },
+        params,
       })
       setVideos(resp.videos || [])
       setChannelInfo(resp.channel || resp.user || null)
+      if (isDouyin) {
+        const more = Boolean(resp.has_more && resp.next_page_token)
+        setHasMore(more)
+        setNextPageToken(resp.next_page_token || null)
+        setPageTokens((previous) => ({
+          ...previous,
+          [targetPage]: token || null,
+          ...(more ? { [targetPage + 1]: resp.next_page_token } : {}),
+        }))
+      }
     } catch (e) {
       setError(e.response?.data?.detail || e.message)
     } finally {
       setLoading(false)
     }
-  }, [channel.id])
+  }, [channel.id, isDouyin, rowsPerPage])
 
-  useEffect(() => { fetchData() }, [fetchData])
+  useEffect(() => {
+    setPage(0)
+    setPageTokens({ 0: null })
+    fetchData(false, 0, null, rowsPerPage)
+  }, [fetchData, rowsPerPage])
 
   const handleRefresh = () => {
     setVideos([])
     setPage(0)
-    fetchData(true)
+    setPageTokens({ 0: null })
+    setHasMore(false)
+    setNextPageToken(null)
+    fetchData(true, 0, null, rowsPerPage)
+  }
+
+  const handlePageChange = (_, targetPage) => {
+    if (!isDouyin) {
+      setPage(targetPage)
+      return
+    }
+    const token = pageTokens[targetPage]
+    if (targetPage > page && !token) return
+    setPage(targetPage)
+    fetchData(false, targetPage, token || null, rowsPerPage)
+  }
+
+  const handleRowsPerPageChange = (event) => {
+    const nextSize = parseInt(event.target.value, 10)
+    setRowsPerPage(nextSize)
+    setPage(0)
+    setPageTokens({ 0: null })
+    setHasMore(false)
+    setNextPageToken(null)
   }
 
   const handleAnalyze = async (video) => {
@@ -428,7 +475,13 @@ function ChannelDetail({ channel, onBack }) {
     return 0
   })
 
-  const paged = sorted.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
+  const paged = isDouyin
+    ? sorted
+    : sorted.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
+  const knownVideoCount = Number(channelInfo?.video_count || channel.video_count || 0)
+  const douyinPaginationCount = knownVideoCount > 0
+    ? knownVideoCount
+    : (page * rowsPerPage) + sorted.length + (hasMore ? 1 : 0)
 
   return (
     <Box>
@@ -545,12 +598,17 @@ function ChannelDetail({ channel, onBack }) {
               </Box>
               <TablePagination
                 component="div"
-                count={sorted.length}
+                count={isDouyin ? douyinPaginationCount : sorted.length}
                 page={page}
-                onPageChange={(_, p) => setPage(p)}
+                onPageChange={handlePageChange}
                 rowsPerPage={rowsPerPage}
-                onRowsPerPageChange={(e) => { setRowsPerPage(parseInt(e.target.value, 10)); setPage(0) }}
+                onRowsPerPageChange={handleRowsPerPageChange}
                 rowsPerPageOptions={[18, 36, 50]}
+                nextIconButtonProps={
+                  isDouyin
+                    ? { disabled: !hasMore || !nextPageToken }
+                    : undefined
+                }
                 sx={{ borderTop: 1, borderColor: "divider", mt: 1 }}
               />
             </>
