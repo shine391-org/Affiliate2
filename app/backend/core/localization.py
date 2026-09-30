@@ -29,6 +29,26 @@ DEFAULT_REWRITE_GUARDRAILS = """- Preserve intent, entities, relationships, quan
 - If essential facts cannot fit, preserve them rather than inventing, deleting or reversing facts."""
 
 
+class AIStageRoute(BaseModel):
+    """One ordered AI route used by a localization stage.
+
+    connection_id is stable user-owned identity. Provider/base/key live in the
+    Settings connection registry, so multiple compatible endpoints/accounts may
+    coexist without overloading the provider name as identity.
+    """
+    connection_id: str
+    model: str | None = None
+    base_url: str | None = None
+
+    @field_validator("connection_id")
+    @classmethod
+    def validate_connection_id(cls, value: str) -> str:
+        value = value.strip()
+        if not value or len(value) > 96:
+            raise ValueError("connection_id must be 1-96 characters")
+        return value
+
+
 class LocalizationProfile(BaseModel):
     id: str
     name: str
@@ -48,6 +68,11 @@ class LocalizationProfile(BaseModel):
     translation_base_url: str | None = None
     translation_fallback_provider: str | None = None
     translation_fallback_model: str | None = None
+    translation_fallback_base_url: str | None = None
+    translation_routes: list[AIStageRoute] = Field(default_factory=list, max_length=8)
+    translation_retry_attempts: int = Field(default=3, ge=1, le=5)
+    translation_attempt_timeout_s: int = Field(default=75, ge=10, le=300)
+    translation_total_timeout_s: int = Field(default=180, ge=20, le=900)
     translation_preset: Literal[
         "natural_vietnamese", "affiliate_conversational", "literal", "custom"
     ] = "natural_vietnamese"
@@ -65,12 +90,20 @@ class LocalizationProfile(BaseModel):
     rewrite_provider: str | None = None
     rewrite_model: str | None = None
     rewrite_base_url: str | None = None
+    rewrite_fallback_provider: str | None = None
+    rewrite_fallback_model: str | None = None
+    rewrite_fallback_base_url: str | None = None
+    rewrite_routes: list[AIStageRoute] = Field(default_factory=list, max_length=8)
+    rewrite_retry_attempts: int = Field(default=3, ge=1, le=4)
+    rewrite_attempt_timeout_s: int = Field(default=45, ge=10, le=180)
+    rewrite_total_timeout_s: int = Field(default=90, ge=20, le=360)
     rewrite_guardrails: str = DEFAULT_REWRITE_GUARDRAILS
     # Appended after the editable semantic guardrails. Users can tune
     # compression/style per profile while the stable-ID / structured-output
     # protocol remains application-owned.
     rewrite_instructions: str = ""
 
+    tts_connection_id: str | None = None
     tts_provider: str | None = None
     tts_model: str | None = None
     tts_voice: str | None = None
@@ -88,6 +121,9 @@ class LocalizationProfile(BaseModel):
     # to differ. Provider-level TTS speed is no longer relied on for fitting;
     # measured chunk audio is fitted after synthesis.
     semantic_segmentation: bool = True
+    semantic_ai_retry_attempts: int = Field(default=2, ge=1, le=3)
+    semantic_ai_attempt_timeout_s: int = Field(default=25, ge=5, le=120)
+    semantic_ai_total_timeout_s: int = Field(default=60, ge=10, le=240)
     dub_min_cue_duration_ms: int = Field(default=2500, ge=250, le=10000)
     dub_max_chunk_size: int = Field(default=5, ge=1, le=12)
     dub_gap_tolerance_ms: int = Field(default=1500, ge=0, le=5000)
@@ -157,6 +193,26 @@ class LocalizationProfile(BaseModel):
             raise ValueError("dub_speed_accept must be <= dub_speed_max")
         if self.video_retime_max_slowdown < 1.0:
             raise ValueError("video_retime_max_slowdown must be >= 1.0")
+        if self.translation_total_timeout_s < self.translation_attempt_timeout_s:
+            raise ValueError("translation_total_timeout_s must be >= translation_attempt_timeout_s")
+        if self.rewrite_total_timeout_s < self.rewrite_attempt_timeout_s:
+            raise ValueError("rewrite_total_timeout_s must be >= rewrite_attempt_timeout_s")
+        if self.semantic_ai_total_timeout_s < self.semantic_ai_attempt_timeout_s:
+            raise ValueError("semantic_ai_total_timeout_s must be >= semantic_ai_attempt_timeout_s")
+        for label, routes in (
+            ("translation_routes", self.translation_routes),
+            ("rewrite_routes", self.rewrite_routes),
+        ):
+            seen = set()
+            for route in routes:
+                identity = (
+                    route.connection_id.strip().lower(),
+                    (route.model or "").strip(),
+                    (route.base_url or "").strip().rstrip("/"),
+                )
+                if identity in seen:
+                    raise ValueError(f"{label} contains a duplicate route: {route.connection_id}")
+                seen.add(identity)
         return self
 
     @field_validator("glossary")

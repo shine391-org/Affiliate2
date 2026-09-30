@@ -14,15 +14,38 @@ from backend.services.clip_options import ExtractOptions
 logger = logging.getLogger(__name__)
 
 
+def _media_metadata_with_identity(
+    media_metadata: dict | None,
+    identity: dict | None,
+) -> dict:
+    """Return persisted media metadata without mutating downloader output."""
+    combined = dict(media_metadata or {})
+    if identity:
+        combined["source_identity"] = dict(identity)
+    return combined
+
+
 def _detect_platform(url: str) -> str:
-    """Extract platform name from any URL domain — fully generic, no hardcoded list."""
+    """Extract platform name while preserving identity-sensitive host aliases."""
     from urllib.parse import urlparse
     try:
-        host = urlparse(url).hostname or ""
+        host = (urlparse(url).hostname or "").lower().rstrip(".")
     except Exception:
         return "unknown"
+
+    # Douyin short/share hosts carry the same requested aweme identity as
+    # www.douyin.com. Returning "v" / "iesdouyin" here bypasses the fail-closed
+    # download guard and can send an exact-identity failure to ai_fix_url().
+    if (
+        host == "douyin.com"
+        or host.endswith(".douyin.com")
+        or host == "iesdouyin.com"
+        or host.endswith(".iesdouyin.com")
+    ):
+        return "douyin"
+
     # Strip www. and take the domain name (e.g. "bilibili.com" → "bilibili")
-    host = host.lstrip("www.")
+    host = host.removeprefix("www.")
     parts = host.rsplit(".", 1)  # ["bilibili", "com"] or ["youtube", "co.uk"] etc
     if len(parts) >= 1:
         # Handle two-part TLDs like "co.uk", "com.br"
@@ -398,8 +421,18 @@ async def _download_single_video_to_db(job_id: str, url: str, title: str, user_i
             extract_audio=True,
             # None for every pre-existing caller → byte-identical download.
             options=options,
+            # Douyin identity resolution needs the caption: /video/<id> can
+            # serve a different aweme, so the resolver proves identity through
+            # the caption search keyed on the exact aweme id.
+            title_hint=title or "",
         )
     except Exception as first_error:
+        # A Douyin URL carries the requested aweme identity. Rewriting it with
+        # an LLM can silently turn a controlled failure into the wrong video,
+        # so keep this path fail-closed and preserve the original URL/error.
+        if _detect_platform(url) == "douyin":
+            raise first_error
+
         # AI-assisted retry: ask AI to fix the URL and try once more
         from backend.core.ai_retry import ai_fix_url
         from backend.models.user_settings import UserSettings
@@ -422,6 +455,7 @@ async def _download_single_video_to_db(job_id: str, url: str, title: str, user_i
             filename=video_id,
             extract_audio=True,
             options=options,
+            title_hint=title or "",
         )
         # If this also fails, the exception propagates naturally
         url = corrected_url  # Use corrected URL for DB records
@@ -485,6 +519,10 @@ async def _download_single_video_to_db(job_id: str, url: str, title: str, user_i
         chapters = dl_result.get("chapters")
         tags = dl_result.get("tags")
         category = dl_result.get("category")
+        stored_media_metadata = _media_metadata_with_identity(
+            dl_result.get("media_metadata"),
+            dl_result.get("media_provenance"),
+        )
 
         dv = DownloadedVideo(
             user_id=user_id,
@@ -505,7 +543,7 @@ async def _download_single_video_to_db(job_id: str, url: str, title: str, user_i
             chapters_json=json.dumps(chapters) if chapters else None,
             tags_json=json.dumps(tags) if tags else None,
             category=category,
-            media_metadata_json=json.dumps(dl_result.get("media_metadata") or {}),
+            media_metadata_json=json.dumps(stored_media_metadata),
         )
         db.add(dv)
         await db.commit()
@@ -514,7 +552,7 @@ async def _download_single_video_to_db(job_id: str, url: str, title: str, user_i
             "id": dv.id,
             "title": dv.title,
             "height": dl_result.get("height"),
-            "media_metadata": dl_result.get("media_metadata") or {},
+            "media_metadata": stored_media_metadata,
             "requested_quality": dl_result.get("requested_quality"),
             "ext": (Path(dl_result["video_path"]).suffix.lstrip(".").lower() or None)
                    if dl_result.get("video_path") else None,

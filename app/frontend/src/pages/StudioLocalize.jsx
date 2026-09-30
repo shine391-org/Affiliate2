@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
-  Alert, Box, Button, Checkbox, Chip, Dialog, DialogContent, DialogTitle, Divider, Drawer,
-  FormControl, FormControlLabel, InputLabel, MenuItem, Paper, Radio, RadioGroup,
-  Select, Slider, Stack, Step, StepButton, Stepper, Typography,
+  Alert, Box, Button, Checkbox, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Divider, Drawer,
+  FormControl, FormControlLabel, IconButton, InputLabel, MenuItem, Paper, Radio, RadioGroup,
+  Select, Slider, Stack, Step, StepButton, Stepper, Switch, Typography,
 } from "@mui/material"
 import BatchPredictionOutlinedIcon from "@mui/icons-material/BatchPredictionOutlined"
+import CloseOutlinedIcon from "@mui/icons-material/CloseOutlined"
 import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined"
 import TuneOutlinedIcon from "@mui/icons-material/TuneOutlined"
+import ReplayOutlinedIcon from "@mui/icons-material/ReplayOutlined"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import http from "../api/http"
 import useAppStore from "../store/appStore"
@@ -22,6 +24,7 @@ import {
   maskPreset,
   pickPreviewReframeMethod,
   previewObjectFit,
+  resolveAiStageSelection,
   resolveProfileTargetAspect,
 } from "../localizationPreview"
 
@@ -29,6 +32,16 @@ const stepIndex = (value) => Math.max(0, LOCALIZE_STEPS.findIndex((item) => item
 const STAGE_STATUS_LABELS = { pending: "đang chờ", running: "đang chạy", complete: "hoàn tất", failed: "thất bại", skipped: "đã bỏ qua" }
 const QC_STATUS_LABELS = { READY: "Sẵn sàng", FAILED: "Thất bại", NEEDS_REVIEW: "Cần duyệt", COMPLETE: "Hoàn tất" }
 const formatMs = (value) => `${(Number(value || 0) / 1000).toFixed(2)}s`
+const STEP_FOR_FAILED_STAGE = {
+  separation: "source",
+  asr: "transcript",
+  semantic: "transcript",
+  translation: "translation",
+  dubbing: "voice-timing",
+  audio_mix: "voice-timing",
+  final_render: "render",
+  qc: "qc",
+}
 
 function StageChip({ name, record }) {
   const status = record?.status || "pending"
@@ -45,10 +58,22 @@ export default function StudioLocalize({ source, sourcesLoading }) {
   const [target, setTarget] = useState("vi")
   const [mode, setMode] = useState("full_dub")
   const [reviewTranslation, setReviewTranslation] = useState(true)
+  const [autoRepair, setAutoRepair] = useState(false)
+  const [autoRepairBusy, setAutoRepairBusy] = useState(false)
+  const [retryingFailure, setRetryingFailure] = useState(false)
+  const [focusedFailureKey, setFocusedFailureKey] = useState("")
   const [detail, setDetail] = useState(null)
   const [detailError, setDetailError] = useState("")
   const [starting, setStarting] = useState(false)
   const [batchOpen, setBatchOpen] = useState(params.get("batch") === "1")
+  const closeBatch = () => {
+    setBatchOpen(false)
+    setParams((previous) => {
+      const next = new URLSearchParams(previous)
+      next.delete("batch")
+      return next
+    }, { replace: true })
+  }
   const [expertOpen, setExpertOpen] = useState(false)
   const jobId = params.get("job") || ""
   const requestedStep = params.get("step") || ""
@@ -131,10 +156,34 @@ export default function StudioLocalize({ source, sourcesLoading }) {
   const segments = detail?.transcript?.segments || []
   const chunks = detail?.chunks || []
   const qc = detail?.qc
+  const translationSelection = resolveAiStageSelection(
+    stages?.translation?.metadata || {},
+    effective,
+    "translation",
+  )
+  const rewriteSelection = resolveAiStageSelection(
+    stages?.dubbing?.metadata || {},
+    effective,
+    "rewrite",
+  )
   const activeLocalization = Boolean(jobId)
     && ["pending", "running"].includes(detail?.job_status)
   const canRerender = canRerenderLocalization(detail)
   const jobFailure = localizationJobFailure(detail)
+  const stepAvailable = {
+    source: true,
+    transcript: ["running", "complete", "failed"].includes(stages.asr?.status)
+      || ["running", "complete", "failed"].includes(stages.semantic?.status),
+    translation: ["running", "complete", "failed"].includes(stages.translation?.status)
+      || Boolean(detail?.translation_review_pending),
+    "voice-timing": stages.translation?.status === "complete"
+      || ["running", "complete", "failed"].includes(stages.dubbing?.status)
+      || ["running", "complete", "failed"].includes(stages.audio_mix?.status),
+    render: stages.audio_mix?.status === "complete"
+      || ["running", "complete", "failed"].includes(stages.final_render?.status),
+    qc: stages.final_render?.status === "complete"
+      || ["running", "complete", "failed"].includes(stages.qc?.status),
+  }
 
   useEffect(() => {
     if (!jobId || hydratedJobId === jobId || !detail?.manifest) return
@@ -144,6 +193,7 @@ export default function StudioLocalize({ source, sourcesLoading }) {
     setTarget(config.target)
     setMode(config.mode)
     setReviewTranslation(config.reviewTranslation)
+    setAutoRepair(config.autoRepair)
     setTargetAspect(config.targetAspect)
     setEnableMask(config.enableMask)
     if (config.maskBox) setMaskBox(config.maskBox)
@@ -181,6 +231,15 @@ export default function StudioLocalize({ source, sourcesLoading }) {
     return next
   })
 
+  useEffect(() => {
+    if (!jobId || !jobFailure?.stage) return
+    const key = `${jobId}:${jobFailure.stage}`
+    if (focusedFailureKey === key) return
+    const failedStep = STEP_FOR_FAILED_STAGE[jobFailure.stage]
+    if (failedStep) setStep(failedStep)
+    setFocusedFailureKey(key)
+  }, [focusedFailureKey, jobFailure?.stage, jobId])
+
   const start = async () => {
     if (!source) { showSnackbar("Hãy chọn nguồn từ Thư viện trước", "warning"); return }
     setStarting(true)
@@ -196,6 +255,7 @@ export default function StudioLocalize({ source, sourcesLoading }) {
       if (renderPayload.mask_box) form.append("mask_box", JSON.stringify(renderPayload.mask_box))
       form.append("caption_placement", JSON.stringify(renderPayload.caption_placement))
       form.append("review_translation", String(mode === "full_dub" && reviewTranslation))
+      form.append("auto_repair", String(autoRepair))
       const { data } = await http.post("/api/tools/translate", form, { headers: { "Content-Type": "multipart/form-data" }, timeout: 120000 })
       startJob(data.job_id, "tool:translate", "Đang bắt đầu bản địa hóa HQ…")
       setParams((previous) => {
@@ -214,6 +274,56 @@ export default function StudioLocalize({ source, sourcesLoading }) {
       showSnackbar(error.response?.data?.detail || "Không thể bắt đầu bản địa hóa", "error")
     } finally {
       setStarting(false)
+    }
+  }
+
+  const toggleAutoRepair = async (enabled) => {
+    setAutoRepair(enabled)
+    if (!jobId) return
+    setAutoRepairBusy(true)
+    try {
+      await http.post(`/api/localization/jobs/${jobId}/auto-repair`, { enabled })
+      showSnackbar(
+        enabled
+          ? "Đã bật tự động sửa lỗi: chỉ thử lại đúng bước lỗi tối đa 1 lần."
+          : "Đã tắt tự động sửa lỗi cho tác vụ này.",
+        "info",
+      )
+      await loadDetail()
+    } catch (error) {
+      setAutoRepair(!enabled)
+      showSnackbar(error.response?.data?.detail || "Không thể cập nhật tự động sửa lỗi", "error")
+    } finally {
+      setAutoRepairBusy(false)
+    }
+  }
+
+  const retryFailedStage = async () => {
+    if (!jobId || !jobFailure) return
+    setRetryingFailure(true)
+    try {
+      let data
+      if (detail?.tts_binding?.binding_mismatch && jobFailure.stage === "dubbing") {
+        const response = await http.post(`/api/localization/jobs/${jobId}/rebind-tts`, { source: "settings" })
+        data = response.data
+        showSnackbar("Đã dùng TTS hiện tại; chỉ chạy lại từ bước Lồng tiếng.", "info")
+      } else {
+        const response = await http.post(`/api/localization/jobs/${jobId}/rerun`, {})
+        data = response.data
+        const targetChunks = data?.targeted_chunk_ids || []
+        showSnackbar(
+          targetChunks.length
+            ? `Đang thử lại đúng ${targetChunks.length} đoạn lỗi ở bước Lồng tiếng.`
+            : `Đang thử lại đúng bước lỗi: ${data?.from_stage || jobFailure.stage}.`,
+          "info",
+        )
+      }
+      startJob(jobId, "tool:translate", "Đang thử lại đúng bước lỗi…")
+      await loadDetail()
+    } catch (error) {
+      showSnackbar(error.response?.data?.detail || "Không thể thử lại bước lỗi", "error")
+    } finally {
+      setRetryingFailure(false)
     }
   }
 
@@ -332,6 +442,23 @@ export default function StudioLocalize({ source, sourcesLoading }) {
           {mode === "full_dub" && (
             <FormControlLabel control={<Checkbox checked={reviewTranslation} onChange={(e) => setReviewTranslation(e.target.checked)} />} label="Tạm dừng sau C6 để duyệt bản dịch" />
           )}
+          <FormControlLabel
+            control={
+              <Switch
+                checked={autoRepair}
+                onChange={(e) => toggleAutoRepair(e.target.checked)}
+                disabled={autoRepairBusy || activeLocalization}
+              />
+            }
+            label={
+              <Box>
+                <Typography sx={{ fontWeight: 600, fontSize: "0.9rem" }}>Tự động sửa lỗi</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Khi bật: thử lại đúng bước lỗi tối đa 1 lần; không tự đổi provider, model, voice hay API key.
+                </Typography>
+              </Box>
+            }
+          />
 
           <Divider sx={{ my: 0.5 }} />
 
@@ -447,7 +574,7 @@ export default function StudioLocalize({ source, sourcesLoading }) {
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "minmax(220px,.7fr) minmax(0,1.6fr) minmax(260px,.7fr)" }, gap: 2 }}>
         <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>{source ? <Box component="video" controls src={`/api/downloaded/${source.id}/stream`} sx={{ width: "100%", bgcolor: "#000", borderRadius: 1 }} /> : <Typography variant="body2">Không có nguồn</Typography>}</Paper>
         <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, maxHeight: 560, overflow: "auto" }}><Stack spacing={1}>{segments.map((segment) => <Box key={segment.id} sx={{ pb: 1, borderBottom: 1, borderColor: "divider" }}><Typography variant="caption" color="text.secondary">{segment.id} · {formatMs(segment.source_start_ms)}–{formatMs(segment.source_end_ms)}</Typography><Typography variant="body2">{segment.source_text}</Typography><Typography variant="body2" sx={{ color: "primary.main", fontWeight: 600 }}>{segment.translated_text || "Chưa dịch"}</Typography></Box>)}</Stack></Paper>
-        <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}><Typography variant="subtitle2">Bản dịch C6</Typography><Typography variant="body2" sx={{ mt: 1 }}>Mô hình: <strong>{effective.translation_model || "mặc định kết nối"}</strong></Typography><Typography variant="body2">Nhà cung cấp: <strong>{effective.translation_provider || "kết nối trong Cài đặt"}</strong></Typography><Typography variant="body2">Preset: <strong>{effective.translation_preset || "natural_vietnamese"}</strong></Typography><Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>{effective.translation_instructions || "Không có hướng dẫn riêng"}</Typography><Typography variant="caption" color="text.secondary">Thuật ngữ: {Object.keys(effective.glossary || {}).length} mục</Typography></Paper>
+        <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}><Typography variant="subtitle2">Bản dịch C6</Typography><Typography variant="body2" sx={{ mt: 1 }}>{translationSelection.isActual ? "Mô hình thực tế" : "Mô hình cấu hình"}: <strong>{translationSelection.model || "mặc định kết nối"}</strong></Typography><Typography variant="body2">{translationSelection.isActual ? "Kết nối thực tế" : "Kết nối cấu hình"}: <strong>{translationSelection.connectionId || "kết nối trong Cài đặt"}</strong></Typography>{translationSelection.failureCount > 0 && <Typography variant="caption" color="warning.main">Đã fallback sau {translationSelection.failureCount} lỗi provider/route trước đó.</Typography>}<Typography variant="body2">Preset: <strong>{effective.translation_preset || "natural_vietnamese"}</strong></Typography><Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>{effective.translation_instructions || "Không có hướng dẫn riêng"}</Typography><Typography variant="caption" color="text.secondary">Thuật ngữ: {Object.keys(effective.glossary || {}).length} mục</Typography></Paper>
       </Box>
       {jobId && (
         <Button variant="outlined" startIcon={<TuneOutlinedIcon />} onClick={() => setExpertOpen(true)} sx={{ alignSelf: "flex-start" }}>
@@ -458,7 +585,7 @@ export default function StudioLocalize({ source, sourcesLoading }) {
   )
 
   const voicePanel = (
-    <Stack spacing={2}><Alert severity="info" variant="outlined">Mô hình viết lại thời lượng C7 <strong>{effective.rewrite_model || "mặc định kết nối"}</strong> tách biệt với mô hình dịch C6.</Alert><Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(3, 1fr)" }, gap: 1.5 }}><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Giọng đọc</Typography><Typography variant="body2">{effective.tts_provider || "mặc định nhà cung cấp"} · {effective.tts_voice || "giọng của hồ sơ"}</Typography></Paper><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Giới hạn nhịp</Typography><Typography variant="body2">Ưu tiên {effective.dub_speed_accept || 1.15}× · tối đa {effective.dub_speed_max || 1.3}×</Typography></Paper><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Viết lại</Typography><Typography variant="body2">{effective.dub_rewrite_attempts ?? 2} lần thử</Typography></Paper></Box>{chunks.length > 0 && <Stack spacing={1}>{chunks.map((chunk) => <Paper variant="outlined" key={chunk.id} sx={{ p: 1.25 }}><Typography variant="body2">Đoạn {chunk.id} · {chunk.speaker_id || "người nói —"} · tốc độ {Number(chunk.speed_factor || 1).toFixed(2)}×</Typography></Paper>)}</Stack>}{jobId && <Button variant="outlined" startIcon={<TuneOutlinedIcon />} onClick={() => setExpertOpen(true)} sx={{ alignSelf: "flex-start" }}>Nhịp / giọng nâng cao</Button>}</Stack>
+    <Stack spacing={2}><Alert severity={rewriteSelection.failureCount > 0 ? "warning" : "info"} variant="outlined">{rewriteSelection.isActual ? "C7 thực tế dùng" : "C7 đang cấu hình"} <strong>{rewriteSelection.connectionId || "kết nối mặc định"}</strong> · <strong>{rewriteSelection.model || "mô hình mặc định"}</strong>{rewriteSelection.failureCount > 0 ? ` sau ${rewriteSelection.failureCount} lỗi route trước đó` : ""}. C7 tách biệt với mô hình dịch C6.</Alert><Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(3, 1fr)" }, gap: 1.5 }}><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Giọng đọc</Typography><Typography variant="body2">{effective.tts_provider || "mặc định nhà cung cấp"} · {effective.tts_voice || "giọng của hồ sơ"}</Typography></Paper><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Giới hạn nhịp</Typography><Typography variant="body2">Ưu tiên {effective.dub_speed_accept || 1.15}× · tối đa {effective.dub_speed_max || 1.3}×</Typography></Paper><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Viết lại</Typography><Typography variant="body2">{effective.dub_rewrite_attempts ?? 2} lần thử</Typography></Paper></Box>{chunks.length > 0 && <Stack spacing={1}>{chunks.map((chunk) => <Paper variant="outlined" key={chunk.id} sx={{ p: 1.25 }}><Typography variant="body2">Đoạn {chunk.id} · {chunk.speaker_id || "người nói —"} · tốc độ {Number(chunk.speed_factor || 1).toFixed(2)}×</Typography></Paper>)}</Stack>}{jobId && <Button variant="outlined" startIcon={<TuneOutlinedIcon />} onClick={() => setExpertOpen(true)} sx={{ alignSelf: "flex-start" }}>Nhịp / giọng nâng cao</Button>}</Stack>
   )
 
   const renderPanel = (
@@ -511,23 +638,70 @@ export default function StudioLocalize({ source, sourcesLoading }) {
       <Stack spacing={2}>
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }}>
           <Box sx={{ flex: 1 }}><Typography variant="h6" sx={{ fontWeight: 800 }}>Bản địa hóa</Typography><Typography variant="caption" color="text.secondary">Một tác vụ Phase C xuyên suốt Nguồn → Bản chép lời → Bản dịch → Giọng & Nhịp → Kết xuất → QC</Typography></Box>
+          <FormControlLabel
+            control={<Switch size="small" checked={autoRepair} onChange={(e) => toggleAutoRepair(e.target.checked)} disabled={autoRepairBusy || activeLocalization} />}
+            label={<Typography variant="body2">Tự động sửa lỗi</Typography>}
+          />
           <Button variant="outlined" startIcon={<BatchPredictionOutlinedIcon />} onClick={() => setBatchOpen(true)}>Chạy hàng loạt</Button>
         </Stack>
         <Stepper nonLinear activeStep={stepIndex(activeStep)} sx={{ overflowX: "auto", pb: 0.5 }}>
-          {LOCALIZE_STEPS.map((item) => <Step key={item.value}><StepButton onClick={() => setStep(item.value)}>{item.label}</StepButton></Step>)}
+          {LOCALIZE_STEPS.map((item) => (
+            <Step key={item.value}>
+              <StepButton
+                onClick={() => setStep(item.value)}
+                disabled={!stepAvailable[item.value]}
+              >
+                {item.label}
+              </StepButton>
+            </Step>
+          ))}
         </Stepper>
         {detailError && <Alert severity="warning">{detailError}</Alert>}
         {jobFailure && (
           <Alert severity="error" data-testid="localization-job-failure">
-            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Tác vụ bản địa hóa thất bại</Typography>
-            {jobFailure.step ? <Typography variant="body2">Bước: {jobFailure.step}</Typography> : null}
-            <Typography variant="body2" sx={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{jobFailure.message}</Typography>
+            <Stack spacing={1}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Tác vụ bản địa hóa thất bại</Typography>
+              {jobFailure.step ? <Typography variant="body2">Bước lỗi: {jobFailure.step}</Typography> : null}
+              <Typography variant="body2" sx={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{jobFailure.message}</Typography>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                <Button
+                  size="small"
+                  variant="contained"
+                  color="error"
+                  startIcon={<ReplayOutlinedIcon />}
+                  onClick={retryFailedStage}
+                  disabled={retryingFailure || activeLocalization}
+                >
+                  {detail?.tts_binding?.binding_mismatch && jobFailure.stage === "dubbing"
+                    ? "Dùng TTS hiện tại & chạy lại bước lỗi"
+                    : "Thử lại đúng bước lỗi"}
+                </Button>
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  label={autoRepair ? "Tự động sửa: BẬT · tối đa 1 lần/bước" : "Tự động sửa: TẮT"}
+                />
+              </Stack>
+            </Stack>
           </Alert>
         )}
         {jobId && <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap><Chip label={`Tác vụ ${jobId}`} size="small" /><StageChip name="Bản dịch" record={stages.translation} /><StageChip name="Lồng tiếng" record={stages.dubbing} /><StageChip name="QC" record={stages.qc} /><Box sx={{ flex: 1 }} /><Button size="small" variant="outlined" startIcon={<TuneOutlinedIcon />} onClick={() => setExpertOpen(true)}>Nâng cao / Chuyên gia</Button></Stack>}
         {panels[activeStep]}
       </Stack>
-      <Dialog open={batchOpen} onClose={() => setParams((previous) => { const next = new URLSearchParams(previous); next.delete("batch"); return next }, { replace: true })} maxWidth="md" fullWidth><DialogTitle>Chạy bản địa hóa hàng loạt</DialogTitle><DialogContent><LocalizationBatch embedded /></DialogContent></Dialog>
+      <Dialog open={batchOpen} onClose={closeBatch} keepMounted maxWidth="md" fullWidth>
+        <DialogTitle sx={{ pr: 6 }}>
+          Chạy bản địa hóa hàng loạt
+          <IconButton
+            aria-label="Đóng hộp thoại bản địa hóa hàng loạt"
+            onClick={closeBatch}
+            sx={{ position: "absolute", right: 8, top: 8 }}
+          >
+            <CloseOutlinedIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent><LocalizationBatch embedded /></DialogContent>
+        <DialogActions><Button onClick={closeBatch}>Đóng</Button></DialogActions>
+      </Dialog>
       <Drawer
         anchor="right"
         open={expertOpen}

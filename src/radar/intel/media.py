@@ -18,16 +18,36 @@ def candidate_dir(platform: str, content_id: str) -> Path:
     return path
 
 
-async def fetch_media_async(platform: str, content_id: str, canonical_url: str) -> dict:
+async def fetch_media_async(
+    platform: str,
+    content_id: str,
+    canonical_url: str,
+    *,
+    title_hint: str = "",
+) -> dict:
     """Async adapter used by the converged Radar intelligence pipeline."""
     return await fetch_candidate_media(
         platform,
         content_id,
         canonical_url,
         candidate_dir(platform, content_id),
+        title_hint=title_hint,
     )
 
 
-def fetch_media(platform: str, content_id: str, canonical_url: str) -> dict:
+def fetch_media(
+    platform: str,
+    content_id: str,
+    canonical_url: str,
+    *,
+    title_hint: str = "",
+) -> dict:
     """Sync compatibility API for older scripts/tests."""
-    return asyncio.run(fetch_media_async(platform, content_id, canonical_url))
+    return asyncio.run(
+        fetch_media_async(
+            platform,
+            content_id,
+            canonical_url,
+            title_hint=title_hint,
+        )
+    )

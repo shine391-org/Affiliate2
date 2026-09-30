@@ -43,6 +43,59 @@ class RerunRequest(BaseModel):
     ] | None = None
 
 
+class TTSRebindRequest(BaseModel):
+    source: Literal["settings"] = "settings"
+    voice_id: str | None = None
+    model: str | None = None
+
+
+class AutoRepairRequest(BaseModel):
+    enabled: bool
+
+
+# Only GPT-SoVITS consumes reference audio in the canonical TTS interface; every
+# other provider ignores it. A reference clip is therefore provider-scoped state
+# once the provider changes to one that cannot use it.
+_CLONE_CAPABLE_TTS_PROVIDERS = {"gpt_sovits"}
+
+
+def _provider_scoped_tts_resets(
+    effective_profile: dict,
+    binding: dict,
+) -> dict[str, Any]:
+    """Drop TTS state that cannot be valid for the newly bound provider.
+
+    ``speaker_voices`` holds provider voice IDs (an ElevenLabs voice_id is
+    meaningless to Edge/Azure/OpenAI) and is preferred over the runtime default
+    voice in ``_voice_for_chunk``, so a stale entry silently wins. Clone
+    references are only honoured by clone-capable providers.
+    """
+    previous_provider = str(effective_profile.get("tts_provider") or "").strip().lower()
+    next_provider = str(binding.get("tts_provider") or "").strip().lower()
+    previous_connection = str(effective_profile.get("tts_connection_id") or "").strip().lower()
+    next_connection = str(binding.get("tts_connection_id") or "").strip().lower()
+    provider_changed = bool(
+        previous_provider and next_provider and previous_provider != next_provider
+    )
+    connection_changed = bool(
+        previous_connection and next_connection and previous_connection != next_connection
+    )
+    if not provider_changed and not connection_changed:
+        return {}
+
+    resets: dict[str, Any] = {
+        "speaker_voices": {},
+        "speaker_reference_audio": {},
+    }
+    if next_provider not in _CLONE_CAPABLE_TTS_PROVIDERS:
+        resets.update({
+            "tts_reference_audio": None,
+            "tts_reference_text": None,
+            "tts_reference_language": None,
+        })
+    return resets
+
+
 class RenderRerunRequest(BaseModel):
     target_aspect: Literal["source", "9:16", "16:9", "1:1"] | None = None
     mask_box: dict[str, Any] | None = None
@@ -53,14 +106,30 @@ _ASR_KEYS = {
     "asr_provider", "asr_model", "asr_quality",
     "alignment_mode", "diarization_mode", "diarization_speakers",
 }
-_SEMANTIC_KEYS = {"semantic_segmentation"}
-_TRANSLATION_KEYS = {
+_AI_TRANSLATION_ROUTE_KEYS = {
+    "translation_routes",
     "translation_provider", "translation_model", "translation_base_url",
+    "translation_fallback_provider", "translation_fallback_model", "translation_fallback_base_url",
+}
+_SEMANTIC_KEYS = {
+    "semantic_segmentation", "semantic_ai_retry_attempts",
+    "semantic_ai_attempt_timeout_s", "semantic_ai_total_timeout_s",
+    # Semantic refinement consumes the C6 route chain too, so route changes
+    # invalidate semantic rather than reusing cues made by a different model.
+    *_AI_TRANSLATION_ROUTE_KEYS,
+}
+_TRANSLATION_KEYS = {
+    *_AI_TRANSLATION_ROUTE_KEYS,
+    "translation_retry_attempts", "translation_attempt_timeout_s", "translation_total_timeout_s",
     "translation_preset", "translation_instructions", "translation_guardrails", "glossary",
 }
 _DUBBING_KEYS = {
-    "rewrite_provider", "rewrite_model", "rewrite_base_url", "rewrite_guardrails", "rewrite_instructions",
-    "tts_provider", "tts_model", "tts_voice", "tts_base_url", "tts_region",
+    "rewrite_routes",
+    "rewrite_provider", "rewrite_model", "rewrite_base_url",
+    "rewrite_fallback_provider", "rewrite_fallback_model", "rewrite_fallback_base_url",
+    "rewrite_retry_attempts", "rewrite_attempt_timeout_s", "rewrite_total_timeout_s",
+    "rewrite_guardrails", "rewrite_instructions",
+    "tts_connection_id", "tts_provider", "tts_model", "tts_voice", "tts_base_url", "tts_region",
     "speaker_voices", "speaker_reference_audio", "tts_reference_audio",
     "tts_reference_text", "tts_reference_language", "voice_clone_reference_mode",
     "dub_min_cue_duration_ms",
@@ -188,6 +257,124 @@ async def _dispatch_existing_run(run: LocalizationRun):
     ))
 
 
+async def _resolve_current_tts_binding(
+    effective_profile: dict,
+    target_language: str,
+    *,
+    voice_id: str | None = None,
+    model: str | None = None,
+) -> dict:
+    """Resolve and cheaply validate the current Settings-owned TTS connection."""
+    from sqlalchemy import select
+    from backend.database import AsyncSessionLocal
+    from backend.models.user_settings import UserSettings
+    from backend.services.localization_service import _tts_config
+    from backend.services.tts_service import test_tts_connection
+
+    async with AsyncSessionLocal() as db:
+        row = (await db.execute(
+            select(UserSettings).where(UserSettings.user_id == "local")
+        )).scalar_one_or_none()
+
+    candidate = dict(effective_profile)
+    candidate.update({
+        "tts_connection_id": None,
+        "tts_provider": None,
+        "tts_model": model.strip() if model and model.strip() else None,
+        "tts_voice": voice_id.strip() if voice_id and voice_id.strip() else None,
+        "tts_base_url": None,
+        "tts_region": None,
+    })
+    profile = LocalizationProfile.model_validate(candidate)
+    runtime = _tts_config(row, profile, target_language)
+    health = await test_tts_connection(
+        provider=runtime.provider,
+        api_key=runtime.api_key,
+        base_url=runtime.base_url,
+        model=runtime.model,
+        voice_id=runtime.default_voice,
+        region=runtime.region,
+    )
+    if not health.get("ok"):
+        raise HTTPException(
+            status_code=400,
+            detail=health.get("message") or "Current TTS Settings are not usable.",
+        )
+    return {
+        "tts_connection_id": runtime.connection_id,
+        "tts_provider": getattr(runtime.provider, "value", str(runtime.provider)),
+        "tts_model": runtime.model,
+        "tts_voice": runtime.default_voice or None,
+        # Keep connection-owned infrastructure live. Persisting the resolved
+        # endpoint here would turn a rebind into a stale per-job override and
+        # defeat later endpoint/region repairs on the same connection ID.
+        "tts_base_url": None,
+        "tts_region": None,
+    }
+
+
+async def _describe_tts_bindings(run: LocalizationRun) -> dict:
+    from sqlalchemy import select
+    from backend.database import AsyncSessionLocal
+    from backend.models.user_settings import UserSettings
+    from backend.services.localization_service import _tts_config
+
+    keys = ("tts_connection_id", "tts_provider", "tts_model", "tts_voice", "tts_base_url", "tts_region")
+    job_binding = {key: run.effective_profile.get(key) for key in keys}
+    try:
+        async with AsyncSessionLocal() as db:
+            row = (await db.execute(
+                select(UserSettings).where(UserSettings.user_id == "local")
+            )).scalar_one_or_none()
+        candidate = dict(run.effective_profile)
+        candidate.update({key: None for key in keys})
+        profile = LocalizationProfile.model_validate(candidate)
+        runtime = _tts_config(
+            row, profile,
+            str(run.request.get("target_language") or "Vietnamese"),
+        )
+        current_binding = {
+            "tts_connection_id": runtime.connection_id,
+            "tts_provider": getattr(runtime.provider, "value", str(runtime.provider)),
+            "tts_model": runtime.model,
+            "tts_voice": runtime.default_voice or None,
+            "tts_base_url": runtime.base_url,
+            "tts_region": runtime.region,
+        }
+        error = None
+    except Exception as exc:
+        current_binding = None
+        error = str(exc)[:200]
+    binding_mode = str(run.request.get("tts_binding_mode") or "legacy_snapshot")
+    provider_mismatch = bool(
+        current_binding
+        and job_binding.get("tts_provider")
+        and job_binding.get("tts_provider") != current_binding.get("tts_provider")
+    )
+    if binding_mode == "pinned":
+        # A pinned connection is intentional and resolves its own live
+        # credential by stable ID. Global active TTS drift is not a mismatch.
+        binding_mismatch = False
+    else:
+        # Inherited jobs (and legacy snapshots where provenance was not stored)
+        # may legitimately be offered an explicit rebind when Settings drift.
+        binding_mismatch = bool(
+            current_binding
+            and any(
+                (job_binding.get(key) or None) != (current_binding.get(key) or None)
+                for key in keys
+            )
+        )
+    return {
+        "job": job_binding,
+        "current": current_binding,
+        "binding_mode": binding_mode,
+        "provider_mismatch": provider_mismatch,
+        "binding_mismatch": binding_mismatch,
+        "current_error": error,
+    }
+
+
 @router.get("/jobs/{job_id}")
 async def localization_job_detail(job_id: str):
     from sqlalchemy import select
@@ -223,6 +410,7 @@ async def localization_job_detail(job_id: str):
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     detail = _job_detail(run)
+    detail["tts_binding"] = await _describe_tts_bindings(run)
     detail["job_status"] = job.status
     detail["job_current_step"] = job.current_step
     detail["job_error_message"] = job.error_message
@@ -447,20 +635,123 @@ async def regenerate_localization_chunk(job_id: str, chunk_id: int):
     return {"ok": True, "job_id": job_id, "regenerating_chunk": chunk_id}
 
 
-@router.post("/jobs/{job_id}/rerun")
-async def rerun_localization_job(job_id: str, body: RerunRequest):
+@router.post("/jobs/{job_id}/rebind-tts")
+async def rebind_localization_tts(job_id: str, body: TTSRebindRequest):
+    """Adopt current Settings TTS and rerun only dubbing plus downstream stages."""
     await _assert_job_inactive(job_id)
     run = _load_run(job_id)
+    if str(run.request.get("mode") or "full_dub").strip().lower() != "full_dub":
+        raise HTTPException(status_code=409, detail="This localization job does not use TTS dubbing.")
+
+    binding = await _resolve_current_tts_binding(
+        run.effective_profile,
+        str(run.request.get("target_language") or "Vietnamese"),
+        voice_id=body.voice_id,
+        model=body.model,
+    )
+    previous = {
+        key: run.effective_profile.get(key)
+        for key in ("tts_connection_id", "tts_provider", "tts_model", "tts_voice", "tts_base_url", "tts_region")
+    }
+    # Provider-scoped voice/clone overrides must not survive the provider change;
+    # translation/ASR fields are never touched here.
+    resets = _provider_scoped_tts_resets(run.effective_profile, binding)
+    run.update_effective_profile({**run.effective_profile, **binding, **resets})
+    run.update_request({
+        **run.request,
+        "tts_binding_mode": "inherit",
+    })
+    run.invalidate_from("dubbing", delete_artifacts=True)
+    await _dispatch_existing_run(run)
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "from_stage": "dubbing",
+        "previous_tts": previous,
+        "current_tts": binding,
+        "cleared_profile_fields": sorted(resets),
+    }
+
+
+@router.post("/jobs/{job_id}/rerun")
+async def rerun_localization_job(job_id: str, body: RerunRequest):
+    """Rerun the SAME persisted job binding from the exact failed stage.
+
+    With no explicit stage this is the normal recovery action: choose the first
+    incomplete/failed stage, preserve every completed upstream artifact, and
+    use stage-specific resume state (translation checkpoint or failed dubbing
+    chunks) where possible. Explicit expert reruns keep their previous behavior.
+    """
+    await _assert_job_inactive(job_id)
+    run = _load_run(job_id)
+    smart_retry = body.from_stage is None
     stage = body.from_stage or run.first_incomplete_stage() or "qc"
-    preserve_files = {"checkpoint.json"} if body.from_stage is None and stage == "translation" else set()
-    run.invalidate_from(stage, delete_artifacts=True, preserve_files=preserve_files)
+    preserve_files = {"checkpoint.json"} if smart_retry and stage == "translation" else set()
+    delete_artifacts = True
+
+    if smart_retry and stage == "dubbing":
+        meta = dict(run.record("dubbing").get("metadata") or {})
+        failed_chunk_ids = sorted({
+            int(item.get("chunk_id"))
+            for item in (meta.get("issues") or [])
+            if isinstance(item, dict)
+            and item.get("reason") == "timing_overflow"
+            and item.get("chunk_id") is not None
+        })
+        if failed_chunk_ids:
+            run.update_request({
+                **run.request,
+                "regenerate_chunk_ids": failed_chunk_ids,
+            })
+            # Keep raw chunk files so only the overflowing chunks regenerate.
+            delete_artifacts = False
+
+    run.invalidate_from(
+        stage,
+        delete_artifacts=delete_artifacts,
+        preserve_files=preserve_files,
+    )
     if stage == "separation":
         # This is the explicit recovery path for an intentionally replaced
         # source. All source-derived artifacts were invalidated above, so the
         # current bytes can safely become the new canonical identity.
         run.refresh_source_identity()
     await _dispatch_existing_run(run)
-    return {"ok": True, "job_id": job_id, "from_stage": stage}
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "from_stage": stage,
+        "smart_retry": smart_retry,
+        "preserved_upstream": list(STAGES[:STAGES.index(stage)]),
+        "targeted_chunk_ids": run.request.get("regenerate_chunk_ids", [])
+            if smart_retry and stage == "dubbing" else [],
+    }
+
+
+@router.post("/jobs/{job_id}/auto-repair")
+async def set_localization_auto_repair(job_id: str, body: AutoRepairRequest):
+    """Toggle bounded automatic repair for an inactive persisted job.
+
+    Active runners keep an in-memory manifest snapshot, so mutating the same
+    file concurrently would be racy and could be overwritten on the next stage
+    write. New jobs receive the choice at creation; failed/completed jobs may be
+    changed here before the next retry.
+    """
+    await _assert_job_inactive(job_id)
+    run = _load_run(job_id)
+    request = {
+        **run.request,
+        "auto_repair": bool(body.enabled),
+    }
+    if not body.enabled:
+        request.pop("last_auto_repair", None)
+    run.update_request(request)
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "auto_repair": bool(body.enabled),
+        "attempts": dict(run.request.get("auto_repair_attempts") or {}),
+    }
 
 
 def _assert_rerender_ready(run: LocalizationRun) -> None:

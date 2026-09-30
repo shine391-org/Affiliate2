@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import {
-  Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Checkbox,
+  Accordion, AccordionDetails, AccordionSummary, Alert, Autocomplete, Box, Button, Checkbox,
   Chip, Divider, FormControl, FormControlLabel, InputLabel, MenuItem, Select,
   Stack, TextField, Typography,
 } from "@mui/material"
@@ -47,8 +47,69 @@ export default function LocalizationProfilesSection({ settings }) {
   const [draft, setDraft] = useState(null)
   const [glossaryText, setGlossaryText] = useState("")
   const [busy, setBusy] = useState(false)
-  const [discovering, setDiscovering] = useState(false)
-  const [discoveredModels, setDiscoveredModels] = useState([])
+  const [discovering, setDiscovering] = useState("")
+  const [discoveredByConnection, setDiscoveredByConnection] = useState({})
+
+  const aiConnections = settings?.ai_connections || {}
+  const activeAiId = settings?.ai_connection_id || Object.keys(aiConnections)[0] || ""
+  const ttsConnections = settings?.tts_connections || {}
+  const activeTtsId = settings?.tts_connection_id || Object.keys(ttsConnections)[0] || ""
+
+  const legacyAiConnectionId = (provider) => {
+    if (!provider) return activeAiId
+    if (aiConnections[provider]) return provider
+    const matches = Object.entries(aiConnections)
+      .filter(([, cfg]) => cfg?.provider === provider)
+      .map(([id]) => id)
+    if (matches.length === 1) return matches[0]
+    if (provider === settings?.ai_provider && activeAiId) return activeAiId
+    return provider
+  }
+
+  const normalizeProfile = (profile) => {
+    if (!profile) return null
+    const next = clone(profile)
+    if (!Array.isArray(next.translation_routes) || next.translation_routes.length === 0) {
+      const primary = legacyAiConnectionId(next.translation_provider)
+      const fallback = next.translation_fallback_provider
+        ? legacyAiConnectionId(next.translation_fallback_provider)
+        : ""
+      next.translation_routes = primary ? [{
+        connection_id: primary,
+        model: next.translation_model || aiConnections[primary]?.model || null,
+        base_url: next.translation_base_url || null,
+      }] : []
+      if (fallback) next.translation_routes.push({
+        connection_id: fallback,
+        model: next.translation_fallback_model || aiConnections[fallback]?.model || null,
+        base_url: next.translation_fallback_base_url || null,
+      })
+    }
+    if (!Array.isArray(next.rewrite_routes) || next.rewrite_routes.length === 0) {
+      const primary = legacyAiConnectionId(next.rewrite_provider)
+      const fallback = next.rewrite_fallback_provider
+        ? legacyAiConnectionId(next.rewrite_fallback_provider)
+        : ""
+      next.rewrite_routes = primary ? [{
+        connection_id: primary,
+        model: next.rewrite_model || aiConnections[primary]?.model || null,
+        base_url: next.rewrite_base_url || null,
+      }] : []
+      if (fallback) next.rewrite_routes.push({
+        connection_id: fallback,
+        model: next.rewrite_fallback_model || aiConnections[fallback]?.model || null,
+        base_url: next.rewrite_fallback_base_url || null,
+      })
+    }
+    if (!next.tts_connection_id && next.tts_provider) {
+      const matches = Object.entries(ttsConnections)
+        .filter(([, cfg]) => cfg?.provider === next.tts_provider)
+        .map(([id]) => id)
+      if (matches.length === 1) next.tts_connection_id = matches[0]
+      else if (next.tts_provider === settings?.tts_provider && activeTtsId) next.tts_connection_id = activeTtsId
+    }
+    return next
+  }
 
   const load = async (preferId = "") => {
     const { data } = await http.get("/api/settings/localization-profiles")
@@ -56,7 +117,8 @@ export default function LocalizationProfilesSection({ settings }) {
     const nextId = preferId || selectedId || data.default_profile_id || data.profiles?.[0]?.id || ""
     setSelectedId(nextId)
     const profile = data.profiles?.find((p) => p.id === nextId) || data.profiles?.[0] || null
-    setDraft(profile ? clone(profile) : null)
+    const normalized = normalizeProfile(profile)
+    setDraft(normalized)
     setGlossaryText(glossaryToText(profile?.glossary))
   }
 
@@ -65,42 +127,208 @@ export default function LocalizationProfilesSection({ settings }) {
   useEffect(() => {
     const profile = store.profiles?.find((p) => p.id === selectedId)
     if (!profile) return
-    setDraft(clone(profile))
+    setDraft(normalizeProfile(profile))
     setGlossaryText(glossaryToText(profile.glossary))
-  }, [selectedId])
+  }, [selectedId, settings?.ai_connections, settings?.tts_connections])
 
   const isDefault = selectedId === store.default_profile_id
-  const globalProvider = settings?.ai_provider || "global AI provider"
-  const globalModel = settings?.ai_model || "configured global model"
-  const modelSummary = useMemo(() => {
-    if (!draft) return ""
-    return `C6: ${draft.translation_model || globalModel} · C7 rewrite: ${draft.rewrite_model || globalModel}`
-  }, [draft, globalModel])
-
   const patch = (key, value) => setDraft((prev) => ({ ...prev, [key]: value }))
 
-  const discoverModels = async () => {
-    const provider = settings?.ai_provider || ""
-    if (!provider || provider === "anthropic") {
-      showSnackbar("Kết nối AI này không hỗ trợ dò tìm mô hình", "warning")
+  const connectionLabel = (connectionId) => {
+    const cfg = aiConnections[connectionId]
+    return cfg ? `${cfg.label || connectionId} · ${cfg.provider}` : connectionId
+  }
+  const routeModels = (connectionId) => [
+    ...new Set([
+      aiConnections[connectionId]?.model,
+      ...(discoveredByConnection[connectionId] || []),
+    ].filter(Boolean)),
+  ]
+
+  const updateRoute = (stage, index, values) => setDraft((prev) => {
+    const key = `${stage}_routes`
+    const routes = [...(prev?.[key] || [])]
+    const current = routes[index] || {}
+    routes[index] = { ...current, ...values }
+    return { ...prev, [key]: routes }
+  })
+
+  const addRoute = (stage) => setDraft((prev) => {
+    const key = `${stage}_routes`
+    const routes = [...(prev?.[key] || [])]
+    const fallbackId = Object.keys(aiConnections).find(
+      (id) => !routes.some((route) => route.connection_id === id)
+    ) || activeAiId
+    if (!fallbackId) return prev
+    routes.push({
+      connection_id: fallbackId,
+      model: aiConnections[fallbackId]?.model || null,
+      base_url: null,
+    })
+    return { ...prev, [key]: routes }
+  })
+
+  const removeRoute = (stage, index) => setDraft((prev) => {
+    const key = `${stage}_routes`
+    const routes = [...(prev?.[key] || [])]
+    if (routes.length <= 1) return prev
+    routes.splice(index, 1)
+    return { ...prev, [key]: routes }
+  })
+
+  const moveRoute = (stage, index, direction) => setDraft((prev) => {
+    const key = `${stage}_routes`
+    const routes = [...(prev?.[key] || [])]
+    const target = index + direction
+    if (target < 0 || target >= routes.length) return prev
+    ;[routes[index], routes[target]] = [routes[target], routes[index]]
+    return { ...prev, [key]: routes }
+  })
+
+  const modelSummary = useMemo(() => {
+    if (!draft) return ""
+    const c6 = (draft.translation_routes || []).map((r) =>
+      `${connectionLabel(r.connection_id)} / ${r.model || aiConnections[r.connection_id]?.model || "default"}`
+    ).join(" → ")
+    const c7 = (draft.rewrite_routes || []).map((r) =>
+      `${connectionLabel(r.connection_id)} / ${r.model || aiConnections[r.connection_id]?.model || "default"}`
+    ).join(" → ")
+    return `C6: ${c6 || "chưa cấu hình"} · C7: ${c7 || "chưa cấu hình"}`
+  }, [draft, settings?.ai_connections])
+
+  const currentTtsProvider = settings?.tts_provider || "edge_tts"
+  const pinnedTtsConnection = draft?.tts_connection_id || null
+  const pinnedTtsConfig = pinnedTtsConnection ? ttsConnections[pinnedTtsConnection] : null
+  const ttsConnectionMissing = Boolean(pinnedTtsConnection && !pinnedTtsConfig)
+  const ttsVoicePlaceholder = pinnedTtsConfig?.voice
+    || settings?.preferred_tts_voice
+    || "kế thừa giọng mặc định của connection"
+
+  const adoptCurrentTts = () => setDraft((prev) => {
+    const connectionChanged = Boolean(
+      prev?.tts_connection_id && prev.tts_connection_id !== activeTtsId
+    )
+    return {
+      ...prev,
+      tts_connection_id: activeTtsId || null,
+      tts_provider: currentTtsProvider,
+      tts_model: settings?.tts_model || null,
+      tts_voice: settings?.preferred_tts_voice || null,
+      tts_base_url: null,
+      tts_region: null,
+      ...(connectionChanged ? {
+        speaker_voices: {},
+        speaker_reference_audio: {},
+        tts_reference_audio: null,
+        tts_reference_text: null,
+        tts_reference_language: null,
+      } : {}),
+    }
+  })
+
+  const discoverModels = async (connectionId) => {
+    const cfg = aiConnections[connectionId]
+    if (!cfg) {
+      showSnackbar("Connection AI không tồn tại", "warning")
       return
     }
-    setDiscovering(true)
+    if (cfg.provider === "anthropic") {
+      showSnackbar("Connection này không hỗ trợ dò tìm mô hình", "warning")
+      return
+    }
+    setDiscovering(connectionId)
     try {
       const { data } = await http.post("/api/settings/ai/models", {
-        provider,
-        model: settings?.ai_model || null,
-        base_url: settings?.ai_base_url || null,
+        connection_id: connectionId,
       })
       const models = data?.models || []
-      setDiscoveredModels(models)
-      showSnackbar(models.length ? `Tìm thấy ${models.length} mô hình trên kết nối đã cấu hình` : "Không có mô hình nào được trả về", models.length ? "success" : "warning")
+      setDiscoveredByConnection((prev) => ({ ...prev, [connectionId]: models }))
+      showSnackbar(
+        models.length ? `Tìm thấy ${models.length} mô hình trên ${cfg.label || connectionId}` : "Không có mô hình nào được trả về",
+        models.length ? "success" : "warning",
+      )
     } catch (err) {
       showSnackbar(err.response?.data?.detail || "Dò tìm mô hình thất bại", "error")
     } finally {
-      setDiscovering(false)
+      setDiscovering("")
     }
   }
+
+  const renderRouteChain = (stage, title) => {
+    const routes = draft?.[`${stage}_routes`] || []
+    return (
+      <Stack spacing={1.25}>
+        <Typography variant="subtitle2">{title}</Typography>
+        {routes.map((route, index) => {
+          const cfg = aiConnections[route.connection_id] || {}
+          const models = routeModels(route.connection_id)
+          return (
+            <Box key={`${stage}-${index}`} sx={{ p: 1.25, border: 1, borderColor: "divider", borderRadius: 1.5 }}>
+              <Stack direction={{ xs: "column", md: "row" }} spacing={1}>
+                <FormControl size="small" fullWidth>
+                  <InputLabel>{index === 0 ? "AI chính" : `Fallback ${index}`}</InputLabel>
+                  <Select
+                    value={route.connection_id || ""}
+                    label={index === 0 ? "AI chính" : `Fallback ${index}`}
+                    onChange={(e) => {
+                      const id = e.target.value
+                      updateRoute(stage, index, {
+                        connection_id: id,
+                        model: aiConnections[id]?.model || null,
+                        base_url: null,
+                      })
+                    }}
+                  >
+                    {Object.entries(aiConnections).map(([id, item]) => (
+                      <MenuItem key={id} value={id}>
+                        {item.label || id} · {item.provider}{id === activeAiId ? " · ACTIVE" : ""}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <Autocomplete
+                  freeSolo
+                  size="small"
+                  fullWidth
+                  options={models}
+                  value={route.model || ""}
+                  onInputChange={(_, value) => updateRoute(stage, index, { model: value || null })}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label="Model"
+                      placeholder={cfg.model || "model mặc định của connection"}
+                    />
+                  )}
+                />
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<RefreshOutlinedIcon />}
+                  onClick={() => discoverModels(route.connection_id)}
+                  disabled={!route.connection_id || discovering === route.connection_id}
+                >
+                  {discovering === route.connection_id ? "Đang dò…" : "Models"}
+                </Button>
+              </Stack>
+              <Stack direction="row" spacing={0.75} sx={{ mt: 1 }} flexWrap="wrap" useFlexGap>
+                <Button size="small" onClick={() => moveRoute(stage, index, -1)} disabled={index === 0}>Lên</Button>
+                <Button size="small" onClick={() => moveRoute(stage, index, 1)} disabled={index === routes.length - 1}>Xuống</Button>
+                <Button size="small" color="error" onClick={() => removeRoute(stage, index)} disabled={routes.length <= 1}>Bỏ route</Button>
+                <Typography variant="caption" color="text.secondary" sx={{ alignSelf: "center" }}>
+                  {cfg.base_url || "endpoint mặc định"}{cfg.api_key_set ? " · key đã lưu" : ""}
+                </Typography>
+              </Stack>
+            </Box>
+          )
+        })}
+        <Button size="small" variant="outlined" startIcon={<AddOutlinedIcon />} onClick={() => addRoute(stage)} disabled={!Object.keys(aiConnections).length}>
+          Thêm fallback
+        </Button>
+      </Stack>
+    )
+  }
+
 
   const save = async () => {
     if (!draft) return
@@ -110,14 +338,41 @@ export default function LocalizationProfilesSection({ settings }) {
     }
     setBusy(true)
     try {
+      const translationRoutes = (draft.translation_routes || [])
+        .filter((route) => route?.connection_id)
+        .map((route) => ({
+          connection_id: route.connection_id,
+          model: route.model?.trim() || null,
+          base_url: route.base_url?.trim() || null,
+        }))
+      const rewriteRoutes = (draft.rewrite_routes || [])
+        .filter((route) => route?.connection_id)
+        .map((route) => ({
+          connection_id: route.connection_id,
+          model: route.model?.trim() || null,
+          base_url: route.base_url?.trim() || null,
+        }))
+      if (!translationRoutes.length || !rewriteRoutes.length) {
+        throw new Error("C6 và C7 cần ít nhất một AI connection route")
+      }
       const payload = {
         ...draft,
-        translation_provider: draft.translation_provider || null,
-        translation_model: draft.translation_model?.trim() || null,
-        translation_base_url: draft.translation_base_url?.trim() || null,
-        rewrite_provider: draft.rewrite_provider || null,
-        rewrite_model: draft.rewrite_model?.trim() || null,
-        rewrite_base_url: draft.rewrite_base_url?.trim() || null,
+        translation_routes: translationRoutes,
+        rewrite_routes: rewriteRoutes,
+        // Keep the first two legacy slots synchronized for old manifests/tools.
+        translation_provider: translationRoutes[0]?.connection_id || null,
+        translation_model: translationRoutes[0]?.model || null,
+        translation_base_url: translationRoutes[0]?.base_url || null,
+        translation_fallback_provider: translationRoutes[1]?.connection_id || null,
+        translation_fallback_model: translationRoutes[1]?.model || null,
+        translation_fallback_base_url: translationRoutes[1]?.base_url || null,
+        rewrite_provider: rewriteRoutes[0]?.connection_id || null,
+        rewrite_model: rewriteRoutes[0]?.model || null,
+        rewrite_base_url: rewriteRoutes[0]?.base_url || null,
+        rewrite_fallback_provider: rewriteRoutes[1]?.connection_id || null,
+        rewrite_fallback_model: rewriteRoutes[1]?.model || null,
+        rewrite_fallback_base_url: rewriteRoutes[1]?.base_url || null,
+        tts_connection_id: draft.tts_connection_id || null,
         translation_instructions: draft.translation_instructions || "",
         rewrite_instructions: draft.rewrite_instructions || "",
         translation_guardrails: draft.translation_guardrails.trim(),
@@ -127,7 +382,7 @@ export default function LocalizationProfilesSection({ settings }) {
       const { data } = await http.post("/api/settings/localization-profiles", payload)
       setStore(data)
       setSelectedId(payload.id)
-      setDraft(clone(data.profiles.find((p) => p.id === payload.id) || payload))
+      setDraft(normalizeProfile(data.profiles.find((p) => p.id === payload.id) || payload))
       setGlossaryText(glossaryToText(payload.glossary))
       showSnackbar("Đã lưu hồ sơ bản địa hóa", "success")
     } catch (err) {
@@ -162,9 +417,26 @@ export default function LocalizationProfilesSection({ settings }) {
       translation_provider: null,
       translation_model: null,
       translation_base_url: null,
+      translation_fallback_provider: null,
+      translation_fallback_model: null,
+      translation_fallback_base_url: null,
+      translation_routes: activeAiId ? [{
+        connection_id: activeAiId,
+        model: aiConnections[activeAiId]?.model || null,
+        base_url: null,
+      }] : [],
       rewrite_provider: null,
       rewrite_model: null,
       rewrite_base_url: null,
+      rewrite_fallback_provider: null,
+      rewrite_fallback_model: null,
+      rewrite_fallback_base_url: null,
+      rewrite_routes: activeAiId ? [{
+        connection_id: activeAiId,
+        model: aiConnections[activeAiId]?.model || null,
+        base_url: null,
+      }] : [],
+      tts_connection_id: activeTtsId || null,
       rewrite_instructions: "",
       translation_guardrails: base?.translation_guardrails || store.prompt_defaults?.translation_guardrails || "",
       rewrite_guardrails: base?.rewrite_guardrails || store.prompt_defaults?.rewrite_guardrails || "",
@@ -183,7 +455,7 @@ export default function LocalizationProfilesSection({ settings }) {
       const nextId = data.default_profile_id || data.profiles?.[0]?.id || ""
       setSelectedId(nextId)
       const profile = data.profiles?.find((p) => p.id === nextId) || null
-      setDraft(profile ? clone(profile) : null)
+      setDraft(normalizeProfile(profile))
       setGlossaryText(glossaryToText(profile?.glossary))
       showSnackbar("Đã xóa hồ sơ bản địa hóa", "info")
     } finally {
@@ -203,6 +475,22 @@ export default function LocalizationProfilesSection({ settings }) {
           C6 = AI dịch nội dung · C7 = AI viết lại cho vừa thời lượng · TTS = tạo giọng đọc · Audio/Render/QC = xử lý và kiểm tra đầu ra. API key/endpoint dùng chung vẫn thuộc Kết nối AI hoặc TTS; hồ sơ này chỉ lưu override và chính sách sản xuất.
         </Typography>
       </Alert>
+
+      {pinnedTtsConnection && pinnedTtsConfig && pinnedTtsConnection !== activeTtsId && (
+        <Alert severity="info" variant="outlined">
+          Hồ sơ đang ghim TTS connection <strong>{pinnedTtsConfig.label || pinnedTtsConnection}</strong> ({pinnedTtsConfig.provider}).
+          Đây là cấu hình hợp lệ và không phụ thuộc connection TTS đang active.
+        </Alert>
+      )}
+      {ttsConnectionMissing && (
+        <Alert
+          severity="warning"
+          action={<Button color="inherit" size="small" onClick={adoptCurrentTts}>Dùng TTS hiện tại cho hồ sơ</Button>}
+        >
+          TTS connection <strong>{pinnedTtsConnection}</strong> không còn trong danh sách đang dùng.
+          Có thể là connection cũ đã archive; chọn connection hiện tại trước khi tạo job mới.
+        </Alert>
+      )}
 
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
         <FormControl size="small" fullWidth>
@@ -227,34 +515,12 @@ export default function LocalizationProfilesSection({ settings }) {
       </Stack>
 
       <Box sx={{ p: 1.5, border: 1, borderColor: "divider", borderRadius: 2 }}>
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }}>
-          <Box sx={{ flex: 1 }}>
-            <Typography variant="subtitle2">Kết nối AI đã cấu hình</Typography>
-            <Typography variant="caption" color="text.secondary">
-              {globalProvider} · mô hình toàn cục/mặc định {globalModel}
-            </Typography>
-          </Box>
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={<RefreshOutlinedIcon />}
-            onClick={discoverModels}
-            disabled={discovering}
-          >
-            {discovering ? "Đang dò tìm…" : "Dò tìm mô hình"}
-          </Button>
-        </Stack>
-        {discoveredModels.length > 0 && (
-          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
-            {discoveredModels.slice(0, 8).map((model) => <Chip key={model} label={model} size="small" variant="outlined" />)}
-            {discoveredModels.length > 8 && <Chip label={`+${discoveredModels.length - 8} mô hình nữa`} size="small" />}
-          </Stack>
-        )}
+        <Typography variant="subtitle2">Connection Registry</Typography>
+        <Typography variant="caption" color="text.secondary">
+          {Object.keys(aiConnections).length} AI connection · {Object.keys(ttsConnections).length} TTS connection.
+          C6/C7 chọn connection theo thứ tự fallback bên dưới; mỗi route tự dò model từ đúng endpoint.
+        </Typography>
       </Box>
-
-      <datalist id="localization-model-suggestions">
-        {[...new Set([settings?.ai_model, ...discoveredModels].filter(Boolean))].map((model) => <option key={model} value={model} />)}
-      </datalist>
 
       <Accordion defaultExpanded disableGutters>
         <AccordionSummary expandIcon={<ExpandMoreOutlinedIcon />}>
@@ -265,27 +531,65 @@ export default function LocalizationProfilesSection({ settings }) {
         </AccordionSummary>
         <AccordionDetails>
           <Stack spacing={2}>
+            {renderRouteChain("translation", "Chuỗi AI C6 / Semantic")}
+            <Alert severity="info" variant="outlined">
+              Chạy theo đúng thứ tự route. Khi một route lỗi và fallback thành công, route đó được giữ sticky cho phần còn lại của stage thay vì quay lại endpoint đang chết. Semantic dùng cùng chuỗi; hết toàn bộ budget thì chuyển deterministic.
+            </Alert>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={draft.semantic_segmentation !== false}
+                  onChange={(e) => patch("semantic_segmentation", e.target.checked)}
+                />
+              }
+              label="Dùng AI để tinh chỉnh ranh giới câu/ngữ nghĩa (tắt = phân đoạn nhanh bằng timestamp/punctuation/speaker)"
+            />
+            <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
+              <TextField
+                size="small" type="number" fullWidth label="Semantic timeout / lần (giây)"
+                value={draft.semantic_ai_attempt_timeout_s ?? 25}
+                onChange={(e) => patch("semantic_ai_attempt_timeout_s", Number(e.target.value))}
+                inputProps={{ min: 5, max: 120, step: 5 }}
+              />
+              <TextField
+                size="small" type="number" fullWidth label="Semantic tổng ngân sách (giây)"
+                value={draft.semantic_ai_total_timeout_s ?? 60}
+                onChange={(e) => patch("semantic_ai_total_timeout_s", Number(e.target.value))}
+                inputProps={{ min: 10, max: 240, step: 5 }}
+              />
+              <TextField
+                size="small" type="number" fullWidth label="Semantic số lần thử/provider"
+                value={draft.semantic_ai_retry_attempts ?? 2}
+                onChange={(e) => patch("semantic_ai_retry_attempts", Number(e.target.value))}
+                inputProps={{ min: 1, max: 3, step: 1 }}
+              />
+            </Stack>
             <FormControl size="small" fullWidth>
               <InputLabel>Phong cách dịch</InputLabel>
               <Select value={draft.translation_preset || "natural_vietnamese"} label="Phong cách dịch" onChange={(e) => patch("translation_preset", e.target.value)}>
                 {PRESETS.map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
               </Select>
             </FormControl>
-            <TextField
-              size="small" fullWidth label="Mô hình dịch C6"
-              value={draft.translation_model || ""}
-              onChange={(e) => patch("translation_model", e.target.value)}
-              placeholder={globalModel}
-              inputProps={{ list: "localization-model-suggestions" }}
-              helperText="Để trống = dùng mô hình mặc định/toàn cục. Nhập ID mô hình tương thích hoặc dùng Dò tìm mô hình."
-            />
-            <TextField
-              size="small" fullWidth label="Ghi đè Base URL tương thích (tùy chọn)"
-              value={draft.translation_base_url || ""}
-              onChange={(e) => patch("translation_base_url", e.target.value)}
-              placeholder={settings?.ai_base_url || "kế thừa endpoint trong Cài đặt"}
-              helperText="Thông tin xác thực kết nối vẫn nằm trong Kết nối AI."
-            />
+            <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
+              <TextField
+                size="small" type="number" fullWidth label="Dịch timeout / lần (giây)"
+                value={draft.translation_attempt_timeout_s ?? 75}
+                onChange={(e) => patch("translation_attempt_timeout_s", Number(e.target.value))}
+                inputProps={{ min: 10, max: 300, step: 5 }}
+              />
+              <TextField
+                size="small" type="number" fullWidth label="Dịch tổng ngân sách/batch (giây)"
+                value={draft.translation_total_timeout_s ?? 180}
+                onChange={(e) => patch("translation_total_timeout_s", Number(e.target.value))}
+                inputProps={{ min: 20, max: 900, step: 10 }}
+              />
+              <TextField
+                size="small" type="number" fullWidth label="Dịch số lần thử/provider"
+                value={draft.translation_retry_attempts ?? 3}
+                onChange={(e) => patch("translation_retry_attempts", Number(e.target.value))}
+                inputProps={{ min: 1, max: 5, step: 1 }}
+              />
+            </Stack>
             <Alert severity="info" variant="outlined">
               Hướng dẫn dịch được bổ sung thêm. Quy tắc bảo vệ ngữ nghĩa có thể chỉnh ở phần bên dưới; giao thức parser (ID/thứ tự ổn định và cấu trúc JSON) vẫn do ứng dụng quản lý.
             </Alert>
@@ -317,20 +621,33 @@ export default function LocalizationProfilesSection({ settings }) {
         </AccordionSummary>
         <AccordionDetails>
           <Stack spacing={2}>
-            <TextField
-              size="small" fullWidth label="Mô hình viết lại thời lượng C7"
-              value={draft.rewrite_model || ""}
-              onChange={(e) => patch("rewrite_model", e.target.value)}
-              placeholder={globalModel}
-              inputProps={{ list: "localization-model-suggestions" }}
-              helperText="Có thể dùng mô hình nhỏ/nhanh hơn C6. Để trống = dùng mô hình mặc định/toàn cục."
-            />
-            <TextField
-              size="small" fullWidth label="Ghi đè Base URL tương thích (tùy chọn)"
-              value={draft.rewrite_base_url || ""}
-              onChange={(e) => patch("rewrite_base_url", e.target.value)}
-              placeholder={settings?.ai_base_url || "kế thừa endpoint trong Cài đặt"}
-            />
+            {renderRouteChain("rewrite", "Chuỗi AI C7")}
+            <Alert severity="info" variant="outlined">
+              C7 cũng hỗ trợ N route theo thứ tự và sticky failover. Nếu toàn bộ AI rewrite lỗi/hết ngân sách, pipeline chuyển sang timing fit/video slowdown bounded thay vì treo.
+            </Alert>
+            <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
+              <TextField
+                size="small" type="number" fullWidth label="C7 timeout / lần (giây)"
+                value={draft.rewrite_attempt_timeout_s ?? 45}
+                onChange={(e) => patch("rewrite_attempt_timeout_s", Number(e.target.value))}
+                inputProps={{ min: 10, max: 180, step: 5 }}
+              />
+              <TextField
+                size="small" type="number" fullWidth label="C7 tổng ngân sách (giây)"
+                value={draft.rewrite_total_timeout_s ?? 90}
+                onChange={(e) => patch("rewrite_total_timeout_s", Number(e.target.value))}
+                inputProps={{ min: 20, max: 360, step: 5 }}
+              />
+              <TextField
+                size="small" type="number" fullWidth label="C7 số lần thử/provider"
+                value={draft.rewrite_retry_attempts ?? 3}
+                onChange={(e) => patch("rewrite_retry_attempts", Number(e.target.value))}
+                inputProps={{ min: 1, max: 4, step: 1 }}
+              />
+            </Stack>
+            <Alert severity="info" variant="outlined">
+              Nếu AI viết lại chính và fallback đều lỗi/hết thời gian, C7 không treo job: pipeline tiếp tục bằng timing fit/video slowdown bounded và chỉ fail nếu cuối cùng vẫn không thể fit.
+            </Alert>
             <Alert severity="info" variant="outlined">
               Hướng dẫn viết lại được bổ sung thêm. Quy tắc bảo vệ ngữ nghĩa có thể chỉnh ở phần bên dưới; giao thức parser (ID/thứ tự ổn định và cấu trúc JSON) vẫn do ứng dụng quản lý.
             </Alert>
@@ -344,13 +661,52 @@ export default function LocalizationProfilesSection({ settings }) {
             />
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
               <FormControl size="small" fullWidth>
-                <InputLabel>Ghi đè TTS cho hồ sơ</InputLabel>
-                <Select value={draft.tts_provider || ""} label="Ghi đè TTS cho hồ sơ" onChange={(e) => patch("tts_provider", e.target.value || null)}>
-                  <MenuItem value=""><em>Kế thừa kết nối TTS dùng chung</em></MenuItem>
-                  {["edge_tts", "openai_tts", "openai_compatible_tts", "azure_tts", "elevenlabs", "gpt_sovits"].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
+                <InputLabel>Kết nối TTS cho hồ sơ</InputLabel>
+                <Select
+                  value={draft.tts_connection_id || ""}
+                  label="Kết nối TTS cho hồ sơ"
+                  onChange={(e) => {
+                    const id = e.target.value
+                    const cfg = id ? ttsConnections[id] : null
+                    const nextId = id || activeTtsId || ""
+                    const nextCfg = cfg || ttsConnections[nextId] || null
+                    setDraft((prev) => {
+                      const changed = Boolean(prev?.tts_connection_id && prev.tts_connection_id !== nextId)
+                      return {
+                        ...prev,
+                        tts_connection_id: nextId || null,
+                        tts_provider: nextCfg?.provider || settings?.tts_provider || null,
+                        tts_model: nextCfg?.model || settings?.tts_model || null,
+                        tts_voice: nextCfg?.voice || settings?.preferred_tts_voice || null,
+                        tts_base_url: null,
+                        tts_region: null,
+                        ...(changed ? {
+                          speaker_voices: {},
+                          speaker_reference_audio: {},
+                          tts_reference_audio: null,
+                          tts_reference_text: null,
+                          tts_reference_language: null,
+                        } : {}),
+                      }
+                    })
+                  }}
+                >
+                  <MenuItem value=""><em>Kế thừa TTS active ({activeTtsId || "chưa có"})</em></MenuItem>
+                  {Object.entries(ttsConnections).map(([id, cfg]) => (
+                    <MenuItem key={id} value={id}>
+                      {cfg.label || id} · {cfg.provider}{id === activeTtsId ? " · ACTIVE" : ""}
+                    </MenuItem>
+                  ))}
                 </Select>
               </FormControl>
-              <TextField size="small" fullWidth label="ID giọng đọc" value={draft.tts_voice || ""} onChange={(e) => patch("tts_voice", e.target.value || null)} placeholder={settings?.preferred_tts_voice || "kế thừa mặc định ngôn ngữ/nhà cung cấp"} />
+              <TextField
+                size="small"
+                fullWidth
+                label="ID giọng đọc override"
+                value={draft.tts_voice || ""}
+                onChange={(e) => patch("tts_voice", e.target.value || null)}
+                placeholder={ttsVoicePlaceholder}
+              />
             </Stack>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
               <TextField size="small" type="number" fullWidth label="Giới hạn tốc độ ưu tiên" value={draft.dub_speed_accept ?? 1.15} onChange={(e) => patch("dub_speed_accept", Number(e.target.value))} inputProps={{ step: 0.01, min: 1, max: 2 }} />
@@ -481,10 +837,6 @@ export default function LocalizationProfilesSection({ settings }) {
               </FormControl>
               <TextField size="small" type="number" fullWidth label="Số người nói dự kiến" value={draft.diarization_speakers ?? ""} onChange={(e) => patch("diarization_speakers", e.target.value === "" ? null : Number(e.target.value))} inputProps={{ min: 1, max: 16 }} />
             </Stack>
-            <FormControlLabel
-              control={<Checkbox checked={!!draft.semantic_segmentation} onChange={(e) => patch("semantic_segmentation", e.target.checked)} />}
-              label="Phân đoạn ngữ nghĩa bằng AI"
-            />
           </Stack>
         </AccordionDetails>
       </Accordion>

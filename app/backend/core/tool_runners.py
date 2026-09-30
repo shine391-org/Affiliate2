@@ -79,6 +79,23 @@ async def _is_already_vertical(video_path: Path) -> bool:
     return await asyncio.to_thread(_is_already_vertical_sync, video_path)
 
 
+def _localization_source_media_preflight_sync(source_path: Path) -> dict:
+    """Reject a proven video-only source before loading Demucs/Whisper.
+
+    Unknown/unprobeable metadata is left to the canonical stage error paths;
+    only a successful ffprobe proving zero audio streams fails here.
+    """
+    from backend.services.video_utils import probe_media_details
+
+    details = probe_media_details(source_path)
+    if details and details.get("has_audio") is False:
+        raise RuntimeError(
+            "Source media has no audio stream. Localization requires audible "
+            "speech/audio; choose or re-download a verified media variant with audio."
+        )
+    return details
+
+
 # GPU concurrency gate (concurrency = 1) for heavy local localization workloads
 # (Demucs separation, Faster-Whisper / WhisperX, and NVENC render) on 8GB VRAM
 from contextlib import asynccontextmanager
@@ -93,6 +110,29 @@ async def localization_gpu_gate():
         yield
     finally:
         _LOCALIZATION_GPU_GATE.release()
+
+
+def _release_localization_torch_cache_sync() -> None:
+    """Release unused PyTorch/Demucs allocator memory after C5/C8 GPU audio work.
+
+    This runs while the localization GPU gate is still held, after Demucs and
+    alignment/diarization have finished. It never frees live tensors; CUDA's
+    empty_cache() only returns UNUSED allocator blocks. Keeping those blocks
+    warm beyond the ASR/alignment boundary made failed jobs pin memory for no
+    useful downstream stage.
+    """
+    import gc
+    import sys
+
+    gc.collect()
+    torch = sys.modules.get("torch")
+    if torch is None:
+        return
+    try:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        logger.debug("Could not release localization torch cache", exc_info=True)
 
 
 def _cleanup_paths(*paths: Path):
@@ -957,6 +997,7 @@ async def run_tool_translate(
     mask_box: dict | None = None,
     caption_placement: dict | None = None,
     downloaded_video_id: str | None = None,
+    auto_repair: bool | None = None,
 ):
     """Canonical resumable Phase-C localization runner.
 
@@ -982,6 +1023,7 @@ async def run_tool_translate(
         synthesize_timed_dub,
         transcribe_for_localization,
         translate_transcript,
+        validate_localization_tts_preflight,
     )
     from backend.services.localization_stage_service import LocalizationRun
 
@@ -1003,6 +1045,8 @@ async def run_tool_translate(
         "caption_placement": caption_placement,
         "downloaded_video_id": downloaded_video_id,
     }
+    if auto_repair is not None:
+        request_snapshot["auto_repair"] = bool(auto_repair)
     logger.info(
         "TASK START tool:translate | job=%s target=%s mode=%s profile=%s aspect=%s",
         job_id[:8], target_language, mode, profile_id or "default", target_aspect or "default",
@@ -1043,6 +1087,18 @@ async def run_tool_translate(
         else:
             profile = resolve_localization_profile(user_settings, profile_id)
 
+        if run is None:
+            # Preserve whether the SOURCE profile intentionally pinned a TTS
+            # provider or inherited Settings. materialize_localization_profile()
+            # resolves both to a concrete provider, so without this provenance
+            # a later Settings change cannot distinguish "stale inherited
+            # binding" from "intentional FAST=Edge while HQ=ElevenLabs".
+            request_snapshot["tts_binding_mode"] = (
+                "pinned"
+                if (profile.tts_connection_id or profile.tts_provider)
+                else "inherit"
+            )
+
         # Manual tool controls are job-level overrides on the resolved profile.
         updates = {}
         if voice_id:
@@ -1064,6 +1120,10 @@ async def run_tool_translate(
                 target_language=target_language,
                 for_dub=is_dub,
             )
+            if is_dub:
+                await validate_localization_tts_preflight(
+                    user_settings, profile, target_language,
+                )
             run = LocalizationRun(
                 job_id,
                 source_path=str(original_input),
@@ -1078,6 +1138,8 @@ async def run_tool_translate(
                 request_snapshot["review_translation"] = bool(
                     run.request.get("review_translation")
                 )
+            if auto_repair is None:
+                request_snapshot.pop("auto_repair", None)
             if not downloaded_video_id and run.request.get("downloaded_video_id"):
                 downloaded_video_id = run.request.get("downloaded_video_id")
                 request_snapshot["downloaded_video_id"] = downloaded_video_id
@@ -1109,6 +1171,12 @@ async def run_tool_translate(
             and not run.is_complete("separation", ("vocals", "background"))
         )
         needs_asr = not run.is_complete("asr", ("transcript",))
+
+        if needs_separation or needs_asr:
+            await asyncio.to_thread(
+                _localization_source_media_preflight_sync,
+                source_path,
+            )
 
         background_file = None
         vocals_file = None
@@ -1193,7 +1261,14 @@ async def run_tool_translate(
 
         if needs_separation or needs_asr:
             async with localization_gpu_gate():
-                await _run_gpu_audio_pipeline()
+                try:
+                    await _run_gpu_audio_pipeline()
+                finally:
+                    # Release unused Demucs/WhisperX allocator memory even when
+                    # separation/ASR fails or the task is cancelled. Without a
+                    # finally, exactly the failure path that stops a job can
+                    # leave multi-GB resident memory pinned in the backend.
+                    await asyncio.to_thread(_release_localization_torch_cache_sync)
         else:
             await _run_gpu_audio_pipeline()
 
@@ -1206,13 +1281,64 @@ async def run_tool_translate(
                 run.load_json("semantic", "transcript")
             )
         else:
-            await _tool_progress(job_id, 26, "Building semantic speech cues...", user_id)
+            await _tool_progress(job_id, 26, "Đang chia câu/ngữ nghĩa...", user_id)
             run.start("semantic")
+            semantic_runtime = {
+                "attempts": 0,
+                "errors": 0,
+                "fallback_provider_used": False,
+                "deterministic_fallback": False,
+            }
+
+            async def _semantic_progress(event: dict):
+                name = event.get("event")
+                window = int(event.get("window") or 1)
+                total = max(1, int(event.get("total") or 1))
+                pct = min(34.0, 26.0 + (window - 1) / total * 8.0)
+                role = str(event.get("role") or "primary")
+                provider = str(event.get("provider") or "")
+                model = str(event.get("model") or "")
+                if name == "attempt":
+                    semantic_runtime["attempts"] += 1
+                    if role.startswith("fallback"):
+                        semantic_runtime["fallback_provider_used"] = True
+                    await _tool_progress(
+                        job_id,
+                        pct,
+                        (
+                            f"Phân đoạn ngữ nghĩa {window}/{total} · "
+                            f"{'fallback' if role.startswith('fallback') else 'AI chính'} "
+                            f"{provider}/{model} · thử {event.get('attempt')}/{event.get('max_attempts')}"
+                        ),
+                        user_id,
+                    )
+                elif name == "error":
+                    semantic_runtime["errors"] += 1
+                    await _tool_progress(
+                        job_id,
+                        pct,
+                        (
+                            f"AI phân đoạn lỗi ở {window}/{total} · "
+                            f"{'fallback' if role == 'fallback' else 'AI chính'} · "
+                            f"đang xử lý dự phòng..."
+                        ),
+                        user_id,
+                    )
+                elif name in {"budget_exhausted", "deterministic_fallback"}:
+                    semantic_runtime["deterministic_fallback"] = True
+                    await _tool_progress(
+                        job_id,
+                        pct,
+                        "AI phân đoạn không phản hồi · chuyển sang phân đoạn nhanh không AI...",
+                        user_id,
+                    )
+
             try:
                 transcript = await prepare_semantic_transcript(
                     transcript,
                     profile=profile,
                     user_settings=user_settings,
+                    progress_cb=_semantic_progress,
                 )
                 path = run.save_json(
                     "semantic", "transcript.json", transcript.model_dump()
@@ -1220,7 +1346,11 @@ async def run_tool_translate(
                 run.complete(
                     "semantic",
                     artifacts={"transcript": path},
-                    metadata={"semantic_cue_count": len(transcript.segments)},
+                    metadata={
+                        "semantic_cue_count": len(transcript.segments),
+                        "ai_enabled": bool(profile.semantic_segmentation),
+                        **semantic_runtime,
+                    },
                 )
             except Exception as exc:
                 run.fail("semantic", exc)
@@ -1235,10 +1365,69 @@ async def run_tool_translate(
         else:
             await _tool_progress(
                 job_id, 36,
-                f"Translating {len(transcript.segments)} semantic cues...",
+                f"Đang dịch {len(transcript.segments)} câu ngữ nghĩa...",
                 user_id,
             )
             run.start("translation")
+            translation_runtime = {
+                "attempts": 0,
+                "errors": 0,
+                "fallback_provider_used": False,
+            }
+            translation_batch = {"current": 1, "total": 1}
+
+            async def _translation_progress(event: dict):
+                name = event.get("event")
+                if name == "batch":
+                    translation_batch["current"] = int(event.get("batch") or 1)
+                    translation_batch["total"] = max(1, int(event.get("total_batches") or 1))
+                current = translation_batch["current"]
+                total = translation_batch["total"]
+                pct = min(50.0, 36.0 + (current - 1) / total * 14.0)
+                role = str(event.get("role") or "primary")
+                provider = str(event.get("provider") or "")
+                model = str(event.get("model") or "")
+                if name == "attempt":
+                    translation_runtime["attempts"] += 1
+                    if role.startswith("fallback"):
+                        translation_runtime["fallback_provider_used"] = True
+                    await _tool_progress(
+                        job_id,
+                        pct,
+                        (
+                            f"Dịch {current}/{total} · "
+                            f"{'fallback' if role.startswith('fallback') else 'AI chính'} "
+                            f"{provider}/{model} · thử {event.get('attempt')}/{event.get('max_attempts')}"
+                        ),
+                        user_id,
+                    )
+                elif name == "error":
+                    translation_runtime["errors"] += 1
+                    await _tool_progress(
+                        job_id,
+                        pct,
+                        (
+                            f"AI dịch lỗi · {provider}/{model} · "
+                            f"thử {event.get('attempt')}/{event.get('max_attempts')}..."
+                        ),
+                        user_id,
+                    )
+                elif name == "retry_wait":
+                    await _tool_progress(
+                        job_id,
+                        pct,
+                        f"AI tạm lỗi · chờ {event.get('backoff_s')}s rồi thử lại...",
+                        user_id,
+                    )
+                elif name == "switch_fallback":
+                    translation_runtime["fallback_provider_used"] = True
+                    await _tool_progress(
+                        job_id,
+                        pct,
+                        f"AI chính không dùng được · chuyển fallback {provider}/{model}...",
+                        user_id,
+                    )
+
             try:
                 localized = await translate_transcript(
                     transcript,
@@ -1247,6 +1436,7 @@ async def run_tool_translate(
                     user_settings=user_settings,
                     for_dub=is_dub,
                     checkpoint_dir=run.stage_dir("translation"),
+                    progress_cb=_translation_progress,
                 )
                 path = run.save_json(
                     "translation", "transcript.json", localized.model_dump()
@@ -1261,10 +1451,59 @@ async def run_tool_translate(
                         ),
                         "translation_provider": profile.translation_provider,
                         "translation_model": profile.translation_model,
+                        "translation_fallback_provider": profile.translation_fallback_provider,
+                        "translation_fallback_model": profile.translation_fallback_model,
                         "translation_preset": profile.translation_preset,
+                        "translation_routes": [
+                            route.model_dump() for route in profile.translation_routes
+                        ],
+                        "translation_ai": dict(
+                            localized.metadata.get("translation_ai") or {}
+                        ),
+                        **translation_runtime,
                     },
                 )
             except Exception as exc:
+                run.record("translation")["metadata"] = {
+                    **dict(run.record("translation").get("metadata") or {}),
+                    **translation_runtime,
+                    "translation_provider": profile.translation_provider,
+                    "translation_model": profile.translation_model,
+                    "translation_fallback_provider": profile.translation_fallback_provider,
+                    "translation_fallback_model": profile.translation_fallback_model,
+                    "translation_routes": [
+                        route.model_dump() for route in profile.translation_routes
+                    ],
+                    "ai_failure_chain": list(
+                        getattr(exc, "ai_failure_chain", None) or []
+                    ),
+                    "ai_selected_connection": getattr(
+                        exc, "ai_selected_connection", None
+                    ),
+                    "translation_ai": {
+                        "selected_connection_id": getattr(
+                            exc, "ai_selected_connection", None
+                        ),
+                        "route_chain": [
+                            route.model_dump() for route in profile.translation_routes
+                        ],
+                        "failure_chain": list(
+                            getattr(exc, "ai_failure_chain", None) or []
+                        ),
+                        "sticky_route_index": getattr(
+                            exc, "ai_sticky_route_index", None
+                        ),
+                        "attempted": int(
+                            getattr(exc, "ai_attempt_count", 0) or 0
+                        ) > 0,
+                        "attempt_count": int(
+                            getattr(exc, "ai_attempt_count", 0) or 0
+                        ),
+                        "success_count": int(
+                            getattr(exc, "ai_success_count", 0) or 0
+                        ),
+                    },
+                }
                 run.fail("translation", exc)
                 raise
 
@@ -1358,6 +1597,46 @@ async def run_tool_translate(
                 )
                 run.start("dubbing")
                 try:
+                    async def _rewrite_progress(event: dict):
+                        name = event.get("event")
+                        provider = str(event.get("provider") or "")
+                        model = str(event.get("model") or "")
+                        role = str(event.get("role") or "primary")
+                        if name == "attempt":
+                            await _tool_progress(
+                                job_id,
+                                54,
+                                (
+                                    f"C7 viết lại · {'fallback' if role.startswith('fallback') else 'AI chính'} "
+                                    f"{provider}/{model} · thử {event.get('attempt')}/{event.get('max_attempts')}"
+                                ),
+                                user_id,
+                            )
+                        elif name == "error":
+                            await _tool_progress(
+                                job_id,
+                                54,
+                                (
+                                    f"C7 AI lỗi · {provider}/{model} · "
+                                    f"thử {event.get('attempt')}/{event.get('max_attempts')}..."
+                                ),
+                                user_id,
+                            )
+                        elif name == "retry_wait":
+                            await _tool_progress(
+                                job_id,
+                                54,
+                                f"C7 AI tạm lỗi · chờ {event.get('backoff_s')}s rồi thử lại...",
+                                user_id,
+                            )
+                        elif name == "switch_fallback":
+                            await _tool_progress(
+                                job_id,
+                                54,
+                                f"C7 chuyển fallback {provider}/{model}...",
+                                user_id,
+                            )
+
                     regenerate_chunk_ids = {
                         int(x) for x in (run.request.get("regenerate_chunk_ids") or [])
                     }
@@ -1374,6 +1653,7 @@ async def run_tool_translate(
                         # identity sidecar before reusing any raw chunk.
                         reuse_existing_chunks=True,
                         reference_media=asr_input,
+                        progress_cb=_rewrite_progress,
                     )
                     localized = dub.transcript
                     dub_track = dub.dub_track
@@ -1411,6 +1691,14 @@ async def run_tool_translate(
                             "rewrite_count": dubbing_rewrite_count,
                             "rewrite_provider": profile.rewrite_provider,
                             "rewrite_model": profile.rewrite_model,
+                            "rewrite_fallback_provider": profile.rewrite_fallback_provider,
+                            "rewrite_fallback_model": profile.rewrite_fallback_model,
+                            "rewrite_routes": [
+                                route.model_dump() for route in profile.rewrite_routes
+                            ],
+                            "rewrite_ai": dict(
+                                localized.metadata.get("dubbing", {}).get("rewrite_ai") or {}
+                            ),
                         },
                     )
                     if dubbing_rewrite_count:
@@ -1444,6 +1732,39 @@ async def run_tool_translate(
                             "regenerate_chunk_ids": [],
                         })
                 except Exception as exc:
+                    # Timing failures happen after C7 may already have attempted
+                    # one or more rewrites. Persist that audit evidence before
+                    # marking the stage failed so the UI can prove whether C7
+                    # actually ran instead of exposing only the final overflow.
+                    if hasattr(exc, "rewrite_count"):
+                        failure_issues = list(
+                            getattr(exc, "all_issues", None)
+                            or getattr(exc, "issues", None)
+                            or []
+                        )
+                        unresolved = list(getattr(exc, "issues", None) or [])
+                        run.record("dubbing")["metadata"] = {
+                            "issues": failure_issues,
+                            "rewrite_count": int(getattr(exc, "rewrite_count", 0) or 0),
+                            "rewrite_provider": profile.rewrite_provider,
+                            "rewrite_model": profile.rewrite_model,
+                            "rewrite_fallback_provider": profile.rewrite_fallback_provider,
+                            "rewrite_fallback_model": profile.rewrite_fallback_model,
+                            "rewrite_routes": [
+                                route.model_dump() for route in profile.rewrite_routes
+                            ],
+                            "rewrite_ai": dict(
+                                getattr(exc, "rewrite_ai", None) or {}
+                            ),
+                            "max_raw_required_speed": max(
+                                [1.0, *[
+                                    float(item.get("required_speed") or 1.0)
+                                    for item in unresolved
+                                    if isinstance(item, dict)
+                                ]],
+                            ),
+                            "failed_before_fit": True,
+                        }
                     run.fail("dubbing", exc)
                     raise
         elif not run.is_complete("dubbing"):
@@ -1629,6 +1950,100 @@ async def run_tool_translate(
                 run.fail(current_stage, e)
             except Exception:
                 logger.debug("Could not record localization stage failure", exc_info=True)
+
+        # Optional bounded self-repair. This never changes provider/model/voice
+        # or any other user configuration. It only retries the exact failed
+        # stage once, preserving every completed upstream artifact. Dubbing
+        # timing failures are narrower still: only the overflowing chunks are
+        # marked for regeneration and raw non-target chunk files are retained.
+        request = run.request if run is not None else {}
+        repair_enabled = bool(request.get("auto_repair"))
+        attempts = dict(request.get("auto_repair_attempts") or {})
+        stage = current_stage if current_stage in {
+            "separation", "asr", "semantic", "translation",
+            "dubbing", "audio_mix", "final_render", "qc",
+        } else (run.first_incomplete_stage() if run is not None else None)
+        message = str(e or "").lower()
+        error_name = type(e).__name__.lower()
+        deterministic_markers = (
+            "api key", "lacks permission", "permission denied",
+            "configure that tts provider", "unsupported language",
+            "requires reference audio", "requires a base url",
+            "matches no streams", "no audio", "source media has changed",
+            "source identity", "missing or inaccessible",
+        )
+        cancelled = "cancel" in error_name
+        deterministic = any(marker in message for marker in deterministic_markers)
+        attempt_count = int(attempts.get(stage, 0) or 0) if stage else 0
+
+        if (
+            run is not None
+            and repair_enabled
+            and stage
+            and not cancelled
+            and not deterministic
+            and attempt_count < 1
+        ):
+            attempts[stage] = attempt_count + 1
+            repair_request = {
+                **run.request,
+                "auto_repair_attempts": attempts,
+                "last_auto_repair": {
+                    "stage": stage,
+                    "attempt": attempts[stage],
+                    "error": str(e)[:500],
+                },
+            }
+            delete_artifacts = True
+            preserve_files: set[str] = set()
+            if stage == "translation":
+                preserve_files = {"checkpoint.json"}
+            if stage == "dubbing" and hasattr(e, "issues"):
+                chunk_ids = sorted({
+                    int(item.get("chunk_id"))
+                    for item in (getattr(e, "issues", None) or [])
+                    if isinstance(item, dict) and item.get("chunk_id") is not None
+                })
+                if chunk_ids:
+                    repair_request["regenerate_chunk_ids"] = chunk_ids
+                    delete_artifacts = False
+
+            run.update_request(repair_request)
+            run.invalidate_from(
+                stage,
+                delete_artifacts=delete_artifacts,
+                preserve_files=preserve_files,
+            )
+            await _tool_progress(
+                job_id,
+                max(1.0, float({
+                    "separation": 5, "asr": 15, "semantic": 25, "translation": 35,
+                    "dubbing": 51, "audio_mix": 69, "final_render": 83, "qc": 93,
+                }.get(stage, 1))),
+                f"Tự động sửa: thử lại đúng bước {stage} (1/1)...",
+                user_id,
+            )
+            await run_tool_translate(
+                job_id,
+                run.source_path,
+                str(run.request.get("target_language") or target_language),
+                str(run.request.get("mode") or mode),
+                str(run.request.get("voice_id") or voice_id or ""),
+                str(run.effective_profile.get("caption_style") or caption_style or "viral"),
+                str(run.request.get("emoji_style") or emoji_style or "moderate"),
+                user_id=user_id,
+                target_aspect=run.effective_profile.get("target_aspect") or run.request.get("target_aspect"),
+                profile_id=run.request.get("profile_id"),
+                profile_override=run.effective_profile,
+                review_translation=bool(run.request.get("review_translation")),
+                cleanup_input=False,
+                mask_box=run.request.get("mask_box"),
+                caption_placement=run.request.get("caption_placement"),
+                downloaded_video_id=run.request.get("downloaded_video_id"),
+                auto_repair=None,
+            )
+            return
+
         await _tool_fail(job_id, e, cleanup, user_id, "translate")
 
 

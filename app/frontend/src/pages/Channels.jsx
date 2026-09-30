@@ -23,6 +23,14 @@ import ChatBubbleIcon from "@mui/icons-material/ChatBubbleOutlineOutlined"
 import http from "../api/http"
 import useAppStore from "../store/appStore"
 import useDocumentTitle from "../hooks/useDocumentTitle"
+import {
+  canonicalChannelVideoUrl,
+  channelRequestConfig,
+  channelVideoPageParams,
+  reconcileSelectedChannel,
+  channelsWithoutChannel,
+  selectedChannelAfterDisconnect,
+} from "../channelVideoIdentity"
 
 function formatCount(n) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -92,7 +100,11 @@ function ConnectForm({ platform, onConnected }) {
     setLoading(true)
     setError("")
     try {
-      await http.post("/api/channels/connect", { platform, url: channel.url })
+      await http.post(
+        "/api/channels/connect",
+        { platform, url: channel.url },
+        { timeout: 40_000 },
+      )
       onConnected()
     } catch (e) {
       setError(e.response?.data?.detail || e.message)
@@ -106,7 +118,11 @@ function ConnectForm({ platform, onConnected }) {
     setLoading(true)
     setError("")
     try {
-      await http.post("/api/channels/connect", { platform, url: url.trim() })
+      await http.post(
+        "/api/channels/connect",
+        { platform, url: url.trim() },
+        { timeout: 40_000 },
+      )
       onConnected()
     } catch (e) {
       setError(e.response?.data?.detail || e.message)
@@ -237,9 +253,9 @@ function VideoCard({ video, platform, onAnalyze, onDownload }) {
   // Build watch URL for opening in browser
   const watchUrl = isYT
     ? `https://www.youtube.com/watch?v=${video.video_id}`
-    : video.url || (isDouyin
-      ? `https://www.douyin.com/video/${video.video_id}`
-      : `https://www.tiktok.com/video/${video.video_id}`)
+    : canonicalChannelVideoUrl(platform, video) || (
+      isDouyin ? "" : `https://www.tiktok.com/video/${video.video_id}`
+    )
   const thumbUrl = isYT ? video.thumbnail_url : video.cover_url
 
   return (
@@ -322,7 +338,10 @@ function VideoCard({ video, platform, onAnalyze, onDownload }) {
           </Tooltip>
           <Tooltip title={`Mở trên ${platformLabel}`} arrow>
             <IconButton size="small"
-              onClick={(e) => { e.stopPropagation(); window.open(video.url, "_blank", "noopener") }}
+              onClick={(e) => {
+                e.stopPropagation()
+                if (watchUrl) window.open(watchUrl, "_blank", "noopener")
+              }}
               sx={{ p: 0.5, color: "text.secondary", "&:hover": { color: "primary.main" } }}>
               <OpenInNewIcon sx={{ fontSize: "1.1rem" }} />
             </IconButton>
@@ -343,37 +362,94 @@ function ChannelDetail({ channel, onBack }) {
   const [sortBy, setSortBy] = useState("recent")
   // Videos open in browser (no embedded iframe — avoids YouTube bot detection)
   const [page, setPage] = useState(0)
-  const [rowsPerPage, setRowsPerPage] = useState(20)
+  const [rowsPerPage, setRowsPerPage] = useState(18)
+  const [pageTokens, setPageTokens] = useState({ 0: null })
+  const [hasMore, setHasMore] = useState(false)
+  const [nextPageToken, setNextPageToken] = useState(null)
   const showSnackbar = useAppStore((s) => s.showSnackbar)
   const isYT = channel.platform === "youtube"
+  const isDouyin = channel.platform === "douyin"
 
-  const fetchData = useCallback(async (refresh = false) => {
+  const fetchData = useCallback(async (
+    refresh = false,
+    targetPage = 0,
+    token = null,
+    requestedLimit = rowsPerPage,
+  ) => {
     setLoading(true)
     setError(null)
     try {
-      const params = {}
-      if (refresh) params.refresh = true
-      const { data: resp } = await http.get(`/api/channels/videos/${channel.id}`, { params })
+      const params = channelVideoPageParams(channel.platform, {
+        limit: requestedLimit,
+        pageToken: token,
+        refresh,
+      })
+      const { data: resp } = await http.get(`/api/channels/videos/${channel.id}`, {
+        ...channelRequestConfig,
+        params,
+      })
       setVideos(resp.videos || [])
       setChannelInfo(resp.channel || resp.user || null)
+      if (isDouyin) {
+        setPage(targetPage)
+        const more = Boolean(resp.has_more && resp.next_page_token)
+        setHasMore(more)
+        setNextPageToken(resp.next_page_token || null)
+        setPageTokens((previous) => ({
+          ...previous,
+          [targetPage]: token || null,
+          ...(more ? { [targetPage + 1]: resp.next_page_token } : {}),
+        }))
+      }
     } catch (e) {
       setError(e.response?.data?.detail || e.message)
     } finally {
       setLoading(false)
     }
-  }, [channel.id])
+  }, [channel.id, channel.platform, isDouyin, rowsPerPage])
 
-  useEffect(() => { fetchData() }, [fetchData])
+  useEffect(() => {
+    setPage(0)
+    setPageTokens({ 0: null })
+    fetchData(false, 0, null, rowsPerPage)
+  }, [fetchData, rowsPerPage])
 
   const handleRefresh = () => {
     setVideos([])
     setPage(0)
-    fetchData(true)
+    setPageTokens({ 0: null })
+    setHasMore(false)
+    setNextPageToken(null)
+    fetchData(true, 0, null, rowsPerPage)
+  }
+
+  const handlePageChange = (_, targetPage) => {
+    if (!isDouyin) {
+      setPage(targetPage)
+      return
+    }
+    const token = pageTokens[targetPage]
+    if (targetPage > page && !token) return
+    fetchData(false, targetPage, token || null, rowsPerPage)
+  }
+
+  const handleRowsPerPageChange = (event) => {
+    const nextSize = parseInt(event.target.value, 10)
+    setRowsPerPage(nextSize)
+    setPage(0)
+    setPageTokens({ 0: null })
+    setHasMore(false)
+    setNextPageToken(null)
   }
 
   const handleAnalyze = async (video) => {
+    const sourceUrl = canonicalChannelVideoUrl(channel.platform, video)
+    if (!sourceUrl) {
+      showSnackbar("Không thể xác minh danh tính video đã chọn.", "error")
+      return
+    }
     try {
-      await http.post("/api/channels/analyze", { video_url: video.url, title: video.title })
+      await http.post("/api/channels/analyze", { video_url: sourceUrl, title: video.title })
       showSnackbar(`Đang phân tích: ${video.title || "video"}`, "info")
     } catch (e) {
       showSnackbar(`Không thể bắt đầu phân tích: ${e.response?.data?.detail || e.message}`, "error")
@@ -381,9 +457,14 @@ function ChannelDetail({ channel, onBack }) {
   }
 
   const handleDownload = async (video) => {
+    const sourceUrl = canonicalChannelVideoUrl(channel.platform, video)
+    if (!sourceUrl) {
+      showSnackbar("Không thể xác minh danh tính video đã chọn.", "error")
+      return
+    }
     try {
       await http.post("/api/downloaded/batch-download", {
-        urls: [{ url: video.url, title: video.title || "" }],
+        urls: [{ url: sourceUrl, title: video.title || "" }],
       })
       showSnackbar(`Đang tải xuống: ${video.title || "video"}`, "info", { label: "Xem trong Thư viện", href: "/library" })
     } catch (e) {
@@ -397,7 +478,13 @@ function ChannelDetail({ channel, onBack }) {
     return 0
   })
 
-  const paged = sorted.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
+  const paged = isDouyin
+    ? sorted
+    : sorted.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
+  const knownVideoCount = Number(channelInfo?.video_count || channel.video_count || 0)
+  const douyinPaginationCount = knownVideoCount > 0
+    ? knownVideoCount
+    : (page * rowsPerPage) + sorted.length + (hasMore ? 1 : 0)
 
   return (
     <Box>
@@ -449,30 +536,38 @@ function ChannelDetail({ channel, onBack }) {
           return !isNaN(d.getTime()) && (Date.now() - d.getTime()) < 30 * 86400000
         })
 
+        const scopeSuffix = isDouyin ? " · trang này" : ""
         const stats = [
-          { label: "Tổng lượt xem", value: formatCount(totalViews) },
-          { label: "Lượt xem TB", value: formatCount(avgViews) },
-          { label: "Trung vị lượt xem", value: formatCount(medianViews) },
-          { label: "Engagement", value: `${engagementRate}%` },
-          { label: "30 ngày qua", value: `${recentVideos.length} video` },
-          { label: "Video nổi bật", value: formatCount(topPerformer?.view_count || 0) + " lượt xem" },
+          { label: `Tổng lượt xem${scopeSuffix}`, value: formatCount(totalViews) },
+          { label: `Lượt xem TB${scopeSuffix}`, value: formatCount(avgViews) },
+          { label: `Trung vị lượt xem${scopeSuffix}`, value: formatCount(medianViews) },
+          { label: `Engagement${scopeSuffix}`, value: `${engagementRate}%` },
+          { label: `30 ngày qua${scopeSuffix}`, value: `${recentVideos.length} video` },
+          { label: `Video nổi bật${scopeSuffix}`, value: formatCount(topPerformer?.view_count || 0) + " lượt xem" },
         ]
 
         return (
-          <Box sx={{
-            display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
-            gap: 1.5, mb: 2,
-          }}>
-            {stats.map(s => (
-              <Paper key={s.label} variant="outlined" sx={{ p: 1.5, borderRadius: 2, textAlign: "center" }}>
-                <Typography variant="h6" sx={{ fontWeight: 700, fontSize: "1.1rem", lineHeight: 1.2 }}>
-                  {s.value}
-                </Typography>
-                <Typography variant="caption" sx={{ color: "text.secondary", fontSize: "0.68rem" }}>
-                  {s.label}
-                </Typography>
-              </Paper>
-            ))}
+          <Box sx={{ mb: 2 }}>
+            {isDouyin && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+                Thống kê Douyin bên dưới chỉ tính các video đang hiển thị trên trang hiện tại.
+              </Typography>
+            )}
+            <Box sx={{
+              display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+              gap: 1.5,
+            }}>
+              {stats.map(s => (
+                <Paper key={s.label} variant="outlined" sx={{ p: 1.5, borderRadius: 2, textAlign: "center" }}>
+                  <Typography variant="h6" sx={{ fontWeight: 700, fontSize: "1.1rem", lineHeight: 1.2 }}>
+                    {s.value}
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: "text.secondary", fontSize: "0.68rem" }}>
+                    {s.label}
+                  </Typography>
+                </Paper>
+              ))}
+            </Box>
           </Box>
         )
       })()}
@@ -514,12 +609,17 @@ function ChannelDetail({ channel, onBack }) {
               </Box>
               <TablePagination
                 component="div"
-                count={sorted.length}
+                count={isDouyin ? douyinPaginationCount : sorted.length}
                 page={page}
-                onPageChange={(_, p) => { setPage(p); setPlayingId(null) }}
+                onPageChange={handlePageChange}
                 rowsPerPage={rowsPerPage}
-                onRowsPerPageChange={(e) => { setRowsPerPage(parseInt(e.target.value, 10)); setPage(0) }}
-                rowsPerPageOptions={[20, 50, 100]}
+                onRowsPerPageChange={handleRowsPerPageChange}
+                rowsPerPageOptions={[18, 36, 50]}
+                nextIconButtonProps={
+                  isDouyin
+                    ? { disabled: !hasMore || !nextPageToken }
+                    : undefined
+                }
                 sx={{ borderTop: 1, borderColor: "divider", mt: 1 }}
               />
             </>
@@ -546,10 +646,9 @@ function PlatformTab({ platform }) {
       const { data } = await http.get("/api/channels/list", { params: { platform } })
       const list = data.channels || []
       setChannels(list)
-      // Auto-select if only one channel
-      if (list.length === 1 && !selectedChannel) {
-        setSelectedChannel(list[0])
-      }
+      setSelectedChannel((current) => (
+        reconcileSelectedChannel(current, list, platform)
+      ))
     } catch (e) {
       showSnackbar(`Không thể tải kênh: ${e.message}`, "error")
     } finally {
@@ -559,10 +658,16 @@ function PlatformTab({ platform }) {
 
   useEffect(() => { fetchChannels() }, [fetchChannels])
 
+  useEffect(() => {
+    setSelectedChannel(null)
+    setShowAdd(false)
+  }, [platform])
+
   const handleDisconnect = async (ch) => {
     try {
       await http.post("/api/channels/disconnect", { id: ch.id })
-      setChannels((prev) => prev.filter((c) => c.id !== ch.id))
+      setChannels((prev) => channelsWithoutChannel(prev, ch.id))
+      setSelectedChannel((current) => selectedChannelAfterDisconnect(current, ch.id))
       showSnackbar(`${ch.channel_name || "Kênh"} đã ngắt kết nối`, "info")
     } catch (e) {
       showSnackbar(`Ngắt kết nối thất bại: ${e.message}`, "error")

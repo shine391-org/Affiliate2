@@ -26,3 +26,27 @@ def test_localization_profiles_ui_exposes_editable_guardrails_and_locked_protoco
     assert "Đặt lại mặc định C7" in ui
     assert "Quy tắc bảo vệ prompt (Nâng cao)" in ui
     assert "ID/thứ tự ổn định và giao thức đầu ra JSON vẫn bị khóa" in ui
+
+
+
+def test_localization_profiles_ui_exposes_ai_fallback_and_deadline_controls():
+    ui = (
+        Path(__file__).parents[1]
+        / "frontend"
+        / "src"
+        / "components"
+        / "settings"
+        / "LocalizationProfilesSection.jsx"
+    ).read_text(encoding="utf-8")
+
+    assert "Chuỗi AI C6 / Semantic" in ui
+    assert "Chuỗi AI C7" in ui
+    assert "Thêm fallback" in ui
+    assert "connection_id" in ui
+    assert "sticky" in ui
+    assert "Semantic tổng ngân sách" in ui
+    assert "Dịch tổng ngân sách/batch" in ui
+    assert "C7 tổng ngân sách" in ui
+    assert 'patch("semantic_segmentation"' in ui
+    assert "tắt = phân đoạn nhanh bằng timestamp/punctuation/speaker" in ui
+    assert "timing fit/video slowdown bounded" in ui

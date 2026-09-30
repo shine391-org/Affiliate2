@@ -100,6 +100,8 @@ def probe_media_details(file_path: Path | str) -> dict:
         "width": _int(video.get("width")),
         "height": _int(video.get("height")),
         "fps": _fps(video.get("avg_frame_rate")),
+        "has_video": bool(video),
+        "has_audio": bool(audio),
         "video_codec": video.get("codec_name") or None,
         "audio_codec": audio.get("codec_name") or None,
         "bitrate_bps": format_bitrate or stream_bitrate,

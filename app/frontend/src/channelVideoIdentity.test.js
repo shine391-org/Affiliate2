@@ -1,0 +1,105 @@
+import assert from "node:assert/strict"
+import test from "node:test"
+import { readFileSync } from "node:fs"
+
+import {
+  canonicalChannelVideoUrl,
+  channelRequestConfig,
+  channelVideoPageParams,
+  reconcileSelectedChannel,
+  channelsWithoutChannel,
+  selectedChannelAfterDisconnect,
+} from "./channelVideoIdentity.js"
+
+
+test("Douyin download URL is rebuilt from the card aweme id", () => {
+  const video = {
+    video_id: "123",
+    aweme_id: "123",
+    url: "https://www.douyin.com/video/999",
+  }
+  assert.equal(
+    canonicalChannelVideoUrl("douyin", video),
+    "https://www.douyin.com/video/123",
+  )
+})
+
+
+test("different Douyin cards retain different canonical identities", () => {
+  const first = canonicalChannelVideoUrl("douyin", { video_id: "123" })
+  const second = canonicalChannelVideoUrl("douyin", { video_id: "456" })
+  assert.notEqual(first, second)
+})
+
+
+test("channel detail requests outlive the bounded backend operation without hard-coding the first 18 videos", () => {
+  assert.equal(channelRequestConfig.timeout, 50_000)
+  assert.equal("params" in channelRequestConfig, false)
+})
+
+
+test("the first connected channel stays on the list until explicitly selected", () => {
+  const channels = [{ id: "one", platform: "douyin" }]
+  assert.equal(reconcileSelectedChannel(null, channels, "douyin"), null)
+})
+
+
+test("stale selected channel is cleared after platform or list changes", () => {
+  const selected = { id: "old", platform: "douyin" }
+  assert.equal(
+    reconcileSelectedChannel(selected, [{ id: "new", platform: "douyin" }], "douyin"),
+    null,
+  )
+  assert.equal(
+    reconcileSelectedChannel(selected, [{ id: "old", platform: "youtube" }], "youtube"),
+    null,
+  )
+})
+
+test("disconnecting the shown channel also drops the detail view", () => {
+  const channels = [
+    { id: "a", platform: "douyin" },
+    { id: "b", platform: "douyin" },
+  ]
+  const selected = { id: "a", platform: "douyin" }
+
+  assert.deepEqual(
+    channelsWithoutChannel(channels, "a").map((c) => c.id),
+    ["b"],
+  )
+  // The bug: the list drops the row but the detail view keeps rendering it,
+  // so the next fetch hits a deleted DB row and comes back 404.
+  assert.equal(selectedChannelAfterDisconnect(selected, "a"), null)
+  assert.deepEqual(selectedChannelAfterDisconnect(selected, "b"), selected)
+  assert.equal(selectedChannelAfterDisconnect(null, "a"), null)
+})
+
+
+
+test("Douyin page requests carry selected page size and native cursor", () => {
+  assert.deepEqual(
+    channelVideoPageParams("douyin", {
+      limit: 50,
+      pageToken: "cursor-18",
+      refresh: true,
+    }),
+    { limit: 50, page_token: "cursor-18", refresh: true },
+  )
+})
+
+test("non-Douyin channel requests never leak a Douyin cursor", () => {
+  assert.deepEqual(
+    channelVideoPageParams("youtube", {
+      limit: 36,
+      pageToken: "douyin-cursor",
+    }),
+    { limit: 36 },
+  )
+})
+
+
+test("Douyin paginated performance cards are explicitly page-local", () => {
+  const source = readFileSync(new URL("./pages/Channels.jsx", import.meta.url), "utf8")
+  assert.ok(source.includes("Thống kê Douyin bên dưới chỉ tính các video đang hiển thị trên trang hiện tại."))
+  assert.ok(source.includes('const scopeSuffix = isDouyin ? " · trang này" : ""'))
+})

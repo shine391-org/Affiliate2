@@ -9,6 +9,7 @@ import ReplayOutlinedIcon from "@mui/icons-material/ReplayOutlined"
 import SaveOutlinedIcon from "@mui/icons-material/SaveOutlined"
 import http from "../../api/http"
 import useAppStore from "../../store/appStore"
+import { resolveAiStageSelection } from "../../localizationPreview"
 
 const STAGE_LABELS = {
   separation: "Tách âm thanh",
@@ -133,15 +134,39 @@ export default function LocalizationExpertPanel({ jobId }) {
   const rerun = async (stage) => {
     setBusy(true)
     try {
-      await http.post("/api/localization/jobs/" + jobId + "/rerun", { from_stage: stage })
-      showSnackbar("Đang chạy lại từ " + (STAGE_LABELS[stage] || stage), "info")
-      const status = await pollUntilTerminal()
+      const { data } = await http.post("/api/localization/jobs/" + jobId + "/rerun", { from_stage: stage })
       showSnackbar(
-        status === "success" ? "Chạy lại bản địa hóa hoàn tất" : "Tác vụ chạy lại kết thúc: " + status,
-        status === "success" ? "success" : "warning",
+        data?.tts_rebound
+          ? "Đã dùng TTS hiện tại; tác vụ đang tiếp tục từ " + (STAGE_LABELS[stage] || stage)
+          : "Đang chạy lại từ " + (STAGE_LABELS[stage] || stage),
+        "info",
       )
+      // Dispatch is enough for this control. Do not lock the editor for the
+      // entire long-running job; the backend rejects duplicate reruns while
+      // active and Activity owns live progress.
+      await load()
     } catch (err) {
-      showSnackbar(err.response?.data?.detail || "Chạy lại thất bại", "error")
+      const detailMessage = err.response?.data?.detail
+      showSnackbar(
+        typeof detailMessage === "string" ? detailMessage : detailMessage?.message || "Chạy lại thất bại",
+        "error",
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const rebindTts = async () => {
+    setBusy(true)
+    try {
+      await http.post("/api/localization/jobs/" + jobId + "/rebind-tts", { source: "settings" })
+      showSnackbar("Đã dùng TTS hiện tại; tác vụ đang tiếp tục từ bước Lồng tiếng", "info")
+      // Rebinding only dispatches the resumed job. Release the UI immediately
+      // instead of keeping every recovery action disabled until render/QC ends.
+      await load()
+    } catch (err) {
+      const detailMessage = err.response?.data?.detail
+      showSnackbar(typeof detailMessage === "string" ? detailMessage : detailMessage?.message || "Không thể gắn lại TTS", "error")
     } finally {
       setBusy(false)
     }
@@ -194,9 +219,19 @@ export default function LocalizationExpertPanel({ jobId }) {
 
   const manifest = detail?.manifest || {}
   const stages = manifest.stages || {}
+  const effective = manifest.effective_profile || {}
   const transcript = detail?.transcript?.segments || []
   const chunks = detail?.chunks || []
   const qc = detail?.qc
+  const ttsBinding = detail?.tts_binding
+  const dubbingMeta = stages?.dubbing?.metadata || {}
+  const rewriteSelection = resolveAiStageSelection(dubbingMeta, effective, "rewrite")
+  const rewriteIssues = (dubbingMeta.issues || []).filter((item) =>
+    String(item?.reason || "").startsWith("rewrite_")
+  )
+  const timingOverflows = (dubbingMeta.issues || []).filter((item) =>
+    item?.reason === "timing_overflow"
+  )
   const reviewPending = !!detail?.translation_review_pending
   const finalReady = stages?.final_render?.status === "complete"
   const stageEntries = useMemo(() => Object.entries(stages), [stages])
@@ -238,6 +273,73 @@ export default function LocalizationExpertPanel({ jobId }) {
         </Alert>
       )}
 
+      {ttsBinding && (
+        <Alert severity={ttsBinding.binding_mismatch ? "warning" : "info"} variant="outlined">
+          <Stack spacing={1}>
+            <Typography variant="subtitle2">Liên kết TTS của tác vụ</Typography>
+            <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 1 }}>
+              <Box>
+                <Typography variant="caption" color="text.secondary">TTS của job</Typography>
+                <Typography variant="body2">{ttsBinding.job?.tts_provider || "kế thừa"} · {ttsBinding.job?.tts_voice || "chưa chọn giọng"}</Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="text.secondary">TTS hiện tại</Typography>
+                <Typography variant="body2">{ttsBinding.current?.tts_provider || "không khả dụng"} · {ttsBinding.current?.tts_voice || "chưa chọn giọng"}</Typography>
+              </Box>
+            </Box>
+            {ttsBinding.binding_mismatch && <Typography variant="body2">Cấu hình TTS đã thay đổi. Có thể tiếp tục cùng job bằng TTS hiện tại mà không chạy lại tách âm thanh, ASR hoặc dịch thuật.</Typography>}
+            {ttsBinding.current_error && <Typography variant="caption" color="error">{ttsBinding.current_error}</Typography>}
+            <Button size="small" variant="contained" color="warning" onClick={rebindTts} disabled={busy || !ttsBinding.current} sx={{ alignSelf: "flex-start" }}>
+              Dùng TTS hiện tại & tiếp tục
+            </Button>
+          </Stack>
+        </Alert>
+      )}
+
+      {(stages?.dubbing?.status === "complete" || stages?.dubbing?.status === "failed") && (
+        <Alert
+          severity={rewriteIssues.some((item) => item.reason === "rewrite_ai_unavailable") ? "warning" : "info"}
+          variant="outlined"
+        >
+          <Stack spacing={0.75}>
+            <Typography variant="subtitle2">C7 · Viết lại thời lượng</Typography>
+            <Typography variant="body2">
+              {"Đã viết lại: " + Number(dubbingMeta.rewrite_count || 0) + " đoạn" +
+                (rewriteSelection.connectionId
+                  ? (rewriteSelection.isActual ? " · kết nối thực tế " : " · kết nối cấu hình ") + rewriteSelection.connectionId
+                  : "") +
+                (rewriteSelection.model ? " · model " + rewriteSelection.model : "")}
+            </Typography>
+            {rewriteSelection.failureCount > 0 && (
+              <Typography variant="caption" color="warning.main">
+                {"Fallback sau " + rewriteSelection.failureCount + " lỗi provider/route trước đó."}
+              </Typography>
+            )}
+            {dubbingMeta.max_raw_required_speed != null && (
+              <Typography variant="caption" color="text.secondary">
+                {"Tốc độ yêu cầu lớn nhất: " + Number(dubbingMeta.max_raw_required_speed || 1).toFixed(2) + "×" +
+                  (dubbingMeta.max_fitted_speed_factor != null
+                    ? " → sau fit " + Number(dubbingMeta.max_fitted_speed_factor || 1).toFixed(2) + "×"
+                    : "")}
+              </Typography>
+            )}
+            {rewriteIssues.slice(0, 4).map((item, index) => (
+              <Typography key={item.chunk_id + "-" + index} variant="caption" color={item.reason === "rewrite_ai_unavailable" ? "error" : "text.secondary"}>
+                {"Chunk " + (item.chunk_id ?? "?") + " · " + item.reason +
+                  (item.message ? " · " + item.message : item.detail ? " · " + item.detail : "")}
+              </Typography>
+            ))}
+            {timingOverflows.slice(0, 4).map((item, index) => (
+              <Typography key={"overflow-" + item.chunk_id + "-" + index} variant="caption" color="error">
+                {"Chunk " + (item.chunk_id ?? "?") + " vẫn overflow · " +
+                  Number(item.required_speed || 1).toFixed(2) + "× / trần " +
+                  Number(item.speed_max || 1).toFixed(2) + "×"}
+              </Typography>
+            ))}
+          </Stack>
+        </Alert>
+      )}
+
       <Box>
         <Typography variant="caption" color="text.secondary">Các bước</Typography>
         <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 0.75 }}>
@@ -253,13 +355,15 @@ export default function LocalizationExpertPanel({ jobId }) {
         </Stack>
       </Box>
 
-      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-        {["translation", "dubbing", "final_render", "qc"].map((stage) => (
-          <Button key={stage} size="small" variant="outlined" startIcon={<ReplayOutlinedIcon />} onClick={() => rerun(stage)} disabled={busy}>
-            {"Chạy lại " + STAGE_LABELS[stage]}
-          </Button>
-        ))}
-      </Stack>
+      {!ttsBinding?.binding_mismatch && (
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+          {["translation", "dubbing", "final_render", "qc"].map((stage) => (
+            <Button key={stage} size="small" variant="outlined" startIcon={<ReplayOutlinedIcon />} onClick={() => rerun(stage)} disabled={busy}>
+              {"Chạy lại từ " + STAGE_LABELS[stage]}
+            </Button>
+          ))}
+        </Stack>
+      )}
 
       <Divider />
 

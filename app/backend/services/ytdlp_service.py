@@ -703,27 +703,28 @@ async def _prepare_download_source(
     url: str,
     cookie_session: dict,
     douyin_cdp_url: str | None = None,
-) -> tuple[str, dict[str, str] | None, str | None]:
+    title_hint: str = "",
+) -> tuple[str, dict[str, str] | None, str | None, dict | None]:
     """Choose the URL that the canonical yt-dlp pipeline will download.
 
     TikTok still requires a readable yt-dlp browser session. Douyin gets one
-    narrow escape hatch for the Windows DPAPI/App-Bound case proven by runtime
-    QA: resolve a signed media URL through the already-authenticated CDP
-    browser, then hand that URL straight back to yt-dlp.
+    exact-identity gate proven by runtime QA: Douyin can serve a different
+    aweme at /video/<requested-id>, so the aweme identity is always proven
+    through the already-authenticated CDP browser before yt-dlp is pointed at
+    anything. The cookie store stays the download transport; it is never a
+    substitute for the identity check.
 
-    Returns (effective_url, headers, resolution_strategy).
+    Returns (effective_url, headers, resolution_strategy, verified_identity).
     """
     if _is_douyin_url(url):
-        if (
-            cookie_session.get("ok")
-            and _required_bytedance_cookie_count(url, cookie_session) > 0
-        ):
-            return url, None, None
-
         try:
             from backend.services.douyin_media_resolver import resolve_douyin_media
             resolved = await asyncio.wait_for(
-                resolve_douyin_media(url, cdp_url=douyin_cdp_url),
+                resolve_douyin_media(
+                    url,
+                    cdp_url=douyin_cdp_url,
+                    title_hint=title_hint,
+                ),
                 timeout=45,
             )
         except Exception as exc:
@@ -740,10 +741,16 @@ async def _prepare_download_source(
             ) from exc
 
         logger.info(
-            "Douyin browser-cookie path unavailable; using authenticated CDP "
-            "media resolution while keeping yt-dlp as the downloader"
+            "Douyin media identity proven through authenticated CDP "
+            "resolution; keeping yt-dlp as the downloader"
         )
-        return resolved.url, dict(resolved.headers), "douyin_cdp"
+        identity = {
+            "requested_aweme_id": resolved.requested_aweme_id,
+            "candidate_aweme_id": resolved.candidate_aweme_id,
+            "provenance": resolved.provenance,
+            "resolution_path": resolved.resolution_path,
+        }
+        return resolved.url, dict(resolved.headers), "douyin_cdp", identity
 
     if _is_tiktok_url(url):
         if not cookie_session.get("ok"):
@@ -760,7 +767,7 @@ async def _prepare_download_source(
                 "it, then retry."
             )
 
-    return url, None, None
+    return url, None, None, None
 
 
 async def probe_browser_session(browser: str = "auto", profile: str | None = None) -> dict:
@@ -851,6 +858,113 @@ FORMAT_FALLBACK_CHAIN = [
     "bestvideo[height<=720]+bestaudio/best[height<=720]",
 ]
 
+#: Douyin CDP resolution hands yt-dlp an already-signed CDN file, not a
+#: platform page. Its generic extractor reports a single format with no height
+#: metadata, so every `[height<=N]` selector fails with "Requested format is
+#: not available" even though the bytes are fetchable. One direct rung is the
+#: only ladder that can succeed for that input.
+DIRECT_MEDIA_FORMAT_CHAIN = ["best"]
+
+
+def _format_chain_for_source(
+    effective_url: str,
+    resolved_via: str | None,
+    format_chain: list[str],
+) -> list[str]:
+    # Every douyin_cdp result is already one signed direct media object.
+    # GenericExtractor frequently exposes no height metadata for douyinvod,
+    # zjcdn, bytecdn or aweme CDN hosts, so height selectors cannot reliably
+    # select it. Download the verified object once; explicit quality ceilings
+    # are enforced on the owned file immediately afterwards.
+    if resolved_via == "douyin_cdp":
+        return list(DIRECT_MEDIA_FORMAT_CHAIN)
+    return format_chain
+
+
+_DIRECT_QUALITY_CAPS = {
+    "2160p": 2160,
+    "1440p": 1440,
+    "1080p": 1080,
+    "720p": 720,
+    "480p": 480,
+}
+
+
+def _enforce_direct_media_quality_cap(
+    video_path: Path,
+    requested_quality: str | None,
+) -> Path:
+    """Downscale a resolved direct media file when it exceeds an explicit cap.
+
+    A direct Douyin CDN URL has one already-selected stream, so yt-dlp cannot
+    choose a lower format by height. The user's explicit ceiling is still a
+    hard contract: if the verified media is taller, transcode once after
+    download and before audio extraction/metadata reporting.
+    """
+    cap = _DIRECT_QUALITY_CAPS.get(str(requested_quality or "").lower())
+    if not cap or not video_path or not video_path.exists():
+        return video_path
+
+    from backend.services.video_utils import probe_media_details
+
+    details = probe_media_details(video_path) or {}
+    height = int(details.get("height") or 0)
+    width = int(details.get("width") or 0)
+    if height <= 0 or height <= cap:
+        return video_path
+
+    # Preserve aspect ratio and keep encoder dimensions even.
+    if width > 0:
+        scaled_width = max(2, int(round(width * (cap / height))))
+        scaled_width -= scaled_width % 2
+    else:
+        scaled_width = -2
+
+    temp = video_path.with_name(f"{video_path.stem}.quality-cap.tmp.mp4")
+    final = video_path if video_path.suffix.lower() == ".mp4" else video_path.with_suffix(".mp4")
+    cmd = [
+        "ffmpeg", "-y", "-i", str(video_path),
+        "-map", "0:v:0", "-map", "0:a?",
+        "-vf", f"scale={scaled_width}:{cap}",
+        "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+        "-c:a", "aac", "-b:a", "192k",
+        "-movflags", "+faststart",
+        str(temp),
+    ]
+    import subprocess
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+    if result.returncode != 0 or not temp.exists() or temp.stat().st_size <= 0:
+        try:
+            temp.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise DownloadError(
+            "Downloaded verified Douyin media exceeded the requested quality "
+            f"ceiling ({height}p > {cap}p), but FFmpeg downscale failed: "
+            f"{(result.stderr or '')[-400:]}"
+        )
+
+    if final != video_path:
+        try:
+            final.unlink(missing_ok=True)
+        except Exception:
+            pass
+        temp.replace(final)
+        try:
+            video_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+    else:
+        temp.replace(video_path)
+
+    capped = probe_media_details(final) or {}
+    capped_height = int(capped.get("height") or 0)
+    if capped_height > cap:
+        raise DownloadError(
+            f"Quality cap enforcement failed: delivered {capped_height}p > {cap}p."
+        )
+    return final
+
 
 def _find_actual_video_file(output_dir: Path, filename_stem: str) -> Path | None:
     """Find the actual downloaded video file — yt-dlp may change the extension after merging."""
@@ -918,6 +1032,7 @@ async def download_video(
     filename: str = None,
     extract_audio: bool = True,
     options: dict | None = None,
+    title_hint: str = "",
 ) -> dict:
     """
     Download a video using yt-dlp.
@@ -961,10 +1076,13 @@ async def download_video(
         _inspect_browser_session, cookie_browser, cookie_profile
     )
     cookie_session_ok = bool(cookie_session.get("ok"))
-    effective_url, resolved_headers, resolved_via = await _prepare_download_source(
-        url, cookie_session, douyin_cdp_url=douyin_cdp_url
+    effective_url, resolved_headers, resolved_via, resolved_identity = await _prepare_download_source(
+        url, cookie_session, douyin_cdp_url=douyin_cdp_url, title_hint=title_hint
     )
     use_browser_cookies = cookie_session_ok and resolved_via is None
+    _format_chain = _format_chain_for_source(
+        effective_url, resolved_via, _format_chain
+    )
     effective_headers = {
         **_yt_dlp_http_headers(),
         **(resolved_headers or {}),
@@ -1213,6 +1331,12 @@ async def download_video(
                 logger.info(f"Video file extension changed: expected {video_path.suffix}, found {actual.suffix}")
                 video_path = actual
 
+        if resolved_via == "douyin_cdp" and video_path and video_path.exists():
+            video_path = _enforce_direct_media_quality_cap(
+                video_path,
+                _opts.get("quality"),
+            )
+
         # Extract subtitles from downloaded files
         subtitles = _collect_subtitles(output_dir, file_stem_resolved)
 
@@ -1312,6 +1436,7 @@ async def download_video(
             "option_postprocessors_dropped": opt_pps_dropped,
             # Safe QA/telemetry signal; contains no cookie or session values.
             "download_source": resolved_via or "yt_dlp",
+            "media_provenance": resolved_identity,
         }
 
     try:

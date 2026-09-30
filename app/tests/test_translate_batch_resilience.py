@@ -617,6 +617,68 @@ async def test_c7_over_max_after_rewrite_fails_without_retime(monkeypatch, tmp_p
 
 
 @pytest.mark.asyncio
+async def test_c7_timing_failure_preserves_actual_fallback_route_audit(monkeypatch, tmp_path):
+    tx = LocalizationTranscript(segments=[
+        LocalizationSegment(
+            id="s1", source_text="x", translated_text="dịch",
+            source_start_ms=0, source_end_ms=500, translation_status="success",
+        ),
+    ])
+    _patch_dub_io(monkeypatch, tmp_path, [2000])
+    monkeypatch.setattr(
+        "backend.services.video_utils.probe_duration",
+        lambda *a, **k: 0.5,
+    )
+
+    primary = SimpleNamespace(connection_name="hermes-main")
+    fallback = SimpleNamespace(connection_name="lmstudio-qwen")
+    monkeypatch.setattr(
+        ls,
+        "_profile_ai_route_clients_compat",
+        lambda *_args, **_kwargs: [primary, fallback],
+    )
+
+    async def failover_without_fit(*args, route_state=None, **kwargs):
+        if route_state is not None:
+            route_state.failure_chain = [{
+                "connection_id": "hermes-main",
+                "provider": "compatible",
+                "model": "longcat",
+                "attempt": 1,
+                "error_type": "TimeoutError",
+                "error": "timed out",
+            }]
+            route_state.sticky_index = 1
+            route_state.attempt_count = 2
+            route_state.success_count = 1
+        return False
+
+    monkeypatch.setattr(ls, "_adapt_chunk_items", failover_without_fit)
+
+    with pytest.raises(ls.LocalizationTimingError) as exc:
+        await ls.synthesize_timed_dub(
+            tx,
+            source_media=tmp_path / "source.mp4",
+            target_language="Vietnamese",
+            profile=_profile(
+                dub_rewrite_attempts=1,
+                dub_speed_max=1.30,
+                video_retime_mode="off",
+            ),
+            user_settings=object(),
+            work_dir=tmp_path / "work",
+        )
+
+    audit = exc.value.rewrite_ai
+    assert audit["selected_connection_id"] == "lmstudio-qwen"
+    assert audit["sticky_route_index"] == 1
+    assert audit["attempted"] is True
+    assert audit["attempt_count"] == 2
+    assert audit["success_count"] == 1
+    assert audit["failure_chain"][0]["connection_id"] == "hermes-main"
+
+
+@pytest.mark.asyncio
 async def test_c7_targeted_regeneration_reuses_other_raw_chunks(monkeypatch, tmp_path):
     tx = LocalizationTranscript(segments=[
         LocalizationSegment(
@@ -675,6 +737,153 @@ async def test_c7_targeted_regeneration_reuses_other_raw_chunks(monkeypatch, tmp
 
 
 @pytest.mark.asyncio
+async def test_c7_rewrite_retries_transient_provider_failure_before_disabling(
+    monkeypatch,
+):
+    plan = [
+        ls.PlanItem(
+            index=0,
+            segment_id="s1",
+            original_start_ms=0,
+            original_end_ms=1000,
+            original_text="một câu rất dài",
+            spoken_text="một câu rất dài",
+            estimated_duration_ms=1800,
+        )
+    ]
+    chunk = ls.DubbingChunk(
+        id=1,
+        item_indexes=[0],
+        start_ms=0,
+        end_ms=1000,
+    )
+    segment = LocalizationSegment(
+        id="s1",
+        source_text="原文",
+        translated_text="một câu rất dài",
+        source_start_ms=0,
+        source_end_ms=1000,
+        translation_status="success",
+    )
+
+    class Transient503(RuntimeError):
+        status_code = 503
+
+    class RecoveringAI:
+        def __init__(self):
+            self.calls = 0
+            self.max_retries = None
+
+        async def chat(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise Transient503("provider overloaded")
+            return json.dumps([{"id": "s1", "text": "ngắn"}], ensure_ascii=False)
+
+    async def no_sleep(_delay):
+        return None
+
+    ai = RecoveringAI()
+    monkeypatch.setattr(ls.asyncio, "sleep", no_sleep)
+    issues = []
+    state = {"measured_duration_ms": 1800, "attempt": 1}
+
+    changed = await ls._adapt_chunk_items(
+        ai,
+        plan=plan,
+        chunk=chunk,
+        segment_by_id={"s1": segment},
+        target_language="Vietnamese",
+        target_ms=1000,
+        profile=_profile(),
+        issues=issues,
+        state=state,
+    )
+
+    assert changed is True
+    assert ai.calls == 2
+    assert ai.max_retries == 0
+    assert state.get("unavailable") is not True
+    assert issues == []
+    assert segment.translated_text == "ngắn"
+
+
+@pytest.mark.asyncio
+async def test_c7_rewrite_exhausts_bounded_retries_before_opening_the_circuit(
+    monkeypatch,
+):
+    """The retry budget must stay bounded.
+
+    This is the pair of the recovery test above: when every transient attempt
+    fails, the chunk must be marked unavailable so the caller can disable the
+    optional rewrite for the rest of the job. A retry loop that never gives up
+    would hang the stage instead of degrading.
+    """
+    plan = [
+        ls.PlanItem(
+            index=0,
+            segment_id="s1",
+            original_start_ms=0,
+            original_end_ms=1000,
+            original_text="một câu rất dài",
+            spoken_text="một câu rất dài",
+            estimated_duration_ms=1800,
+        )
+    ]
+    chunk = ls.DubbingChunk(id=1, item_indexes=[0], start_ms=0, end_ms=1000)
+    segment = LocalizationSegment(
+        id="s1",
+        source_text="原文",
+        translated_text="một câu rất dài",
+        source_start_ms=0,
+        source_end_ms=1000,
+        translation_status="success",
+    )
+
+    class Transient503(RuntimeError):
+        status_code = 503
+
+    class DeadAI:
+        def __init__(self):
+            self.calls = 0
+            self.max_retries = None
+
+        async def chat(self, *args, **kwargs):
+            self.calls += 1
+            raise Transient503("provider overloaded")
+
+    async def no_sleep(_delay):
+        return None
+
+    ai = DeadAI()
+    monkeypatch.setattr(ls.asyncio, "sleep", no_sleep)
+    issues = []
+    state = {"measured_duration_ms": 1800, "attempt": 1}
+
+    changed = await ls._adapt_chunk_items(
+        ai,
+        plan=plan,
+        chunk=chunk,
+        segment_by_id={"s1": segment},
+        target_language="Vietnamese",
+        target_ms=1000,
+        profile=_profile(),
+        issues=issues,
+        state=state,
+    )
+
+    assert changed is False
+    # Bounded: exactly the helper's budget, then it stops.
+    assert ai.calls == 3
+    assert state.get("unavailable") is True
+    # The plan and caption transcript must stay untouched so a failed rewrite
+    # can never half-apply.
+    assert plan[0].spoken_text == "một câu rất dài"
+    assert segment.translated_text == "một câu rất dài"
+    assert [i["reason"] for i in issues] == ["rewrite_ai_unavailable"]
+
+
+@pytest.mark.asyncio
 async def test_c7_optional_rewrite_provider_failure_opens_job_circuit_breaker(
     monkeypatch, tmp_path,
 ):
@@ -700,7 +909,11 @@ async def test_c7_optional_rewrite_provider_failure_opens_job_circuit_breaker(
             self.calls += 1
             raise TimeoutError("local rewrite provider timeout")
 
+    async def no_sleep(_delay):
+        return None
+
     ai = TimeoutAI()
+    monkeypatch.setattr(ls.asyncio, "sleep", no_sleep)
     calls = _patch_dub_io(monkeypatch, tmp_path, [400, 400, 400])
     monkeypatch.setattr(ls, "_profile_ai_client", lambda *_: ai)
 
@@ -713,7 +926,7 @@ async def test_c7_optional_rewrite_provider_failure_opens_job_circuit_breaker(
         work_dir=tmp_path / "work",
     )
 
-    assert ai.calls == 1
+    assert ai.calls == 3
     assert calls["n"] == 3
     unavailable = [
         issue for issue in result.issues
@@ -1260,7 +1473,10 @@ def test_materialized_profile_snapshots_non_secret_runtime_bindings(monkeypatch)
     )
     assert got.translation_provider == "compatible"
     assert got.translation_model == "qwen-local"
-    assert got.translation_base_url == "http://localhost:1234/v1"
+    # Connection endpoints stay live by connection_id unless the profile
+    # explicitly pins a per-route base_url override.
+    assert got.translation_base_url is None
+    assert got.translation_routes[0].base_url is None
     assert got.tts_provider == "edge_tts"
     assert got.tts_voice == "vi-VN-HoaiMyNeural"
     assert "secret-must-not-be-persisted" not in got.model_dump_json()
@@ -1380,7 +1596,10 @@ async def test_c7_ai_rewrite_timeout_degrades_to_tts_instead_of_failing(
         work_dir=tmp_path / "work",
     )
 
-    assert slow.calls == 1
+    # A transient provider failure is retried within one bounded budget before
+    # the optional rewrite is disabled for the rest of the job. The contract
+    # under test is graceful degradation, not a single-attempt call count.
+    assert slow.calls == 3
     assert result.chunk_count == 1
     assert any(
         issue["reason"] == "rewrite_ai_unavailable"
@@ -1812,3 +2031,722 @@ async def test_adapt_chunk_invalid_shape_records_qc_warning():
     assert issues[0]["reason"] == "rewrite_invalid_response"
     assert issues[0]["detail"] == "shape_or_length"
 
+
+
+
+@pytest.mark.asyncio
+async def test_translation_retry_switches_to_saved_fallback_provider(monkeypatch):
+    events = []
+
+    class Transient503(RuntimeError):
+        status_code = 503
+
+    class Primary:
+        connection_name = "compatible"
+        provider = SimpleNamespace(value="compatible")
+        model = "longcat"
+        max_retries = None
+        calls = 0
+
+        async def chat(self, **kwargs):
+            self.calls += 1
+            raise Transient503("Hermes proxy unavailable")
+
+    class Fallback:
+        connection_name = "lmstudio"
+        provider = SimpleNamespace(value="compatible")
+        model = "qwen3:8b"
+        max_retries = None
+        calls = 0
+
+        async def chat(self, **kwargs):
+            self.calls += 1
+            return "fallback-ok"
+
+    async def no_sleep(_delay):
+        return None
+
+    async def progress(event):
+        events.append(dict(event))
+
+    primary = Primary()
+    fallback = Fallback()
+    monkeypatch.setattr(ls.asyncio, "sleep", no_sleep)
+
+    result = await ls._call_ai_chat_resilient(
+        primary,
+        fallback,
+        messages=[{"role": "user", "content": "x"}],
+        max_tokens=8,
+        max_attempts=2,
+        attempt_timeout_s=1,
+        total_timeout_s=5,
+        progress_cb=progress,
+        stage="translation",
+    )
+
+    assert result == "fallback-ok"
+    assert primary.calls == 2
+    assert fallback.calls == 1
+    assert primary.max_retries == 0
+    assert fallback.max_retries == 0
+    assert any(e["event"] == "switch_fallback" and e["provider"] == "lmstudio" for e in events)
+    assert any(e["event"] == "attempt" and e["role"] == "fallback" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_translation_hard_deadline_cancels_hanging_ai():
+    class Hanging:
+        connection_name = "hermes"
+        provider = SimpleNamespace(value="compatible")
+        model = "slow"
+        max_retries = None
+
+        async def chat(self, **kwargs):
+            await __import__("asyncio").Event().wait()
+
+    with pytest.raises(TimeoutError, match="deadline exceeded"):
+        await ls._call_ai_chat_resilient(
+            Hanging(),
+            None,
+            messages=[{"role": "user", "content": "x"}],
+            max_tokens=8,
+            max_attempts=2,
+            attempt_timeout_s=0.01,
+            total_timeout_s=0.03,
+            stage="translation",
+        )
+
+
+def test_saved_inactive_local_provider_resolves_as_fallback():
+    settings = SimpleNamespace(
+        ai_provider="compatible",
+        ai_model="longcat",
+        ai_base_url="http://127.0.0.1:8645/v1",
+        ai_api_key_encrypted=None,
+        ai_provider_profiles_json=json.dumps({
+            "lmstudio": {
+                "model": "qwen3:8b",
+                "base_url": "http://127.0.0.1:1234/v1",
+                "api_key_encrypted": None,
+            },
+        }),
+    )
+    profile = _profile(
+        translation_fallback_provider="lmstudio",
+        translation_fallback_model=None,
+    )
+
+    fallback = ls._profile_ai_fallback_client(
+        settings,
+        profile,
+        "translation",
+        primary_ai=None,
+    )
+
+    assert fallback.connection_name == "lmstudio"
+    assert fallback.model == "qwen3:8b"
+    assert fallback.base_url == "http://127.0.0.1:1234/v1"
+    assert fallback.api_key == "local"
+
+
+
+@pytest.mark.asyncio
+async def test_hanging_primary_cannot_starve_translation_fallback():
+    import asyncio
+
+    class HangingPrimary:
+        connection_name = "hermes"
+        provider = SimpleNamespace(value="compatible")
+        model = "longcat"
+        max_retries = None
+
+        async def chat(self, **kwargs):
+            await asyncio.Event().wait()
+
+    class FastFallback:
+        connection_name = "lmstudio"
+        provider = SimpleNamespace(value="compatible")
+        model = "qwen3:8b"
+        max_retries = None
+        calls = 0
+
+        async def chat(self, **kwargs):
+            self.calls += 1
+            return "fallback-ok"
+
+    fallback = FastFallback()
+    events = []
+
+    result = await ls._call_ai_chat_resilient(
+        HangingPrimary(),
+        fallback,
+        messages=[{"role": "user", "content": "x"}],
+        max_tokens=8,
+        max_attempts=3,
+        attempt_timeout_s=0.05,
+        total_timeout_s=0.08,
+        progress_cb=lambda event: events.append(dict(event)),
+        stage="translation",
+    )
+
+    assert result == "fallback-ok"
+    assert fallback.calls == 1
+    assert any(
+        e.get("event") == "switch_fallback" and e.get("provider") == "lmstudio"
+        for e in events
+    )
+
+
+
+def test_materialized_env_provider_can_resolve_again_without_saved_registry(monkeypatch):
+    from backend.core.ai_provider import AIClient, AIProvider
+
+    env_client = AIClient(
+        provider=AIProvider.OPENAI,
+        api_key="env-openai-key",
+        model="env-model",
+    )
+    monkeypatch.setattr(
+        "backend.core.ai_provider.get_ai_client",
+        lambda settings=None: env_client,
+    )
+
+    settings = SimpleNamespace(
+        ai_provider="",
+        ai_model=None,
+        ai_base_url=None,
+        ai_api_key_encrypted=None,
+        ai_provider_profiles_json="{}",
+    )
+
+    client = ls._ai_client_for_connection(
+        settings,
+        "openai",
+        model="materialized-model",
+    )
+
+    assert client.api_key == "env-openai-key"
+    assert client.model == "materialized-model"
+    assert client.connection_name == "openai"
+
+
+
+@pytest.mark.asyncio
+async def test_three_route_chain_sticks_to_second_fallback_after_success():
+    class Transient503(RuntimeError):
+        status_code = 503
+
+    class Client:
+        def __init__(self, name, answer=None):
+            self.connection_name = name
+            self.provider = SimpleNamespace(value="compatible")
+            self.model = name + "-model"
+            self.max_retries = None
+            self.answer = answer
+            self.calls = 0
+
+        async def chat(self, **kwargs):
+            self.calls += 1
+            if self.answer is None:
+                raise Transient503(self.connection_name + " unavailable")
+            return self.answer
+
+    primary = Client("hermes-a")
+    fallback1 = Client("hermes-b")
+    fallback2 = Client("lmstudio", "ok")
+    state = ls._AIStageRouteState([primary, fallback1, fallback2])
+
+    first = await ls._call_ai_chat_resilient(
+        primary,
+        fallback1,
+        messages=[{"role": "user", "content": "x"}],
+        max_tokens=8,
+        max_attempts=1,
+        attempt_timeout_s=0.1,
+        total_timeout_s=1,
+        route_state=state,
+    )
+    assert first == "ok"
+    assert state.sticky_index == 2
+    assert [primary.calls, fallback1.calls, fallback2.calls] == [1, 1, 1]
+
+    second = await ls._call_ai_chat_resilient(
+        primary,
+        fallback1,
+        messages=[{"role": "user", "content": "y"}],
+        max_tokens=8,
+        max_attempts=1,
+        attempt_timeout_s=0.1,
+        total_timeout_s=1,
+        route_state=state,
+    )
+    assert second == "ok"
+    assert [primary.calls, fallback1.calls, fallback2.calls] == [1, 1, 2]
+
+
+@pytest.mark.asyncio
+async def test_exhausted_route_chain_attaches_non_secret_failure_history():
+    class Dead(RuntimeError):
+        status_code = 503
+
+    class Client:
+        def __init__(self, name):
+            self.connection_name = name
+            self.provider = SimpleNamespace(value="compatible")
+            self.model = name + "-model"
+            self.max_retries = None
+
+        async def chat(self, **kwargs):
+            raise Dead(self.connection_name + " failed")
+
+    clients = [Client("a"), Client("b"), Client("c")]
+    state = ls._AIStageRouteState(clients)
+
+    with pytest.raises(Dead) as exc:
+        await ls._call_ai_chat_resilient(
+            clients[0],
+            clients[1],
+            messages=[{"role": "user", "content": "x"}],
+            max_tokens=8,
+            max_attempts=1,
+            attempt_timeout_s=0.1,
+            total_timeout_s=1,
+            route_state=state,
+        )
+
+    assert [x["connection_id"] for x in exc.value.ai_failure_chain] == ["a", "b", "c"]
+    assert all("api_key" not in item for item in exc.value.ai_failure_chain)
+    assert exc.value.ai_selected_connection == "c"
+    assert exc.value.ai_sticky_route_index == 0
+    assert exc.value.ai_attempt_count == 3
+    assert exc.value.ai_success_count == 0
+
+
+
+@pytest.mark.asyncio
+async def test_invalid_structured_translation_advances_to_next_route():
+    class BadStructured:
+        connection_name = "hermes-main"
+        provider = SimpleNamespace(value="compatible")
+        model = "longcat"
+        max_retries = None
+        calls = 0
+
+        async def chat(self, **kwargs):
+            self.calls += 1
+            return '{"not":"the required array"}'
+
+    class GoodFallback:
+        connection_name = "lmstudio-qwen"
+        provider = SimpleNamespace(value="compatible")
+        model = "qwen3:8b"
+        max_retries = None
+        calls = 0
+
+        async def chat(self, **kwargs):
+            self.calls += 1
+            return json.dumps([
+                {"id": "s1", "text": "xin chào"},
+                {"id": "s2", "text": "thế giới"},
+            ])
+
+    batch = [
+        LocalizationSegment(
+            id="s1", source_text="hello", source_start_ms=0, source_end_ms=500,
+        ),
+        LocalizationSegment(
+            id="s2", source_text="world", source_start_ms=500, source_end_ms=1000,
+        ),
+    ]
+    primary = BadStructured()
+    fallback = GoodFallback()
+    state = ls._AIStageRouteState([primary, fallback])
+
+    texts, failed = await ls._translate_batch_resilient(
+        primary,
+        batch,
+        route_state=state,
+        target_language="Vietnamese",
+        context="hello world",
+        profile=_profile(
+            translation_retry_attempts=1,
+            translation_attempt_timeout_s=10,
+            translation_total_timeout_s=20,
+        ),
+        for_dub=True,
+        fallback_ai=fallback,
+    )
+
+    assert texts == ["xin chào", "thế giới"]
+    assert failed == set()
+    assert primary.calls == 1
+    assert fallback.calls == 1
+    assert state.sticky_index == 1
+    assert any(
+        item.get("error_type") == "InvalidStructuredOutput"
+        and item.get("connection_id") == "hermes-main"
+        for item in state.failure_chain
+    )
+
+
+@pytest.mark.asyncio
+async def test_translation_recursive_shape_split_shares_one_batch_deadline(monkeypatch):
+    seen_deadlines = []
+
+    async def fake_call(
+        ai,
+        fallback_ai,
+        messages,
+        max_tokens=3000,
+        max_attempts=3,
+        *,
+        attempt_timeout_s=75,
+        total_timeout_s=180,
+        progress_cb=None,
+        stage="translation",
+        route_state=None,
+        deadline_at=None,
+    ):
+        seen_deadlines.append(deadline_at)
+        return "[]"
+
+    monkeypatch.setattr(ls, "_call_ai_chat_resilient", fake_call)
+
+    batch = [
+        LocalizationSegment(
+            id=f"s{i}",
+            source_text=f"source {i}",
+            source_start_ms=i * 500,
+            source_end_ms=(i + 1) * 500,
+        )
+        for i in range(4)
+    ]
+
+    texts, failed = await ls._translate_batch_resilient(
+        object(),
+        batch,
+        target_language="Vietnamese",
+        context="ctx",
+        profile=_profile(
+            translation_attempt_timeout_s=10,
+            translation_total_timeout_s=30,
+        ),
+        for_dub=True,
+    )
+
+    assert len(texts) == 4
+    assert failed == {0, 1, 2, 3}
+    assert len(seen_deadlines) > 1
+    assert all(value is not None for value in seen_deadlines)
+    first = seen_deadlines[0]
+    assert all(value == first for value in seen_deadlines)
+
+
+
+@pytest.mark.asyncio
+async def test_ai_failure_provenance_redacts_api_key():
+    events = []
+
+    class SecretFailure:
+        connection_name = "cloud-main"
+        provider = SimpleNamespace(value="openai")
+        model = "model-x"
+        api_key = "super-secret-key"
+        max_retries = None
+
+        async def chat(self, **kwargs):
+            raise RuntimeError("request failed with token super-secret-key")
+
+    client = SecretFailure()
+    state = ls._AIStageRouteState([client])
+
+    with pytest.raises(RuntimeError):
+        await ls._call_ai_chat_resilient(
+            client,
+            None,
+            messages=[{"role": "user", "content": "x"}],
+            max_attempts=1,
+            attempt_timeout_s=1,
+            total_timeout_s=2,
+            progress_cb=lambda event: events.append(dict(event)),
+            route_state=state,
+        )
+
+    serialized = json.dumps({
+        "chain": state.failure_chain,
+        "events": events,
+    })
+    assert "super-secret-key" not in serialized
+    assert "***" in serialized
+
+
+@pytest.mark.asyncio
+async def test_eight_route_chain_reaches_last_healthy_fallback_without_starvation():
+    class Transient503(RuntimeError):
+        status_code = 503
+
+    class Client:
+        def __init__(self, name, answer=None):
+            self.connection_name = name
+            self.provider = SimpleNamespace(value="compatible")
+            self.model = name + "-model"
+            self.max_retries = None
+            self.answer = answer
+            self.calls = 0
+
+        async def chat(self, **kwargs):
+            self.calls += 1
+            if self.answer is None:
+                raise Transient503(self.connection_name + " unavailable")
+            return self.answer
+
+    clients = [Client(f"route-{i}") for i in range(7)] + [Client("route-7", "ok")]
+    state = ls._AIStageRouteState(clients)
+
+    result = await ls._call_ai_chat_resilient(
+        clients[0],
+        clients[1],
+        messages=[{"role": "user", "content": "x"}],
+        max_tokens=8,
+        max_attempts=1,
+        attempt_timeout_s=1,
+        total_timeout_s=8,
+        route_state=state,
+    )
+
+    assert result == "ok"
+    assert state.sticky_index == 7
+    assert [client.calls for client in clients] == [1] * 8
+    assert [item["connection_id"] for item in state.failure_chain] == [
+        f"route-{i}" for i in range(7)
+    ]
+
+
+def test_ai_failure_history_is_bounded_to_recent_events():
+    state = ls._AIStageRouteState([SimpleNamespace(connection_name="only")])
+    for index in range(100):
+        ls._append_ai_failure(state, {
+            "connection_id": "only",
+            "attempt": index,
+            "error": f"failure-{index}",
+        })
+
+    assert len(state.failure_chain) == ls._MAX_AI_FAILURE_HISTORY
+    assert state.failure_chain[0]["attempt"] == 36
+    assert state.failure_chain[-1]["attempt"] == 99
+
+
+@pytest.mark.asyncio
+async def test_translation_checkpoint_restores_sticky_fallback_and_audit(monkeypatch, tmp_path):
+    class Transient503(RuntimeError):
+        status_code = 503
+
+    class Primary:
+        connection_name = "primary"
+        provider = SimpleNamespace(value="compatible")
+        model = "primary-model"
+        max_retries = None
+
+        def __init__(self):
+            self.calls = 0
+
+        async def chat(self, **kwargs):
+            self.calls += 1
+            raise Transient503("primary unavailable")
+
+    class Fallback:
+        connection_name = "fallback"
+        provider = SimpleNamespace(value="compatible")
+        model = "fallback-model"
+        max_retries = None
+
+        def __init__(self):
+            self.calls = 0
+
+        async def chat(self, **kwargs):
+            self.calls += 1
+            return json.dumps([{"id": "s1", "text": "xin chào"}])
+
+    first_primary = Primary()
+    first_fallback = Fallback()
+    active_clients = [first_primary, first_fallback]
+    monkeypatch.setattr(
+        ls,
+        "_profile_ai_route_clients_compat",
+        lambda *_args, **_kwargs: active_clients,
+    )
+
+    profile = _profile(
+        translation_routes=[
+            {"connection_id": "primary", "model": "primary-model"},
+            {"connection_id": "fallback", "model": "fallback-model"},
+        ],
+        translation_retry_attempts=1,
+        translation_attempt_timeout_s=10,
+        translation_total_timeout_s=20,
+    )
+    transcript = LocalizationTranscript(segments=[
+        LocalizationSegment(
+            id="s1",
+            source_text="hello",
+            source_start_ms=0,
+            source_end_ms=500,
+        ),
+    ])
+
+    first = await ls.translate_transcript(
+        transcript,
+        target_language="Vietnamese",
+        profile=profile,
+        user_settings=SimpleNamespace(
+            ai_connection_id="primary",
+            ai_provider="compatible",
+        ),
+        for_dub=True,
+        checkpoint_dir=tmp_path,
+    )
+    assert first.segments[0].translated_text == "xin chào"
+    assert first.metadata["translation_ai"]["selected_connection_id"] == "fallback"
+    assert first.metadata["translation_ai"]["attempted"] is True
+    assert [first_primary.calls, first_fallback.calls] == [1, 1]
+
+    resumed_primary = Primary()
+    resumed_fallback = Fallback()
+    active_clients = [resumed_primary, resumed_fallback]
+
+    resumed = await ls.translate_transcript(
+        transcript,
+        target_language="Vietnamese",
+        profile=profile,
+        user_settings=SimpleNamespace(
+            ai_connection_id="primary",
+            ai_provider="compatible",
+        ),
+        for_dub=True,
+        checkpoint_dir=tmp_path,
+    )
+
+    assert [resumed_primary.calls, resumed_fallback.calls] == [0, 0]
+    audit = resumed.metadata["translation_ai"]
+    assert audit["selected_connection_id"] == "fallback"
+    assert audit["sticky_route_index"] == 1
+    assert audit["attempted"] is True
+    assert audit["attempt_count"] == 2
+    assert audit["success_count"] == 1
+    assert audit["failure_chain"][0]["connection_id"] == "primary"
+
+
+@pytest.mark.asyncio
+async def test_c7_timing_failure_reports_last_attempted_route_when_all_rewrite_routes_fail(monkeypatch, tmp_path):
+    tx = LocalizationTranscript(segments=[
+        LocalizationSegment(
+            id="s1", source_text="x", translated_text="dịch",
+            source_start_ms=0, source_end_ms=500, translation_status="success",
+        ),
+    ])
+    _patch_dub_io(monkeypatch, tmp_path, [2000])
+    monkeypatch.setattr(
+        "backend.services.video_utils.probe_duration",
+        lambda *a, **k: 0.5,
+    )
+
+    primary = SimpleNamespace(connection_name="hermes-main")
+    fallback = SimpleNamespace(connection_name="lmstudio-qwen")
+    monkeypatch.setattr(
+        ls,
+        "_profile_ai_route_clients_compat",
+        lambda *_args, **_kwargs: [primary, fallback],
+    )
+
+    async def all_routes_failed_without_fit(*args, route_state=None, **kwargs):
+        if route_state is not None:
+            route_state.failure_chain = [
+                {"connection_id": "hermes-main", "error_type": "TimeoutError", "error": "down"},
+                {"connection_id": "lmstudio-qwen", "error_type": "ConnectionError", "error": "down"},
+            ]
+            # Transport exhaustion does not make any failed route sticky.
+            route_state.sticky_index = 0
+            route_state.attempt_count = 2
+            route_state.success_count = 0
+        return False
+
+    monkeypatch.setattr(ls, "_adapt_chunk_items", all_routes_failed_without_fit)
+
+    with pytest.raises(ls.LocalizationTimingError) as exc:
+        await ls.synthesize_timed_dub(
+            tx,
+            source_media=tmp_path / "source.mp4",
+            target_language="Vietnamese",
+            profile=_profile(
+                dub_rewrite_attempts=1,
+                dub_speed_max=1.30,
+                video_retime_mode="off",
+            ),
+            user_settings=object(),
+            work_dir=tmp_path / "work",
+        )
+
+    audit = exc.value.rewrite_ai
+    assert audit["selected_connection_id"] == "lmstudio-qwen"
+    assert audit["sticky_route_index"] == 0
+    assert audit["attempted"] is True
+    assert audit["success_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_all_malformed_translation_routes_attach_terminal_route_audit(monkeypatch):
+    class InvalidClient:
+        provider = SimpleNamespace(value="compatible")
+        max_retries = None
+
+        def __init__(self, name):
+            self.connection_name = name
+            self.model = name + "-model"
+            self.calls = 0
+
+        async def chat(self, **kwargs):
+            self.calls += 1
+            return '{"not":"a translation array"}'
+
+    primary = InvalidClient("hermes-main")
+    fallback = InvalidClient("lmstudio-qwen")
+    monkeypatch.setattr(
+        ls,
+        "_profile_ai_route_clients_compat",
+        lambda *_args, **_kwargs: [primary, fallback],
+    )
+
+    profile = _profile(
+        translation_routes=[
+            {"connection_id": "hermes-main", "model": "hermes-main-model"},
+            {"connection_id": "lmstudio-qwen", "model": "lmstudio-qwen-model"},
+        ],
+        translation_retry_attempts=1,
+        translation_attempt_timeout_s=10,
+        translation_total_timeout_s=20,
+    )
+    transcript = LocalizationTranscript(segments=[
+        LocalizationSegment(
+            id="s1", source_text="hello",
+            source_start_ms=0, source_end_ms=500,
+        ),
+    ])
+
+    with pytest.raises(RuntimeError, match="failed for every segment") as exc:
+        await ls.translate_transcript(
+            transcript,
+            target_language="Vietnamese",
+            profile=profile,
+            user_settings=SimpleNamespace(ai_provider="compatible"),
+            for_dub=True,
+        )
+
+    assert primary.calls == 1
+    assert fallback.calls == 1
+    assert [item["connection_id"] for item in exc.value.ai_failure_chain] == [
+        "hermes-main", "lmstudio-qwen",
+    ]
+    assert exc.value.ai_selected_connection == "lmstudio-qwen"
+    assert exc.value.ai_attempt_count == 2
+    assert exc.value.ai_success_count == 2

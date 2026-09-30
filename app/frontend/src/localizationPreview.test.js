@@ -10,6 +10,7 @@ import {
   maskPreset,
   pickPreviewReframeMethod,
   previewObjectFit,
+  resolveAiStageSelection,
   resolveProfileTargetAspect,
 } from "./localizationPreview.js"
 
@@ -57,6 +58,7 @@ test("existing job hydration remains source of truth after delayed profile defau
       job_id: "job-16x9",
       request: {
         profile_id: "profile-existing",
+        auto_repair: true,
         target_aspect: "16:9",
         mask_box: { x: 0.05, y: 0.72, width: 0.9, height: 0.15, mode: "solid" },
         caption_placement: { mode: "mask_region", vertical_offset: 0.1 },
@@ -66,6 +68,7 @@ test("existing job hydration remains source of truth after delayed profile defau
   })
 
   assert.equal(hydrated.profileId, "profile-existing")
+  assert.equal(hydrated.autoRepair, true)
   assert.equal(hydrated.targetAspect, "16:9")
   assert.equal(resolveProfileTargetAspect({
     currentAspect: hydrated.targetAspect,
@@ -166,4 +169,68 @@ test("canonical backend fields win over the manifest stage fallback", () => {
   })
   assert.equal(failure.step, "final_render")
   assert.equal(failure.message, "ffmpeg exit code 1")
+})
+
+
+test("AI stage selection prefers actual fallback audit over configured primary", () => {
+  const metadata = {
+    translation_provider: "hermes-main",
+    translation_model: "longcat",
+    translation_routes: [
+      { connection_id: "hermes-main", model: "longcat" },
+      { connection_id: "lmstudio-qwen", model: "qwen3:8b" },
+    ],
+    translation_ai: {
+      selected_connection_id: "lmstudio-qwen",
+      attempted: true,
+      failure_chain: [{ connection_id: "hermes-main", error_type: "TimeoutError" }],
+    },
+  }
+  const selected = resolveAiStageSelection(metadata, {}, "translation")
+  assert.equal(selected.connectionId, "lmstudio-qwen")
+  assert.equal(selected.model, "qwen3:8b")
+  assert.equal(selected.failureCount, 1)
+  assert.equal(selected.isActual, true)
+})
+
+test("C7 stage selection still resolves actual fallback on failed dubbing metadata", () => {
+  const metadata = {
+    rewrite_provider: "hermes-main",
+    rewrite_model: "longcat",
+    rewrite_routes: [
+      { connection_id: "hermes-main", model: "longcat" },
+      { connection_id: "lmstudio-gemma", model: "gemma-4-e4b" },
+    ],
+    rewrite_ai: {
+      selected_connection_id: "lmstudio-gemma",
+      attempted: true,
+      sticky_route_index: 1,
+      failure_chain: [{ connection_id: "hermes-main", error_type: "ServiceUnavailable" }],
+    },
+  }
+  const selected = resolveAiStageSelection(metadata, {}, "rewrite")
+  assert.equal(selected.connectionId, "lmstudio-gemma")
+  assert.equal(selected.model, "gemma-4-e4b")
+  assert.equal(selected.failureCount, 1)
+  assert.equal(selected.isActual, true)
+})
+
+test("configured C7 route is not claimed as actually used before any AI call", () => {
+  const selected = resolveAiStageSelection({
+    rewrite_provider: "hermes-main",
+    rewrite_model: "longcat",
+    rewrite_routes: [{ connection_id: "hermes-main", model: "longcat" }],
+    rewrite_ai: {
+      selected_connection_id: "hermes-main",
+      attempted: false,
+      attempt_count: 0,
+      success_count: 0,
+      failure_chain: [],
+    },
+  }, {}, "rewrite")
+
+  assert.equal(selected.connectionId, "hermes-main")
+  assert.equal(selected.model, "longcat")
+  assert.equal(selected.attempted, false)
+  assert.equal(selected.isActual, false)
 })

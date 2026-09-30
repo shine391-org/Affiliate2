@@ -423,6 +423,7 @@ async def translate_tool(
     target_aspect: Optional[str] = Form(None),
     profile_id: Optional[str] = Form(None),
     review_translation: bool = Form(False),
+    auto_repair: bool = Form(False),
     mask_box: Optional[str] = Form(None),
     caption_placement: Optional[str] = Form(None),
 ):
@@ -502,6 +503,7 @@ async def translate_tool(
         "target_aspect": target_aspect or "",
         "profile_id": profile_id or "",
         "review_translation": bool(review_translation),
+        "auto_repair": bool(auto_repair),
         "mask_box": parsed_mask_box or {},
         "caption_placement": parsed_caption_placement or {},
     }, sort_keys=True, separators=(",", ":"))
@@ -518,6 +520,7 @@ async def translate_tool(
             "target_aspect": target_aspect,
             "profile_id": profile_id,
             "review_translation": bool(review_translation),
+            "auto_repair": bool(auto_repair),
             "downloaded_video_id": stripped_source_id or None,
             "mask_box": parsed_mask_box,
             "caption_placement": parsed_caption_placement,
@@ -552,6 +555,7 @@ async def translate_tool(
         target_aspect=target_aspect,
         profile_id=profile_id,
         review_translation=bool(review_translation),
+        auto_repair=bool(auto_repair),
         cleanup_input=(persisted_source_path is None),
         mask_box=parsed_mask_box,
         caption_placement=parsed_caption_placement,

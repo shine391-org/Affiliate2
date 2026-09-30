@@ -34,6 +34,7 @@ _ACCESS_HTTP = {401, 403, 412, 429}
 _ACCESS_API_STATUS = {-1, 8, 2483, 10000}
 DOUYIN_REQUEST_COUNT = 15
 DOUYIN_PAGE_STEP = 10
+DOUYIN_API_TIMEOUT_MS = 15_000
 
 
 def _first_url(value: Any) -> str:
@@ -130,6 +131,7 @@ class DouyinProvider:
         params: dict[str, str],
         *,
         referer: str,
+        cookie_dict: dict[str, str] | None = None,
     ) -> dict:
         """Issue one authenticated Douyin web request through the CDP context."""
         query = urllib.parse.urlencode({
@@ -143,9 +145,14 @@ class DouyinProvider:
             "User-Agent": user_agent,
             "Referer": referer,
             "Origin": DOUYIN_HOST,
-            "x-tt-argus": "1",
         }
-        response = await context.request.get(url, headers=headers, timeout=45_000)
+        cookies = cookie_dict or {}
+        uifid = cookies.get("UIFID") or cookies.get("UIFID_TEMP")
+        if uifid:
+            headers["uifid"] = uifid
+        response = await context.request.get(
+            url, headers=headers, timeout=DOUYIN_API_TIMEOUT_MS
+        )
         status = response.status
         text = await response.text()
 
@@ -185,6 +192,7 @@ class DouyinProvider:
         self,
         context,
         page,
+        cookie_dict: dict[str, str],
         ms_token: str | None,
         creator_id: str,
     ) -> dict:
@@ -201,12 +209,14 @@ class DouyinProvider:
             DOUYIN_PROFILE_PATH,
             params,
             referer=f"{DOUYIN_HOST}/user/{creator_id}",
+            cookie_dict=cookie_dict,
         )
 
     async def _fetch_creator_posts(
         self,
         context,
         page,
+        cookie_dict: dict[str, str],
         ms_token: str | None,
         creator_id: str,
         max_cursor: str,
@@ -227,6 +237,7 @@ class DouyinProvider:
             DOUYIN_CREATOR_POSTS_PATH,
             params,
             referer=f"{DOUYIN_HOST}/user/{creator_id}",
+            cookie_dict=cookie_dict,
         )
 
     @staticmethod
@@ -243,20 +254,8 @@ class DouyinProvider:
             return urllib.parse.unquote(parts[1]).strip()
         return ""
 
-    async def creator_info(self, creator_id: str) -> dict:
-        """Fetch one Douyin creator profile through the authenticated CDP session."""
-        creator_id = str(creator_id or "").strip()
-        if not creator_id:
-            raise ValueError("Douyin creator_id is required")
-
-        async with open_douyin_cdp_session(self.cdp_url) as session:
-            payload = await self._fetch_creator_profile(
-                session.context,
-                session.page,
-                session.ms_token,
-                creator_id,
-            )
-
+    @staticmethod
+    def _creator_info_from_payload(payload: dict, creator_id: str) -> dict:
         user = (
             payload.get("user")
             or (payload.get("user_info") or {}).get("user")
@@ -290,13 +289,29 @@ class DouyinProvider:
                 stats.get("follower_count")
                 if "follower_count" in stats
                 else stats.get("followerCount")
-            ) or 0,
+            ),
             "video_count": _optional_metric(
                 stats.get("aweme_count")
                 if "aweme_count" in stats
                 else stats.get("videoCount")
-            ) or 0,
+            ),
         }
+
+    async def creator_info(self, creator_id: str) -> dict:
+        """Fetch one Douyin creator profile through the authenticated CDP session."""
+        creator_id = str(creator_id or "").strip()
+        if not creator_id:
+            raise ValueError("Douyin creator_id is required")
+
+        async with open_douyin_cdp_session(self.cdp_url) as session:
+            payload = await self._fetch_creator_profile(
+                session.context,
+                session.page,
+                session.cookie_dict,
+                session.ms_token,
+                creator_id,
+            )
+        return self._creator_info_from_payload(payload, creator_id)
 
     async def creator_history(
         self,
@@ -319,18 +334,22 @@ class DouyinProvider:
         raw_awemes: list[dict] = []
         try:
             async with open_douyin_cdp_session(self.cdp_url) as session:
-                cursor = "0"
-                page_size = max(1, min(limit, 18))
+                cursor_value = "0"
                 seen_cursor: set[str] = set()
 
                 while len(raw_awemes) < limit:
+                    # Never over-fetch the last native page. Advancing the
+                    # cursor after 18 rows while returning only the remaining
+                    # 14 would permanently skip four videos on the next UI page.
+                    request_count = max(1, min(18, limit - len(raw_awemes)))
                     payload = await self._fetch_creator_posts(
                         session.context,
                         session.page,
+                        session.cookie_dict,
                         session.ms_token,
                         creator_id,
-                        cursor,
-                        page_size,
+                        cursor_value,
+                        request_count,
                     )
                     page_items = payload.get("aweme_list") or []
                     if not isinstance(page_items, list) or not page_items:
@@ -338,15 +357,20 @@ class DouyinProvider:
                     raw_awemes.extend(
                         item for item in page_items if isinstance(item, dict)
                     )
-                    if not payload.get("has_more"):
+                    has_more = bool(payload.get("has_more"))
+                    next_cursor = str(payload.get("max_cursor") or "") or None
+                    if not has_more:
+                        next_cursor = None
                         break
-                    next_cursor = str(payload.get("max_cursor") or "")
                     if not next_cursor or next_cursor in seen_cursor:
+                        has_more = False
+                        next_cursor = None
                         break
                     seen_cursor.add(next_cursor)
-                    cursor = next_cursor
-                    if len(raw_awemes) < limit:
-                        await asyncio.sleep(0.4)
+                    if len(raw_awemes) >= limit:
+                        break
+                    cursor_value = next_cursor
+                    await asyncio.sleep(0.4)
 
         except PermissionError as exc:
             return SourceProviderResult(
@@ -388,6 +412,209 @@ class DouyinProvider:
             provider=self.name,
         )
 
+    async def _fetch_creator_dom_items(
+        self,
+        page,
+        creator_id: str,
+        *,
+        creator_name: str = "",
+        limit: int = 18,
+    ) -> list[dict]:
+        """Read server-rendered creator cards when Douyin's posts API is 403."""
+        creator_url = f"{DOUYIN_HOST}/user/{creator_id}"
+        await page.goto(
+            creator_url,
+            wait_until="domcontentloaded",
+            timeout=30_000,
+        )
+        await page.wait_for_timeout(3_500)
+        cards = await page.eval_on_selector_all(
+            'a[href*="/video/"]',
+            """els => els.map(el => {
+                const href = el.href || '';
+                const match = href.match(/\/video\/(\d+)/);
+                const image = el.querySelector('img');
+                const footer = el.closest('footer, [data-e2e="page-footer"]');
+                return {
+                    video_id: match ? match[1] : '',
+                    video_url: href,
+                    title: (el.getAttribute('title') || image?.alt || el.textContent || '').trim(),
+                    cover_url: image?.currentSrc || image?.src || null,
+                    associated: Boolean(image) && !footer,
+                };
+            })""",
+        )
+
+        items: list[dict] = []
+        seen: set[str] = set()
+        for card in cards or []:
+            if not isinstance(card, dict):
+                continue
+            if card.get("associated") is not True:
+                continue
+            video_id = str(card.get("video_id") or "").strip()
+            if not video_id.isdigit() or video_id in seen:
+                continue
+            seen.add(video_id)
+            items.append({
+                "platform": self.platform,
+                "requested_platform": self.platform,
+                "video_id": video_id,
+                "video_url": f"{DOUYIN_HOST}/video/{video_id}",
+                "title": str(card.get("title") or "").strip() or "Douyin video",
+                "description": "",
+                "thumbnail_url": card.get("cover_url"),
+                "cover_url": card.get("cover_url"),
+                "author": creator_name,
+                "creator_id": creator_id,
+                "author_url": creator_url,
+                "views": 0,
+                "likes": 0,
+                "comments": 0,
+                "shares": 0,
+                "upload_date": None,
+                "duration_seconds": None,
+                "radar_metrics": {
+                    "views": None,
+                    "likes": None,
+                    "comments": None,
+                    "shares": None,
+                },
+                "metadata_source": "creator_page_dom",
+            })
+            if len(items) >= limit:
+                break
+        return items
+
+    async def creator_snapshot(
+        self,
+        creator_id: str,
+        *,
+        limit: int = 18,
+        cursor: str | None = None,
+    ) -> tuple[dict, SourceProviderResult]:
+        """Fetch profile and initial posts through one authenticated session."""
+        creator_id = str(creator_id or "").strip()
+        if not creator_id:
+            raise ValueError("Douyin creator_id is required")
+        if limit <= 0:
+            raise ValueError("Douyin creator history limit must be positive")
+
+        query = f"creator:{creator_id}"
+        raw_awemes: list[dict] = []
+        dom_items: list[dict] = []
+        async with open_douyin_cdp_session(self.cdp_url) as session:
+            profile_payload = await self._fetch_creator_profile(
+                session.context,
+                session.page,
+                session.cookie_dict,
+                session.ms_token,
+                creator_id,
+            )
+            info = self._creator_info_from_payload(profile_payload, creator_id)
+
+            cursor_value = str(cursor or "0")
+            seen_cursor: set[str] = set()
+            next_cursor: str | None = None
+            has_more = False
+            try:
+                while len(raw_awemes) < limit:
+                    request_count = max(1, min(18, limit - len(raw_awemes)))
+                    payload = await self._fetch_creator_posts(
+                        session.context,
+                        session.page,
+                        session.cookie_dict,
+                        session.ms_token,
+                        creator_id,
+                        cursor_value,
+                        request_count,
+                    )
+                    page_items = payload.get("aweme_list") or []
+                    if not isinstance(page_items, list) or not page_items:
+                        has_more = False
+                        next_cursor = None
+                        break
+                    raw_awemes.extend(
+                        item for item in page_items if isinstance(item, dict)
+                    )
+                    has_more = bool(payload.get("has_more"))
+                    next_cursor = str(payload.get("max_cursor") or "") or None
+                    if not has_more:
+                        next_cursor = None
+                        break
+                    if not next_cursor or next_cursor in seen_cursor:
+                        has_more = False
+                        next_cursor = None
+                        break
+                    seen_cursor.add(next_cursor)
+                    if len(raw_awemes) >= limit:
+                        break
+                    cursor_value = next_cursor
+                    await asyncio.sleep(0.4)
+            except PermissionError:
+                # A cursor cannot be reconstructed from the DOM. If one or more
+                # native pages already succeeded, keep that exact partial page
+                # and stop cleanly instead of mixing first-page DOM cards into
+                # cursor results (duplicates + a fake next cursor).
+                has_more = False
+                next_cursor = None
+                if not raw_awemes:
+                    # Never navigate the user's already-open authenticated
+                    # Douyin tab just to perform DOM recovery. Borrow session
+                    # cookies and create a temporary owned page.
+                    dom_page = session.page
+                    close_dom_page = False
+                    if not getattr(session, "created_page", False):
+                        new_page = getattr(session.context, "new_page", None)
+                        if not callable(new_page):
+                            raise RuntimeError(
+                                "Douyin DOM fallback needs a temporary CDP page; "
+                                "refusing to navigate the user's existing tab."
+                            )
+                        dom_page = await new_page()
+                        close_dom_page = True
+                    try:
+                        dom_items = await self._fetch_creator_dom_items(
+                            dom_page,
+                            creator_id,
+                            creator_name=info.get("display_name") or "",
+                            limit=limit,
+                        )
+                    finally:
+                        if close_dom_page:
+                            try:
+                                await dom_page.close()
+                            except Exception:
+                                pass
+                    if not dom_items:
+                        raise
+
+        items: list[dict] = list(dom_items)
+        seen: set[str] = set()
+        for aweme in raw_awemes:
+            row = self._normalize_aweme(aweme, query)
+            if not row or row["video_id"] in seen:
+                continue
+            seen.add(row["video_id"])
+            row["creator_id"] = creator_id
+            row["author_url"] = f"{DOUYIN_HOST}/user/{creator_id}"
+            if info.get("display_name") and not row.get("author"):
+                row["author"] = info["display_name"]
+            items.append(row)
+            if len(items) >= limit:
+                break
+
+        history = SourceProviderResult(
+            platform=self.platform,
+            query=query,
+            status=ProviderStatus.SUCCESS if items else ProviderStatus.EMPTY,
+            items=items,
+            provider=self.name,
+            has_more=bool(has_more and next_cursor) if raw_awemes else False,
+            next_cursor=(next_cursor if raw_awemes and has_more else None),
+        )
+        return info, history
+
     async def _fetch_search_page(
         self,
         context,
@@ -415,44 +642,16 @@ class DouyinProvider:
             **self._common_params(ms_token),
         }
 
-        url = f"{DOUYIN_HOST}{DOUYIN_SEARCH_PATH}?{urllib.parse.urlencode(params)}"
-        user_agent = await page.evaluate("() => navigator.userAgent")
-        headers = {
-            "Accept": "application/json, text/plain, */*",
-            "User-Agent": user_agent,
-            "Referer": f"{DOUYIN_HOST}/search/{urllib.parse.quote(query)}?type=general",
-            "Origin": DOUYIN_HOST,
-            # Current Douyin edge gateway requires the header's presence on
-            # this web path. If server-side validation changes, we return an
-            # explicit access error instead of silently switching platforms.
-            "x-tt-argus": "1",
-        }
-        uifid = cookie_dict.get("UIFID") or cookie_dict.get("UIFID_TEMP")
-        if uifid:
-            headers["uifid"] = uifid
-
-        response = await context.request.get(url, headers=headers, timeout=45_000)
-        status = response.status
-        text = await response.text()
-
-        if status in _ACCESS_HTTP:
-            raise PermissionError(f"Douyin HTTP {status}: access/session restriction")
-        if "Blocked by ArgusSecurityPlugin" in text or text.strip().lower() == "blocked":
-            raise PermissionError(f"Douyin access blocked: {text[:180]}")
-        if status < 200 or status >= 300:
-            raise RuntimeError(f"Douyin HTTP {status}: {text[:180]}")
-
-        try:
-            payload = await response.json()
-        except Exception as exc:
-            raise RuntimeError(f"Douyin returned non-JSON response: {text[:180]}") from exc
-
-        status_code = payload.get("status_code")
-        if status_code not in (None, 0):
-            message = payload.get("status_msg") or payload.get("message") or "Douyin API error"
-            if status_code in _ACCESS_API_STATUS:
-                raise PermissionError(f"Douyin API status {status_code}: {message}")
-            raise RuntimeError(f"Douyin API status {status_code}: {message}")
+        payload = await self._request_json(
+            context,
+            page,
+            DOUYIN_SEARCH_PATH,
+            params,
+            referer=(
+                f"{DOUYIN_HOST}/search/{urllib.parse.quote(query)}?type=general"
+            ),
+            cookie_dict=cookie_dict,
+        )
         if "data" not in payload:
             raise RuntimeError("Douyin search response missing data")
         if payload["data"] is not None and not isinstance(payload["data"], list):

@@ -53,6 +53,11 @@ async def test_library_source_preserved_on_failure(tmp_path, monkeypatch):
     monkeypatch.setattr(Settings, "STORAGE_ROOT", property(lambda self: tmp_path / "storage"))
     monkeypatch.setattr(tr, "_tool_fail", AsyncMock())
     monkeypatch.setattr(tr, "_tool_progress", AsyncMock())
+    cleanup_calls = []
+    monkeypatch.setattr(
+        tr, "_release_localization_torch_cache_sync",
+        lambda: cleanup_calls.append("released"),
+    )
     monkeypatch.setattr(tr, "_load_user_settings", AsyncMock(return_value=SimpleNamespace(
         localization_profiles_json=None, ai_provider="compatible", whisper_quality="balanced",
     )))
@@ -78,6 +83,7 @@ async def test_library_source_preserved_on_failure(tmp_path, monkeypatch):
     )
 
     tr._tool_fail.assert_awaited_once()
+    assert cleanup_calls == ["released"], "GPU cache cleanup must run even when ASR fails"
     assert source_file.exists(), "Library source was deleted on failure!"
     assert source_file.read_bytes() == b"content-library-source"
 
@@ -421,7 +427,7 @@ async def test_fallback_provider_missing_credentials_fails_closed(tmp_path):
     )
     mock_ai = SimpleNamespace(provider=AIProvider.COMPATIBLE, model="gemini-2.5-flash", api_key="dummy", base_url=None)
     with patch.object(ls, "_profile_ai_client", return_value=mock_ai):
-        with pytest.raises(ValueError, match="Invalid fallback AI provider configuration"):
+        with pytest.raises(ValueError, match="Invalid translation AI route configuration"):
             await ls.translate_transcript(
                 transcript,
                 target_language="vi",
@@ -443,8 +449,12 @@ async def test_checkpoint_invalidated_on_config_change(tmp_path, monkeypatch):
     checkpoint_data = {
         "semantic_hash": "different-hash",
         "target_language": "vi",
-        "provider": "compatible",
-        "model": "gemini-2.5-flash",
+        "routes": [{
+            "connection_id": "compatible",
+            "provider": "compatible",
+            "model": "gemini-2.5-flash",
+            "base_url_override": "",
+        }],
         "preset": "natural_vietnamese",
         "instructions": "",
         "guardrails": profile.translation_guardrails.strip(),
@@ -454,7 +464,13 @@ async def test_checkpoint_invalidated_on_config_change(tmp_path, monkeypatch):
                 "texts": ["Stale translation"],
                 "failed": [],
             }
-        }
+        },
+        "route_state": {
+            "sticky_index": 0,
+            "failure_chain": [],
+            "attempt_count": 1,
+            "success_count": 1,
+        },
     }
     checkpoint_file.write_text(json.dumps(checkpoint_data, ensure_ascii=False), encoding="utf-8")
 
@@ -464,8 +480,13 @@ async def test_checkpoint_invalidated_on_config_change(tmp_path, monkeypatch):
         return ["Fresh translation"], set()
 
     with patch.object(ls, "_translate_batch_resilient", side_effect=mock_batch_translate):
-        mock_ai = SimpleNamespace(provider=AIProvider.COMPATIBLE, model="gemini-2.5-flash")
-        with patch.object(ls, "_profile_ai_client", return_value=mock_ai):
+        mock_ai = SimpleNamespace(
+            connection_name="compatible",
+            provider=AIProvider.COMPATIBLE,
+            model="gemini-2.5-flash",
+            base_url=None,
+        )
+        with patch.object(ls, "_profile_ai_route_clients_compat", return_value=[mock_ai]):
             out = await ls.translate_transcript(
                 transcript,
                 target_language="vi",
@@ -543,7 +564,7 @@ async def test_checkpoint_records_only_successful_batches_and_retries_failed_bat
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("changed_config", ["primary_base_url", "fallback_model"])
+@pytest.mark.parametrize("changed_config", ["profile_base_url_override", "fallback_model"])
 async def test_checkpoint_identity_binds_endpoint_and_fallback_config(tmp_path, monkeypatch, changed_config):
     trans_dir = tmp_path / "translation"
     transcript = LocalizationTranscript(
@@ -558,12 +579,23 @@ async def test_checkpoint_identity_binds_endpoint_and_fallback_config(tmp_path, 
         translation_fallback_provider="lmstudio",
         translation_fallback_model="fallback-a",
     )
-    primary = SimpleNamespace(
-        provider=AIProvider.COMPATIBLE,
-        model="primary-model",
-        base_url="https://primary-a.example/v1",
-    )
-    monkeypatch.setattr(ls, "_profile_ai_client", lambda *args: primary)
+    def route_clients(_settings, current_profile, _purpose="translation"):
+        return [
+            SimpleNamespace(
+                connection_name="compatible",
+                provider=AIProvider.COMPATIBLE,
+                model="primary-model",
+                base_url="https://primary-live.example/v1",
+            ),
+            SimpleNamespace(
+                connection_name="lmstudio",
+                provider=AIProvider.COMPATIBLE,
+                model=current_profile.translation_fallback_model,
+                base_url="http://127.0.0.1:1234/v1",
+            ),
+        ]
+
+    monkeypatch.setattr(ls, "_profile_ai_route_clients_compat", route_clients)
 
     calls = []
 
@@ -582,8 +614,10 @@ async def test_checkpoint_identity_binds_endpoint_and_fallback_config(tmp_path, 
     )
     assert calls == ["s0"]
 
-    if changed_config == "primary_base_url":
-        primary.base_url = "https://primary-b.example/v1"
+    if changed_config == "profile_base_url_override":
+        profile = profile.model_copy(update={
+            "translation_base_url": "https://profile-pinned-b.example/v1",
+        })
     else:
         profile = profile.model_copy(update={"translation_fallback_model": "fallback-b"})
 
@@ -627,22 +661,28 @@ async def test_rerun_preserves_translation_checkpoint_and_skips_finished_batches
     checkpoint_data = {
         "semantic_hash": semantic_sig,
         "target_language": "vi",
-        "provider": "compatible",
-        "model": "gemini-2.5-flash",
-        "base_url": "",
+        "routes": [{
+            "connection_id": "compatible",
+            "provider": "compatible",
+            "model": "gemini-2.5-flash",
+            "base_url_override": "",
+        }],
         "preset": "natural_vietnamese",
         "instructions": "",
         "guardrails": profile.translation_guardrails.strip(),
         "glossary_hash": ls.hashlib.sha256(b"{}").hexdigest()[:16],
-        "fallback_provider": "",
-        "fallback_model": "",
-        "fallback_base_url": "",
         "batches": {
             "0": {
                 "texts": [f"Dịch {i}" for i in range(12)],
                 "failed": [],
             }
-        }
+        },
+        "route_state": {
+            "sticky_index": 0,
+            "failure_chain": [],
+            "attempt_count": 1,
+            "success_count": 1,
+        },
     }
     checkpoint_file.write_text(json.dumps(checkpoint_data, ensure_ascii=False), encoding="utf-8")
     final_tr = trans_dir / "transcript.json"
@@ -666,8 +706,13 @@ async def test_rerun_preserves_translation_checkpoint_and_skips_finished_batches
         return [f"Dịch {s.id}" for s in batch], set()
 
     with patch.object(ls, "_translate_batch_resilient", side_effect=mock_batch_translate):
-        mock_ai = SimpleNamespace(provider=AIProvider.COMPATIBLE, model="gemini-2.5-flash")
-        with patch.object(ls, "_profile_ai_client", return_value=mock_ai):
+        mock_ai = SimpleNamespace(
+            connection_name="compatible",
+            provider=AIProvider.COMPATIBLE,
+            model="gemini-2.5-flash",
+            base_url=None,
+        )
+        with patch.object(ls, "_profile_ai_route_clients_compat", return_value=[mock_ai]):
             out = await ls.translate_transcript(
                 transcript,
                 target_language="vi",
@@ -897,3 +942,37 @@ async def test_localization_gpu_gate_releases_on_exception():
     async with localization_gpu_gate():
         acquired = True
     assert acquired is True
+
+
+
+def test_localization_source_preflight_rejects_proven_video_only_media(monkeypatch, tmp_path):
+    from backend.core import tool_runners as tr
+
+    source = tmp_path / "video-only.mp4"
+    source.write_bytes(b"media")
+    monkeypatch.setattr(
+        "backend.services.video_utils.probe_media_details",
+        lambda path: {
+            "has_video": True,
+            "has_audio": False,
+            "video_codec": "h264",
+            "audio_codec": None,
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="no audio stream"):
+        tr._localization_source_media_preflight_sync(source)
+
+
+def test_localization_source_preflight_does_not_guess_when_probe_is_unknown(
+        monkeypatch, tmp_path):
+    from backend.core import tool_runners as tr
+
+    source = tmp_path / "unknown.mp4"
+    source.write_bytes(b"media")
+    monkeypatch.setattr(
+        "backend.services.video_utils.probe_media_details",
+        lambda path: {},
+    )
+
+    assert tr._localization_source_media_preflight_sync(source) == {}

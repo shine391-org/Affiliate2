@@ -58,7 +58,7 @@ def downloader(monkeypatch, tmp_path):
     seen_options: list = []
 
     async def fake_download(url, output_dir=None, filename=None,
-                            extract_audio=True, options=None):
+                            extract_audio=True, options=None, title_hint=""):
         calls.append(url)
         seen_options.append(options)
         out = outcomes.get(url, "ok")
@@ -108,6 +108,10 @@ class TestDetectPlatform:
         ("https://youtu.be/abc", "youtube"),
         ("https://m.youtube.com/watch?v=abc", "youtube"),
         ("https://www.tiktok.com/@x/video/1", "tiktok"),
+        ("https://www.douyin.com/video/123", "douyin"),
+        ("https://v.douyin.com/abc123/", "douyin"),
+        ("https://iesdouyin.com/share/video/123", "douyin"),
+        ("https://m.iesdouyin.com/share/video/123", "douyin"),
         ("https://www.bilibili.com/video/BV1", "bilibili"),
         ("https://vimeo.com/12345", "vimeo"),
     ])

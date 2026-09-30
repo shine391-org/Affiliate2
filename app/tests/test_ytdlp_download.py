@@ -286,7 +286,7 @@ class TestDownloadCascade:
         async def configured_browser():
             return ("edge", "Default")
 
-        async def resolve(url, cdp_url=None):
+        async def resolve(url, cdp_url=None, title_hint=""):
             return ResolvedDouyinMedia(
                 url="https://v3-web.douyinvod.com/video/main.mp4?sig=abc",
                 headers={"User-Agent": "Mozilla/5.0 Edge", "Referer": url},
@@ -483,3 +483,94 @@ class TestOptionalPostprocessorDrop:
                        for r in caplog.records)
         assert Path(out["video_path"]).exists()
         assert out["option_postprocessors_dropped"] is False
+
+
+
+class TestResolvedDouyinQualityContract:
+    @pytest.mark.parametrize("url", [
+        "https://v3-web.douyinvod.com/video/main.mp4?sig=x",
+        "https://v5-dy.zjcdn.com/video/main.mp4?sig=x",
+        "https://video.bytecdn.cn/video/main.mp4?sig=x",
+        "https://aweme.snssdk.com/video/main.mp4?sig=x",
+    ])
+    def test_every_resolved_douyin_cdn_uses_direct_media_selector(self, url):
+        original = ["bestvideo[height<=720]+bestaudio/best[height<=720]"]
+        assert YT._format_chain_for_source(url, "douyin_cdp", original) == ["best"]
+
+    def test_non_douyin_resolved_source_keeps_requested_ladder(self):
+        original = ["bestvideo[height<=720]+bestaudio/best[height<=720]"]
+        assert YT._format_chain_for_source(
+            "https://example.com/video.mp4", None, original
+        ) == original
+
+    def test_direct_media_without_explicit_cap_is_not_transcoded(
+            self, tmp_path, monkeypatch):
+        source = tmp_path / "source.mp4"
+        source.write_bytes(b"video")
+        called = []
+
+        monkeypatch.setattr(
+            "backend.services.video_utils.probe_media_details",
+            lambda path: {"width": 1920, "height": 1080},
+        )
+        monkeypatch.setattr(
+            "subprocess.run",
+            lambda *a, **k: called.append((a, k)),
+        )
+
+        got = YT._enforce_direct_media_quality_cap(source, "best")
+
+        assert got == source
+        assert source.exists()
+        assert called == []
+
+    def test_direct_media_over_cap_is_downscaled_and_verified(
+            self, tmp_path, monkeypatch):
+        source = tmp_path / "source.mp4"
+        source.write_bytes(b"original")
+        probes = iter([
+            {"width": 1920, "height": 1080},
+            {"width": 1280, "height": 720},
+        ])
+        seen = {}
+
+        monkeypatch.setattr(
+            "backend.services.video_utils.probe_media_details",
+            lambda path: next(probes),
+        )
+
+        def fake_run(cmd, **kwargs):
+            seen["cmd"] = list(cmd)
+            Path(cmd[-1]).write_bytes(b"capped")
+            return types.SimpleNamespace(returncode=0, stderr="")
+
+        monkeypatch.setattr("subprocess.run", fake_run)
+
+        got = YT._enforce_direct_media_quality_cap(source, "720p")
+
+        assert got == source
+        assert source.read_bytes() == b"capped"
+        assert "-vf" in seen["cmd"]
+        assert "scale=1280:720" in seen["cmd"]
+        assert "-map" in seen["cmd"]
+        assert "0:a?" in seen["cmd"]
+
+    def test_direct_media_cap_fails_closed_when_transcode_fails(
+            self, tmp_path, monkeypatch):
+        source = tmp_path / "source.mp4"
+        source.write_bytes(b"original")
+        monkeypatch.setattr(
+            "backend.services.video_utils.probe_media_details",
+            lambda path: {"width": 1920, "height": 1080},
+        )
+        monkeypatch.setattr(
+            "subprocess.run",
+            lambda *a, **k: types.SimpleNamespace(
+                returncode=1, stderr="encoder failed",
+            ),
+        )
+
+        with pytest.raises(DownloadError, match="quality ceiling"):
+            YT._enforce_direct_media_quality_cap(source, "720p")
+
+        assert source.read_bytes() == b"original"

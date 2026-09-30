@@ -59,6 +59,7 @@ export function hydrateLocalizationJobConfig(detail) {
     target: request.target_language || "vi",
     mode: request.mode === "captions_only" ? "captions_only" : "full_dub",
     reviewTranslation: Boolean(request.review_translation),
+    autoRepair: Boolean(request.auto_repair),
     targetAspect: request.target_aspect || manifest.effective_profile?.target_aspect || "9:16",
     enableMask: Boolean(savedMask),
     maskBox: savedMask ? {
@@ -150,5 +151,31 @@ export function buildLocalizationRenderPayload({
       mode: enableMask && captionPlacementMode === "mask_region" ? "mask_region" : "default",
       vertical_offset: Number(captionVerticalOffset || 0),
     },
+  }
+}
+
+
+export function resolveAiStageSelection(metadata = {}, effective = {}, stage = "translation") {
+  const rewrite = stage === "rewrite"
+  const aiKey = rewrite ? "rewrite_ai" : "translation_ai"
+  const providerKey = rewrite ? "rewrite_provider" : "translation_provider"
+  const modelKey = rewrite ? "rewrite_model" : "translation_model"
+  const routesKey = rewrite ? "rewrite_routes" : "translation_routes"
+  const audit = metadata?.[aiKey] || {}
+  const routes = audit.route_chain || metadata?.[routesKey] || effective?.[routesKey] || []
+  const attempted = audit.attempted === true
+  const auditedConnectionId = attempted ? (audit.selected_connection_id || null) : null
+  const connectionId = auditedConnectionId || metadata?.[providerKey] || effective?.[providerKey] || null
+  const selectedRoute = Array.isArray(routes)
+    ? routes.find((route) => route?.connection_id === connectionId)
+    : null
+  const failureChain = Array.isArray(audit.failure_chain) ? audit.failure_chain : []
+  return {
+    connectionId,
+    model: selectedRoute?.model || metadata?.[modelKey] || effective?.[modelKey] || null,
+    attempted,
+    isActual: Boolean(auditedConnectionId),
+    failureChain,
+    failureCount: failureChain.length,
   }
 }

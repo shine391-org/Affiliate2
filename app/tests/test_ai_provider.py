@@ -4,8 +4,8 @@
 
 Covers get_ai_client() resolution order (user BYOK → env → error),
 _resolve_user_provider_and_key() decryption/validation, PROVIDER_DEFAULTS
-model selection, and AIClient.chat() aggregating a mocked stream. No real
-provider SDK is ever imported or called.
+model selection, and AIClient.chat() using true non-streaming completion while chat_stream() remains
+available for interactive callers. No real provider SDK is ever imported or called.
 """
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -122,18 +122,23 @@ def test_env_path_still_applies_user_model():
     assert c.provider == AIProvider.ANTHROPIC and c.model == "my-model"
 
 
-# ── chat() aggregates the provider stream ──────────────────────────────────
+# ── structured chat is non-streaming; interactive streaming remains separate ─
 
-async def test_chat_aggregates_stream_and_routes_by_provider():
+async def test_chat_routes_to_non_streaming_provider_completion():
     c = AIClient(AIProvider.ANTHROPIC, "sk-x")
+    seen = {}
 
-    async def _fake_stream(messages, system, max_tokens):
-        for tok in ("Hel", "lo ", "world"):
-            yield tok
+    async def _fake_complete(messages, system, max_tokens):
+        seen["complete"] = True
+        return "Hello world"
 
-    with patch.object(c, "_anthropic_stream", _fake_stream):
+    async def _forbidden_stream(*args, **kwargs):
+        raise AssertionError("structured chat must not use SSE stream")
+
+    with patch.object(c, "_anthropic_complete", _fake_complete), patch.object(c, "_anthropic_stream", _forbidden_stream):
         out = await c.chat([{"role": "user", "content": "hi"}])
     assert out == "Hello world"
+    assert seen["complete"] is True
 
 
 async def test_chat_stream_dispatches_to_openai_impl():

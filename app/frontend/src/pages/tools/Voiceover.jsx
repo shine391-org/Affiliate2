@@ -10,7 +10,7 @@ import UploadFileOutlinedIcon from "@mui/icons-material/UploadFileOutlined"
 import CloseIcon from "@mui/icons-material/Close"
 import PlayArrowIcon from "@mui/icons-material/PlayArrow"
 import StopIcon from "@mui/icons-material/Stop"
-import http from "../../api/http"
+import http, { apiErrorMessage } from "../../api/http"
 import useAppStore from "../../store/appStore"
 import ToolRunner from "../../components/tools/ToolRunner"
 import PromptField from "../../components/tools/PromptField"
@@ -188,7 +188,9 @@ export default function ToolVoiceover() {
       await audio.play()
       setPreviewVoice(voice)
     } catch (err) {
-      const msg = err.response?.data?.detail || err.message || "Nghe thử thất bại"
+      // responseType:"blob" makes the error body a Blob too; decode it so the
+      // provider status/message survives to the user.
+      const msg = await apiErrorMessage(err, "Nghe thử thất bại")
       showSnackbar(`Nghe thử giọng thất bại: ${msg}`, "error")
     } finally {
       setPreviewLoading(null)

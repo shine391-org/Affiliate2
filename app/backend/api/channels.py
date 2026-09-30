@@ -6,6 +6,7 @@ Supports multiple connected channels per user.
 YouTube/TikTok use their existing readers; Douyin is a separate authenticated
 CDP connector and never aliases to TikTok.
 """
+import asyncio
 import logging
 
 from fastapi import APIRouter, Query, HTTPException
@@ -327,6 +328,7 @@ async def get_channel_videos(
     channel_db_id: str,
     page_token: str | None = Query(None),
     refresh: bool = Query(False),
+    limit: int = Query(18, ge=1, le=50),
 ):
     """Fetch videos for a specific connected channel."""
     async with AsyncSessionLocal() as db:
@@ -378,18 +380,28 @@ async def get_channel_videos(
             raise HTTPException(status_code=400, detail="Stored Douyin channel has no creator ID")
 
         try:
-            info = await provider.creator_info(creator_id)
-            history = await provider.creator_history(
-                creator_id,
-                creator_name=ch.channel_name or "",
-                limit=200,
+            info, history = await asyncio.wait_for(
+                provider.creator_snapshot(
+                    creator_id,
+                    limit=limit,
+                    cursor=(page_token or "0"),
+                ),
+                timeout=45,
             )
+        except asyncio.TimeoutError as exc:
+            raise HTTPException(
+                status_code=504,
+                detail="Timed out waiting for Douyin creator data. Retry after checking the authenticated CDP session.",
+            ) from exc
         except PermissionError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)[:300]) from exc
+            raise HTTPException(
+                status_code=409,
+                detail=f"Douyin login/session required: {str(exc)[:250]}",
+            ) from exc
         except Exception as exc:
             raise HTTPException(
                 status_code=502,
-                detail=f"Douyin connector failed: {str(exc)[:250]}",
+                detail=f"Douyin provider rejected request: {str(exc)[:250]}",
             ) from exc
 
         if history.status == ProviderStatus.AUTH_REQUIRED:
@@ -398,6 +410,9 @@ async def get_channel_videos(
             raise HTTPException(status_code=502, detail=history.error or "Douyin creator fetch failed")
 
         videos = [{
+            "platform": "douyin",
+            "creator_id": item.get("creator_id") or creator_id,
+            "aweme_id": item.get("video_id", ""),
             "video_id": item.get("video_id", ""),
             "title": item.get("title", ""),
             "cover_url": item.get("thumbnail_url", ""),
@@ -411,7 +426,8 @@ async def get_channel_videos(
             "comment_count": item.get("comments", 0) or 0,
             "share_count": item.get("shares", 0) or 0,
             "duration": item.get("duration_seconds", 0) or 0,
-            "url": item.get("video_url", ""),
+            "source_url": f"https://www.douyin.com/video/{item.get('video_id', '')}",
+            "url": f"https://www.douyin.com/video/{item.get('video_id', '')}",
         } for item in history.items]
 
         return {
@@ -419,11 +435,20 @@ async def get_channel_videos(
             "user": {
                 "display_name": info.get("display_name", ch.channel_name or ""),
                 "avatar_url": info.get("avatar_url", ch.thumbnail_url or ""),
-                "follower_count": info.get("follower_count", ch.subscriber_count or 0),
-                "video_count": info.get("video_count", ch.video_count or len(videos)),
+                "follower_count": (
+                    info.get("follower_count")
+                    if info.get("follower_count") is not None
+                    else ch.subscriber_count
+                ),
+                "video_count": (
+                    info.get("video_count")
+                    if info.get("video_count") is not None
+                    else ch.video_count
+                ),
             },
             "videos": videos,
-            "has_more": False,
+            "has_more": bool(history.has_more),
+            "next_page_token": history.next_cursor,
         }
 
 
