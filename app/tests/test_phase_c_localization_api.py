@@ -1280,3 +1280,54 @@ def test_ai_route_change_invalidates_semantic_and_rewrite_route_invalidates_dubb
     assert api._profile_invalidation({"translation_guardrails"}) == "translation"
     assert api._profile_invalidation({"rewrite_routes"}) == "dubbing"
     assert api._profile_invalidation({"tts_connection_id"}) == "dubbing"
+
+
+@pytest.mark.asyncio
+async def test_current_tts_rebind_keeps_saved_connection_endpoint_live(monkeypatch):
+    import backend.database as database
+    from backend.services import localization_service as localization
+    from backend.services import tts_service
+
+    row = SimpleNamespace()
+
+    class Result:
+        def scalar_one_or_none(self):
+            return row
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+        async def execute(self, _query):
+            return Result()
+
+    monkeypatch.setattr(database, "AsyncSessionLocal", lambda: FakeSession())
+    runtime = localization.TTSRuntimeConfig(
+        provider=SimpleNamespace(value="openai_compatible_tts"),
+        default_voice="vi-test",
+        api_key="secret",
+        model="tts-local",
+        base_url="http://127.0.0.1:9001/v1",
+        region="runtime-region",
+        connection_id="tts-live",
+    )
+    monkeypatch.setattr(localization, "_tts_config", lambda *_args, **_kwargs: runtime)
+
+    async def healthy(**kwargs):
+        assert kwargs["base_url"] == "http://127.0.0.1:9001/v1"
+        assert kwargs["region"] == "runtime-region"
+        return {"ok": True}
+
+    monkeypatch.setattr(tts_service, "test_tts_connection", healthy)
+
+    binding = await api._resolve_current_tts_binding(
+        {"id": "hq", "name": "HQ"},
+        "Vietnamese",
+    )
+
+    assert binding["tts_connection_id"] == "tts-live"
+    assert binding["tts_model"] == "tts-local"
+    assert binding["tts_voice"] == "vi-test"
+    assert binding["tts_base_url"] is None
+    assert binding["tts_region"] is None
