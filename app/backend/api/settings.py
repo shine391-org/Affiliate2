@@ -1278,7 +1278,7 @@ async def test_tts_connection(body: TTSProbeRequest):
     from backend.services import tts_service
     from backend.services.elevenlabs_tts_service import ElevenLabsAPIError
 
-    saved = await _load_saved_settings()
+    saved = await _load_saved_settings() if body.connection_id else None
     connection = _tts_probe_connection(saved, body) if saved else {}
     provider_name = (
         (body.provider or "").strip().lower()
@@ -1332,7 +1332,7 @@ async def discover_tts_voices(body: TTSProbeRequest):
     from backend.services import tts_service
     from backend.services.elevenlabs_tts_service import ElevenLabsAPIError
 
-    saved = await _load_saved_settings()
+    saved = await _load_saved_settings() if body.connection_id else None
     connection = _tts_probe_connection(saved, body) if saved else {}
     provider_name = (
         (body.provider or "").strip().lower()
