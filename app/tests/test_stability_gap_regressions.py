@@ -696,8 +696,13 @@ async def test_rerun_preserves_translation_checkpoint_and_skips_finished_batches
         return [f"Dịch {s.id}" for s in batch], set()
 
     with patch.object(ls, "_translate_batch_resilient", side_effect=mock_batch_translate):
-        mock_ai = SimpleNamespace(provider=AIProvider.COMPATIBLE, model="gemini-2.5-flash")
-        with patch.object(ls, "_profile_ai_client", return_value=mock_ai):
+        mock_ai = SimpleNamespace(
+            connection_name="compatible",
+            provider=AIProvider.COMPATIBLE,
+            model="gemini-2.5-flash",
+            base_url=None,
+        )
+        with patch.object(ls, "_profile_ai_route_clients_compat", return_value=[mock_ai]):
             out = await ls.translate_transcript(
                 transcript,
                 target_language="vi",
