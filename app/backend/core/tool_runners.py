@@ -79,6 +79,23 @@ async def _is_already_vertical(video_path: Path) -> bool:
     return await asyncio.to_thread(_is_already_vertical_sync, video_path)
 
 
+def _localization_source_media_preflight_sync(source_path: Path) -> dict:
+    """Reject a proven video-only source before loading Demucs/Whisper.
+
+    Unknown/unprobeable metadata is left to the canonical stage error paths;
+    only a successful ffprobe proving zero audio streams fails here.
+    """
+    from backend.services.video_utils import probe_media_details
+
+    details = probe_media_details(source_path)
+    if details and details.get("has_audio") is False:
+        raise RuntimeError(
+            "Source media has no audio stream. Localization requires audible "
+            "speech/audio; choose or re-download a verified media variant with audio."
+        )
+    return details
+
+
 # GPU concurrency gate (concurrency = 1) for heavy local localization workloads
 # (Demucs separation, Faster-Whisper / WhisperX, and NVENC render) on 8GB VRAM
 from contextlib import asynccontextmanager
@@ -1154,6 +1171,12 @@ async def run_tool_translate(
             and not run.is_complete("separation", ("vocals", "background"))
         )
         needs_asr = not run.is_complete("asr", ("transcript",))
+
+        if needs_separation or needs_asr:
+            await asyncio.to_thread(
+                _localization_source_media_preflight_sync,
+                source_path,
+            )
 
         background_file = None
         vocals_file = None
