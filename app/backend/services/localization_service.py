@@ -78,10 +78,12 @@ class LocalizationTimingError(RuntimeError):
         *,
         rewrite_count: int = 0,
         all_issues: list[dict] | None = None,
+        rewrite_ai: dict | None = None,
     ):
         self.issues = issues
         self.rewrite_count = int(rewrite_count or 0)
         self.all_issues = list(all_issues or issues)
+        self.rewrite_ai = dict(rewrite_ai or {})
         preview = "; ".join(
             (
                 f"chunk {x.get('chunk_id')}: speed {x.get('required_speed', '?')}x"
@@ -2440,6 +2442,19 @@ async def synthesize_timed_dub(
             unresolved,
             rewrite_count=rewrite_count,
             all_issues=[*issues, *unresolved],
+            rewrite_ai={
+                "selected_connection_id": (
+                    getattr(route_state.current, "connection_name", None)
+                    if route_state is not None else None
+                ),
+                "failure_chain": (
+                    list(route_state.failure_chain)
+                    if route_state is not None else []
+                ),
+                "sticky_route_index": (
+                    route_state.sticky_index if route_state is not None else None
+                ),
+            },
         )
     issues.extend(unresolved)
 
