@@ -773,7 +773,17 @@ def _attach_ai_failure_context(exc: Exception, stage: str, route_state: _AIStage
     try:
         exc.ai_stage = stage
         exc.ai_failure_chain = list(route_state.failure_chain)
-        exc.ai_selected_connection = getattr(route_state.current, "connection_name", None)
+        last_failure_connection = (
+            route_state.failure_chain[-1].get("connection_id")
+            if route_state.failure_chain else None
+        )
+        exc.ai_selected_connection = (
+            last_failure_connection
+            or getattr(route_state.current, "connection_name", None)
+        )
+        exc.ai_sticky_route_index = route_state.sticky_index
+        exc.ai_attempt_count = route_state.attempt_count
+        exc.ai_success_count = route_state.success_count
     except Exception:
         pass
     return exc
