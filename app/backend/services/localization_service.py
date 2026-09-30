@@ -557,6 +557,9 @@ def _profile_ai_fallback_client(
     return clients[1] if len(clients) > 1 else None
 
 
+_MAX_AI_FAILURE_HISTORY = 64
+
+
 class _AIStageRouteState:
     def __init__(self, clients: list):
         if not clients:
@@ -570,6 +573,12 @@ class _AIStageRouteState:
         return self.clients[self.sticky_index]
 
 
+def _append_ai_failure(route_state: _AIStageRouteState | None, failure: dict) -> None:
+    if route_state is None:
+        return
+    _append_ai_failure(route_state, dict(failure))
+    if len(route_state.failure_chain) > _MAX_AI_FAILURE_HISTORY:
+        del route_state.failure_chain[:-_MAX_AI_FAILURE_HISTORY]
 
 
 async def prepare_semantic_transcript(
@@ -873,7 +882,7 @@ async def _call_ai_chat_resilient(
                     "error": _safe_ai_error_text(exc, client),
                 }
                 if route_state is not None:
-                    route_state.failure_chain.append(failure)
+                    _append_ai_failure(route_state, failure)
                 await _emit_ai_progress(progress_cb, {
                     "event": "error",
                     "stage": stage,
@@ -979,7 +988,7 @@ async def _translate_batch_resilient(
         # configured fallback is never tried.
         if route_state is not None and route_state.sticky_index + 1 < len(route_state.clients):
             current = route_state.current
-            route_state.failure_chain.append({
+            _append_ai_failure(route_state, {
                 "connection_id": getattr(current, "connection_name", None),
                 "provider": getattr(getattr(current, "provider", None), "value", str(getattr(current, "provider", ""))),
                 "model": getattr(current, "model", None),
@@ -1824,7 +1833,7 @@ ITEMS:
         if route_state is None or route_state.sticky_index + 1 >= len(route_state.clients):
             return None
         current = route_state.current
-        route_state.failure_chain.append({
+        _append_ai_failure(route_state, {
             "connection_id": getattr(current, "connection_name", None),
             "provider": getattr(getattr(current, "provider", None), "value", str(getattr(current, "provider", ""))),
             "model": getattr(current, "model", None),
@@ -1892,7 +1901,7 @@ ITEMS:
     except Exception:
         if route_state is not None and route_state.sticky_index + 1 < len(route_state.clients):
             current = route_state.current
-            route_state.failure_chain.append({
+            _append_ai_failure(route_state, {
                 "connection_id": getattr(current, "connection_name", None),
                 "provider": getattr(getattr(current, "provider", None), "value", str(getattr(current, "provider", ""))),
                 "model": getattr(current, "model", None),
@@ -1921,7 +1930,7 @@ ITEMS:
     if not isinstance(payload, list) or len(payload) != len(items):
         if route_state is not None and route_state.sticky_index + 1 < len(route_state.clients):
             current = route_state.current
-            route_state.failure_chain.append({
+            _append_ai_failure(route_state, {
                 "connection_id": getattr(current, "connection_name", None),
                 "provider": getattr(getattr(current, "provider", None), "value", str(getattr(current, "provider", ""))),
                 "model": getattr(current, "model", None),
