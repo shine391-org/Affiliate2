@@ -1265,3 +1265,113 @@ async def test_provider_only_switch_rejects_ambiguous_same_provider_connections(
 
     assert row.ai_connection_id == "openai-main"
     assert row.tts_connection_id == "edge-main"
+
+
+@pytest.mark.asyncio
+async def test_partial_connection_edit_preserves_unsent_runtime_fields(monkeypatch):
+    from backend.models.user_settings import UserSettings
+
+    row = UserSettings(user_id="local")
+    row.ai_provider = "compatible"
+    row.ai_connection_id = "hermes-a"
+    row.ai_model = "longcat-a"
+    row.ai_base_url = "http://127.0.0.1:8645/v1"
+    row.ai_connections_json = json.dumps({
+        "hermes-a": {
+            "label": "Hermes A",
+            "provider": "compatible",
+            "model": "longcat-a",
+            "base_url": "http://127.0.0.1:8645/v1",
+            "api_key_encrypted": None,
+            "archived": False,
+        },
+    })
+    row.tts_provider = "edge_tts"
+    row.tts_connection_id = "edge-main"
+    row.preferred_tts_voice = "vi-VN-HoaiMyNeural"
+    row.tts_model = "edge-model-marker"
+    row.tts_region = "legacy-region"
+    row.tts_connections_json = json.dumps({
+        "edge-main": {
+            "label": "Edge Main",
+            "provider": "edge_tts",
+            "voice": "vi-VN-HoaiMyNeural",
+            "model": "edge-model-marker",
+            "base_url": None,
+            "region": "legacy-region",
+            "api_key_encrypted": None,
+            "archived": False,
+        },
+    })
+
+    class Result:
+        def scalar_one_or_none(self):
+            return row
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+        async def execute(self, _query):
+            return Result()
+        def add(self, _row):
+            return None
+        async def commit(self):
+            return None
+
+    monkeypatch.setattr(settings_api, "AsyncSessionLocal", lambda: FakeSession())
+
+    await settings_api.upsert_ai_connection(settings_api.AIConnectionRequest(
+        connection_id="hermes-a",
+        label="Hermes renamed",
+        provider="compatible",
+        activate=False,
+    ))
+    ai_saved = json.loads(row.ai_connections_json)["hermes-a"]
+    assert ai_saved["model"] == "longcat-a"
+    assert ai_saved["base_url"] == "http://127.0.0.1:8645/v1"
+
+    await settings_api.upsert_tts_connection(settings_api.TTSConnectionRequest(
+        connection_id="edge-main",
+        label="Edge renamed",
+        provider="edge_tts",
+        activate=False,
+    ))
+    tts_saved = json.loads(row.tts_connections_json)["edge-main"]
+    assert tts_saved["voice"] == "vi-VN-HoaiMyNeural"
+    assert tts_saved["model"] == "edge-model-marker"
+    assert tts_saved["region"] == "legacy-region"
+
+
+@pytest.mark.asyncio
+async def test_ai_connection_probe_has_hard_timeout_and_disables_sdk_retry(monkeypatch):
+    class HangingClient:
+        def __init__(self):
+            self.max_retries = None
+
+        async def chat(self, **kwargs):
+            await __import__("asyncio").Event().wait()
+
+    client = HangingClient()
+
+    async def no_saved_settings():
+        return None
+
+    monkeypatch.setattr(settings_api, "_load_saved_settings", no_saved_settings)
+    monkeypatch.setattr(settings_api, "_AI_PROBE_TIMEOUT_S", 0.01)
+    monkeypatch.setattr(
+        "backend.core.ai_provider.make_ai_client",
+        lambda **kwargs: client,
+    )
+
+    with pytest.raises(Exception) as exc:
+        await settings_api.test_ai_connection(settings_api.AIProbeRequest(
+            provider="compatible",
+            model="qwen3:8b",
+            base_url="http://127.0.0.1:1234/v1",
+        ))
+
+    assert getattr(exc.value, "status_code", None) == 408
+    assert "timed out" in str(getattr(exc.value, "detail", "")).lower()
+    assert client.max_retries == 0
