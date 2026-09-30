@@ -493,7 +493,8 @@ async def _generated_path_still_referenced(db: AsyncSession, path: Path) -> bool
 async def delete_video(video_id: str, db: AsyncSession = Depends(get_db)):
     """Delete a generated video only when no publication/recovery is in flight."""
     from backend.models.job import Job
-    from backend.models.phase_g import PublicationRecord
+    from backend.models.phase_g import ContentAction, PublicationRecord
+    from backend.models.video_metrics import VideoMetrics
 
     # Serialize the whole destructive preflight with any localization
     # promotion/recovery write. Without the SQLite write lock, a rerun could
@@ -528,20 +529,35 @@ async def delete_video(video_id: str, db: AsyncSession = Depends(get_db)):
                 detail="Video đang có tác vụ xuất bản chạy/chờ. Hãy chờ hoàn tất hoặc hủy tác vụ trước khi xóa.",
             )
 
-    risky_publication = (await db.execute(
+    publication_history = (await db.execute(
         select(PublicationRecord.id).where(
             PublicationRecord.generated_video_id == video_id,
-            PublicationRecord.status.in_(
-                ["PUBLISHING", "PERSISTENCE_ERROR", "OUTCOME_UNKNOWN"]
-            ),
         )
     )).first()
-    if risky_publication:
+    metrics_history = (await db.execute(
+        select(VideoMetrics.id).where(
+            VideoMetrics.generated_video_id == video_id,
+        )
+    )).first()
+    action_history = (await db.execute(
+        select(ContentAction.id).where(
+            ContentAction.generated_video_id == video_id,
+        )
+    )).first()
+    legacy_published = bool(
+        video.status == "uploaded"
+        or video.youtube_video_id
+        or video.tiktok_publish_id
+        or video.instagram_media_id
+        or bool(_safe_json(video.uploaded_platforms_json, []))
+    )
+    if publication_history or metrics_history or action_history or legacy_published:
+        await db.rollback()
         raise HTTPException(
             status_code=409,
             detail=(
-                "Kết quả xuất bản của video này chưa xác định chắc chắn. "
-                "Hãy đối soát nền tảng trước khi xóa."
+                "Video này đã có lịch sử xuất bản/đo lường nên không thể xóa vật lý "
+                "mà không làm mất provenance. Hãy giữ bản ghi hoặc dùng luồng lưu trữ/archive."
             ),
         )
 
