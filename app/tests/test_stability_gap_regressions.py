@@ -903,3 +903,37 @@ async def test_localization_gpu_gate_releases_on_exception():
     async with localization_gpu_gate():
         acquired = True
     assert acquired is True
+
+
+
+def test_localization_source_preflight_rejects_proven_video_only_media(monkeypatch, tmp_path):
+    from backend.core import tool_runners as tr
+
+    source = tmp_path / "video-only.mp4"
+    source.write_bytes(b"media")
+    monkeypatch.setattr(
+        "backend.services.video_utils.probe_media_details",
+        lambda path: {
+            "has_video": True,
+            "has_audio": False,
+            "video_codec": "h264",
+            "audio_codec": None,
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="no audio stream"):
+        tr._localization_source_media_preflight_sync(source)
+
+
+def test_localization_source_preflight_does_not_guess_when_probe_is_unknown(
+        monkeypatch, tmp_path):
+    from backend.core import tool_runners as tr
+
+    source = tmp_path / "unknown.mp4"
+    source.write_bytes(b"media")
+    monkeypatch.setattr(
+        "backend.services.video_utils.probe_media_details",
+        lambda path: {},
+    )
+
+    assert tr._localization_source_media_preflight_sync(source) == {}
