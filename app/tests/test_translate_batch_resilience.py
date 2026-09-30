@@ -2520,3 +2520,103 @@ def test_ai_failure_history_is_bounded_to_recent_events():
     assert len(state.failure_chain) == ls._MAX_AI_FAILURE_HISTORY
     assert state.failure_chain[0]["attempt"] == 36
     assert state.failure_chain[-1]["attempt"] == 99
+
+
+@pytest.mark.asyncio
+async def test_translation_checkpoint_restores_sticky_fallback_and_audit(monkeypatch, tmp_path):
+    class Transient503(RuntimeError):
+        status_code = 503
+
+    class Primary:
+        connection_name = "primary"
+        provider = SimpleNamespace(value="compatible")
+        model = "primary-model"
+        max_retries = None
+
+        def __init__(self):
+            self.calls = 0
+
+        async def chat(self, **kwargs):
+            self.calls += 1
+            raise Transient503("primary unavailable")
+
+    class Fallback:
+        connection_name = "fallback"
+        provider = SimpleNamespace(value="compatible")
+        model = "fallback-model"
+        max_retries = None
+
+        def __init__(self):
+            self.calls = 0
+
+        async def chat(self, **kwargs):
+            self.calls += 1
+            return json.dumps([{"id": "s1", "text": "xin chào"}])
+
+    first_primary = Primary()
+    first_fallback = Fallback()
+    active_clients = [first_primary, first_fallback]
+    monkeypatch.setattr(
+        ls,
+        "_profile_ai_route_clients_compat",
+        lambda *_args, **_kwargs: active_clients,
+    )
+
+    profile = _profile(
+        translation_routes=[
+            {"connection_id": "primary", "model": "primary-model"},
+            {"connection_id": "fallback", "model": "fallback-model"},
+        ],
+        translation_retry_attempts=1,
+        translation_attempt_timeout_s=1,
+        translation_total_timeout_s=5,
+    )
+    transcript = LocalizationTranscript(segments=[
+        LocalizationSegment(
+            id="s1",
+            source_text="hello",
+            source_start_ms=0,
+            source_end_ms=500,
+        ),
+    ])
+
+    first = await ls.translate_transcript(
+        transcript,
+        target_language="Vietnamese",
+        profile=profile,
+        user_settings=SimpleNamespace(
+            ai_connection_id="primary",
+            ai_provider="compatible",
+        ),
+        for_dub=True,
+        checkpoint_dir=tmp_path,
+    )
+    assert first.segments[0].translated_text == "xin chào"
+    assert first.metadata["translation_ai"]["selected_connection_id"] == "fallback"
+    assert first.metadata["translation_ai"]["attempted"] is True
+    assert [first_primary.calls, first_fallback.calls] == [1, 1]
+
+    resumed_primary = Primary()
+    resumed_fallback = Fallback()
+    active_clients = [resumed_primary, resumed_fallback]
+
+    resumed = await ls.translate_transcript(
+        transcript,
+        target_language="Vietnamese",
+        profile=profile,
+        user_settings=SimpleNamespace(
+            ai_connection_id="primary",
+            ai_provider="compatible",
+        ),
+        for_dub=True,
+        checkpoint_dir=tmp_path,
+    )
+
+    assert [resumed_primary.calls, resumed_fallback.calls] == [0, 0]
+    audit = resumed.metadata["translation_ai"]
+    assert audit["selected_connection_id"] == "fallback"
+    assert audit["sticky_route_index"] == 1
+    assert audit["attempted"] is True
+    assert audit["attempt_count"] == 2
+    assert audit["success_count"] == 1
+    assert audit["failure_chain"][0]["connection_id"] == "primary"
