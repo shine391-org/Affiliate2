@@ -1097,6 +1097,22 @@ async def translate_transcript(
             cp_data = json.loads(checkpoint_file.read_text(encoding="utf-8"))
             if all(cp_data.get(k) == v for k, v in checkpoint_meta.items()):
                 completed_batches = cp_data.get("batches", {})
+                saved_route_state = cp_data.get("route_state")
+                if isinstance(saved_route_state, dict):
+                    route_state.sticky_index = min(
+                        max(int(saved_route_state.get("sticky_index", 0) or 0), 0),
+                        len(route_clients) - 1,
+                    )
+                    saved_failures = saved_route_state.get("failure_chain") or []
+                    route_state.failure_chain = [
+                        dict(item) for item in saved_failures if isinstance(item, dict)
+                    ][-_MAX_AI_FAILURE_HISTORY:]
+                    route_state.attempt_count = max(
+                        0, int(saved_route_state.get("attempt_count", 0) or 0)
+                    )
+                    route_state.success_count = max(
+                        0, int(saved_route_state.get("success_count", 0) or 0)
+                    )
                 logger.info(
                     "Resuming translation from checkpoint (%d completed batches)",
                     len(completed_batches),
@@ -1142,7 +1158,16 @@ async def translate_transcript(
                     checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
                     tmp_cp = checkpoint_file.with_suffix(".tmp")
                     tmp_cp.write_text(
-                        json.dumps({**checkpoint_meta, "batches": completed_batches}, ensure_ascii=False) + "\n",
+                        json.dumps({
+                            **checkpoint_meta,
+                            "batches": completed_batches,
+                            "route_state": {
+                                "sticky_index": route_state.sticky_index,
+                                "failure_chain": list(route_state.failure_chain),
+                                "attempt_count": route_state.attempt_count,
+                                "success_count": route_state.success_count,
+                            },
+                        }, ensure_ascii=False) + "\n",
                         encoding="utf-8",
                     )
                     tmp_cp.replace(checkpoint_file)
