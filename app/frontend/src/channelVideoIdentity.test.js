@@ -4,6 +4,7 @@ import test from "node:test"
 import {
   canonicalChannelVideoUrl,
   channelRequestConfig,
+  channelVideoPageParams,
   reconcileSelectedChannel,
   channelsWithoutChannel,
   selectedChannelAfterDisconnect,
@@ -70,4 +71,27 @@ test("disconnecting the shown channel also drops the detail view", () => {
   assert.equal(selectedChannelAfterDisconnect(selected, "a"), null)
   assert.deepEqual(selectedChannelAfterDisconnect(selected, "b"), selected)
   assert.equal(selectedChannelAfterDisconnect(null, "a"), null)
+})
+
+
+
+test("Douyin page requests carry selected page size and native cursor", () => {
+  assert.deepEqual(
+    channelVideoPageParams("douyin", {
+      limit: 50,
+      pageToken: "cursor-18",
+      refresh: true,
+    }),
+    { limit: 50, page_token: "cursor-18", refresh: true },
+  )
+})
+
+test("non-Douyin channel requests never leak a Douyin cursor", () => {
+  assert.deepEqual(
+    channelVideoPageParams("youtube", {
+      limit: 36,
+      pageToken: "douyin-cursor",
+    }),
+    { limit: 36 },
+  )
 })
