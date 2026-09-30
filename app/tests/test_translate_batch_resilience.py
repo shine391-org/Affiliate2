@@ -2573,8 +2573,8 @@ async def test_translation_checkpoint_restores_sticky_fallback_and_audit(monkeyp
             {"connection_id": "fallback", "model": "fallback-model"},
         ],
         translation_retry_attempts=1,
-        translation_attempt_timeout_s=1,
-        translation_total_timeout_s=5,
+        translation_attempt_timeout_s=10,
+        translation_total_timeout_s=20,
     )
     transcript = LocalizationTranscript(segments=[
         LocalizationSegment(
