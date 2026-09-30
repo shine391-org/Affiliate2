@@ -1727,6 +1727,12 @@ async def run_tool_translate(
                             "rewrite_model": profile.rewrite_model,
                             "rewrite_fallback_provider": profile.rewrite_fallback_provider,
                             "rewrite_fallback_model": profile.rewrite_fallback_model,
+                            "rewrite_routes": [
+                                route.model_dump() for route in profile.rewrite_routes
+                            ],
+                            "rewrite_ai": dict(
+                                getattr(exc, "rewrite_ai", None) or {}
+                            ),
                             "max_raw_required_speed": max(
                                 [1.0, *[
                                     float(item.get("required_speed") or 1.0)
