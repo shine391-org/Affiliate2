@@ -20,7 +20,11 @@ from backend.api.downloaded import (
     auto_clip_count,
 )
 
-JS = Path("frontend/src/components/clip/autoClipCount.js")
+# Anchored to the repo layout, not the invocation cwd: `pytest app/tests` from
+# the project root and `pytest tests` from app/ must both resolve these.
+APP_ROOT = Path(__file__).resolve().parent.parent
+JS = APP_ROOT / "frontend/src/components/clip/autoClipCount.js"
+DOWNLOADED_API = APP_ROOT / "backend/api/downloaded.py"
 
 
 def _js_const(name: str) -> int:
@@ -60,7 +64,7 @@ def test_known_points(duration, expected):
 
 
 def test_the_endpoint_uses_the_helper_rather_than_its_own_arithmetic():
-    src = Path("backend/api/downloaded.py").read_text()
+    src = DOWNLOADED_API.read_text()
     assert "auto_clip_count(duration)" in src
     assert "duration // 30" not in src, (
         "the inline formula is back — it is the copy this helper replaced")

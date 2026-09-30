@@ -353,6 +353,6 @@ def test_the_boot_sweep_takes_the_old_file_and_leaves_the_fresh_one(tmp_path):
 def test_main_registers_the_bench_cache_sweep():
     """The sweep above is only worth anything if boot actually runs it — OSS
     has no scheduler, so the lifespan is the only cadence there is."""
-    src = Path("backend/main.py").read_text()
+    src = (Path(__file__).resolve().parents[1] / "backend" / "main.py").read_text()
     assert "_purge_bench_caches" in src
     assert "spawn_background(_purge_bench_caches())" in src
