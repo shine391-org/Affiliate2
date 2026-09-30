@@ -1421,3 +1421,26 @@ async def test_continue_after_translation_rejects_stale_review_revision(monkeypa
             api.ReviewApprovalRequest(revision="stale-revision-123456"),
         )
 
+def test_qc_review_revision_changes_when_final_video_bytes_change(tmp_path):
+    report = tmp_path / "report.json"
+    video = tmp_path / "final.mp4"
+    report.write_text('{"status":"NEEDS_REVIEW"}', encoding="utf-8")
+    video.write_bytes(b"AAAA")
+
+    class FakeRun:
+        def artifact(self, stage, key):
+            if (stage, key) == ("qc", "report"):
+                return report
+            if (stage, key) == ("final_render", "final_video"):
+                return video
+            return None
+
+    run = FakeRun()
+    before = api._qc_review_revision(run)
+    video.write_bytes(b"BBBB")  # same size, different bytes
+    after = api._qc_review_revision(run)
+
+    assert before
+    assert after
+    assert before != after
+
