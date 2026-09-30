@@ -379,8 +379,33 @@ async def set_localization_publish_eligibility(
     *,
     eligible: bool,
 ) -> dict:
-    """Sync QC human acknowledgement with the publishable GeneratedVideo."""
+    """Sync QC acknowledgement with Publish eligibility without enqueue races."""
+    if eligible:
+        async with AsyncSessionLocal() as db:
+            job = await db.get(Job, job_id)
+            if job is None:
+                raise RuntimeError(f"Localization job not found: {job_id}")
+            try:
+                output = json.loads(job.output_json or "{}")
+            except (TypeError, ValueError):
+                output = {}
+            if not isinstance(output, dict):
+                output = {}
+            existing_id = output.get("generated_video_id") or output.get(
+                "supersedes_generated_video_id"
+            )
+        return await promote_localization_output(
+            job_id,
+            existing_generated_video_id=str(existing_id) if existing_id else None,
+        )
+
+    # Revocation and /videos/{id}/upload both take BEGIN IMMEDIATE before their
+    # read/decision/write sequence. Whichever wins first establishes the truth:
+    # either upload is queued and revocation is rejected, or approval is revoked
+    # and the later enqueue sees a non-publishable artifact.
     async with AsyncSessionLocal() as db:
+        await db.execute(text("BEGIN IMMEDIATE"))
+
         job = await db.get(Job, job_id)
         if job is None:
             raise RuntimeError(f"Localization job not found: {job_id}")
@@ -390,23 +415,25 @@ async def set_localization_publish_eligibility(
             output = {}
         if not isinstance(output, dict):
             output = {}
+
         existing_id = output.get("generated_video_id") or output.get(
             "supersedes_generated_video_id"
         )
+        if not existing_id:
+            output["publish_ready"] = False
+            job.output_json = json.dumps(output)
+            await db.commit()
+            return {
+                "promoted": False,
+                "generated_video_id": None,
+                "publish_ready": False,
+            }
 
-    if eligible:
-        return await promote_localization_output(
-            job_id,
-            existing_generated_video_id=str(existing_id) if existing_id else None,
-        )
-
-    if not existing_id:
-        return {"promoted": False, "generated_video_id": None, "publish_ready": False}
-
-    async with AsyncSessionLocal() as db:
         video = await db.get(GeneratedVideo, str(existing_id))
-        job = await db.get(Job, job_id)
-        if video is None or job is None:
+        if video is None:
+            output["publish_ready"] = False
+            job.output_json = json.dumps(output)
+            await db.commit()
             return {
                 "promoted": False,
                 "generated_video_id": str(existing_id),
@@ -414,12 +441,11 @@ async def set_localization_publish_eligibility(
             }
 
         if await _publication_is_live_or_uncertain(db, video.id):
+            await db.rollback()
             raise ValueError(
                 "Không thể thu hồi duyệt QC khi video đang xuất bản hoặc kết quả nền tảng chưa chắc chắn. Hãy đối soát tác vụ xuất bản trước."
             )
 
-        # Revoking QC acknowledgement cannot undo a completed external
-        # publication. It does revoke future publish approval for these bytes.
         video.publish_approved_at = None
         video.publish_approval_artifact_sha256 = None
         video.review_status = "qc_review_revoked"
@@ -427,12 +453,6 @@ async def set_localization_publish_eligibility(
         if not _already_published(video):
             video.status = "draft"
 
-        try:
-            output = json.loads(job.output_json or "{}")
-        except (TypeError, ValueError):
-            output = {}
-        if not isinstance(output, dict):
-            output = {}
         output["publish_ready"] = False
         job.output_json = json.dumps(output)
         await db.commit()
