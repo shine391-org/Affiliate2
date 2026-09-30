@@ -36,6 +36,32 @@ def _utc() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def compact_localization_workspace(job_id: str) -> int:
+    """Drop reconstructible heavy stage directories but keep the resumable source.
+
+    Long-lived Library outputs should not pin Demucs stems, ASR scratch, TTS
+    chunks and mixed-audio intermediates forever. The immutable source snapshot,
+    manifest, translation/QC review data and final delivery metadata remain, so
+    a later rerun can rebuild missing heavy stages from the same source identity.
+    Returns the number of stage directories removed.
+    """
+    parent = (settings.STORAGE_ROOT / "localization_jobs").resolve()
+    root = (parent / str(job_id)).resolve()
+    if not root.is_relative_to(parent) or root == parent:
+        raise ValueError("Unsafe localization workspace path")
+    if not root.exists():
+        return 0
+
+    removed = 0
+    for name in ("separation", "asr", "semantic", "dubbing", "audio_mix"):
+        directory = root / name
+        if directory.exists():
+            shutil.rmtree(directory, ignore_errors=True)
+            if not directory.exists():
+                removed += 1
+    return removed
+
+
 def cleanup_localization_workspace(job_id: str) -> bool:
     """Delete one durable localization workspace after the owning job is deleted.
 
