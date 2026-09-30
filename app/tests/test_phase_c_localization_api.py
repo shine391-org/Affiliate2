@@ -46,7 +46,7 @@ def test_profile_invalidation_uses_earliest_quality_stage():
     assert api._profile_invalidation({"tts_model"}) == "dubbing"
     assert api._profile_invalidation({"tts_base_url"}) == "dubbing"
     assert api._profile_invalidation({"voice_clone_reference_mode"}) == "dubbing"
-    assert api._profile_invalidation({"translation_base_url"}) == "translation"
+    assert api._profile_invalidation({"translation_base_url"}) == "semantic"
     assert api._profile_invalidation({"translation_guardrails"}) == "translation"
     assert api._profile_invalidation({"rewrite_model"}) == "dubbing"
     assert api._profile_invalidation({"rewrite_base_url"}) == "dubbing"
@@ -54,7 +54,7 @@ def test_profile_invalidation_uses_earliest_quality_stage():
     assert api._profile_invalidation({"rewrite_guardrails"}) == "dubbing"
     assert api._profile_invalidation({"audio_mode"}) == "audio_mix"
     assert api._profile_invalidation({"render_profile"}) == "final_render"
-    assert api._profile_invalidation({"translation_model", "tts_model"}) == "translation"
+    assert api._profile_invalidation({"translation_model", "tts_model"}) == "semantic"
     assert api._profile_invalidation({"asr_model", "render_profile"}) == "asr"
 
 
