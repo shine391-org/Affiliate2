@@ -885,10 +885,7 @@ async def upsert_ai_connection(body: AIConnectionRequest):
                 base_url=base_url,
             )
         except Exception as exc:
-            # Missing key is permitted while editing an already-stored keyed
-            # provider only when that stored key exists.
-            if not encrypted:
-                raise HTTPException(status_code=400, detail=str(exc)[:240]) from exc
+            raise HTTPException(status_code=400, detail=str(exc)[:240]) from exc
 
         connections[connection_id] = {
             "label": body.label.strip() or connection_id,
