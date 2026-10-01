@@ -104,11 +104,27 @@ def test_planner_nested_overlap_never_shrinks_chunk_end():
     assert chunks[0].end_ms == 3000
 
 
-def test_orphan_rescue_does_not_merge_across_a_real_pause():
+def test_orphan_rescue_merges_impossible_micro_cue_within_configured_gap():
+    # Real faeffbbb shape: the 21ms "Ừ" slot starts 886ms after prior speech.
+    # Ordinary continuation merging must preserve that pause, but the orphan
+    # rescue is a deliberate viability exception: leaving 21ms standalone is
+    # impossible even at speed_max.
+    cfg = DubbingConfig(max_chunk_size=1, gap_tolerance_ms=1500, speed_max=1.30)
+    _, chunks = build_plan([
+        _cue(1, 245, 1019, "Cắt phần môi xuống cho tôi"),
+        _cue(2, 1905, 1926, "Ừ"),
+    ], cfg, language="Vietnamese")
+    assert len(chunks) == 1
+    assert chunks[0].item_indexes == [0, 1]
+    assert chunks[0].start_ms == 245
+    assert chunks[0].end_ms == 1926
+
+
+def test_orphan_rescue_still_respects_configured_gap_ceiling():
     cfg = DubbingConfig(max_chunk_size=1, gap_tolerance_ms=1500, speed_max=1.30)
     _, chunks = build_plan([
         _cue(1, 0, 1000, "first"),
-        _cue(2, 2000, 2020, "sẽ"),
+        _cue(2, 2501, 2521, "sẽ"),
     ], cfg, language="Vietnamese")
     assert len(chunks) == 2
 
