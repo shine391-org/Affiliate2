@@ -113,6 +113,16 @@ def test_orphan_rescue_does_not_merge_across_a_real_pause():
     assert len(chunks) == 2
 
 
+def test_orphan_rescue_overlap_never_shrinks_previous_chunk_end():
+    cfg = DubbingConfig(max_chunk_size=1, gap_tolerance_ms=1500, speed_max=1.30)
+    _, chunks = build_plan([
+        _cue(1, 0, 3000, "continuing thought"),
+        _cue(2, 2950, 2990, "sẽ"),
+    ], cfg, language="Vietnamese")
+    assert len(chunks) == 1
+    assert chunks[0].end_ms == 3000
+
+
 def test_source_sentence_boundary_accepts_ascii_closing_parenthesis():
     cfg = DubbingConfig()
     _, chunks = build_plan([
