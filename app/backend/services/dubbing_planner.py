@@ -105,7 +105,7 @@ class DubbingReport:
     rewrite_count: int = 0
 
 
-_STRONG_END = re.compile(r"[.!?。！？…][\"'”’」』）】》)\\]}»]*\\s*$")
+_STRONG_END = re.compile(r"[.!?。！？…][\"'”’」』）】》)\]}»]*\s*$")
 
 # Semantic segmentation already treats gaps up to 350 ms as a continuous thought.
 # Preserve that continuity through TTS so a sentence split into two healthy-sized
@@ -227,11 +227,7 @@ def build_plan(
             and prev.duration_ms >= config.min_cue_duration_ms
             and cue.duration_ms >= config.min_cue_duration_ms
         )
-        speaker_change = (
-            prev.speaker_id is not None
-            and cue.speaker_id is not None
-            and prev.speaker_id != cue.speaker_id
-        )
+        speaker_change = prev.speaker_id != cue.speaker_id
         # An explicit voice override must never bleed into a neighbouring
         # default-voice cue (or vice versa). None is meaningful here: it means
         # "resolve the profile/speaker default", so None <-> explicit is a
@@ -239,6 +235,7 @@ def build_plan(
         voice_change = prev.voice_id != cue.voice_id
         must_split = (
             len(current.item_indexes) >= config.max_chunk_size
+            or continuation_span_ms > _NATURAL_CONTINUATION_MAX_SPAN_MS
             or not (should_merge_short or should_merge_continuation)
             or strong_boundary
             or speaker_change
@@ -260,13 +257,14 @@ def build_plan(
 
     chunks.append(current)
 
-    # A hard max-size split can strand a final aligned syllable in a window
-    # far shorter than even its conservative speech estimate (real regression:
-    # b8193843 left Vietnamese "sẽ" in 20ms). When the split itself created an
-    # impossible singleton and no speaker/voice/gap boundary exists, merge that
-    # one cue back into the preceding chunk. The exceptional chunk is at most
-    # max_chunk_size + 1; preserving a viable speech window is more important
-    # than enforcing a soft synthesis batch size that created invalid timing.
+    # A size/span/gap split can strand an aligned syllable in a window far
+    # shorter than its speech estimate ("sẽ" in 20ms, "Ừ" in 21ms). Rescue only
+    # an impossible singleton with the same speaker/voice and configured gap.
+    # This viability exception may cross a real pause, unlike ordinary merging.
+    # Batch size is bounded at max_chunk_size + 1. A span above 8000ms is allowed
+    # only by appending one short orphan to a previously bounded chunk, so its
+    # ceiling is 8000 + gap_tolerance_ms + min_cue_duration_ms. Never grow an
+    # already oversized chunk or use the exception for a healthy speech window.
     for chunk_pos in range(len(chunks) - 1, 0, -1):
         chunk = chunks[chunk_pos]
         previous = chunks[chunk_pos - 1]
@@ -284,7 +282,23 @@ def build_plan(
             previous_last.speaker_id != orphan_cue.speaker_id
             or previous_last.voice_id != orphan_cue.voice_id
             or orphan_gap < -_MAX_NATURAL_CUE_OVERLAP_MS
-            or orphan_gap > min(config.gap_tolerance_ms, _NATURAL_CONTINUATION_GAP_MS)
+            or orphan_gap > config.gap_tolerance_ms
+        ):
+            continue
+        rescue_span_ms = max(previous.end_ms, chunk.end_ms) - previous.start_ms
+        if (
+            len(previous.item_indexes) >= config.max_chunk_size + 1
+            or previous.available_ms > _NATURAL_CONTINUATION_MAX_SPAN_MS
+            or (
+                rescue_span_ms > _NATURAL_CONTINUATION_MAX_SPAN_MS
+                and (
+                    orphan_window_ms >= config.min_cue_duration_ms
+                    or rescue_span_ms > (
+                        _NATURAL_CONTINUATION_MAX_SPAN_MS
+                        + config.gap_tolerance_ms + config.min_cue_duration_ms
+                    )
+                )
+            )
         ):
             continue
         previous.item_indexes.extend(chunk.item_indexes)

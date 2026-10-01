@@ -94,6 +94,53 @@ def test_planner_natural_continuation_still_stops_at_span_limit():
     assert len(chunks) == 2
 
 
+def test_short_cue_merge_cannot_bypass_span_limit_real_tail():
+    _, chunks = build_plan([
+        _cue(31, 49792, 55930, "thể nè, ồ cái này đẹp lắm, qua tấm tiếp theo, quỳ xuống, tôi nhận được ảnh thần rồi, nào"),
+        _cue(32, 55930, 58312, "bên trái nâng lên, cảm ơn Chanh接下来"),
+        _cue(33, 58312, 62939, "nối mắt cô cao lên một chút, đẹp"),
+    ], DubbingConfig())
+    assert [ch.item_indexes for ch in chunks] == [[0], [1, 2]]
+    assert [ch.available_ms for ch in chunks] == [6138, 7009]
+
+
+def test_span_split_still_rescues_impossible_micro_cue():
+    _, chunks = build_plan([
+        _cue(1, 0, 7900, "a healthy previous cue"),
+        _cue(2, 8786, 8807, "Ừ"),
+    ], DubbingConfig())
+    assert len(chunks) == 1
+    assert chunks[0].item_indexes == [0, 1]
+    assert chunks[0].available_ms == 8807
+
+
+def test_orphan_rescue_cannot_keep_growing_an_oversized_chunk():
+    _, chunks = build_plan([
+        _cue(1, 0, 7900, "a healthy previous cue"),
+        _cue(2, 8786, 8807, "Ừ"),
+        _cue(3, 9693, 9714, "Ừ"),
+    ], DubbingConfig())
+    assert [ch.item_indexes for ch in chunks] == [[0], [1, 2]]
+    assert all(ch.available_ms <= 8000 for ch in chunks)
+
+
+def test_orphan_rescue_cannot_create_an_unbounded_span():
+    _, chunks = build_plan([
+        _cue(1, 0, 8000, "first"),
+        _cue(2, 9500, 12500, " ".join(["word"] * 20)),
+    ], DubbingConfig())
+    assert len(chunks) == 2
+
+
+@pytest.mark.parametrize("speaker_pair", [("a", None), (None, "a")])
+def test_unknown_speaker_transition_remains_a_hard_boundary(speaker_pair):
+    _, chunks = build_plan([
+        _cue(1, 0, 3000, "first half", speaker=speaker_pair[0]),
+        _cue(2, 3150, 6000, "second half", speaker=speaker_pair[1]),
+    ], DubbingConfig())
+    assert len(chunks) == 2
+
+
 def test_planner_nested_overlap_never_shrinks_chunk_end():
     cfg = DubbingConfig()
     _, chunks = build_plan([
@@ -104,12 +151,55 @@ def test_planner_nested_overlap_never_shrinks_chunk_end():
     assert chunks[0].end_ms == 3000
 
 
-def test_orphan_rescue_does_not_merge_across_a_real_pause():
-    cfg = DubbingConfig(max_chunk_size=1, gap_tolerance_ms=1500, speed_max=1.30)
+@pytest.mark.parametrize("ending", [
+    "first long sentence.", "Tốn tiền không?", "Done.)", "第一句。",
+    "Done!", "Done…", "Done.\"]}", "Done!  ",
+])
+def test_compiled_strong_sentence_endings(ending):
+    from backend.services.dubbing_planner import _STRONG_END
+
+    assert _STRONG_END.search(ending)
+    assert not _STRONG_END.search("first half of the same thought")
+
+
+def test_orphan_rescue_merges_real_21ms_cue_across_viability_gap():
+    _, chunks = build_plan([
+        _cue(1, 245, 1019, "Cắt phần môi xuống cho tôi"),
+        _cue(2, 1905, 1926, "Ừ"),
+    ], DubbingConfig(), language="Vietnamese")
+    assert len(chunks) == 1
+    assert chunks[0].item_indexes == [0, 1]
+    assert (chunks[0].start_ms, chunks[0].end_ms) == (245, 1926)
+
+
+@pytest.mark.parametrize("gap,limit,merged", [
+    (1000, 1500, True), (1500, 1500, True), (1501, 1500, False),
+    (886, 800, False), (800, 800, True),
+])
+def test_orphan_rescue_uses_configured_viability_gap(gap, limit, merged):
+    cfg = DubbingConfig(max_chunk_size=1, gap_tolerance_ms=limit)
     _, chunks = build_plan([
         _cue(1, 0, 1000, "first"),
-        _cue(2, 2000, 2020, "sẽ"),
-    ], cfg, language="Vietnamese")
+        _cue(2, 1000 + gap, 1021 + gap, "Ừ"),
+    ], cfg)
+    assert len(chunks) == (1 if merged else 2)
+
+
+@pytest.mark.parametrize("speaker,voice", [("b", "v1"), ("a", "v2"), ("a", None), (None, "v1")])
+def test_orphan_rescue_preserves_speaker_and_voice_boundaries(speaker, voice):
+    _, chunks = build_plan([
+        _cue(1, 245, 1019, "first", speaker="a", voice="v1"),
+        _cue(2, 1905, 1926, "Ừ", speaker=speaker, voice=voice),
+    ], DubbingConfig())
+    assert len(chunks) == 2
+
+
+@pytest.mark.parametrize("gap", [800, 886, 1000])
+def test_viable_cues_still_preserve_real_pause(gap):
+    _, chunks = build_plan([
+        _cue(1, 0, 3000, "first half of the same thought"),
+        _cue(2, 3000 + gap, 4000 + gap, "continues here"),
+    ], DubbingConfig())
     assert len(chunks) == 2
 
 
