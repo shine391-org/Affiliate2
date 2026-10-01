@@ -2382,6 +2382,7 @@ async def synthesize_timed_dub(
             start_ms=start_ms,
             end_ms=end_ms,
             text=seg.translated_text or "",
+            source_text=seg.source_text or "",
             speaker_id=seg.speaker_id,
             voice_id=(str(override.get("voice_id")).strip() or None)
                 if override.get("voice_id") is not None else None,
