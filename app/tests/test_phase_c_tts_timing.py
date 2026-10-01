@@ -184,6 +184,7 @@ def test_edge_speed_one_maps_to_native_zero_percent(monkeypatch, tmp_path):
 
     class FakeCommunicate:
         def __init__(self, text, voice, rate, pitch=None):
+            captured["text"] = text
             captured["rate"] = rate
 
         async def save(self, path):
@@ -199,6 +200,7 @@ def test_edge_speed_one_maps_to_native_zero_percent(monkeypatch, tmp_path):
     ))
     assert out.exists()
     assert captured["rate"] == "+0%"
+    assert captured["text"] == "xin chào"
 
 
 def test_edge_tts_does_not_invent_pause_punctuation():
@@ -388,6 +390,29 @@ def test_old_edge_chunk_sidecar_is_invalidated_without_touching_other_providers(
     )
     old_edge_identity = legacy_identity("edge_tts")
     assert new_edge_identity != old_edge_identity
+
+    v1_payload = {
+        "rules": 1,
+        "provider": "edge_tts",
+        "model": None,
+        "base_url": None,
+        "region": None,
+        "voice": "vi-VN-HoaiMyNeural",
+        "language": "Vietnamese",
+        "speaker_id": None,
+        "text": "Cảm ơn.",
+        "reference_audio": None,
+        "reference_text": None,
+        "reference_language": None,
+        "boundary_postprocess": "edge-boundary-trim-v1",
+    }
+    v1_identity = hashlib.sha256(json.dumps(
+        v1_payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    assert new_edge_identity != v1_identity
 
     audio = tmp_path / "chunk.wav"
     audio.write_bytes(b"old-edge-artifact")
