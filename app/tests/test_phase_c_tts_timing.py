@@ -357,3 +357,36 @@ def test_old_raw_chunk_sidecar_is_invalidated_by_boundary_trim_rules(tmp_path):
     assert svc._chunk_identity_matches(audio, identity) is False
     assert svc._chunk_persisted_duration_ms(audio, identity) is None
 
+def test_edge_tts_boundary_trim_preserves_internal_pause(tmp_path):
+    from backend.services import localization_service as svc
+
+    audio = tmp_path / "internal-pause.wav"
+    rate = 16000
+    frames = bytearray()
+
+    def tone(ms, phase_offset=0):
+        count = int(rate * ms / 1000)
+        for i in range(count):
+            sample = int(
+                12000 * math.sin(2 * math.pi * 440 * (i + phase_offset) / rate)
+            )
+            frames.extend(sample.to_bytes(2, "little", signed=True))
+
+    tone(220)
+    frames.extend(b"\0\0" * int(rate * 320 / 1000))
+    tone(220, 5000)
+
+    with wave.open(str(audio), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(rate)
+        handle.writeframes(bytes(frames))
+
+    before = hashlib.sha256(audio.read_bytes()).hexdigest()
+    duration = svc._trim_edge_tts_boundary_silence_sync(audio, 760)
+
+    # The 320ms pause is internal speech timing, not provider padding. Boundary
+    # cleanup must not collapse it or replace the original artifact.
+    assert duration == 760
+    assert hashlib.sha256(audio.read_bytes()).hexdigest() == before
+
