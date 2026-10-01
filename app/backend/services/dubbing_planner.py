@@ -288,7 +288,7 @@ def build_plan(
         ):
             continue
         previous.item_indexes.extend(chunk.item_indexes)
-        previous.end_ms = chunk.end_ms
+        previous.end_ms = max(previous.end_ms, chunk.end_ms)
         chunks.pop(chunk_pos)
 
     # Merging an intermediate orphan removes a chunk, so normalize IDs before
