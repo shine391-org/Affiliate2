@@ -52,6 +52,7 @@ class DubbingCue:
     start_ms: int
     end_ms: int
     text: str
+    source_text: str = ""
     speaker_id: str | None = None
     voice_id: str | None = None
 
@@ -111,6 +112,7 @@ _STRONG_END = re.compile(r"[.!?。！？…][\"'”’」』）】》]*\s*$")
 # cues does not become two independent syntheses with a prosody reset between them.
 _NATURAL_CONTINUATION_GAP_MS = 350
 _NATURAL_CONTINUATION_MAX_SPAN_MS = 8000
+_MAX_NATURAL_CUE_OVERLAP_MS = 120
 
 
 def clean_text_for_speech(text: str) -> str:
@@ -195,23 +197,30 @@ def build_plan(
         prev = ordered[i - 1]
         cue = ordered[i]
         gap = cue.start_ms - prev.end_ms
+        natural_gap = (
+            -_MAX_NATURAL_CUE_OVERLAP_MS <= gap
+            <= min(config.gap_tolerance_ms, _NATURAL_CONTINUATION_GAP_MS)
+        )
         should_merge_short = (
-            gap <= config.gap_tolerance_ms
+            natural_gap
             and (
                 prev.duration_ms < config.min_cue_duration_ms
                 or cue.duration_ms < config.min_cue_duration_ms
             )
         )
-        sentence_boundary = bool(_STRONG_END.search(prev.text))
-        continuation_span_ms = cue.end_ms - current.start_ms
+        sentence_boundary = bool(
+            _STRONG_END.search(prev.text)
+            or _STRONG_END.search(prev.source_text or "")
+        )
+        continuation_span_ms = max(current.end_ms, cue.end_ms) - current.start_ms
         should_merge_continuation = (
             not sentence_boundary
-            and gap <= min(config.gap_tolerance_ms, _NATURAL_CONTINUATION_GAP_MS)
+            and natural_gap
             and continuation_span_ms <= _NATURAL_CONTINUATION_MAX_SPAN_MS
         )
         # Strong sentence boundaries are useful only when they do not strand
         # a micro-cue. A very short following cue must remain mergeable with
-        # the previous chunk (same speaker/voice, within the gap tolerance),
+        # the previous chunk (same speaker/voice, within the natural-gap limit),
         # otherwise sub-second utterances can become impossible dubbing slots.
         strong_boundary = (
             sentence_boundary
@@ -228,8 +237,12 @@ def build_plan(
         # "resolve the profile/speaker default", so None <-> explicit is a
         # hard boundary as well.
         voice_change = prev.voice_id != cue.voice_id
-        must_split = (
+        max_size_boundary = (
             len(current.item_indexes) >= config.max_chunk_size
+            and not should_merge_continuation
+        )
+        must_split = (
+            max_size_boundary
             or not (should_merge_short or should_merge_continuation)
             or strong_boundary
             or speaker_change
@@ -247,7 +260,7 @@ def build_plan(
             )
         else:
             current.item_indexes.append(i)
-            current.end_ms = cue.end_ms
+            current.end_ms = max(current.end_ms, cue.end_ms)
 
     chunks.append(current)
 
