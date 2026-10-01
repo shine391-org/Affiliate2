@@ -104,6 +104,24 @@ def test_planner_nested_overlap_never_shrinks_chunk_end():
     assert chunks[0].end_ms == 3000
 
 
+def test_orphan_rescue_does_not_merge_across_a_real_pause():
+    cfg = DubbingConfig(max_chunk_size=1, gap_tolerance_ms=1500, speed_max=1.30)
+    _, chunks = build_plan([
+        _cue(1, 0, 1000, "first"),
+        _cue(2, 2000, 2020, "sẽ"),
+    ], cfg, language="Vietnamese")
+    assert len(chunks) == 2
+
+
+def test_source_sentence_boundary_accepts_ascii_closing_parenthesis():
+    cfg = DubbingConfig()
+    _, chunks = build_plan([
+        _cue(1, 0, 3000, "cau dau", source="Done.)"),
+        _cue(2, 3150, 6000, "cau tiep theo", source="Next"),
+    ], cfg)
+    assert len(chunks) == 2
+
+
 def test_planner_does_not_orphan_short_cue_after_strong_boundary():
     cfg = DubbingConfig()
     plan, chunks = build_plan([
