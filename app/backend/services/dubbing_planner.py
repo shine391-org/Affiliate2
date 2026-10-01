@@ -52,9 +52,9 @@ class DubbingCue:
     start_ms: int
     end_ms: int
     text: str
-    source_text: str = ""
     speaker_id: str | None = None
     voice_id: str | None = None
+    source_text: str = ""
 
     @property
     def duration_ms(self) -> int:
@@ -237,12 +237,8 @@ def build_plan(
         # "resolve the profile/speaker default", so None <-> explicit is a
         # hard boundary as well.
         voice_change = prev.voice_id != cue.voice_id
-        max_size_boundary = (
-            len(current.item_indexes) >= config.max_chunk_size
-            and not should_merge_continuation
-        )
         must_split = (
-            max_size_boundary
+            len(current.item_indexes) >= config.max_chunk_size
             or not (should_merge_short or should_merge_continuation)
             or strong_boundary
             or speaker_change
