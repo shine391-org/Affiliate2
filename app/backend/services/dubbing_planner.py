@@ -106,6 +106,12 @@ class DubbingReport:
 
 _STRONG_END = re.compile(r"[.!?。！？…][\"'”’」』）】》]*\s*$")
 
+# Semantic segmentation already treats gaps up to 350 ms as a continuous thought.
+# Preserve that continuity through TTS so a sentence split into two healthy-sized
+# cues does not become two independent syntheses with a prosody reset between them.
+_NATURAL_CONTINUATION_GAP_MS = 350
+_NATURAL_CONTINUATION_MAX_SPAN_MS = 8000
+
 
 def clean_text_for_speech(text: str) -> str:
     return " ".join((text or "").replace("\r", " ").replace("\n", " ").split()).strip()
@@ -196,12 +202,19 @@ def build_plan(
                 or cue.duration_ms < config.min_cue_duration_ms
             )
         )
+        sentence_boundary = bool(_STRONG_END.search(prev.text))
+        continuation_span_ms = cue.end_ms - current.start_ms
+        should_merge_continuation = (
+            not sentence_boundary
+            and gap <= min(config.gap_tolerance_ms, _NATURAL_CONTINUATION_GAP_MS)
+            and continuation_span_ms <= _NATURAL_CONTINUATION_MAX_SPAN_MS
+        )
         # Strong sentence boundaries are useful only when they do not strand
         # a micro-cue. A very short following cue must remain mergeable with
         # the previous chunk (same speaker/voice, within the gap tolerance),
         # otherwise sub-second utterances can become impossible dubbing slots.
         strong_boundary = (
-            bool(_STRONG_END.search(prev.text))
+            sentence_boundary
             and prev.duration_ms >= config.min_cue_duration_ms
             and cue.duration_ms >= config.min_cue_duration_ms
         )
@@ -217,7 +230,7 @@ def build_plan(
         voice_change = prev.voice_id != cue.voice_id
         must_split = (
             len(current.item_indexes) >= config.max_chunk_size
-            or not should_merge_short
+            or not (should_merge_short or should_merge_continuation)
             or strong_boundary
             or speaker_change
             or voice_change
