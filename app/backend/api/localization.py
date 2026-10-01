@@ -15,6 +15,7 @@ from backend.core.localization import LocalizationProfile, LocalizationTranscrip
 from backend.services.localization_stage_service import (
     MANIFEST_VERSION,
     LocalizationRun,
+    ManifestTransaction,
     STAGES,
 )
 
@@ -49,6 +50,12 @@ class TTSRebindRequest(BaseModel):
     source: Literal["settings"] = "settings"
     voice_id: str | None = None
     model: str | None = None
+
+
+class ProviderRebindRequest(BaseModel):
+    """Adopt the CURRENT Settings provider binding onto the same persisted job."""
+
+    source: Literal["settings"] = "settings"
 
 
 class AutoRepairRequest(BaseModel):
@@ -476,6 +483,246 @@ async def _describe_tts_bindings(run: LocalizationRun) -> dict:
     }
 
 
+# ── Provider binding (C6/C7/TTS identity) ───────────────────────────────────
+#
+# The read model above is TTS-only and job-scoped. The provider-binding UX also
+# has to answer "did the translation/rewrite routes this job was created with
+# still match Settings?", because a drifted route is just as expensive to
+# discover late as a drifted voice. The rules below are deliberately narrow:
+#
+#   * compared identity is the STABLE route identity (connection id + model +
+#     an explicit per-route base_url override), and for TTS the connection id,
+#     provider, model, voice and explicit overrides;
+#   * a saved connection's live endpoint and rotated key are infrastructure and
+#     are never part of identity, and no secret ever enters the payload;
+#   * rewrite/TTS are only meaningful for a full-dub job;
+#   * the CURRENT side is the profile the job names (``request.profile_id`` or
+#     the snapshot id), materialized against live Settings — not the job's own
+#     stored snapshot.
+
+_TRANSLATION_BINDING_KEYS = (
+    "translation_routes",
+    "translation_provider", "translation_model", "translation_base_url",
+    "translation_fallback_provider", "translation_fallback_model",
+    "translation_fallback_base_url",
+)
+_REWRITE_BINDING_KEYS = (
+    "rewrite_routes",
+    "rewrite_provider", "rewrite_model", "rewrite_base_url",
+    "rewrite_fallback_provider", "rewrite_fallback_model",
+    "rewrite_fallback_base_url",
+)
+_TTS_BINDING_KEYS = (
+    "tts_connection_id", "tts_provider", "tts_model", "tts_voice",
+    "tts_base_url", "tts_region",
+)
+
+
+def _requested_profile_id(run: LocalizationRun) -> str | None:
+    value = run.request.get("profile_id") or run.effective_profile.get("id")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    raise ValueError("Job không có profile gốc. Hãy kiểm tra Localization Profile trong Settings.")
+
+
+def _is_dub_run(run: LocalizationRun) -> bool:
+    return str(run.request.get("mode") or "full_dub").strip().lower() == "full_dub"
+
+
+def _route_identity(routes) -> list[dict]:
+    """Ordered stable route identity: connection + model + explicit override.
+
+    Endpoint/key are intentionally absent: they belong to the saved connection
+    and must stay live so an endpoint repair or key rotation recovers an
+    in-flight job instead of flagging it as drift.
+    """
+    identity: list[dict] = []
+    for route in routes or []:
+        if isinstance(route, dict):
+            connection_id = route.get("connection_id")
+            model = route.get("model")
+            base_url = route.get("base_url")
+        else:
+            connection_id = getattr(route, "connection_id", None)
+            model = getattr(route, "model", None)
+            base_url = getattr(route, "base_url", None)
+        identity.append({
+            "connection_id": connection_id,
+            "model": model,
+            "base_url": base_url,
+        })
+    return identity
+
+
+def _tts_identity(profile: dict) -> dict | None:
+    if not any(profile.get(key) for key in _TTS_BINDING_KEYS):
+        return None
+    return {key: profile.get(key) for key in _TTS_BINDING_KEYS}
+
+
+def _binding_identity(profile: Any) -> dict:
+    """Normalize either a stored snapshot dict or a materialized model dump."""
+    if hasattr(profile, "model_dump"):
+        profile = profile.model_dump()
+    translation_routes = profile.get("translation_routes")
+    if not translation_routes:
+        # Legacy manifests may predate route lists; fall back to the single
+        # primary + fallback pair so they still compare meaningfully.
+        translation_routes = [
+            {
+                "connection_id": profile.get("translation_provider"),
+                "model": profile.get("translation_model"),
+                "base_url": profile.get("translation_base_url"),
+            },
+        ]
+        if profile.get("translation_fallback_provider"):
+            translation_routes.append({
+                "connection_id": profile.get("translation_fallback_provider"),
+                "model": profile.get("translation_fallback_model"),
+                "base_url": profile.get("translation_fallback_base_url"),
+            })
+    rewrite_routes = profile.get("rewrite_routes")
+    if not rewrite_routes:
+        rewrite_routes = [
+            {
+                "connection_id": profile.get("rewrite_provider"),
+                "model": profile.get("rewrite_model"),
+                "base_url": profile.get("rewrite_base_url"),
+            },
+        ]
+        if profile.get("rewrite_fallback_provider"):
+            rewrite_routes.append({
+                "connection_id": profile.get("rewrite_fallback_provider"),
+                "model": profile.get("rewrite_fallback_model"),
+                "base_url": profile.get("rewrite_fallback_base_url"),
+            })
+    return {
+        "translation_routes": _route_identity(translation_routes),
+        "rewrite_routes": _route_identity(rewrite_routes),
+        "tts": _tts_identity(profile),
+    }
+
+
+def _binding_diff(job_profile: Any, current_profile: Any, *, is_dub: bool) -> dict:
+    """Which stages drifted, and the earliest stage a rebind must rerun from."""
+    job_identity = _binding_identity(job_profile)
+    current_identity = _binding_identity(current_profile)
+
+    changed: list[str] = []
+    if job_identity["translation_routes"] != current_identity["translation_routes"]:
+        changed.append("translation")
+    if is_dub:
+        if job_identity["rewrite_routes"] != current_identity["rewrite_routes"]:
+            changed.append("rewrite")
+        if job_identity["tts"] != current_identity["tts"]:
+            changed.append("tts")
+
+    from_stage = None
+    if changed:
+        from_stage = "translation" if "translation" in changed else "dubbing"
+    return {"changed_stages": changed, "from_stage": from_stage}
+
+
+async def _load_current_profile_for_binding(run: LocalizationRun, *, user_id: str = "local"):
+    """Resolve the profile this job names against the LIVE Settings.
+
+    Read-only. Raises ValueError with an actionable message when Settings or
+    the named profile is missing, so the caller can fail before mutating
+    anything.
+    """
+    from sqlalchemy import select
+    from backend.database import AsyncSessionLocal
+    from backend.models.user_settings import UserSettings
+    from backend.services.localization_service import (
+        materialize_localization_profile,
+        resolve_localization_profile,
+    )
+
+    async with AsyncSessionLocal() as db:
+        row = (await db.execute(
+            select(UserSettings).where(UserSettings.user_id == user_id)
+        )).scalar_one_or_none()
+    if row is None:
+        raise ValueError(
+            "Current Settings are unavailable for this workspace. Open Settings, "
+            "save the AI/TTS configuration, then adopt it."
+        )
+
+    profile = resolve_localization_profile(row, _requested_profile_id(run))
+    return materialize_localization_profile(
+        row,
+        profile,
+        target_language=str(run.request.get("target_language") or "Vietnamese"),
+        for_dub=_is_dub_run(run),
+    )
+
+
+async def _describe_provider_binding(run: LocalizationRun, *, user_id: str = "local") -> dict:
+    """Non-mutating drift verdict for translation/rewrite/TTS binding."""
+    is_dub = _is_dub_run(run)
+    job_identity = _binding_identity(run.effective_profile)
+
+    current_profile = None
+    current_identity = None
+    error = None
+    try:
+        current_profile = await _load_current_profile_for_binding(run, user_id=user_id)
+        current_identity = _binding_identity(current_profile)
+    except Exception as exc:
+        error = str(exc)[:200]
+
+    if current_identity is None:
+        diff = {"changed_stages": [], "from_stage": None}
+    else:
+        diff = _binding_diff(run.effective_profile, current_profile, is_dub=is_dub)
+
+    def _side(identity: dict | None) -> dict | None:
+        if identity is None:
+            return None
+        return {
+            "translation_routes": identity["translation_routes"],
+            "rewrite_routes": identity["rewrite_routes"] if is_dub else None,
+            "tts": identity["tts"] if is_dub else None,
+        }
+
+    return {
+        "job": _side(job_identity),
+        "current": _side(current_identity),
+        "changed_stages": diff["changed_stages"],
+        "from_stage": diff["from_stage"],
+        "binding_mismatch": bool(diff["changed_stages"]),
+        "current_error": error,
+    }
+
+
+def _binding_profile_updates(current: Any, *, is_dub: bool) -> dict:
+    """Copy ONLY binding fields off the current profile.
+
+    Policy — presets, instructions, guardrails, glossary, timing, audio and
+    render settings — is what the job was created with and is never adopted
+    from Settings; a provider rebind must not silently change how the job is
+    written or rendered.
+    """
+    if hasattr(current, "model_dump"):
+        current = current.model_dump()
+    keys = list(_TRANSLATION_BINDING_KEYS)
+    if is_dub:
+        keys += list(_REWRITE_BINDING_KEYS) + list(_TTS_BINDING_KEYS)
+    return {key: current.get(key) for key in keys}
+
+
+async def _job_user_id(job_id: str) -> str:
+    from sqlalchemy import select
+    from backend.database import AsyncSessionLocal
+    from backend.models.job import Job
+
+    async with AsyncSessionLocal() as db:
+        user_id = (await db.execute(
+            select(Job.user_id).where(Job.id == job_id)
+        )).scalar_one_or_none()
+    return str(user_id or "local")
+
+
 @router.get("/jobs/{job_id}/source")
 async def localization_job_source(job_id: str, request: Request):
     """Stream the immutable source snapshot bound to a localization job."""
@@ -536,6 +783,9 @@ async def localization_job_detail(job_id: str):
 
     detail = _job_detail(run)
     detail["tts_binding"] = await _describe_tts_bindings(run)
+    detail["provider_binding"] = await _describe_provider_binding(
+        run, user_id=str(job.user_id or "local"),
+    )
     detail["job_status"] = job.status
     detail["job_current_step"] = job.current_step
     detail["job_error_message"] = job.error_message
@@ -1052,6 +1302,137 @@ async def rebind_localization_tts(job_id: str, body: TTSRebindRequest):
             from backend.agents.job_helper import restore_job_restart_claim
             await restore_job_restart_claim(job_id, claim)
         raise
+
+@router.post("/jobs/{job_id}/rebind-providers")
+async def rebind_localization_providers(job_id: str, body: ProviderRebindRequest):
+    """Adopt the CURRENT Settings provider binding and rerun only affected stages.
+
+    This is the single explicit adoption path. The default rerun keeps the job's
+    own snapshot; nothing here is triggered implicitly, and a job whose binding
+    still matches is left completely untouched.
+    """
+    claim = await _claim_job_mutation(job_id)
+    dispatched = False
+    transaction: ManifestTransaction | None = None
+    try:
+        run = _load_run(job_id)
+        _verify_run_source_identity(run)
+        is_dub = _is_dub_run(run)
+
+        # Resolve the CURRENT side first. Missing Settings/profile must fail
+        # before a single byte of the job is mutated.
+        try:
+            current_profile = await _load_current_profile_for_binding(
+                run, user_id=await _job_user_id(job_id),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Could not resolve the current provider configuration: {exc}",
+            ) from exc
+
+        diff = _binding_diff(run.effective_profile, current_profile, is_dub=is_dub)
+        changed_stages = diff["changed_stages"]
+        from_stage = diff["from_stage"]
+
+        if not changed_stages:
+            # Nothing to adopt. Release the claim and report the no-op rather
+            # than rerunning a job that already matches Settings.
+            await _restore_job_mutation(job_id, claim)
+            return {
+                "ok": True,
+                "job_id": job_id,
+                "from_stage": None,
+                "changed_stages": [],
+                "awaiting_translation_review": bool(
+                    run.request.get("translation_review_pending")
+                    and not run.request.get("translation_review_approved")
+                ),
+                "cleared_profile_fields": [],
+            }
+
+        updates = _binding_profile_updates(current_profile, is_dub=is_dub)
+        resets = _provider_scoped_tts_resets(run.effective_profile, updates) if is_dub else {}
+        request_updates = {
+            **run.request,
+            "tts_binding_mode": "inherit" if is_dub else run.request.get("tts_binding_mode"),
+            "regenerate_chunk_ids": [],
+            "qc_human_approved": False,
+        }
+        if is_dub:
+            # The dispatcher forwards this manual override ahead of the
+            # effective profile; don't let the previous voice undo the rebind.
+            request_updates["voice_id"] = updates.get("tts_voice") or ""
+        if from_stage == "translation":
+            # Translation is about to be recomputed, so a previous approval
+            # cannot describe the new artifact.
+            request_updates["translation_review_pending"] = False
+            request_updates["translation_review_approved"] = False
+
+        transaction = ManifestTransaction(
+            run, STAGES[STAGES.index(from_stage):],
+        )
+        transaction.begin()
+        run.update_effective_profile({
+            **run.effective_profile,
+            **updates,
+            **resets,
+        })
+        run.update_request(request_updates)
+        # Canonical invalidation — there is no second invalidation engine.
+        run.invalidate_from(from_stage, delete_artifacts=True)
+        # invalidate_from is intentionally best-effort for ordinary reruns.
+        # Rebinding must not let old provider chunk caches survive silently.
+        if any((run.root / stage).exists() for stage in transaction.stage_names):
+            raise OSError("Provider artifacts could not be removed completely")
+
+        review_pending = bool(
+            request_updates.get("translation_review_pending")
+            and not request_updates.get("translation_review_approved")
+        )
+        if review_pending:
+            # Rebinding while C6 is paused is configuration-only. Release the
+            # claim back to awaiting_review instead of inventing an active job.
+            await _restore_job_mutation(job_id, claim)
+        else:
+            await _dispatch_existing_run(run, already_claimed=True)
+            dispatched = True
+        transaction.commit()
+        transaction = None
+
+        return {
+            "ok": True,
+            "job_id": job_id,
+            "from_stage": from_stage,
+            "changed_stages": changed_stages,
+            "awaiting_translation_review": review_pending,
+            "cleared_profile_fields": sorted(resets),
+        }
+    except Exception as exc:
+        if transaction is not None:
+            try:
+                transaction.rollback()
+            except Exception as restore_error:
+                # Do not release a runnable claim onto half-restored state.
+                # The backup is retained for recovery after the disk is usable.
+                raise HTTPException(
+                    status_code=503,
+                    detail="Không thể khôi phục rebind do lỗi lưu trữ. Bản sao cũ còn trong "
+                    ".rollback của job; kiểm tra dung lượng/quyền ghi và khôi phục trước khi chạy lại.",
+                ) from restore_error
+        if not dispatched:
+            from backend.agents.job_helper import restore_job_restart_claim
+            await restore_job_restart_claim(job_id, claim)
+        if isinstance(exc, HTTPException):
+            raise
+        raise HTTPException(
+            status_code=503,
+            detail="Không thể áp dụng cấu hình hiện tại. Cấu hình và artifact cũ đã được giữ/khôi phục. "
+            "Kiểm tra dung lượng, quyền ghi, tệp đang bị khóa và trạng thái backend rồi thử lại.",
+        ) from exc
+
 
 @router.post("/jobs/{job_id}/rerun")
 async def rerun_localization_job(job_id: str, body: RerunRequest):

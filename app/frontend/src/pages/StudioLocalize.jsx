@@ -13,7 +13,9 @@ import { useNavigate, useSearchParams } from "react-router-dom"
 import http from "../api/http"
 import useAppStore from "../store/appStore"
 import LocalizationExpertPanel from "../components/tools/LocalizationExpertPanel"
+import { ProviderBindingChip, ProviderBindingRerunDialog } from "../components/tools/ProviderBindingRerun"
 import LocalizationBatch from "./LocalizationBatch"
+import { providerBindingMismatch, rebindProvidersPayload } from "../providerBinding"
 import { LOCALIZE_STEPS, localizeStepForDetail } from "../studioModel"
 import {
   buildLocalizationRenderPayload,
@@ -67,6 +69,7 @@ export default function StudioLocalize({ source, sourcesLoading }) {
   const [autoRepair, setAutoRepair] = useState(false)
   const [autoRepairBusy, setAutoRepairBusy] = useState(false)
   const [retryingFailure, setRetryingFailure] = useState(false)
+  const [bindingPrompt, setBindingPrompt] = useState(null)
   const [continuingReview, setContinuingReview] = useState(false)
   const [focusedFailureKey, setFocusedFailureKey] = useState("")
   const [detail, setDetail] = useState(null)
@@ -325,30 +328,84 @@ export default function StudioLocalize({ source, sourcesLoading }) {
     }
   }
 
+  const runFailureRerun = async () => {
+    const response = await http.post(`/api/localization/jobs/${jobId}/rerun`, {})
+    const data = response.data
+    const targetChunks = data?.targeted_chunk_ids || []
+    showSnackbar(
+      targetChunks.length
+        ? `Đang thử lại đúng ${targetChunks.length} đoạn lỗi ở bước Lồng tiếng.`
+        : `Đang thử lại đúng bước lỗi: ${data?.from_stage || jobFailure.stage}.`,
+      "info",
+    )
+    startJob(jobId, "tool:translate", "Đang thử lại đúng bước lỗi…")
+    await loadDetail()
+  }
+
+  const rebindProvidersAndRerun = async () => {
+    const response = await http.post(`/api/localization/jobs/${jobId}/rebind-providers`, rebindProvidersPayload())
+    const data = response.data
+    const fromStage = data?.from_stage
+    if (data?.awaiting_translation_review) {
+      // A review-paused job only adopts the binding here; it must not pretend
+      // a run is active when the backend deliberately did not dispatch.
+      showSnackbar("Đã dùng cấu hình hiện tại. Bản dịch vẫn đang chờ duyệt; duyệt xong mới chạy lại.", "info")
+    } else if (!data?.from_stage) {
+      showSnackbar("Cấu hình đã trùng với job; không có bước nào được chạy lại.", "info")
+    } else {
+      showSnackbar(`Đã dùng cấu hình hiện tại; tác vụ chạy lại từ bước ${fromStage}.`, "info")
+      startJob(jobId, "tool:translate", "Đang dùng cấu hình hiện tại…")
+    }
+    await loadDetail()
+  }
+
   const retryFailedStage = async () => {
     if (!jobId || !jobFailure) return
+    // A drifted provider binding must be an explicit choice: never silently
+    // adopt Settings mid-recovery. Keep the job's own snapshot by default.
+    if (providerBindingMismatch(detail)) {
+      setBindingPrompt({ action: "failure" })
+      return
+    }
     setRetryingFailure(true)
     try {
-      let data
-      if (detail?.tts_binding?.binding_mismatch && jobFailure.stage === "dubbing") {
-        const response = await http.post(`/api/localization/jobs/${jobId}/rebind-tts`, { source: "settings" })
-        data = response.data
-        showSnackbar("Đã dùng TTS hiện tại; chỉ chạy lại từ bước Lồng tiếng.", "info")
-      } else {
-        const response = await http.post(`/api/localization/jobs/${jobId}/rerun`, {})
-        data = response.data
-        const targetChunks = data?.targeted_chunk_ids || []
-        showSnackbar(
-          targetChunks.length
-            ? `Đang thử lại đúng ${targetChunks.length} đoạn lỗi ở bước Lồng tiếng.`
-            : `Đang thử lại đúng bước lỗi: ${data?.from_stage || jobFailure.stage}.`,
-          "info",
-        )
-      }
-      startJob(jobId, "tool:translate", "Đang thử lại đúng bước lỗi…")
-      await loadDetail()
+      await runFailureRerun()
     } catch (error) {
       showSnackbar(error.response?.data?.detail || "Không thể thử lại bước lỗi", "error")
+    } finally {
+      setRetryingFailure(false)
+    }
+  }
+
+  const keepSnapshotAndRerun = async () => {
+    if (!jobId) return
+    const action = bindingPrompt?.action
+    setBindingPrompt(null)
+    setRetryingFailure(true)
+    try {
+      if (action === "failure") {
+        await runFailureRerun()
+      } else {
+        await http.post(`/api/localization/jobs/${jobId}/rerun`, { from_stage: action })
+        showSnackbar("Đang chạy lại với cấu hình của job.", "info")
+        startJob(jobId, "tool:translate", "Đang chạy lại với cấu hình của job…")
+        await loadDetail()
+      }
+    } catch (error) {
+      showSnackbar(error.response?.data?.detail || "Không thể chạy lại tác vụ", "error")
+    } finally {
+      setRetryingFailure(false)
+    }
+  }
+
+  const useCurrentProvidersAndRerun = async () => {
+    if (!jobId) return
+    setBindingPrompt(null)
+    setRetryingFailure(true)
+    try {
+      await rebindProvidersAndRerun()
+    } catch (error) {
+      showSnackbar(error.response?.data?.detail || "Không thể dùng cấu hình hiện tại", "error")
     } finally {
       setRetryingFailure(false)
     }
@@ -858,7 +915,8 @@ export default function StudioLocalize({ source, sourcesLoading }) {
               <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Tác vụ bản địa hóa thất bại</Typography>
               {jobFailure.step ? <Typography variant="body2">Bước lỗi: {jobFailure.step}</Typography> : null}
               <Typography variant="body2" sx={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{jobFailure.message}</Typography>
-              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
+                <ProviderBindingChip detail={detail} />
                 <Button
                   size="small"
                   variant="contained"
@@ -867,9 +925,7 @@ export default function StudioLocalize({ source, sourcesLoading }) {
                   onClick={retryFailedStage}
                   disabled={retryingFailure || activeLocalization}
                 >
-                  {detail?.tts_binding?.binding_mismatch && jobFailure.stage === "dubbing"
-                    ? "Dùng TTS hiện tại & chạy lại bước lỗi"
-                    : "Thử lại đúng bước lỗi"}
+                  Thử lại đúng bước lỗi
                 </Button>
                 <Chip
                   size="small"
@@ -883,6 +939,15 @@ export default function StudioLocalize({ source, sourcesLoading }) {
         {jobId && <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap><Chip label={`Tác vụ ${jobId}`} size="small" />{detail?.translation_review_pending && <Chip label="Chờ duyệt bản dịch" size="small" color="warning" />}<StageChip name="Bản dịch" record={stages.translation} /><StageChip name="Lồng tiếng" record={stages.dubbing} /><StageChip name="QC" record={stages.qc} /><Box sx={{ flex: 1 }} /><Button size="small" variant="outlined" startIcon={<TuneOutlinedIcon />} onClick={() => setExpertOpen(true)}>Nâng cao / Chuyên gia</Button></Stack>}
         {panels[activeStep]}
       </Stack>
+      <ProviderBindingRerunDialog
+        open={Boolean(bindingPrompt)}
+        binding={detail?.provider_binding}
+        requestedStage={bindingPrompt?.action === "failure" ? null : bindingPrompt?.action}
+        busy={retryingFailure}
+        onKeepSnapshot={keepSnapshotAndRerun}
+        onUseCurrent={useCurrentProvidersAndRerun}
+        onCancel={() => setBindingPrompt(null)}
+      />
       <Dialog open={batchOpen} onClose={closeBatch} keepMounted maxWidth="md" fullWidth>
         <DialogTitle sx={{ pr: 6 }}>
           Chạy bản địa hóa hàng loạt

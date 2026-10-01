@@ -10,6 +10,8 @@ import SaveOutlinedIcon from "@mui/icons-material/SaveOutlined"
 import http from "../../api/http"
 import useAppStore from "../../store/appStore"
 import { resolveAiStageSelection } from "../../localizationPreview"
+import { ProviderBindingChip, ProviderBindingRerunDialog } from "./ProviderBindingRerun"
+import { providerBindingMismatch, rebindProvidersPayload } from "../../providerBinding"
 
 const STAGE_LABELS = {
   separation: "Tách âm thanh",
@@ -98,6 +100,7 @@ export default function LocalizationExpertPanel({ jobId }) {
   const [detail, setDetail] = useState(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
+  const [bindingPrompt, setBindingPrompt] = useState(null)
 
   const load = useCallback(async () => {
     if (!jobId) return
@@ -131,24 +134,76 @@ export default function LocalizationExpertPanel({ jobId }) {
     return "timeout"
   }, [jobId, load])
 
+  const performRerun = async (stage) => {
+    const { data } = await http.post("/api/localization/jobs/" + jobId + "/rerun", { from_stage: stage })
+    showSnackbar(
+      data?.tts_rebound
+        ? "Đã dùng TTS hiện tại; tác vụ đang tiếp tục từ " + (STAGE_LABELS[stage] || stage)
+        : "Đang chạy lại từ " + (STAGE_LABELS[stage] || stage),
+      "info",
+    )
+    // Dispatch is enough for this control. Do not lock the editor for the
+    // entire long-running job; the backend rejects duplicate reruns while
+    // active and Activity owns live progress.
+    await load()
+  }
+
   const rerun = async (stage) => {
+    // Drifted providers are an explicit choice: keep the job snapshot by
+    // default, or adopt Settings through rebind-providers.
+    if (providerBindingMismatch(detail)) {
+      setBindingPrompt({ action: stage })
+      return
+    }
     setBusy(true)
     try {
-      const { data } = await http.post("/api/localization/jobs/" + jobId + "/rerun", { from_stage: stage })
-      showSnackbar(
-        data?.tts_rebound
-          ? "Đã dùng TTS hiện tại; tác vụ đang tiếp tục từ " + (STAGE_LABELS[stage] || stage)
-          : "Đang chạy lại từ " + (STAGE_LABELS[stage] || stage),
-        "info",
-      )
-      // Dispatch is enough for this control. Do not lock the editor for the
-      // entire long-running job; the backend rejects duplicate reruns while
-      // active and Activity owns live progress.
-      await load()
+      await performRerun(stage)
     } catch (err) {
       const detailMessage = err.response?.data?.detail
       showSnackbar(
         typeof detailMessage === "string" ? detailMessage : detailMessage?.message || "Chạy lại thất bại",
+        "error",
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const keepSnapshotRerun = async () => {
+    const stage = bindingPrompt?.action
+    setBindingPrompt(null)
+    setBusy(true)
+    try {
+      await performRerun(stage)
+    } catch (err) {
+      const detailMessage = err.response?.data?.detail
+      showSnackbar(
+        typeof detailMessage === "string" ? detailMessage : detailMessage?.message || "Chạy lại thất bại",
+        "error",
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const useCurrentProvidersRerun = async () => {
+    setBindingPrompt(null)
+    setBusy(true)
+    try {
+      const { data } = await http.post("/api/localization/jobs/" + jobId + "/rebind-providers", rebindProvidersPayload())
+      const fromStage = data?.from_stage
+      if (data?.awaiting_translation_review) {
+        showSnackbar("Đã dùng cấu hình hiện tại. Bản dịch vẫn đang chờ duyệt; duyệt xong mới chạy lại.", "info")
+      } else if (!data?.from_stage) {
+        showSnackbar("Cấu hình đã trùng với job; không có bước nào được chạy lại.", "info")
+      } else {
+        showSnackbar("Đã dùng cấu hình hiện tại; tác vụ chạy lại từ " + (STAGE_LABELS[fromStage] || fromStage), "info")
+      }
+      await load()
+    } catch (err) {
+      const detailMessage = err.response?.data?.detail
+      showSnackbar(
+        typeof detailMessage === "string" ? detailMessage : detailMessage?.message || "Không thể dùng cấu hình hiện tại",
         "error",
       )
     } finally {
@@ -383,7 +438,7 @@ export default function LocalizationExpertPanel({ jobId }) {
         </Alert>
       )}
 
-      {ttsBinding && (
+      {ttsBinding && !detail?.provider_binding && (
         <Alert severity={ttsBinding.binding_mismatch ? "warning" : "info"} variant="outlined">
           <Stack spacing={1}>
             <Typography variant="subtitle2">Liên kết TTS của tác vụ</Typography>
@@ -474,15 +529,14 @@ export default function LocalizationExpertPanel({ jobId }) {
         </Stack>
       </Box>
 
-      {!ttsBinding?.binding_mismatch && (
-        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-          {["translation", "dubbing", "final_render", "qc"].map((stage) => (
-            <Button key={stage} size="small" variant="outlined" startIcon={<ReplayOutlinedIcon />} onClick={() => rerun(stage)} disabled={busy}>
-              {"Chạy lại từ " + STAGE_LABELS[stage]}
-            </Button>
-          ))}
-        </Stack>
-      )}
+      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
+        <ProviderBindingChip detail={detail} />
+        {["translation", "dubbing", "final_render", "qc"].map((stage) => (
+          <Button key={stage} size="small" variant="outlined" startIcon={<ReplayOutlinedIcon />} onClick={() => rerun(stage)} disabled={busy}>
+            {"Chạy lại từ " + STAGE_LABELS[stage]}
+          </Button>
+        ))}
+      </Stack>
 
       <Divider />
 
@@ -520,6 +574,16 @@ export default function LocalizationExpertPanel({ jobId }) {
           </AccordionDetails>
         </Accordion>
       ))}
+
+      <ProviderBindingRerunDialog
+        open={Boolean(bindingPrompt)}
+        binding={detail?.provider_binding}
+        requestedStage={bindingPrompt?.action}
+        busy={busy}
+        onKeepSnapshot={keepSnapshotRerun}
+        onUseCurrent={useCurrentProvidersRerun}
+        onCancel={() => setBindingPrompt(null)}
+      />
     </Stack>
   )
 }

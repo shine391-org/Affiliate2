@@ -476,3 +476,87 @@ class LocalizationRun:
 
     def snapshot(self) -> dict:
         return json.loads(json.dumps(self.data))
+
+
+class ManifestTransaction:
+    """Best-effort atomicity around one multi-step manifest mutation.
+
+    ``invalidate_from`` deletes artifact trees and rewrites the manifest in a
+    single pass. A caller that must ALSO adopt a new effective profile/request
+    and then hand control to a background runner needs both halves to survive
+    or neither: a failure after invalidation would otherwise leave a job whose
+    manifest says its artifacts are gone, whose bytes are already deleted, and
+    whose rerun was never dispatched.
+
+    ``begin()`` snapshots the manifest bytes plus the artifact trees of the
+    stages that may change; ``rollback()`` restores them; ``commit()`` drops
+    the snapshot. This is deliberately NOT a second invalidation engine and
+    not a general transaction system: it wraps exactly the files
+    ``LocalizationRun`` owns for a bounded stage window, and it is the only
+    rollback mechanism the localization control plane uses.
+    """
+
+    _DIRNAME = ".rollback"
+
+    def __init__(self, run: "LocalizationRun", stage_names) -> None:
+        self.run = run
+        self.stage_names = [name for name in stage_names if name in STAGES]
+        self.backup_root = run.root / self._DIRNAME
+        self._active = False
+
+    def begin(self) -> None:
+        if self._active:
+            return
+        if self.backup_root.exists():
+            raise RuntimeError("Unresolved rebind backup exists; restore it before rebinding again.")
+        stages_root = self.backup_root / "stages"
+        try:
+            stages_root.mkdir(parents=True, exist_ok=True)
+            manifest_bytes = self.run.manifest_path.read_bytes()
+            (self.backup_root / "manifest.json").write_bytes(manifest_bytes)
+            for name in self.stage_names:
+                source = self.run.root / name
+                if source.is_dir():
+                    shutil.copytree(source, stages_root / name)
+        except Exception:
+            # Preparation has not touched the originals. A partial backup is
+            # not recoverable state and must not prevent a safe retry.
+            shutil.rmtree(self.backup_root, ignore_errors=True)
+            raise
+        self._active = True
+
+    def rollback(self) -> None:
+        if not self._active:
+            return
+        # Restore artifacts before publishing the old manifest. If restoration
+        # fails, retain the backup so an IO failure cannot destroy the last copy.
+        stages_root = self.backup_root / "stages"
+        for name in self.stage_names:
+            current = self.run.root / name
+            backup = stages_root / name
+            if current.exists():
+                shutil.rmtree(current)
+            if backup.is_dir():
+                shutil.copytree(backup, current)
+        manifest_bytes = (self.backup_root / "manifest.json").read_bytes()
+        tmp = self.run.manifest_path.with_suffix(".json.rollback")
+        tmp.write_bytes(manifest_bytes)
+        tmp.replace(self.run.manifest_path)
+        self.run.data = json.loads(manifest_bytes)
+        shutil.rmtree(self.backup_root, ignore_errors=True)
+        self._active = False
+
+    def commit(self) -> None:
+        shutil.rmtree(self.backup_root, ignore_errors=True)
+        self._active = False
+
+    def __enter__(self) -> "ManifestTransaction":
+        self.begin()
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        if exc_type is None:
+            self.commit()
+        else:
+            self.rollback()
+        return False
