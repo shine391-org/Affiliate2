@@ -201,6 +201,11 @@ def test_edge_speed_one_maps_to_native_zero_percent(monkeypatch, tmp_path):
     assert captured["rate"] == "+0%"
 
 
+def test_edge_tts_does_not_invent_pause_punctuation():
+    text = "Now we continue naturally. But keep the original rhythm."
+    assert edge_tts_service._add_natural_pauses(text) == text
+
+
 
 def test_gpt_sovits_rejects_vietnamese_in_donor_compatible_mode(tmp_path):
     from backend.core.exceptions import VoiceGenerationError
