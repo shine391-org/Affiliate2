@@ -337,25 +337,86 @@ async def test_localization_edge_tts_measures_trimmed_audio_before_timing(monkey
     assert output.read_bytes() == b"trimmed"
 
 
-def test_old_raw_chunk_sidecar_is_invalidated_by_boundary_trim_rules(tmp_path):
+def test_old_edge_chunk_sidecar_is_invalidated_without_touching_other_providers(tmp_path):
     from backend.services import localization_service as svc
+    from backend.services.tts_service import TTSProvider
+
+    def legacy_identity(provider: str) -> str:
+        payload = {
+            "rules": 1,
+            "provider": provider,
+            "model": None,
+            "base_url": None,
+            "region": None,
+            "voice": "vi-VN-HoaiMyNeural",
+            "language": "Vietnamese",
+            "speaker_id": None,
+            "text": "Cảm ơn.",
+            "reference_audio": None,
+            "reference_text": None,
+            "reference_language": None,
+        }
+        return hashlib.sha256(json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+
+    edge_runtime = svc.TTSRuntimeConfig(
+        provider=TTSProvider.EDGE_TTS,
+        default_voice="vi-VN-HoaiMyNeural",
+        api_key="",
+        model=None,
+        base_url=None,
+        region=None,
+    )
+    new_edge_identity = svc._chunk_synthesis_identity(
+        text="Cảm ơn.",
+        runtime=edge_runtime,
+        voice="vi-VN-HoaiMyNeural",
+        target_language="Vietnamese",
+        speaker_id=None,
+        reference_audio=None,
+        reference_text=None,
+        reference_language=None,
+    )
+    old_edge_identity = legacy_identity("edge_tts")
+    assert new_edge_identity != old_edge_identity
 
     audio = tmp_path / "chunk.wav"
     audio.write_bytes(b"old-edge-artifact")
-    identity = "abc123"
     sidecar = audio.with_name(audio.name + ".input.json")
-    sidecar.write_text(
-        json.dumps({
-            "rules": 1,
-            "identity": identity,
-            "duration_ms": 2088,
-        }),
-        encoding="utf-8",
-    )
+    sidecar.write_text(json.dumps({
+        "rules": 1,
+        "identity": old_edge_identity,
+        "duration_ms": 2088,
+    }), encoding="utf-8")
+    assert svc._chunk_identity_matches(audio, new_edge_identity) is False
+    assert svc._chunk_persisted_duration_ms(audio, new_edge_identity) is None
 
-    assert svc._DUBBING_SYNTHESIS_RULES_VERSION >= 2
-    assert svc._chunk_identity_matches(audio, identity) is False
-    assert svc._chunk_persisted_duration_ms(audio, identity) is None
+    # Non-Edge providers keep the old synthesis identity; adding this cleanup
+    # must not force a paid/clone provider to regenerate a valid cached chunk.
+    openai_runtime = svc.TTSRuntimeConfig(
+        provider=TTSProvider.OPENAI_TTS,
+        default_voice="alloy",
+        api_key="x",
+        model=None,
+        base_url=None,
+        region=None,
+    )
+    new_openai_identity = svc._chunk_synthesis_identity(
+        text="Cảm ơn.",
+        runtime=openai_runtime,
+        voice="vi-VN-HoaiMyNeural",
+        target_language="Vietnamese",
+        speaker_id=None,
+        reference_audio=None,
+        reference_text=None,
+        reference_language=None,
+    )
+    assert new_openai_identity == legacy_identity("openai_tts")
+
 
 def test_edge_tts_boundary_trim_preserves_internal_pause(tmp_path):
     from backend.services import localization_service as svc
