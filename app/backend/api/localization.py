@@ -2,11 +2,12 @@
 """Phase-C localization control plane: batch, resume, QC exceptions, expert overrides."""
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 
 from backend.config import settings
@@ -34,6 +35,7 @@ class SegmentOverride(BaseModel):
 class ExpertOverrideRequest(BaseModel):
     segments: list[SegmentOverride] = Field(default_factory=list)
     profile_updates: dict[str, Any] = Field(default_factory=dict)
+    revision: str | None = None
 
 
 class RerunRequest(BaseModel):
@@ -51,6 +53,15 @@ class TTSRebindRequest(BaseModel):
 
 class AutoRepairRequest(BaseModel):
     enabled: bool
+
+
+class ReviewApprovalRequest(BaseModel):
+    revision: str = Field(min_length=16)
+
+
+class QCApprovalRequest(BaseModel):
+    approved: bool
+    revision: str = Field(min_length=16)
 
 
 # Only GPT-SoVITS consumes reference audio in the canonical TTS interface; every
@@ -151,7 +162,7 @@ def _load_run(job_id: str) -> LocalizationRun:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-async def _assert_job_inactive(job_id: str) -> None:
+async def _job_status(job_id: str) -> str:
     from sqlalchemy import select
     from backend.database import AsyncSessionLocal
     from backend.models.job import Job
@@ -162,10 +173,53 @@ async def _assert_job_inactive(job_id: str) -> None:
         )).scalar_one_or_none()
     if status is None:
         raise HTTPException(status_code=404, detail="Job row not found")
+    return str(status)
+
+
+async def _assert_job_inactive(job_id: str) -> None:
+    status = await _job_status(job_id)
     if status in {"running", "pending"}:
         raise HTTPException(
             status_code=409,
             detail="Localization job is already active; wait for it to finish before editing or rerunning.",
+        )
+
+
+async def _claim_job_mutation(
+    job_id: str,
+    *,
+    allowed_statuses: set[str] | tuple[str, ...] | list[str] | None = None,
+) -> dict:
+    """CAS-lock one inactive Job row before touching its localization manifest."""
+    from backend.agents.job_helper import claim_job_for_restart
+
+    token = await claim_job_for_restart(
+        job_id, allowed_statuses=allowed_statuses,
+    )
+    if token is not None:
+        return token
+
+    status = await _job_status(job_id)
+    if allowed_statuses and status not in set(allowed_statuses):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Localization job is in state {status!r}; this action is not allowed.",
+        )
+    raise HTTPException(
+        status_code=409,
+        detail="Localization job changed while this action was starting. Refresh and try again.",
+    )
+
+
+async def _restore_job_mutation(job_id: str, token: dict) -> None:
+    """Release a mutation claim that did not dispatch background work."""
+    from backend.agents.job_helper import restore_job_restart_claim
+
+    restored = await restore_job_restart_claim(job_id, token)
+    if not restored:
+        raise HTTPException(
+            status_code=409,
+            detail="Localization job state changed while the action was being rolled back.",
         )
 
 
@@ -199,6 +253,43 @@ def _optional_json(run: LocalizationRun, stage: str, key: str):
         return None
 
 
+def _verify_run_source_identity(run: LocalizationRun) -> None:
+    """Preflight before destructive mutation.
+
+    _load_run always returns LocalizationRun in production. The getattr keeps
+    lightweight unit-test doubles focused on the behavior under test.
+    """
+    verifier = getattr(run, "verify_source_identity", None)
+    if verifier is not None:
+        verifier()
+
+
+def _review_revision(run: LocalizationRun, stage: str, artifact: str) -> str | None:
+    """Stable hash for the exact persisted artifact the user reviewed."""
+    path = run.artifact(stage, artifact)
+    if path is None or not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(block)
+    except OSError:
+        return None
+    return digest.hexdigest()
+
+
+def _qc_review_revision(run: LocalizationRun) -> str | None:
+    """Revision token for the exact QC report AND exact rendered video bytes."""
+    report_revision = _review_revision(run, "qc", "report")
+    video_revision = _review_revision(run, "final_render", "final_video")
+    if not report_revision or not video_revision:
+        return None
+    return hashlib.sha256(
+        f"{report_revision}|{video_revision}".encode("utf-8")
+    ).hexdigest()
+
+
 def _job_detail(run: LocalizationRun) -> dict:
     translation = _optional_json(run, "translation", "transcript")
     dubbing_tx = _optional_json(run, "dubbing", "transcript")
@@ -212,14 +303,18 @@ def _job_detail(run: LocalizationRun) -> dict:
         "plan": plan or [],
         "chunks": chunks or [],
         "qc": qc,
+        "qc_human_approved": bool(request.get("qc_human_approved")),
+        "qc_review_revision": _qc_review_revision(run),
+        "translation_review_revision": _review_revision(run, "translation", "transcript"),
         "translation_review_pending": bool(
-            request.get("translation_review_pending")
+            run.is_complete("translation", ("transcript",))
+            and request.get("translation_review_pending")
             and not request.get("translation_review_approved")
         ),
     }
 
 
-async def _dispatch_existing_run(run: LocalizationRun):
+async def _dispatch_existing_run(run: LocalizationRun, *, already_claimed: bool = False):
     from backend.agents.job_helper import restart_job
     from backend.core.task_runner import dispatch
     from backend.core.tool_runners import run_tool_translate
@@ -230,7 +325,13 @@ async def _dispatch_existing_run(run: LocalizationRun):
         run.verify_source_identity()
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    if not await restart_job(run.job_id):
+    if already_claimed:
+        if await _job_status(run.job_id) != "pending":
+            raise HTTPException(
+                status_code=409,
+                detail="Localization recovery claim was lost before dispatch.",
+            )
+    elif not await restart_job(run.job_id):
         raise HTTPException(
             status_code=409,
             detail="Localization job became active before the rerun could be claimed.",
@@ -375,6 +476,18 @@ async def _describe_tts_bindings(run: LocalizationRun) -> dict:
     }
 
 
+@router.get("/jobs/{job_id}/source")
+async def localization_job_source(job_id: str, request: Request):
+    """Stream the immutable source snapshot bound to a localization job."""
+    run = _load_run(job_id)
+    path = run.source_path.resolve()
+    root = (settings.STORAGE_ROOT / "localization_jobs" / job_id).resolve()
+    if not path.is_relative_to(root) or not path.is_file():
+        raise HTTPException(status_code=404, detail="Persisted localization source is unavailable")
+    from backend.api.videos import serve_media_with_range
+    return serve_media_with_range(path, request, filename=path.name)
+
+
 @router.get("/jobs/{job_id}")
 async def localization_job_detail(job_id: str):
     from sqlalchemy import select
@@ -387,6 +500,13 @@ async def localization_job_detail(job_id: str):
         )).scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="Localization job not found")
+
+    try:
+        job_output = json.loads(job.output_json or "{}")
+    except (TypeError, json.JSONDecodeError):
+        job_output = {}
+    if not isinstance(job_output, dict):
+        job_output = {}
 
     try:
         run = LocalizationRun.load(job_id)
@@ -402,9 +522,14 @@ async def localization_job_detail(job_id: str):
             "chunks": [],
             "qc": None,
             "translation_review_pending": False,
+            "translation_review_revision": None,
+            "qc_review_revision": None,
             "job_status": job.status,
             "job_current_step": job.current_step,
             "job_error_message": job.error_message,
+            "generated_video_id": job_output.get("generated_video_id"),
+            "publish_ready": bool(job_output.get("publish_ready")),
+            "publish_registration_error": job_output.get("publish_registration_error"),
         }
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -414,6 +539,9 @@ async def localization_job_detail(job_id: str):
     detail["job_status"] = job.status
     detail["job_current_step"] = job.current_step
     detail["job_error_message"] = job.error_message
+    detail["generated_video_id"] = job_output.get("generated_video_id")
+    detail["publish_ready"] = bool(job_output.get("publish_ready"))
+    detail["publish_registration_error"] = job_output.get("publish_registration_error")
     return detail
 
 
@@ -447,12 +575,20 @@ async def localization_exceptions(limit: int = 50):
             qc = {}
         qc_metadata = qc.get("metadata") or {}
         qc_status = qc_metadata.get("status") if isinstance(qc_metadata, dict) else None
+        request = data.get("request") or {}
+        qc_human_approved = bool(
+            isinstance(request, dict) and request.get("qc_human_approved")
+        )
         failed = [
             {"stage": name, "error": rec.get("error")}
             for name, rec in stages.items()
             if isinstance(rec, dict) and rec.get("status") == "failed"
         ]
-        if qc_status in {"FAILED", "NEEDS_REVIEW"} or failed:
+        needs_qc_action = (
+            qc_status == "FAILED"
+            or (qc_status == "NEEDS_REVIEW" and not qc_human_approved)
+        )
+        if needs_qc_action or failed:
             candidates.append((job_id, data, qc_status, failed))
 
     if not candidates:
@@ -487,272 +623,549 @@ async def localization_exceptions(limit: int = 50):
     return {"total": len(items), "items": items}
 
 
-@router.post("/jobs/{job_id}/override")
-async def localization_expert_override(job_id: str, body: ExpertOverrideRequest):
-    await _assert_job_inactive(job_id)
-    run = _load_run(job_id)
-    invalidations: list[str] = []
-
-    if body.profile_updates:
-        merged = {**run.effective_profile, **body.profile_updates}
-        try:
-            profile = LocalizationProfile.model_validate(merged)
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"Invalid profile override: {exc}") from exc
-        stage = _profile_invalidation(set(body.profile_updates))
-        if body.segments and stage in {"separation", "asr", "semantic", "translation"}:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "Cannot combine upstream profile changes with segment overrides "
-                    "because the segment IDs may be regenerated. Apply the profile "
-                    "change and rerun first, then edit the resulting segments."
-                ),
-            )
-        run.update_effective_profile(profile.model_dump())
-        if stage:
-            invalidations.append(stage)
-
-    if body.segments:
-        raw = _optional_json(run, "translation", "transcript")
-        if not raw:
+@router.post("/jobs/{job_id}/qc-approval")
+async def set_localization_qc_approval(job_id: str, body: QCApprovalRequest):
+    """Acknowledge warning-only QC and synchronize Publish eligibility."""
+    claim = await _claim_job_mutation(job_id, allowed_statuses={"success", "failed"})
+    original_request = None
+    original_output_json = None
+    try:
+        run = _load_run(job_id)
+        current_revision = _qc_review_revision(run)
+        if not current_revision or body.revision != current_revision:
             raise HTTPException(
                 status_code=409,
-                detail="Translation artifact is unavailable; rerun through translation first",
+                detail="QC đã thay đổi kể từ lúc bạn mở màn hình. Hãy tải lại và duyệt đúng phiên bản mới.",
             )
-        transcript = LocalizationTranscript.model_validate(raw)
-        by_id = {seg.id: seg for seg in transcript.segments}
+        original_request = dict(run.request)
+        qc = _optional_json(run, "qc", "report")
+        if not isinstance(qc, dict):
+            raise HTTPException(status_code=409, detail="QC chưa hoàn tất.")
+        qc_status = str(qc.get("status") or "").upper()
+        if body.approved:
+            if qc_status == "FAILED":
+                raise HTTPException(
+                    status_code=409,
+                    detail="QC đang ở trạng thái Thất bại; cần sửa/chạy lại thay vì bỏ qua.",
+                )
+            if qc_status != "NEEDS_REVIEW":
+                raise HTTPException(
+                    status_code=409,
+                    detail="QC không ở trạng thái cần duyệt.",
+                )
 
-        for change in body.segments:
-            seg = by_id.get(change.id)
-            if seg is None:
-                raise HTTPException(status_code=404, detail=f"Segment not found: {change.id}")
+        run.update_request({
+            **run.request,
+            "qc_human_approved": bool(body.approved),
+        })
 
-            if change.translated_text is not None:
-                value = change.translated_text.strip()
-                if not value:
-                    raise HTTPException(status_code=400, detail=f"Empty translation: {change.id}")
-                seg.translated_text = value
-                seg.translation_status = "success"
-                seg.qc_status = "pending"
+        from sqlalchemy import select
+        from backend.database import AsyncSessionLocal
+        from backend.models.job import Job
+        async with AsyncSessionLocal() as db:
+            row = (await db.execute(
+                select(Job).where(Job.id == job_id)
+            )).scalar_one_or_none()
+            if row is None:
+                raise HTTPException(status_code=404, detail="Job row not found")
+            original_output_json = row.output_json
+            try:
+                out = json.loads(row.output_json or "{}")
+            except (TypeError, json.JSONDecodeError):
+                out = {}
+            if not isinstance(out, dict):
+                out = {}
+            out["qc_human_approved"] = bool(body.approved)
+            out["publish_ready"] = False
+            row.output_json = json.dumps(out)
+            await db.commit()
 
-            if change.speaker_id is not None:
-                seg.speaker_id = change.speaker_id.strip() or None
-
-            overrides = dict(seg.overrides or {})
-            if change.clear_timing:
-                overrides.pop("target_start_ms", None)
-                overrides.pop("target_end_ms", None)
-            elif change.target_start_ms is not None or change.target_end_ms is not None:
-                if change.target_start_ms is None or change.target_end_ms is None:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Both target_start_ms and target_end_ms are required: {change.id}",
-                    )
-                if change.target_end_ms <= change.target_start_ms:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"target_end_ms must be > target_start_ms: {change.id}",
-                    )
-                overrides["target_start_ms"] = change.target_start_ms
-                overrides["target_end_ms"] = change.target_end_ms
-
-            if change.clear_voice:
-                overrides.pop("voice_id", None)
-            elif change.voice_id is not None:
-                voice = change.voice_id.strip()
-                if voice:
-                    overrides["voice_id"] = voice
-
-            seg.overrides = overrides
-
-        path = run.save_json("translation", "transcript.json", transcript.model_dump())
-        old_meta = dict(run.record("translation").get("metadata") or {})
-        old_meta["expert_override"] = True
-        run.complete(
-            "translation",
-            artifacts={"transcript": path},
-            metadata=old_meta,
+        from backend.services.localization_publish_service import (
+            set_localization_publish_eligibility,
         )
-        invalidations.append("dubbing")
+        try:
+            publish = await set_localization_publish_eligibility(
+                job_id,
+                eligible=bool(body.approved),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    if invalidations:
-        stage = _earliest_stage(invalidations)
-        # Keep manually edited translation when the earliest invalidation is
-        # downstream; earlier profile changes intentionally recompute it.
-        run.invalidate_from(stage, delete_artifacts=True)
-    else:
-        stage = None
+        result = {
+            "ok": True,
+            "job_id": job_id,
+            "qc_status": qc_status,
+            "qc_human_approved": bool(body.approved),
+            "generated_video_id": publish.get("generated_video_id"),
+            "publish_ready": bool(publish.get("publish_ready")),
+        }
+    except Exception:
+        # This endpoint changes both manifest and Job output. Put both back if
+        # the Publish handoff or any other step fails before releasing the claim.
+        try:
+            if original_request is not None:
+                _load_run(job_id).update_request(original_request)
+            if original_output_json is not None:
+                from backend.database import AsyncSessionLocal
+                from backend.models.job import Job
+                async with AsyncSessionLocal() as db:
+                    row = await db.get(Job, job_id)
+                    if row is not None:
+                        row.output_json = original_output_json
+                        await db.commit()
+        finally:
+            await _restore_job_mutation(job_id, claim)
+        raise
 
-    return {
-        "ok": True,
-        "invalidated_from": stage,
-        "effective_profile": run.effective_profile,
-    }
+    await _restore_job_mutation(job_id, claim)
+    return result
 
+
+@router.post("/jobs/{job_id}/publish-registration")
+async def retry_localization_publish_registration(job_id: str):
+    """Retry only the localization -> GeneratedVideo handoff, never media work."""
+    claim = await _claim_job_mutation(
+        job_id, allowed_statuses={"success", "failed"},
+    )
+    try:
+        from backend.services.localization_publish_service import (
+            promote_localization_output,
+        )
+        publish = await promote_localization_output(job_id)
+        if not publish.get("publish_ready"):
+            raise HTTPException(
+                status_code=409,
+                detail="Đầu ra đã được giữ trong Thư viện nhưng chưa đạt điều kiện Xuất bản; hãy xử lý QC trước.",
+            )
+        result = {
+            "ok": True,
+            "job_id": job_id,
+            "generated_video_id": publish.get("generated_video_id"),
+            "publish_ready": True,
+        }
+    except Exception:
+        await _restore_job_mutation(job_id, claim)
+        raise
+
+    await _restore_job_mutation(job_id, claim)
+    return result
+
+@router.post("/jobs/{job_id}/override")
+async def localization_expert_override(job_id: str, body: ExpertOverrideRequest):
+    claim = await _claim_job_mutation(job_id)
+    try:
+        # Reload only AFTER winning the claim. A losing request may have started
+        # from an older manifest snapshot; using it here would overwrite the
+        # winner's edits even though the DB race itself was prevented.
+        run = _load_run(job_id)
+        _verify_run_source_identity(run)
+        invalidations: list[str] = []
+
+        if body.profile_updates:
+            merged = {**run.effective_profile, **body.profile_updates}
+            try:
+                profile = LocalizationProfile.model_validate(merged)
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid profile override: {exc}",
+                ) from exc
+            stage = _profile_invalidation(set(body.profile_updates))
+            if body.segments and stage in {"separation", "asr", "semantic", "translation"}:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Cannot combine upstream profile changes with segment overrides "
+                        "because the segment IDs may be regenerated. Apply the profile "
+                        "change and rerun first, then edit the resulting segments."
+                    ),
+                )
+            run.update_effective_profile(profile.model_dump())
+            if stage:
+                invalidations.append(stage)
+
+        if body.segments:
+            current_revision = _review_revision(run, "translation", "transcript")
+            if (
+                not current_revision
+                or not body.revision
+                or body.revision != current_revision
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Bản dịch đã thay đổi kể từ lúc bạn mở màn hình. Hãy tải lại trước khi chỉnh sửa.",
+                )
+            raw = _optional_json(run, "translation", "transcript")
+            if not raw:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Translation artifact is unavailable; rerun through translation first",
+                )
+            transcript = LocalizationTranscript.model_validate(raw)
+            by_id = {seg.id: seg for seg in transcript.segments}
+
+            for change in body.segments:
+                seg = by_id.get(change.id)
+                if seg is None:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Segment not found: {change.id}",
+                    )
+
+                if change.translated_text is not None:
+                    value = change.translated_text.strip()
+                    if not value:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Empty translation: {change.id}",
+                        )
+                    seg.translated_text = value
+                    seg.translation_status = "success"
+                    seg.qc_status = "pending"
+
+                if change.speaker_id is not None:
+                    seg.speaker_id = change.speaker_id.strip() or None
+
+                overrides = dict(seg.overrides or {})
+                if change.clear_timing:
+                    overrides.pop("target_start_ms", None)
+                    overrides.pop("target_end_ms", None)
+                elif change.target_start_ms is not None or change.target_end_ms is not None:
+                    if change.target_start_ms is None or change.target_end_ms is None:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Both target_start_ms and target_end_ms are required: {change.id}",
+                        )
+                    if change.target_end_ms <= change.target_start_ms:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"target_end_ms must be > target_start_ms: {change.id}",
+                        )
+                    overrides["target_start_ms"] = change.target_start_ms
+                    overrides["target_end_ms"] = change.target_end_ms
+
+                if change.clear_voice:
+                    overrides.pop("voice_id", None)
+                elif change.voice_id is not None:
+                    voice = change.voice_id.strip()
+                    if voice:
+                        overrides["voice_id"] = voice
+
+                seg.overrides = overrides
+
+            path = run.save_json(
+                "translation", "transcript.json", transcript.model_dump()
+            )
+            old_meta = dict(run.record("translation").get("metadata") or {})
+            old_meta["expert_override"] = True
+            run.complete(
+                "translation",
+                artifacts={"transcript": path},
+                metadata=old_meta,
+            )
+            invalidations.append("dubbing")
+
+        if invalidations:
+            stage = _earliest_stage(invalidations)
+            next_request = {
+                **run.request,
+                "qc_human_approved": False,
+            }
+            if STAGES.index(stage) <= STAGES.index("translation"):
+                next_request.update({
+                    "translation_review_pending": False,
+                    "translation_review_approved": False,
+                })
+            run.update_request(next_request)
+            run.invalidate_from(stage, delete_artifacts=True)
+        else:
+            stage = None
+
+        result = {
+            "ok": True,
+            "invalidated_from": stage,
+            "effective_profile": run.effective_profile,
+        }
+    except Exception:
+        await _restore_job_mutation(job_id, claim)
+        raise
+
+    await _restore_job_mutation(job_id, claim)
+    return result
 
 @router.post("/jobs/{job_id}/continue-after-translation")
-async def continue_after_translation_review(job_id: str):
-    """Approve the persisted C6 translation and continue the SAME run at C7."""
-    await _assert_job_inactive(job_id)
-    run = _load_run(job_id)
-    if not run.is_complete("translation", ("transcript",)):
-        raise HTTPException(
-            status_code=409,
-            detail="Translation is not complete; there is nothing to approve yet.",
-        )
-    req = run.request
-    if not req.get("review_translation"):
-        raise HTTPException(
-            status_code=409,
-            detail="This localization job was not configured for translation review.",
-        )
-    run.update_request({
-        **req,
-        "translation_review_approved": True,
-        "translation_review_pending": False,
-    })
-    await _dispatch_existing_run(run)
-    return {"ok": True, "job_id": job_id, "from_stage": "dubbing"}
+async def continue_after_translation_review(job_id: str, body: ReviewApprovalRequest):
+    """Approve persisted C6 translation and resume the SAME run at C7."""
+    claim = await _claim_job_mutation(
+        job_id,
+        allowed_statuses={"awaiting_review", "success", "failed"},
+    )
+    dispatched = False
+    original_request = None
+    try:
+        run = _load_run(job_id)
+        current_revision = _review_revision(run, "translation", "transcript")
+        if not current_revision or body.revision != current_revision:
+            raise HTTPException(
+                status_code=409,
+                detail="Bản dịch đã thay đổi kể từ lúc bạn mở màn hình. Hãy tải lại trước khi duyệt.",
+            )
+        if not run.is_complete("translation", ("transcript",)):
+            raise HTTPException(
+                status_code=409,
+                detail="Translation is not complete; there is nothing to approve yet.",
+            )
+        _verify_run_source_identity(run)
+        req = run.request
+        original_request = dict(req)
+        if not req.get("review_translation"):
+            raise HTTPException(
+                status_code=409,
+                detail="This localization job was not configured for translation review.",
+            )
+        if not req.get("translation_review_pending") or req.get("translation_review_approved"):
+            raise HTTPException(
+                status_code=409,
+                detail="Bản dịch này không còn ở trạng thái chờ duyệt.",
+            )
 
+        run.update_request({
+            **req,
+            "translation_review_approved": True,
+            "translation_review_pending": False,
+        })
+        await _dispatch_existing_run(run, already_claimed=True)
+        dispatched = True
+        return {"ok": True, "job_id": job_id, "from_stage": "dubbing"}
+    except Exception:
+        if original_request is not None and not dispatched:
+            try:
+                _load_run(job_id).update_request(original_request)
+            except Exception:
+                pass
+        if not dispatched:
+            await _restore_job_mutation(job_id, claim)
+        raise
 
 @router.post("/jobs/{job_id}/chunks/{chunk_id}/regenerate")
 async def regenerate_localization_chunk(job_id: str, chunk_id: int):
-    await _assert_job_inactive(job_id)
-    run = _load_run(job_id)
-    chunks = _optional_json(run, "dubbing", "chunks") or []
-    ids = {int(row.get("id")) for row in chunks if isinstance(row, dict) and row.get("id") is not None}
-    if chunk_id not in ids:
-        raise HTTPException(status_code=404, detail="Dubbing chunk not found")
+    claim = await _claim_job_mutation(job_id)
+    dispatched = False
+    try:
+        run = _load_run(job_id)
+        _verify_run_source_identity(run)
+        chunks = _optional_json(run, "dubbing", "chunks") or []
+        ids = {
+            int(row.get("id"))
+            for row in chunks
+            if isinstance(row, dict) and row.get("id") is not None
+        }
+        if chunk_id not in ids:
+            raise HTTPException(status_code=404, detail="Dubbing chunk not found")
 
-    run.update_request({
-        **run.request,
-        "regenerate_chunk_ids": [chunk_id],
-    })
-    # Preserve raw chunk files so every non-target chunk can be reused.
-    run.invalidate_from("dubbing", delete_artifacts=False)
-    await _dispatch_existing_run(run)
-    return {"ok": True, "job_id": job_id, "regenerating_chunk": chunk_id}
-
+        run.update_request({
+            **run.request,
+            "regenerate_chunk_ids": [chunk_id],
+            "qc_human_approved": False,
+        })
+        # Keep raw chunk files so every non-target chunk can be reused.
+        run.invalidate_from("dubbing", delete_artifacts=False)
+        await _dispatch_existing_run(run, already_claimed=True)
+        dispatched = True
+        return {"ok": True, "job_id": job_id, "regenerating_chunk": chunk_id}
+    except Exception:
+        if not dispatched:
+            await _restore_job_mutation(job_id, claim)
+        raise
 
 @router.post("/jobs/{job_id}/rebind-tts")
 async def rebind_localization_tts(job_id: str, body: TTSRebindRequest):
     """Adopt current Settings TTS and rerun only dubbing plus downstream stages."""
-    await _assert_job_inactive(job_id)
-    run = _load_run(job_id)
-    if str(run.request.get("mode") or "full_dub").strip().lower() != "full_dub":
-        raise HTTPException(status_code=409, detail="This localization job does not use TTS dubbing.")
+    claim = await _claim_job_mutation(job_id)
+    dispatched = False
+    try:
+        run = _load_run(job_id)
+        _verify_run_source_identity(run)
+        if str(run.request.get("mode") or "full_dub").strip().lower() != "full_dub":
+            raise HTTPException(
+                status_code=409,
+                detail="This localization job does not use TTS dubbing.",
+            )
 
-    binding = await _resolve_current_tts_binding(
-        run.effective_profile,
-        str(run.request.get("target_language") or "Vietnamese"),
-        voice_id=body.voice_id,
-        model=body.model,
-    )
-    previous = {
-        key: run.effective_profile.get(key)
-        for key in ("tts_connection_id", "tts_provider", "tts_model", "tts_voice", "tts_base_url", "tts_region")
-    }
-    # Provider-scoped voice/clone overrides must not survive the provider change;
-    # translation/ASR fields are never touched here.
-    resets = _provider_scoped_tts_resets(run.effective_profile, binding)
-    run.update_effective_profile({**run.effective_profile, **binding, **resets})
-    run.update_request({
-        **run.request,
-        "tts_binding_mode": "inherit",
-    })
-    run.invalidate_from("dubbing", delete_artifacts=True)
-    await _dispatch_existing_run(run)
-    return {
-        "ok": True,
-        "job_id": job_id,
-        "from_stage": "dubbing",
-        "previous_tts": previous,
-        "current_tts": binding,
-        "cleared_profile_fields": sorted(resets),
-    }
+        binding = await _resolve_current_tts_binding(
+            run.effective_profile,
+            str(run.request.get("target_language") or "Vietnamese"),
+            voice_id=body.voice_id,
+            model=body.model,
+        )
+        previous = {
+            key: run.effective_profile.get(key)
+            for key in (
+                "tts_connection_id", "tts_provider", "tts_model",
+                "tts_voice", "tts_base_url", "tts_region",
+            )
+        }
+        resets = _provider_scoped_tts_resets(run.effective_profile, binding)
+        run.update_effective_profile({
+            **run.effective_profile,
+            **binding,
+            **resets,
+        })
+        run.update_request({
+            **run.request,
+            "tts_binding_mode": "inherit",
+            # The dispatcher forwards this manual override ahead of the
+            # effective profile; don't let the previous voice undo the rebind.
+            "voice_id": binding.get("tts_voice") or "",
+            # Rebinding deletes every raw chunk, so a previous targeted retry
+            # must not demand reusable non-target artifacts that no longer exist.
+            "regenerate_chunk_ids": [],
+            "qc_human_approved": False,
+        })
+        run.invalidate_from("dubbing", delete_artifacts=True)
 
+        review_pending = bool(
+            run.request.get("translation_review_pending")
+            and not run.request.get("translation_review_approved")
+        )
+        if review_pending:
+            # Rebinding while C6 is paused is configuration-only. Release the
+            # claim back to awaiting_review instead of inventing an active job.
+            await _restore_job_mutation(job_id, claim)
+        else:
+            await _dispatch_existing_run(run, already_claimed=True)
+            dispatched = True
+
+        return {
+            "ok": True,
+            "job_id": job_id,
+            "from_stage": "dubbing",
+            "awaiting_translation_review": review_pending,
+            "previous_tts": previous,
+            "current_tts": binding,
+            "cleared_profile_fields": sorted(resets),
+        }
+    except Exception:
+        if not dispatched:
+            # If review_pending already restored the claim this is a no-op CAS;
+            # only try when the row is still our pending claim.
+            from backend.agents.job_helper import restore_job_restart_claim
+            await restore_job_restart_claim(job_id, claim)
+        raise
 
 @router.post("/jobs/{job_id}/rerun")
 async def rerun_localization_job(job_id: str, body: RerunRequest):
-    """Rerun the SAME persisted job binding from the exact failed stage.
+    """Rerun the SAME persisted job binding from the exact failed stage."""
+    claim = await _claim_job_mutation(job_id)
+    dispatched = False
+    try:
+        run = _load_run(job_id)
+        smart_retry = body.from_stage is None
+        stage = body.from_stage or run.first_incomplete_stage() or "qc"
+        if stage != "separation":
+            _verify_run_source_identity(run)
+        review_pending = bool(
+            run.request.get("translation_review_pending")
+            and not run.request.get("translation_review_approved")
+        )
+        if review_pending and STAGES.index(stage) > STAGES.index("translation"):
+            raise HTTPException(
+                status_code=409,
+                detail="Bản dịch đang chờ duyệt. Hãy duyệt/tiếp tục C6 trước khi chạy lại bước phía sau.",
+            )
 
-    With no explicit stage this is the normal recovery action: choose the first
-    incomplete/failed stage, preserve every completed upstream artifact, and
-    use stage-specific resume state (translation checkpoint or failed dubbing
-    chunks) where possible. Explicit expert reruns keep their previous behavior.
-    """
-    await _assert_job_inactive(job_id)
-    run = _load_run(job_id)
-    smart_retry = body.from_stage is None
-    stage = body.from_stage or run.first_incomplete_stage() or "qc"
-    preserve_files = {"checkpoint.json"} if smart_retry and stage == "translation" else set()
-    delete_artifacts = True
-
-    if smart_retry and stage == "dubbing":
-        meta = dict(run.record("dubbing").get("metadata") or {})
-        failed_chunk_ids = sorted({
-            int(item.get("chunk_id"))
-            for item in (meta.get("issues") or [])
-            if isinstance(item, dict)
-            and item.get("reason") == "timing_overflow"
-            and item.get("chunk_id") is not None
-        })
-        if failed_chunk_ids:
-            run.update_request({
-                **run.request,
-                "regenerate_chunk_ids": failed_chunk_ids,
+        rerun_request = {
+            **run.request,
+            "qc_human_approved": False,
+        }
+        if (
+            run.request.get("review_translation")
+            and STAGES.index(stage) <= STAGES.index("translation")
+        ):
+            rerun_request.update({
+                "translation_review_pending": False,
+                "translation_review_approved": False,
             })
-            # Keep raw chunk files so only the overflowing chunks regenerate.
-            delete_artifacts = False
+        run.update_request(rerun_request)
 
-    run.invalidate_from(
-        stage,
-        delete_artifacts=delete_artifacts,
-        preserve_files=preserve_files,
-    )
-    if stage == "separation":
-        # This is the explicit recovery path for an intentionally replaced
-        # source. All source-derived artifacts were invalidated above, so the
-        # current bytes can safely become the new canonical identity.
-        run.refresh_source_identity()
-    await _dispatch_existing_run(run)
-    return {
-        "ok": True,
-        "job_id": job_id,
-        "from_stage": stage,
-        "smart_retry": smart_retry,
-        "preserved_upstream": list(STAGES[:STAGES.index(stage)]),
-        "targeted_chunk_ids": run.request.get("regenerate_chunk_ids", [])
-            if smart_retry and stage == "dubbing" else [],
-    }
+        preserve_files = (
+            {"checkpoint.json"}
+            if smart_retry and stage == "translation"
+            else set()
+        )
+        delete_artifacts = True
 
+        if smart_retry and stage == "dubbing":
+            meta = dict(run.record("dubbing").get("metadata") or {})
+            failed_chunk_ids = sorted({
+                int(item.get("chunk_id"))
+                for item in (meta.get("issues") or [])
+                if isinstance(item, dict)
+                and item.get("reason") == "timing_overflow"
+                and item.get("chunk_id") is not None
+            })
+            if failed_chunk_ids:
+                run.update_request({
+                    **run.request,
+                    "regenerate_chunk_ids": failed_chunk_ids,
+                })
+                delete_artifacts = False
+        else:
+            # Artifacts of this stage are about to be deleted, so a targeted
+            # retry recorded by an earlier attempt can no longer be honored;
+            # carrying it forward would demand reusable chunks that are gone.
+            rerun_request.pop("regenerate_chunk_ids", None)
+            run.update_request(rerun_request)
+
+        run.invalidate_from(
+            stage,
+            delete_artifacts=delete_artifacts,
+            preserve_files=preserve_files,
+        )
+        if stage == "separation":
+            run.refresh_source_identity()
+
+        await _dispatch_existing_run(run, already_claimed=True)
+        dispatched = True
+        return {
+            "ok": True,
+            "job_id": job_id,
+            "from_stage": stage,
+            "smart_retry": smart_retry,
+            "preserved_upstream": list(STAGES[:STAGES.index(stage)]),
+            "targeted_chunk_ids": run.request.get("regenerate_chunk_ids", [])
+                if smart_retry and stage == "dubbing" else [],
+        }
+    except Exception:
+        if not dispatched:
+            await _restore_job_mutation(job_id, claim)
+        raise
 
 @router.post("/jobs/{job_id}/auto-repair")
 async def set_localization_auto_repair(job_id: str, body: AutoRepairRequest):
-    """Toggle bounded automatic repair for an inactive persisted job.
+    """Toggle bounded automatic repair for an inactive persisted job."""
+    claim = await _claim_job_mutation(job_id)
+    try:
+        run = _load_run(job_id)
+        request = {
+            **run.request,
+            "auto_repair": bool(body.enabled),
+        }
+        if not body.enabled:
+            request.pop("last_auto_repair", None)
+        run.update_request(request)
+        result = {
+            "ok": True,
+            "job_id": job_id,
+            "auto_repair": bool(body.enabled),
+            "attempts": dict(run.request.get("auto_repair_attempts") or {}),
+        }
+    except Exception:
+        await _restore_job_mutation(job_id, claim)
+        raise
 
-    Active runners keep an in-memory manifest snapshot, so mutating the same
-    file concurrently would be racy and could be overwritten on the next stage
-    write. New jobs receive the choice at creation; failed/completed jobs may be
-    changed here before the next retry.
-    """
-    await _assert_job_inactive(job_id)
-    run = _load_run(job_id)
-    request = {
-        **run.request,
-        "auto_repair": bool(body.enabled),
-    }
-    if not body.enabled:
-        request.pop("last_auto_repair", None)
-    run.update_request(request)
-    return {
-        "ok": True,
-        "job_id": job_id,
-        "auto_repair": bool(body.enabled),
-        "attempts": dict(run.request.get("auto_repair_attempts") or {}),
-    }
-
+    await _restore_job_mutation(job_id, claim)
+    return result
 
 def _assert_rerender_ready(run: LocalizationRun) -> None:
     """Fail closed unless the canonical runner can skip every upstream stage."""
@@ -795,8 +1208,8 @@ def _assert_rerender_ready(run: LocalizationRun) -> None:
 
 @router.post("/jobs/{job_id}/rerender")
 async def rerender_localization_job(job_id: str, body: RenderRerunRequest):
-    await _assert_job_inactive(job_id)
-
+    # Validate request-local geometry before claiming the job; these checks do
+    # not read or mutate persisted state and should not hold the recovery lock.
     provided = body.model_fields_set
     explicit_mask = body.mask_box if "mask_box" in provided else None
     if explicit_mask is not None:
@@ -804,63 +1217,104 @@ async def rerender_localization_job(job_id: str, body: RenderRerunRequest):
         if mask_mode not in {"blur", "solid"}:
             raise HTTPException(status_code=400, detail="Mask mode must be blur or solid")
         if explicit_mask.get("normalized") is not True:
-            raise HTTPException(status_code=400, detail="Mask box must explicitly set normalized=true")
+            raise HTTPException(
+                status_code=400,
+                detail="Mask box must explicitly set normalized=true",
+            )
         from backend.services.caption_service import parse_and_validate_mask_box
 
         if parse_and_validate_mask_box(explicit_mask, 1000, 1000) is None:
             raise HTTPException(status_code=400, detail="Mask box geometry is invalid")
 
-    run = _load_run(job_id)
-    _assert_rerender_ready(run)
-    mask_box = (
-        body.mask_box
-        if "mask_box" in provided
-        else run.request.get("mask_box")
-    )
-    if mask_box is not None and "mask_box" not in provided:
-        if mask_box.get("normalized") is not True:
-            raise HTTPException(status_code=400, detail="Mask box must explicitly set normalized=true")
-        from backend.services.caption_service import parse_and_validate_mask_box
-
-        if parse_and_validate_mask_box(mask_box, 1000, 1000) is None:
-            raise HTTPException(status_code=400, detail="Mask box geometry is invalid")
-
-    raw_placement = (
-        body.caption_placement
-        if "caption_placement" in provided
-        else run.request.get("caption_placement")
-    )
-    placement = dict(raw_placement or {})
-    mode = str(placement.get("mode") or "default").strip().lower()
-    if mode not in {"default", "mask_region"}:
-        raise HTTPException(status_code=400, detail="Caption placement mode is invalid")
+    claim = await _claim_job_mutation(job_id)
+    dispatched = False
     try:
-        vertical_offset = float(placement.get("vertical_offset", 0.0))
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail="Caption vertical offset must be numeric") from exc
-    if not -0.25 <= vertical_offset <= 0.25:
-        raise HTTPException(status_code=400, detail="Caption vertical offset must be between -0.25 and 0.25")
-    if mode == "mask_region" and mask_box is None:
-        raise HTTPException(status_code=400, detail="Mask-region caption placement requires an enabled mask")
-    placement = {"mode": mode, "vertical_offset": vertical_offset}
+        # Re-read every persisted field only after the CAS claim. This closes
+        # the stale-snapshot race between two rapid rerender/rebind/rerun calls.
+        run = _load_run(job_id)
+        _verify_run_source_identity(run)
+        _assert_rerender_ready(run)
 
-    request = dict(run.request)
-    if "mask_box" in provided:
-        request["mask_box"] = mask_box
-    if "caption_placement" in provided:
-        request["caption_placement"] = placement
-    if "target_aspect" in provided and body.target_aspect:
-        request["target_aspect"] = body.target_aspect
-    run.update_request(request)
-    if "target_aspect" in provided and body.target_aspect:
-        run.update_effective_profile({
-            **run.effective_profile,
-            "target_aspect": body.target_aspect,
-        })
-    run.invalidate_from("final_render", delete_artifacts=True, preserve_files=set())
-    await _dispatch_existing_run(run)
-    return {"ok": True, "job_id": job_id, "from_stage": "final_render"}
+        mask_box = (
+            body.mask_box
+            if "mask_box" in provided
+            else run.request.get("mask_box")
+        )
+        if mask_box is not None and "mask_box" not in provided:
+            if mask_box.get("normalized") is not True:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Mask box must explicitly set normalized=true",
+                )
+            from backend.services.caption_service import parse_and_validate_mask_box
 
+            if parse_and_validate_mask_box(mask_box, 1000, 1000) is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Mask box geometry is invalid",
+                )
+
+        raw_placement = (
+            body.caption_placement
+            if "caption_placement" in provided
+            else run.request.get("caption_placement")
+        )
+        placement = dict(raw_placement or {})
+        mode = str(placement.get("mode") or "default").strip().lower()
+        if mode not in {"default", "mask_region"}:
+            raise HTTPException(
+                status_code=400,
+                detail="Caption placement mode is invalid",
+            )
+        try:
+            vertical_offset = float(placement.get("vertical_offset", 0.0))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="Caption vertical offset must be numeric",
+            ) from exc
+        if not -0.25 <= vertical_offset <= 0.25:
+            raise HTTPException(
+                status_code=400,
+                detail="Caption vertical offset must be between -0.25 and 0.25",
+            )
+        if mode == "mask_region" and mask_box is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Mask-region caption placement requires an enabled mask",
+            )
+        placement = {"mode": mode, "vertical_offset": vertical_offset}
+
+        request = {
+            **run.request,
+            "qc_human_approved": False,
+        }
+        if "mask_box" in provided:
+            request["mask_box"] = mask_box
+        if "caption_placement" in provided:
+            request["caption_placement"] = placement
+        if "target_aspect" in provided and body.target_aspect:
+            request["target_aspect"] = body.target_aspect
+        run.update_request(request)
+
+        if "target_aspect" in provided and body.target_aspect:
+            run.update_effective_profile({
+                **run.effective_profile,
+                "target_aspect": body.target_aspect,
+            })
+
+        run.invalidate_from(
+            "final_render",
+            delete_artifacts=True,
+            preserve_files=set(),
+        )
+        await _dispatch_existing_run(run, already_claimed=True)
+        dispatched = True
+        return {"ok": True, "job_id": job_id, "from_stage": "final_render"}
+    except Exception:
+        if not dispatched:
+            await _restore_job_mutation(job_id, claim)
+        raise
 
 async def _run_localization_batch_sequential(specs: list[dict]) -> None:
     """Run HQ localization jobs one-by-one to avoid loading Demucs/WhisperX N times.

@@ -111,6 +111,7 @@ export default function Studio() {
   const [sourceDownloadJobId, setSourceDownloadJobId] = useState("")
   const mode = studioModeForPath(location.pathname)
   const sourceId = params.get("source") || ""
+  const localizationJobId = params.get("job") || ""
 
   const loadSources = useCallback(async () => {
     setLoading(true)
@@ -123,6 +124,33 @@ export default function Studio() {
   }, [])
 
   useEffect(() => { loadSources() }, [loadSources])
+
+  // A review-paused localization job may be opened from Activity using only
+  // its job id. Recover the original downloaded source from the persisted run
+  // so the Studio never opens as a dead-end "Không có nguồn" screen.
+  useEffect(() => {
+    if (mode !== "localize" || !localizationJobId) return undefined
+    let alive = true
+    http.get(`/api/localization/jobs/${localizationJobId}`)
+      .then(({ data }) => {
+        if (!alive) return
+        const recovered = data?.manifest?.request?.downloaded_video_id
+        if (recovered === sourceId) return
+        setParams((previous) => {
+          const next = new URLSearchParams(previous)
+          // The persisted job is canonical. A stale/mismatched source query
+          // would otherwise show one video while edits/reruns mutate another.
+          // Legacy/direct-upload jobs have no DownloadedVideo id at all; clear
+          // any stray source= so their persisted snapshot is the only preview.
+          if (recovered) next.set("source", recovered)
+          else next.delete("source")
+          return next
+        }, { replace: true })
+      })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [localizationJobId, mode, setParams, sourceId])
+
   const sourceSummary = useMemo(() => sources.find((item) => item.id === sourceId) || null, [sources, sourceId])
 
   useEffect(() => {

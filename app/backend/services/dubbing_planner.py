@@ -23,6 +23,11 @@ class DubbingConfig:
     gap_tolerance_ms: int = 1500
     speed_accept: float = 1.15
     speed_max: float = 1.30
+    # Emergency hard ceiling. Unlike speed_max this is NOT a quality promise: it
+    # only decides whether a chunk that already exhausted every fitting strategy
+    # may still be rendered so a human can review it. Anything above it is a hard
+    # failure.
+    emergency_speed_max: float = 1.35
     rewrite_max_attempts: int = 2
 
     def validate(self) -> None:
@@ -34,6 +39,8 @@ class DubbingConfig:
             raise ValueError("gap_tolerance_ms must be >= 0")
         if not (1.0 <= self.speed_accept <= self.speed_max <= 2.0):
             raise ValueError("invalid dubbing speed policy")
+        if self.emergency_speed_max < self.speed_max:
+            raise ValueError("emergency_speed_max must be >= speed_max")
         if self.rewrite_max_attempts < 0:
             raise ValueError("rewrite_max_attempts must be >= 0")
 
@@ -320,10 +327,20 @@ def fit_timeline(
     plan: list[PlanItem],
     chunks: list[DubbingChunk],
     config: DubbingConfig,
+    *,
+    soft_overflow_chunk_ids: set[int] | None = None,
 ) -> tuple[list[PlanItem], list[DubbingChunk], DubbingReport]:
-    """Fit measured chunk audio and redistribute fitted time to cue items."""
+    """Fit measured chunk audio and redistribute fitted time to cue items.
+
+    A chunk listed in ``soft_overflow_chunk_ids`` already exhausted every
+    fitting strategy and sits between the normal ceiling and the emergency
+    ceiling. It is fitted up to the emergency ceiling rather than being forced
+    back to ``speed_max`` (which would still overflow its window) and is
+    reported separately from a hard overflow.
+    """
     config.validate()
     report = DubbingReport()
+    soft_ids = soft_overflow_chunk_ids or set()
     last_end = 0
 
     for chunk in chunks:
@@ -349,9 +366,13 @@ def fit_timeline(
                 f"chunk {chunk.id} speed {speed:.2f} exceeds max {config.speed_max:.2f}"
             )
 
-        # Never silently force beyond the quality ceiling. Caller must rewrite,
-        # regenerate, or route to review before assembly.
-        applied = min(speed, config.speed_max)
+        # Never silently force beyond the quality ceiling. A soft-overflow chunk
+        # is allowed up to the emergency ceiling ONLY because it was already
+        # classified for mandatory human review before this call.
+        ceiling = config.speed_max
+        if chunk.id in soft_ids:
+            ceiling = config.emergency_speed_max
+        applied = min(speed, ceiling)
         chunk.speed_factor = applied
         fitted_total = round(chunk.actual_duration_ms / applied)
 

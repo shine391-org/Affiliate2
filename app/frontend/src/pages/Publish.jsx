@@ -16,7 +16,7 @@ import useAppStore from "../store/appStore"
 
 const terminal = (status) => ["success", "failed", "cancelled"].includes(status)
 const STATUS_LABELS = { ready: "Sẵn sàng", uploaded: "Đã tải lên", pending: "Đang chờ", running: "Đang chạy", success: "Hoàn tất", failed: "Thất bại", cancelled: "Đã hủy" }
-const SOURCE_LABELS = { generated: "Đã tạo", smart_video: "Video thông minh", clip_extraction: "Clip", smart_cut: "Cắt thông minh", motion_graphics: "Đồ họa chuyển động" }
+const SOURCE_LABELS = { generated: "Đã tạo", smart_video: "Video thông minh", clip_extraction: "Clip", smart_cut: "Cắt thông minh", localization: "Bản địa hóa", motion_graphics: "Đồ họa chuyển động" }
 
 function PlatformCard({ name, connected, reconnect = false, connectLabel, onConnect, onPublish, busy, published, hint, children }) {
   return (

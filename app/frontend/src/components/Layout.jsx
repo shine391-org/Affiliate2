@@ -68,6 +68,7 @@ export default function Layout() {
   // moment a user had more.
   const { jobs: allJobs, jobTotal, fetchJobs } = useJobs(5000, 200)
   const activity = useMemo(() => allJobs.map(activityFromJob), [allJobs])
+  const attentionJobCount = activity.filter((job) => job.state === "attention").length
   // The poll backs off when nothing is in flight, but the WebSocket knows about
   // a new job immediately (job_started → activeJobs). Without this nudge, a run
   // you just started could be missing from Activity long enough to read as
@@ -95,7 +96,7 @@ export default function Layout() {
   const renderNavItem = ({ to, icon, label, activeRoot }) => {
     const active = isActive(to, activeRoot)
     const isCollapsed = collapsed && !isNarrow
-    const renderedIcon = (to === "/library" && runningJobCount > 0)
+    const renderedIcon = (to === "/library" && (runningJobCount > 0 || attentionJobCount > 0))
       ? <Badge color="warning" variant="dot">{icon}</Badge>
       : icon
     const button = (
@@ -208,7 +209,7 @@ export default function Layout() {
       {/* Work in flight, from any route. The job log used to be a Library tab,
           so the only way to answer "is my clip still rendering?" was to
           navigate away from whatever you were doing. */}
-      {runningJobCount > 0 && (
+      {(runningJobCount > 0 || attentionJobCount > 0) && (
         <Box sx={{ px: collapsed && !isNarrow ? 0.75 : 1.5, pb: 1 }}>
           <Tooltip title="Hiện hoạt động" placement="right" arrow>
             <ListItemButton onClick={openActivity} aria-label="Hiện hoạt động"
@@ -222,7 +223,9 @@ export default function Layout() {
               </Badge>
               {!(collapsed && !isNarrow) && (
                 <Typography sx={{ fontSize: "0.78rem", fontWeight: 600 }}>
-                  {runningJobCount} job{runningJobCount === 1 ? "" : "s"} running
+                  {attentionJobCount > 0
+                    ? `${attentionJobCount} tác vụ chờ thao tác${runningJobCount > 0 ? ` · ${runningJobCount} đang chạy` : ""}`
+                    : `${runningJobCount} tác vụ đang chạy`}
                 </Typography>
               )}
             </ListItemButton>
@@ -338,6 +341,10 @@ export default function Layout() {
           closeActivity()
           navigate(`/library?open=${encodeURIComponent(key)}`)
         }}
+        onOpenAction={(href) => {
+          closeActivity()
+          navigate(href)
+        }}
         onCancel={async (jobId) => {
           try {
             await http.delete(`/api/jobs/${jobId}`)
@@ -355,12 +362,15 @@ export default function Layout() {
           // Removing a running row therefore takes two calls.
           try {
             await http.delete(`/api/jobs/${job.id}`)
-            if (job.state === "running") {
+            if (job.state === "running" || job.attention_kind === "translation_review") {
               removeJob(job.id)
-              // The second call removes the now-cancelled row. A 409 means it
-              // backs a Library file — surface that rather than swallow it.
+              // Running work and a human-review pause are cancelled first; the
+              // second call removes the now-cancelled activity row.
               await http.delete(`/api/jobs/${job.id}`).catch(() => {})
-              showSnackbar("Đã hủy và xóa tác vụ", "info")
+              showSnackbar(
+                job.attention_kind === "translation_review" ? "Đã hủy tác vụ đang chờ duyệt" : "Đã hủy và xóa tác vụ",
+                "info",
+              )
             } else {
               showSnackbar("Đã xóa tác vụ", "info")
             }

@@ -172,15 +172,42 @@ def evaluate_localization_qc(
             "segment_ids": untranslated[:50],
         })
 
-    overflow = [
+    overflow_all = [
         issue for issue in (timing_issues or [])
         if issue.get("reason") in {"timing_overflow", "speed_limit_exceeded"}
     ]
-    if overflow:
+    # A soft overflow is bounded and already rendered, but it is NOT a pass:
+    # it is a review warning that carries both ceilings so Studio can explain
+    # exactly why a human acknowledgement is required before Publish.
+    soft_overflow = [issue for issue in overflow_all if issue.get("soft_overflow") is True]
+    hard_overflow = [issue for issue in overflow_all if issue.get("soft_overflow") is not True]
+    if soft_overflow:
+        warnings.append({
+            "code": "timing_overflow_soft",
+            "count": len(soft_overflow),
+            "required_speed": max(
+                float(issue.get("required_speed") or 1.0) for issue in soft_overflow
+            ),
+            "speed_max": soft_overflow[0].get("speed_max"),
+            "emergency_speed_max": soft_overflow[0].get("emergency_speed_max"),
+            "chunk_ids": [issue.get("chunk_id") for issue in soft_overflow][:30],
+            "segment_ids": [
+                segment_id
+                for issue in soft_overflow
+                for segment_id in (issue.get("segment_ids") or [])
+            ][:50],
+            "issues": soft_overflow[:30],
+            "message": (
+                "Dubbing exceeded the normal speed ceiling but stayed inside the "
+                "emergency ceiling after every fitting strategy was exhausted. "
+                "Human cadence review is required before this revision can publish."
+            ),
+        })
+    if hard_overflow:
         failures.append({
             "code": "timing_overflow",
-            "count": len(overflow),
-            "issues": overflow[:30],
+            "count": len(hard_overflow),
+            "issues": hard_overflow[:30],
         })
 
     if check_tts_quality and (profile.tts_provider or "").strip().lower() == "edge_tts":
@@ -264,6 +291,10 @@ def evaluate_localization_qc(
         })
 
     status = "FAILED" if failures else ("NEEDS_REVIEW" if warnings else "READY")
+    if soft_overflow and status == "READY":
+        # Explicit invariant: a bounded soft overflow can never be reported as a
+        # clean pass, whatever other thresholds happen to say.
+        status = "NEEDS_REVIEW"
     if profile.qc_profile == "strict" and warnings and status == "NEEDS_REVIEW":
         # Strict does not turn every warning into a fatal render failure; it
         # blocks automatic publish by keeping the output in review.

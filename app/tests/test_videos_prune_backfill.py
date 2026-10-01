@@ -180,3 +180,153 @@ class TestMissingArtifactContract:
         out = _list(limit=10)
         assert _ids(out) == ["draft"]
         assert out["videos"][0]["artifact_missing"] is False
+
+class TestSafeDeletion:
+    def test_deleting_one_legacy_duplicate_row_keeps_shared_file_for_other_row(self, tmp_path):
+        from backend.api.videos import delete_video
+        from backend.database import AsyncSessionLocal
+        from backend.models.generated_video import GeneratedVideo
+
+        shared = tmp_path / "shared-delete.mp4"
+        # delete_video intentionally refuses outside STORAGE_ROOT, so put the
+        # regression file inside the real storage tree.
+        from backend.config import settings
+        shared = settings.STORAGE_ROOT / "tools" / "out" / f"{MARKER}-shared.mp4"
+        shared.parent.mkdir(parents=True, exist_ok=True)
+        shared.write_bytes(b"shared-artifact")
+
+        first_id = asyncio.run(_insert("shared-a", str(shared), ago_seconds=1))
+        second_id = asyncio.run(_insert("shared-b", str(shared), ago_seconds=0))
+
+        async def run():
+            async with AsyncSessionLocal() as db:
+                await delete_video(first_id, db=db)
+                survivor = await db.get(GeneratedVideo, second_id)
+                return survivor
+
+        try:
+            survivor = asyncio.run(run())
+            assert survivor is not None
+            assert Path(survivor.video_path).is_file()
+            assert shared.is_file()
+        finally:
+            shared.unlink(missing_ok=True)
+
+    def test_delete_is_blocked_while_upload_job_is_pending(self):
+        import json
+
+        from fastapi import HTTPException
+        from backend.api.videos import delete_video
+        from backend.database import AsyncSessionLocal
+        from backend.models.job import Job
+
+        video_id = asyncio.run(_insert("upload-locked", None, ago_seconds=0))
+        job_id = f"{MARKER}-upload-job"
+
+        async def seed_and_try():
+            async with AsyncSessionLocal() as db:
+                db.add(Job(
+                    id=job_id,
+                    user_id="local",
+                    job_type="upload",
+                    status="pending",
+                    input_json=json.dumps({
+                        "generated_video_id": video_id,
+                        "platforms": ["youtube"],
+                    }),
+                ))
+                await db.commit()
+            try:
+                async with AsyncSessionLocal() as db:
+                    with pytest.raises(HTTPException) as exc:
+                        await delete_video(video_id, db=db)
+                    assert exc.value.status_code == 409
+                async with AsyncSessionLocal() as db:
+                    assert await db.get(GeneratedVideo, video_id) is not None
+            finally:
+                async with AsyncSessionLocal() as db:
+                    row = await db.get(Job, job_id)
+                    if row:
+                        await db.delete(row)
+                        await db.commit()
+
+        from backend.models.generated_video import GeneratedVideo
+        asyncio.run(seed_and_try())
+
+    def test_delete_is_blocked_when_publication_history_exists(self):
+        from fastapi import HTTPException
+        from backend.api.videos import delete_video
+        from backend.database import AsyncSessionLocal
+        from backend.models.generated_video import GeneratedVideo
+        from backend.models.phase_g import PublicationRecord
+
+        video_id = asyncio.run(_insert("publication-history", None, ago_seconds=0))
+
+        async def run():
+            async with AsyncSessionLocal() as db:
+                db.add(PublicationRecord(
+                    generated_video_id=video_id,
+                    platform="youtube",
+                    status="FAILED",
+                    mapping_status="mapped",
+                ))
+                await db.commit()
+            async with AsyncSessionLocal() as db:
+                with pytest.raises(HTTPException) as exc:
+                    await delete_video(video_id, db=db)
+                assert exc.value.status_code == 409
+            async with AsyncSessionLocal() as db:
+                assert await db.get(GeneratedVideo, video_id) is not None
+
+        asyncio.run(run())
+
+    def test_publish_approval_revoke_is_blocked_while_upload_pending(self):
+        import json
+
+        from fastapi import HTTPException
+        from backend.api.videos import PublishApprovalRequest, set_publish_approval
+        from backend.database import AsyncSessionLocal
+        from backend.models.generated_video import GeneratedVideo
+        from backend.models.job import Job
+
+        video_id = asyncio.run(_insert("approval-revoke-locked", None, ago_seconds=0))
+        job_id = f"{MARKER}-approval-upload"
+
+        async def run():
+            async with AsyncSessionLocal() as db:
+                video = await db.get(GeneratedVideo, video_id)
+                video.publish_approved_at = datetime.utcnow()
+                db.add(Job(
+                    id=job_id,
+                    user_id="local",
+                    job_type="upload",
+                    status="pending",
+                    input_json=json.dumps({
+                        "generated_video_id": video_id,
+                        "platforms": ["youtube"],
+                    }),
+                ))
+                await db.commit()
+
+            try:
+                async with AsyncSessionLocal() as db:
+                    with pytest.raises(HTTPException) as exc:
+                        await set_publish_approval(
+                            video_id,
+                            PublishApprovalRequest(approved=False),
+                            db=db,
+                        )
+                    assert exc.value.status_code == 409
+
+                async with AsyncSessionLocal() as db:
+                    video = await db.get(GeneratedVideo, video_id)
+                    assert video.publish_approved_at is not None
+            finally:
+                async with AsyncSessionLocal() as db:
+                    row = await db.get(Job, job_id)
+                    if row:
+                        await db.delete(row)
+                        await db.commit()
+
+        asyncio.run(run())
+

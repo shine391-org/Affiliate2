@@ -7,6 +7,24 @@ from backend.api import tools
 from backend.core.localization import LocalizationProfile
 
 
+async def _fake_claim(job_id: str, **_kwargs):
+    # Preserve each test's existing fake_inactive assertions/event recording.
+    await api._assert_job_inactive(job_id)
+    return {
+        "status": "failed",
+        "progress_pct": 0.0,
+        "current_step": None,
+        "error_message": None,
+        "started_at": None,
+        "completed_at": None,
+        "claimed_at": None,
+    }
+
+
+async def _fake_restore(_job_id: str, _token: dict):
+    return None
+
+
 @pytest.mark.asyncio
 async def test_localization_batch_coordinator_runs_jobs_sequentially(monkeypatch):
     active = 0
@@ -150,15 +168,24 @@ async def test_continue_after_translation_approves_same_run(monkeypatch):
     async def fake_inactive(job_id):
         events.append(("inactive", job_id))
 
-    async def fake_dispatch(run):
+    async def fake_dispatch(run, **_kwargs):
         events.append(("dispatch", run.job_id))
 
     fake_run = FakeRun()
     monkeypatch.setattr(api, "_assert_job_inactive", fake_inactive)
+    monkeypatch.setattr(api, "_claim_job_mutation", _fake_claim)
+    monkeypatch.setattr(api, "_restore_job_mutation", _fake_restore)
     monkeypatch.setattr(api, "_load_run", lambda job_id: fake_run)
     monkeypatch.setattr(api, "_dispatch_existing_run", fake_dispatch)
+    monkeypatch.setattr(
+        api, "_review_revision",
+        lambda run, stage, artifact: "translation-revision-123456",
+    )
 
-    result = await api.continue_after_translation_review("job-review")
+    result = await api.continue_after_translation_review(
+        "job-review",
+        api.ReviewApprovalRequest(revision="translation-revision-123456"),
+    )
 
     assert result["from_stage"] == "dubbing"
     assert fake_run.request["translation_review_approved"] is True
@@ -172,6 +199,7 @@ async def test_rerun_from_separation_rebinds_source_identity(monkeypatch):
 
     class FakeRun:
         job_id = "job-source-reset"
+        request = {}
 
         def first_incomplete_stage(self):
             return "dubbing"
@@ -182,14 +210,19 @@ async def test_rerun_from_separation_rebinds_source_identity(monkeypatch):
         def refresh_source_identity(self):
             events.append(("refresh_source_identity",))
 
+        def update_request(self, value):
+            self.request = value
+
     async def fake_inactive(job_id):
         events.append(("inactive", job_id))
 
-    async def fake_dispatch(run):
+    async def fake_dispatch(run, **_kwargs):
         events.append(("dispatch", run.job_id))
 
     fake_run = FakeRun()
     monkeypatch.setattr(api, "_assert_job_inactive", fake_inactive)
+    monkeypatch.setattr(api, "_claim_job_mutation", _fake_claim)
+    monkeypatch.setattr(api, "_restore_job_mutation", _fake_restore)
     monkeypatch.setattr(api, "_load_run", lambda job_id: fake_run)
     monkeypatch.setattr(api, "_dispatch_existing_run", fake_dispatch)
 
@@ -222,6 +255,7 @@ async def test_translation_rerun_distinguishes_auto_resume_from_explicit_recompu
 
     class FakeRun:
         job_id = "job-translation-rerun"
+        request = {}
 
         def first_incomplete_stage(self):
             return "translation"
@@ -232,13 +266,18 @@ async def test_translation_rerun_distinguishes_auto_resume_from_explicit_recompu
         def refresh_source_identity(self):
             raise AssertionError("translation rerun must not rebind source identity")
 
+        def update_request(self, value):
+            self.request = value
+
     async def fake_inactive(job_id):
         events.append(("inactive", job_id))
 
-    async def fake_dispatch(run):
+    async def fake_dispatch(run, **_kwargs):
         events.append(("dispatch", run.job_id))
 
     monkeypatch.setattr(api, "_assert_job_inactive", fake_inactive)
+    monkeypatch.setattr(api, "_claim_job_mutation", _fake_claim)
+    monkeypatch.setattr(api, "_restore_job_mutation", _fake_restore)
     monkeypatch.setattr(api, "_load_run", lambda job_id: FakeRun())
     monkeypatch.setattr(api, "_dispatch_existing_run", fake_dispatch)
 
@@ -301,12 +340,21 @@ async def test_existing_rerun_dispatches_persisted_effective_profile(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_explicit_tts_rebind_updates_only_tts_and_invalidates_from_dubbing(monkeypatch):
+@pytest.mark.parametrize("request_field,expected", [
+    ("voice_id", "vi-VN-HoaiMyNeural"),
+    ("regenerate_chunk_ids", []),
+])
+async def test_explicit_tts_rebind_updates_only_tts_and_invalidates_from_dubbing(
+    monkeypatch, request_field, expected,
+):
     events = []
 
     class FakeRun:
         job_id = "job-rebind-tts"
-        request = {"target_language": "Vietnamese", "mode": "full_dub"}
+        request = {
+            "target_language": "Vietnamese", "mode": "full_dub",
+            "voice_id": "old-manual-voice", "regenerate_chunk_ids": [2],
+        }
         effective_profile = {
             "id": "hq",
             "name": "HQ",
@@ -340,11 +388,13 @@ async def test_explicit_tts_rebind_updates_only_tts_and_invalidates_from_dubbing
             "tts_region": None,
         }
 
-    async def fake_dispatch(run):
+    async def fake_dispatch(run, **_kwargs):
         events.append(("dispatch", run.job_id))
 
     run = FakeRun()
     monkeypatch.setattr(api, "_assert_job_inactive", fake_inactive)
+    monkeypatch.setattr(api, "_claim_job_mutation", _fake_claim)
+    monkeypatch.setattr(api, "_restore_job_mutation", _fake_restore)
     monkeypatch.setattr(api, "_load_run", lambda job_id: run)
     monkeypatch.setattr(api, "_resolve_current_tts_binding", fake_binding)
     monkeypatch.setattr(api, "_dispatch_existing_run", fake_dispatch)
@@ -359,6 +409,7 @@ async def test_explicit_tts_rebind_updates_only_tts_and_invalidates_from_dubbing
     assert run.effective_profile["tts_voice"] == "vi-VN-HoaiMyNeural"
     assert run.effective_profile["translation_model"] == "qwen-translation"
     assert run.request["tts_binding_mode"] == "inherit"
+    assert run.request.get(request_field) == expected
     assert ("invalidate", "dubbing", True, set()) in events
     assert not any(event[0] == "invalidate" and event[1] != "dubbing" for event in events)
     assert events[-1] == ("dispatch", run.job_id)
@@ -389,7 +440,7 @@ async def test_tts_rebind_voice_override_still_invalidates_only_dubbing(monkeypa
             "tts_voice": voice_id, "tts_base_url": None, "tts_region": None,
         }
 
-    async def fake_dispatch(run):
+    async def fake_dispatch(run, **_kwargs):
         return None
 
     async def fake_inactive(job_id):
@@ -397,6 +448,8 @@ async def test_tts_rebind_voice_override_still_invalidates_only_dubbing(monkeypa
 
     run = FakeRun()
     monkeypatch.setattr(api, "_assert_job_inactive", fake_inactive)
+    monkeypatch.setattr(api, "_claim_job_mutation", _fake_claim)
+    monkeypatch.setattr(api, "_restore_job_mutation", _fake_restore)
     monkeypatch.setattr(api, "_load_run", lambda job_id: run)
     monkeypatch.setattr(api, "_resolve_current_tts_binding", fake_binding)
     monkeypatch.setattr(api, "_dispatch_existing_run", fake_dispatch)
@@ -450,7 +503,7 @@ async def test_tts_rebind_to_other_provider_drops_provider_scoped_voice_state(mo
             "tts_voice": "vi-VN-HoaiMyNeural", "tts_base_url": None, "tts_region": None,
         }
 
-    async def fake_dispatch(run):
+    async def fake_dispatch(run, **_kwargs):
         return None
 
     async def fake_inactive(job_id):
@@ -458,6 +511,8 @@ async def test_tts_rebind_to_other_provider_drops_provider_scoped_voice_state(mo
 
     run = FakeRun()
     monkeypatch.setattr(api, "_assert_job_inactive", fake_inactive)
+    monkeypatch.setattr(api, "_claim_job_mutation", _fake_claim)
+    monkeypatch.setattr(api, "_restore_job_mutation", _fake_restore)
     monkeypatch.setattr(api, "_load_run", lambda job_id: run)
     monkeypatch.setattr(api, "_resolve_current_tts_binding", fake_binding)
     monkeypatch.setattr(api, "_dispatch_existing_run", fake_dispatch)
@@ -543,11 +598,13 @@ async def test_rerender_updates_render_config_and_invalidates_only_final_render(
     async def fake_inactive(job_id):
         events.append(("inactive", job_id))
 
-    async def fake_dispatch(run):
+    async def fake_dispatch(run, **_kwargs):
         events.append(("dispatch", run.job_id))
 
     fake_run = FakeRun()
     monkeypatch.setattr(api, "_assert_job_inactive", fake_inactive)
+    monkeypatch.setattr(api, "_claim_job_mutation", _fake_claim)
+    monkeypatch.setattr(api, "_restore_job_mutation", _fake_restore)
     monkeypatch.setattr(api, "_load_run", lambda job_id: fake_run)
     monkeypatch.setattr(api, "_dispatch_existing_run", fake_dispatch)
 
@@ -581,6 +638,8 @@ async def test_rerender_rejects_non_normalized_or_invalid_mask_before_dispatch(m
         return None
 
     monkeypatch.setattr(api, "_assert_job_inactive", fake_inactive)
+    monkeypatch.setattr(api, "_claim_job_mutation", _fake_claim)
+    monkeypatch.setattr(api, "_restore_job_mutation", _fake_restore)
 
     with pytest.raises(api.HTTPException, match="normalized"):
         await api.rerender_localization_job(
@@ -599,11 +658,13 @@ async def test_rerender_rejects_invalid_mask_mode_before_dispatch(monkeypatch):
     async def fake_inactive(job_id):
         return None
 
-    async def fake_dispatch(run):
+    async def fake_dispatch(run, **_kwargs):
         nonlocal dispatched
         dispatched = True
 
     monkeypatch.setattr(api, "_assert_job_inactive", fake_inactive)
+    monkeypatch.setattr(api, "_claim_job_mutation", _fake_claim)
+    monkeypatch.setattr(api, "_restore_job_mutation", _fake_restore)
     monkeypatch.setattr(api, "_dispatch_existing_run", fake_dispatch)
 
     with pytest.raises(api.HTTPException, match="mode") as exc:
@@ -656,11 +717,13 @@ async def test_rerender_partial_update_preserves_existing_render_config(monkeypa
     async def fake_inactive(job_id):
         return None
 
-    async def fake_dispatch(run):
+    async def fake_dispatch(run, **_kwargs):
         return None
 
     fake_run = FakeRun()
     monkeypatch.setattr(api, "_assert_job_inactive", fake_inactive)
+    monkeypatch.setattr(api, "_claim_job_mutation", _fake_claim)
+    monkeypatch.setattr(api, "_restore_job_mutation", _fake_restore)
     monkeypatch.setattr(api, "_load_run", lambda job_id: fake_run)
     monkeypatch.setattr(api, "_dispatch_existing_run", fake_dispatch)
 
@@ -707,6 +770,8 @@ async def test_rerender_explicit_null_mask_disables_mask_and_resets_placement(mo
 
     fake_run = FakeRun()
     monkeypatch.setattr(api, "_assert_job_inactive", fake_noop)
+    monkeypatch.setattr(api, "_claim_job_mutation", _fake_claim)
+    monkeypatch.setattr(api, "_restore_job_mutation", _fake_restore)
     monkeypatch.setattr(api, "_load_run", lambda job_id: fake_run)
     monkeypatch.setattr(api, "_dispatch_existing_run", fake_noop)
 
@@ -753,6 +818,8 @@ async def test_rerender_explicit_null_caption_placement_resets_default(monkeypat
 
     fake_run = FakeRun()
     monkeypatch.setattr(api, "_assert_job_inactive", fake_noop)
+    monkeypatch.setattr(api, "_claim_job_mutation", _fake_claim)
+    monkeypatch.setattr(api, "_restore_job_mutation", _fake_restore)
     monkeypatch.setattr(api, "_load_run", lambda job_id: fake_run)
     monkeypatch.setattr(api, "_dispatch_existing_run", fake_noop)
 
@@ -806,10 +873,12 @@ async def test_rerender_blocks_when_upstream_is_not_ready(
     async def fake_inactive(job_id):
         return None
 
-    async def fake_dispatch(run):
+    async def fake_dispatch(run, **_kwargs):
         events.append(("dispatch", run.job_id))
 
     monkeypatch.setattr(api, "_assert_job_inactive", fake_inactive)
+    monkeypatch.setattr(api, "_claim_job_mutation", _fake_claim)
+    monkeypatch.setattr(api, "_restore_job_mutation", _fake_restore)
     monkeypatch.setattr(api, "_load_run", lambda job_id: FakeRun())
     monkeypatch.setattr(api, "_dispatch_existing_run", fake_dispatch)
 
@@ -848,11 +917,13 @@ async def test_rerender_accepts_canonical_ready_upstream(monkeypatch, mode):
     async def fake_inactive(job_id):
         return None
 
-    async def fake_dispatch(run):
+    async def fake_dispatch(run, **_kwargs):
         events.append(("dispatch", run.job_id))
 
     fake_run = FakeRun()
     monkeypatch.setattr(api, "_assert_job_inactive", fake_inactive)
+    monkeypatch.setattr(api, "_claim_job_mutation", _fake_claim)
+    monkeypatch.setattr(api, "_restore_job_mutation", _fake_restore)
     monkeypatch.setattr(api, "_load_run", lambda job_id: fake_run)
     monkeypatch.setattr(api, "_dispatch_existing_run", fake_dispatch)
 
@@ -1085,6 +1156,7 @@ async def test_rerun_dubbing_preserves_persisted_tts_binding(monkeypatch):
             "mode": "full_dub",
             "target_language": "Vietnamese",
             "tts_binding_mode": "pinned",
+            "regenerate_chunk_ids": [2],
         }
         effective_profile = {
             "translation_model": "keep-translation",
@@ -1104,18 +1176,23 @@ async def test_rerun_dubbing_preserves_persisted_tts_binding(monkeypatch):
         def refresh_source_identity(self):
             events.append(("refresh_source_identity",))
 
+        def update_request(self, value):
+            self.request = value
+
     async def fake_inactive(job_id):
         return None
 
     async def fail_rebind(*args, **kwargs):
         raise AssertionError("ordinary rerun must never inspect or rebind current TTS Settings")
 
-    async def fake_dispatch(run):
+    async def fake_dispatch(run, **_kwargs):
         events.append(("dispatch", run.job_id, run.effective_profile["tts_provider"]))
 
     run = FakeRun()
     original_profile = dict(run.effective_profile)
     monkeypatch.setattr(api, "_assert_job_inactive", fake_inactive)
+    monkeypatch.setattr(api, "_claim_job_mutation", _fake_claim)
+    monkeypatch.setattr(api, "_restore_job_mutation", _fake_restore)
     monkeypatch.setattr(api, "_load_run", lambda job_id: run)
     monkeypatch.setattr(api, "_describe_tts_bindings", fail_rebind)
     monkeypatch.setattr(api, "_resolve_current_tts_binding", fail_rebind)
@@ -1131,6 +1208,7 @@ async def test_rerun_dubbing_preserves_persisted_tts_binding(monkeypatch):
     assert result["from_stage"] == "dubbing"
     assert result["smart_retry"] is False
     assert run.effective_profile == original_profile
+    assert not run.request.get("regenerate_chunk_ids")
     assert events == [
         ("invalidate", "dubbing", True, set()),
         ("dispatch", run.job_id, "edge_tts"),
@@ -1155,17 +1233,22 @@ async def test_rerun_downstream_of_dubbing_does_not_rebind_tts(monkeypatch):
         def refresh_source_identity(self):
             raise AssertionError("render-only rerun must not refresh source")
 
+        def update_request(self, value):
+            self.request = value
+
     async def fake_inactive(job_id):
         return None
 
     async def fail_describe(run):
         raise AssertionError("render-only rerun must not inspect/rebind TTS")
 
-    async def fake_dispatch(run):
+    async def fake_dispatch(run, **_kwargs):
         events.append(("dispatch", run.job_id))
 
     run = FakeRun()
     monkeypatch.setattr(api, "_assert_job_inactive", fake_inactive)
+    monkeypatch.setattr(api, "_claim_job_mutation", _fake_claim)
+    monkeypatch.setattr(api, "_restore_job_mutation", _fake_restore)
     monkeypatch.setattr(api, "_load_run", lambda job_id: run)
     monkeypatch.setattr(api, "_describe_tts_bindings", fail_describe)
     monkeypatch.setattr(api, "_dispatch_existing_run", fake_dispatch)
@@ -1219,11 +1302,13 @@ async def test_smart_rerun_dubbing_targets_only_overflow_chunks(monkeypatch):
     async def fake_inactive(job_id):
         return None
 
-    async def fake_dispatch(run):
+    async def fake_dispatch(run, **_kwargs):
         events.append(("dispatch", run.job_id))
 
     run = FakeRun()
     monkeypatch.setattr(api, "_assert_job_inactive", fake_inactive)
+    monkeypatch.setattr(api, "_claim_job_mutation", _fake_claim)
+    monkeypatch.setattr(api, "_restore_job_mutation", _fake_restore)
     monkeypatch.setattr(api, "_load_run", lambda job_id: run)
     monkeypatch.setattr(api, "_dispatch_existing_run", fake_dispatch)
 
@@ -1254,6 +1339,8 @@ async def test_auto_repair_toggle_persists_on_same_job(monkeypatch):
 
     run = FakeRun()
     monkeypatch.setattr(api, "_assert_job_inactive", fake_inactive)
+    monkeypatch.setattr(api, "_claim_job_mutation", _fake_claim)
+    monkeypatch.setattr(api, "_restore_job_mutation", _fake_restore)
     monkeypatch.setattr(api, "_load_run", lambda job_id: run)
 
     enabled = await api.set_localization_auto_repair(
@@ -1331,3 +1418,58 @@ async def test_current_tts_rebind_keeps_saved_connection_endpoint_live(monkeypat
     assert binding["tts_voice"] == "vi-test"
     assert binding["tts_base_url"] is None
     assert binding["tts_region"] is None
+
+@pytest.mark.asyncio
+async def test_continue_after_translation_rejects_stale_review_revision(monkeypatch):
+    class FakeRun:
+        job_id = "job-stale-review"
+        request = {
+            "review_translation": True,
+            "translation_review_pending": True,
+            "translation_review_approved": False,
+        }
+
+        def is_complete(self, stage, artifacts=()):
+            return stage == "translation"
+
+    fake_run = FakeRun()
+    async def fake_inactive(job_id):
+        return None
+    monkeypatch.setattr(api, "_assert_job_inactive", fake_inactive)
+    monkeypatch.setattr(api, "_claim_job_mutation", _fake_claim)
+    monkeypatch.setattr(api, "_restore_job_mutation", _fake_restore)
+    monkeypatch.setattr(api, "_load_run", lambda job_id: fake_run)
+    monkeypatch.setattr(
+        api, "_review_revision",
+        lambda run, stage, artifact: "current-revision-123456",
+    )
+
+    with pytest.raises(Exception, match="đã thay đổi"):
+        await api.continue_after_translation_review(
+            "job-stale-review",
+            api.ReviewApprovalRequest(revision="stale-revision-123456"),
+        )
+
+def test_qc_review_revision_changes_when_final_video_bytes_change(tmp_path):
+    report = tmp_path / "report.json"
+    video = tmp_path / "final.mp4"
+    report.write_text('{"status":"NEEDS_REVIEW"}', encoding="utf-8")
+    video.write_bytes(b"AAAA")
+
+    class FakeRun:
+        def artifact(self, stage, key):
+            if (stage, key) == ("qc", "report"):
+                return report
+            if (stage, key) == ("final_render", "final_video"):
+                return video
+            return None
+
+    run = FakeRun()
+    before = api._qc_review_revision(run)
+    video.write_bytes(b"BBBB")  # same size, different bytes
+    after = api._qc_review_revision(run)
+
+    assert before
+    assert after
+    assert before != after
+

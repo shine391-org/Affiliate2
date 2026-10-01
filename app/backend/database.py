@@ -341,6 +341,12 @@ async def sweep_stale_jobs(grace_seconds: int = ZOMBIE_GRACE_SECONDS,
                 if not (job.updated_at is None or job.updated_at < cutoff):
                     still_live.append(job.id)      # fresh heartbeat — leave alone
                     continue
+
+                marker = str(job.task_id or "")
+                recovery_claim = (
+                    job.status == "pending"
+                    and marker.startswith("recovery_claim:")
+                )
                 res = await db.execute(
                     update(Job)
                     .where(
@@ -349,7 +355,12 @@ async def sweep_stale_jobs(grace_seconds: int = ZOMBIE_GRACE_SECONDS,
                     )
                     .values(
                         status="failed",
-                        error_message="Server restarted — job did not complete",
+                        task_id=None,
+                        error_message=(
+                            "Server restarted during a recovery action — retry from the persisted stage"
+                            if recovery_claim
+                            else "Server restarted — job did not complete"
+                        ),
                         completed_at=datetime.utcnow(),
                     )
                 )

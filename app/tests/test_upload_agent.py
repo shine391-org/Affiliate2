@@ -241,6 +241,62 @@ class TestPreconditions:
         assert "youtube" in providers["calls"]
 
 
+class TestCancellation:
+    def test_cancelled_before_runner_start_never_reaches_provider(self, ws, providers):
+        async def run():
+            from backend.agents.job_helper import update_job_status
+
+            await _make_settings(
+                youtube_credentials_json_encrypted=encrypt('{"token":"t"}')
+            )
+            vid = await _make_video()
+            jid = await _job()
+            await update_job_status(jid, "cancelled", current_step="Cancelled")
+            await UploadAgent().run(jid, vid, ["youtube"])
+            return await _job_row(jid), await _publication_rows(vid)
+
+        job, publications = asyncio.run(run())
+        assert job.status == "cancelled"
+        assert publications == []
+        assert "youtube" not in providers["calls"]
+
+    def test_cancel_after_publication_record_stops_before_provider(self, ws, providers, monkeypatch):
+        original = UploadAgent._create_publication_record
+
+        async def create_then_cancel(self, video, job_id, platform, settings, options=None):
+            from backend.agents.job_helper import update_job_status
+
+            record_id = await original(
+                self, video, job_id, platform, settings, options,
+            )
+            await update_job_status(
+                job_id, "cancelled", current_step="Cancelled before provider",
+            )
+            return record_id
+
+        monkeypatch.setattr(
+            UploadAgent,
+            "_create_publication_record",
+            create_then_cancel,
+        )
+
+        async def run():
+            await _make_settings(
+                youtube_credentials_json_encrypted=encrypt('{"token":"t"}')
+            )
+            vid = await _make_video()
+            jid = await _job()
+            await UploadAgent().run(jid, vid, ["youtube"])
+            return await _job_row(jid), await _publication_rows(vid)
+
+        job, publications = asyncio.run(run())
+        assert job.status == "cancelled"
+        assert "youtube" not in providers["calls"]
+        assert len(publications) == 1
+        assert publications[0].status == "FAILED"
+        assert "Cancelled before provider upload" in publications[0].error_message
+
+
 # ── per-platform success ────────────────────────────────────────────────────
 
 class TestSuccessfulUploads:

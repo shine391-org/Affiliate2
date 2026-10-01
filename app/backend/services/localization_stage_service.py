@@ -36,6 +36,97 @@ def _utc() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def compact_localization_workspace(job_id: str) -> int:
+    """Drop reconstructible heavy intermediates while preserving fast rerender.
+
+    Keep the immutable source, manifest, translation/QC/final artifacts and the
+    *declared* dubbing/audio-mix artifacts required by _assert_rerender_ready.
+    Raw TTS chunks, fitted variants, speaker references, Demucs stems and
+    ASR/semantic scratch are reconstructible and may be discarded.
+    """
+    parent = (settings.STORAGE_ROOT / "localization_jobs").resolve()
+    root = (parent / str(job_id)).resolve()
+    if not root.is_relative_to(parent) or root == parent:
+        raise ValueError("Unsafe localization workspace path")
+    manifest_path = root / "manifest.json"
+    if not root.exists() or not manifest_path.is_file():
+        return 0
+
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise RuntimeError(
+            f"Localization manifest is unreadable: {manifest_path}"
+        ) from exc
+
+    removed = 0
+
+    # These stages are never required for render-only replay once translation,
+    # dub_track and mixed_audio are durable.
+    for name in ("separation", "asr", "semantic"):
+        directory = root / name
+        if directory.exists():
+            shutil.rmtree(directory, ignore_errors=True)
+            if not directory.exists():
+                removed += 1
+
+    # Dubbing can contain hundreds of raw/fitted TTS files. Keep only the
+    # canonical artifacts named by the manifest (transcript, dub_track, plan,
+    # chunks); delete every other file/directory.
+    for stage in ("dubbing", "audio_mix"):
+        directory = root / stage
+        if not directory.exists():
+            continue
+
+        record = (data.get("stages") or {}).get(stage) or {}
+        keep: set[Path] = set()
+        for value in (record.get("artifacts") or {}).values():
+            try:
+                path = Path(value).resolve()
+            except (TypeError, OSError, ValueError):
+                continue
+            if path.is_relative_to(directory.resolve()):
+                keep.add(path)
+
+        for item in list(directory.iterdir()):
+            try:
+                resolved = item.resolve()
+            except OSError:
+                continue
+            if resolved in keep:
+                continue
+            if item.is_dir():
+                shutil.rmtree(item, ignore_errors=True)
+                if not item.exists():
+                    removed += 1
+            else:
+                try:
+                    item.unlink(missing_ok=True)
+                    removed += 1
+                except OSError:
+                    pass
+
+    return removed
+
+
+def cleanup_localization_workspace(job_id: str) -> bool:
+    """Delete one durable localization workspace after the owning job is deleted.
+
+    Cancellation alone intentionally keeps it resumable. This is only for an
+    explicit DELETE of the job/Library asset; otherwise Demucs stems, TTS chunks,
+    source snapshots and render candidates would survive forever after the row
+    that can reach them is gone.
+    """
+    parent = (settings.STORAGE_ROOT / "localization_jobs").resolve()
+    root = (parent / str(job_id)).resolve()
+    if not root.is_relative_to(parent) or root == parent:
+        raise ValueError("Unsafe localization workspace path")
+    if not root.exists():
+        return False
+    shutil.rmtree(root)
+    return True
+
+
 def _source_identity(path: Path) -> dict[str, Any]:
     """Return the content identity used to decide whether resume is safe.
 

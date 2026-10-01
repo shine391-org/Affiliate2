@@ -38,6 +38,10 @@ _EVENT_DATA_KEYS = (
 )
 
 _TERMINAL = {"success", "failed", "cancelled"}
+# A human-review pause is inactive like a terminal state for late progress
+# updates, but it is NOT finished: restart_job() may explicitly reopen it.
+_PAUSED = {"awaiting_review"}
+_QUIESCENT = _TERMINAL | _PAUSED
 _ACTIVE_JOB_DEDUPE_LOCK = asyncio.Lock()
 
 async def _notify_phase_f_job(job_type: str, status: str, user_id: str,
@@ -133,7 +137,9 @@ async def create_or_reuse_active_job(
     lock. The persisted _dedupe_key also lets a later request reuse an active
     row after a frontend refresh instead of starting another heavy pipeline.
 
-    Returns (job, reused). Terminal jobs never block a fresh run.
+    Returns (job, reused). Terminal jobs never block a fresh run. A human-review
+    pause does block an identical fresh run because it is the SAME unfinished
+    workflow waiting for user action.
     """
     if not dedupe_key:
         return await create_job(job_type, user_id, input_data), False
@@ -145,12 +151,19 @@ async def create_or_reuse_active_job(
         async with AsyncSessionLocal() as db:
             from sqlalchemy import select
 
+            candidate_statuses = ["pending", "running", "awaiting_review"]
+            # Only localization has the pre-fix "successful but actually paused"
+            # compatibility case. Do not scan historical success rows for every
+            # other deduped job type.
+            if job_type == "tool:translate":
+                candidate_statuses.append("success")
+
             active = (await db.execute(
                 select(Job)
                 .where(
                     Job.user_id == user_id,
                     Job.job_type == job_type,
-                    Job.status.in_(("pending", "running")),
+                    Job.status.in_(candidate_statuses),
                 )
                 .order_by(Job.created_at.desc())
             )).scalars().all()
@@ -160,8 +173,34 @@ async def create_or_reuse_active_job(
                     submitted = json.loads(existing.input_json or "{}")
                 except (TypeError, ValueError):
                     continue
-                if isinstance(submitted, dict) and submitted.get("_dedupe_key") == dedupe_key:
-                    return existing, True
+                if not (isinstance(submitted, dict) and submitted.get("_dedupe_key") == dedupe_key):
+                    continue
+                if existing.status == "success":
+                    # Pre-fix localization review checkpoints were incorrectly
+                    # finalized as success with a JSON marker. They are the same
+                    # unfinished workflow, not a completed request that should
+                    # allow a duplicate.
+                    if job_type != "tool:translate":
+                        continue
+                    try:
+                        legacy_out = json.loads(existing.output_json or "{}")
+                    except (TypeError, ValueError):
+                        legacy_out = {}
+                    if not (
+                        isinstance(legacy_out, dict)
+                        and legacy_out.get("translation_review_pending") is True
+                    ):
+                        # This is the newest matching request and it genuinely
+                        # finished. Do not skip past it and resurrect an even
+                        # older legacy review checkpoint with the same signature.
+                        break
+                    existing.status = "awaiting_review"
+                    existing.completed_at = None
+                    existing.current_step = "Chờ duyệt bản dịch"
+                    existing.progress_pct = min(float(existing.progress_pct or 50), 50.0)
+                    await db.commit()
+                    await db.refresh(existing)
+                return existing, True
 
             job = Job(
                 user_id=user_id,
@@ -191,17 +230,18 @@ async def update_job_status(
         result = await db.execute(select(Job).where(Job.id == job_id))
         job = result.scalar_one_or_none()
         if not job:
-            return
-        # Terminal-state guard. A finalised job (success/failed/cancelled) must
-        # never be reverted to "running" by a late progress update — this
-        # matters now that ws_manager.send_progress also writes the DB, so a
-        # stray progress event arriving after termination would otherwise
-        # resurrect the row (and hand the zombie sweep a fresh heartbeat on a
-        # job nobody is running). Updates AMONG terminal states are still
-        # allowed, which is what lets a mis-swept job self-heal: a draining
-        # predecessor's final "success" still lands over the sweep's "failed".
-        if job.status in _TERMINAL and status not in _TERMINAL:
-            return
+            return False
+        # Cancellation and human-review pause are explicit stop states and are
+        # sticky. A stale coroutine may finish a native call afterwards, but it
+        # must not emit success/failure/progress over either state. Explicit
+        # reopen paths use restart_job(), which performs the guarded SQL update.
+        if job.status in {"cancelled", "awaiting_review"} and status != job.status:
+            return False
+        # Other final/quiescent states must never be resurrected by a late
+        # progress tick. Updates among success/failed remain allowed so a
+        # draining predecessor can still self-heal a zombie-sweep race.
+        if job.status in _QUIESCENT and status not in _QUIESCENT:
+            return False
         prev_status = job.status
         job.status = status
         # Heartbeat: touch on EVERY accepted update, even when no other column
@@ -213,7 +253,11 @@ async def update_job_status(
         job.updated_at = datetime.utcnow()
         if progress_pct is not None:
             # Prevent progress regression (e.g. 95% → 50%) unless explicitly restarting
-            is_restart = status == "running" and progress_pct == 0
+            is_restart = (
+                prev_status != "running"
+                and status == "running"
+                and progress_pct == 0
+            )
             if is_restart or progress_pct >= (job.progress_pct or 0):
                 job.progress_pct = progress_pct
         if current_step is not None:
@@ -222,11 +266,28 @@ async def update_job_status(
             job.error_message = error_message
         if output_data is not None:
             job.output_json = json.dumps(output_data)
-        if status == "running" and not job.started_at:
-            job.started_at = datetime.utcnow()
+        if status == "running":
+            recovery_claim = str(job.task_id or "").startswith("recovery_claim:")
+            if recovery_claim:
+                # Preserve prior terminal metadata until a runner REALLY starts,
+                # so a process crash before dispatch can restore old state.
+                job.task_id = None
+                job.error_message = None
+                job.completed_at = None
+                job.started_at = datetime.utcnow()
+            elif not job.started_at:
+                job.started_at = datetime.utcnow()
+        elif str(job.task_id or "").startswith("recovery_claim:") and status != "pending":
+            job.task_id = None
         if status in ("success", "failed", "cancelled"):
             job.completed_at = datetime.utcnow()
+        elif status == "awaiting_review":
+            # C6 translation is complete, but the localization workflow is not.
+            # Keep the original started_at and do not stamp a fake completion.
+            job.completed_at = None
         await db.commit()
+
+        accepted = True
 
         # On the FIRST transition to success, emit a behavior event so the
         # personalization engine learns this action happened. Fire-and-forget;
@@ -241,6 +302,7 @@ async def update_job_status(
                 job.job_type, status, job.user_id, job.id, job.input_json,
                 job.output_json, job.error_message, job.current_step,
             ))
+        return accepted
 
 
 async def job_cancelled(job_id: str | None) -> bool:
@@ -272,31 +334,105 @@ async def job_cancelled(job_id: str | None) -> bool:
 
 
 
-async def restart_job(job_id: str) -> bool:
-    """Atomically reopen one terminal job for an explicit rerun.
+async def claim_job_for_restart(
+    job_id: str,
+    *,
+    allowed_statuses: set[str] | tuple[str, ...] | list[str] | None = None,
+) -> dict | None:
+    """Atomically claim an inactive job before mutating resumable state.
 
-    The conditional UPDATE is deliberate: two rapid rerun/regenerate requests
-    must not both turn into live coroutines writing the same manifest/artifacts.
+    The claim is persisted in task_id while status becomes pending. Crucially,
+    prior progress/error/timestamps/current_step survive until a background
+    runner really enters running. If the process dies between claim and
+    dispatch, boot recovery can restore the previous quiescent status.
+    """
+    from datetime import datetime
+    from uuid import uuid4
+    from sqlalchemy import select, update
+
+    allowed = set(allowed_statuses or ())
+    async with AsyncSessionLocal() as db:
+        job = (await db.execute(
+            select(Job).where(Job.id == job_id)
+        )).scalar_one_or_none()
+        if job is None:
+            return None
+        if job.status in {"running", "pending"}:
+            return None
+        if allowed and job.status not in allowed:
+            return None
+
+        previous_status = str(job.status)
+        marker = f"recovery_claim:{previous_status}:{uuid4().hex}"
+        token = {
+            "status": previous_status,
+            "task_id": job.task_id,
+            "progress_pct": job.progress_pct,
+            "current_step": job.current_step,
+            "error_message": job.error_message,
+            "started_at": job.started_at,
+            "completed_at": job.completed_at,
+            "updated_at": job.updated_at,
+            "marker": marker,
+        }
+
+        predicates = [Job.id == job_id, Job.status == job.status]
+        if job.updated_at is None:
+            predicates.append(Job.updated_at.is_(None))
+        else:
+            predicates.append(Job.updated_at == job.updated_at)
+
+        result = await db.execute(
+            update(Job)
+            .where(*predicates)
+            .values(
+                status="pending",
+                task_id=marker,
+                updated_at=datetime.utcnow(),
+            )
+        )
+        await db.commit()
+        if not result.rowcount:
+            return None
+        return token
+
+
+async def restore_job_restart_claim(job_id: str, token: dict) -> bool:
+    """Restore a claim that aborted before a runner was dispatched.
+
+    The marker, not updated_at, proves ownership. Control-plane actions may
+    legitimately update output_json while holding the claim, which touches the
+    heartbeat. Once a runner starts, update_job_status consumes the marker.
     """
     from datetime import datetime
     from sqlalchemy import update
+
+    marker = token.get("marker")
+    if not marker:
+        return False
 
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             update(Job)
             .where(
                 Job.id == job_id,
-                Job.status.notin_(("running", "pending")),
+                Job.status == "pending",
+                Job.task_id == marker,
             )
             .values(
-                status="pending",
-                progress_pct=0.0,
-                current_step="Queued for rerun",
-                error_message=None,
-                completed_at=None,
-                started_at=None,
+                status=token.get("status"),
+                task_id=token.get("task_id"),
+                progress_pct=token.get("progress_pct"),
+                current_step=token.get("current_step"),
+                error_message=token.get("error_message"),
+                started_at=token.get("started_at"),
+                completed_at=token.get("completed_at"),
                 updated_at=datetime.utcnow(),
             )
         )
         await db.commit()
         return bool(result.rowcount)
+
+async def restart_job(job_id: str) -> bool:
+    """Atomically reopen one inactive job for an explicit rerun."""
+    return await claim_job_for_restart(job_id) is not None

@@ -9,7 +9,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, StrictBool, StrictInt
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db
@@ -187,34 +187,117 @@ async def set_publish_approval(
     body: PublishApprovalRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """Explicit human gate for Phase-F publishing.
+    """Record/revoke approval for the exact GeneratedVideo artifact.
 
-    Approval never starts an upload. It only records that the operator reviewed
-    this exact GeneratedVideo and allows a later /upload action to run.
+    Expensive SHA-256 work happens outside SQLite's global write lock. The
+    locked phase re-reads canonical identity before committing the approval, so
+    a concurrent localization promotion cannot swap the row underneath it.
     """
     approved = body.approved
-    result = await db.execute(
-        select(GeneratedVideo).where(GeneratedVideo.id == video_id)
-    )
-    video = result.scalar_one_or_none()
-    if not video:
-        raise HTTPException(status_code=404, detail="Video not found")
+
+    artifact_hash = None
+    pre_path = None
     if approved:
+        from backend.agents.uploader import (
+            file_sha256,
+            localization_qc_publish_error,
+        )
+        from backend.database import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as pre_db:
+            pre_video = await pre_db.get(GeneratedVideo, video_id)
+            if not pre_video:
+                raise HTTPException(status_code=404, detail="Video not found")
+            if pre_video.status not in ("ready", "uploaded"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Video status is '{pre_video.status}', must be 'ready' or 'uploaded' before approval",
+                )
+            if not pre_video.video_path or not Path(pre_video.video_path).is_file():
+                raise HTTPException(status_code=400, detail="Video file not found on disk")
+            qc_error = localization_qc_publish_error(pre_video)
+            if qc_error:
+                raise HTTPException(status_code=409, detail=qc_error)
+            pre_path = str(Path(pre_video.video_path).resolve())
+
+        artifact_hash = await asyncio.to_thread(file_sha256, pre_path)
+
+    await db.execute(text("BEGIN IMMEDIATE"))
+    video = await db.get(GeneratedVideo, video_id)
+    if not video:
+        await db.rollback()
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    if approved:
+        from backend.agents.uploader import localization_qc_publish_error
+
         if video.status not in ("ready", "uploaded"):
+            await db.rollback()
             raise HTTPException(
-                status_code=400,
-                detail=f"Video status is '{video.status}', must be 'ready' or 'uploaded' before approval",
+                status_code=409,
+                detail="Video changed while approval was being prepared; refresh and review it again.",
             )
-        if not video.video_path or not Path(video.video_path).is_file():
-            raise HTTPException(status_code=400, detail="Video file not found on disk")
-        from backend.agents.uploader import file_sha256
-        artifact_hash = file_sha256(video.video_path)
+        if (
+            not video.video_path
+            or str(Path(video.video_path).resolve()) != pre_path
+            or not Path(video.video_path).is_file()
+        ):
+            await db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="Video artifact changed while approval was being prepared; refresh and review it again.",
+            )
+        qc_error = localization_qc_publish_error(video)
+        if qc_error:
+            await db.rollback()
+            raise HTTPException(status_code=409, detail=qc_error)
+
         video.artifact_sha256 = artifact_hash
         video.publish_approval_artifact_sha256 = artifact_hash
         video.publish_approved_at = datetime.utcnow()
     else:
+        from backend.models.job import Job
+        from backend.models.phase_g import PublicationRecord
+
+        active_uploads = (await db.execute(
+            select(Job).where(
+                Job.job_type == "upload",
+                Job.status.in_(["pending", "running"]),
+            )
+        )).scalars().all()
+        for upload_job in active_uploads:
+            try:
+                submitted = json.loads(upload_job.input_json or "{}")
+            except (TypeError, ValueError):
+                continue
+            if (
+                isinstance(submitted, dict)
+                and str(submitted.get("generated_video_id") or "") == video_id
+            ):
+                await db.rollback()
+                raise HTTPException(
+                    status_code=409,
+                    detail="Không thể thu hồi duyệt khi video đang có tác vụ xuất bản chạy/chờ.",
+                )
+
+        uncertain = (await db.execute(
+            select(PublicationRecord.id).where(
+                PublicationRecord.generated_video_id == video_id,
+                PublicationRecord.status.in_(
+                    ["PUBLISHING", "PERSISTENCE_ERROR", "OUTCOME_UNKNOWN"]
+                ),
+            )
+        )).first()
+        if uncertain:
+            await db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="Không thể thu hồi duyệt khi kết quả xuất bản chưa chắc chắn; hãy đối soát nền tảng trước.",
+            )
+
         video.publish_approved_at = None
         video.publish_approval_artifact_sha256 = None
+
     await db.commit()
     await db.refresh(video)
     return {
@@ -226,7 +309,6 @@ async def set_publish_approval(
         "publish_approval_artifact_sha256": video.publish_approval_artifact_sha256,
     }
 
-
 @router.post("/videos/{video_id}/upload")
 async def upload_video(video_id: str, body: dict, db: AsyncSession = Depends(get_db)):
     """Queue a canonical UploadAgent job only after the exact asset is ready."""
@@ -236,7 +318,6 @@ async def upload_video(video_id: str, body: dict, db: AsyncSession = Depends(get
         normalize_publish_platforms, published_destinations, disconnected_destinations,
         approved_artifact_error, uncertain_publication_destinations,
     )
-    from backend.agents.job_helper import create_job
     from backend.core.task_runner import run_upload as task_upload, dispatch
     from backend.models.user_settings import UserSettings
     from backend.models.job import Job
@@ -265,6 +346,31 @@ async def upload_video(video_id: str, body: dict, db: AsyncSession = Depends(get
             if value is not None
         }
 
+    # Hash/validate the approved artifact before taking SQLite's global
+    # write lock. UploadAgent repeats the exact-artifact check at execution time,
+    # so a file mutation after this preflight still fails closed before provider
+    # side effects.
+    from backend.database import AsyncSessionLocal
+    async with AsyncSessionLocal() as pre_db:
+        pre_video = await pre_db.get(GeneratedVideo, video_id)
+        if not pre_video:
+            raise HTTPException(status_code=404, detail="Video not found")
+        if pre_video.status not in ("ready", "uploaded"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Video status is '{pre_video.status}', must be 'ready' or 'uploaded'",
+            )
+        if not pre_video.publish_approved_at:
+            raise HTTPException(
+                status_code=403,
+                detail="Video must be explicitly approved for publishing first.",
+            )
+        pre_path = str(Path(pre_video.video_path).resolve()) if pre_video.video_path else None
+        pre_approval_hash = pre_video.publish_approval_artifact_sha256
+        artifact_error = await asyncio.to_thread(approved_artifact_error, pre_video)
+        if artifact_error:
+            raise HTTPException(status_code=409, detail=artifact_error)
+
     for meta_platform in ("facebook", "instagram"):
         if meta_platform not in platforms:
             continue
@@ -286,21 +392,35 @@ async def upload_video(video_id: str, body: dict, db: AsyncSession = Depends(get
         }
 
     async with _publish_queue_lock:
+        # asyncio.Lock only covers this interpreter. BEGIN IMMEDIATE serializes
+        # predecessor + replacement backends too, so duplicate-check and Job
+        # insertion are one cross-process critical section.
+        await db.execute(text("BEGIN IMMEDIATE"))
         video = await db.get(GeneratedVideo, video_id)
         if not video:
+            await db.rollback()
             raise HTTPException(status_code=404, detail="Video not found")
         await db.refresh(video)
         if video.status not in ("ready", "uploaded"):
-            raise HTTPException(status_code=400,
-                                detail=f"Video status is '{video.status}', must be 'ready' or 'uploaded'")
-        if not video.publish_approved_at:
-            raise HTTPException(status_code=403,
-                                detail="Video must be explicitly approved for publishing first.")
-        if not video.video_path:
-            raise HTTPException(status_code=400, detail="Video file path is missing")
-        artifact_error = approved_artifact_error(video)
-        if artifact_error:
-            raise HTTPException(status_code=409, detail=artifact_error)
+            await db.rollback()
+            raise HTTPException(status_code=409,
+                                detail="Video changed while publish was being queued; refresh and try again.")
+        if (
+            not video.publish_approved_at
+            or not video.video_path
+            or str(Path(video.video_path).resolve()) != pre_path
+            or video.publish_approval_artifact_sha256 != pre_approval_hash
+        ):
+            await db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="Video approval/artifact changed while publish was being queued; refresh and review it again.",
+            )
+        from backend.agents.uploader import localization_qc_publish_error
+        qc_error = localization_qc_publish_error(video)
+        if qc_error:
+            await db.rollback()
+            raise HTTPException(status_code=409, detail=qc_error)
         duplicates = set(platforms) & published_destinations(video)
         if duplicates:
             raise HTTPException(status_code=409,
@@ -335,11 +455,20 @@ async def upload_video(video_id: str, body: dict, db: AsyncSession = Depends(get
                     and set(submitted.get("platforms", [])) & set(platforms)):
                 raise HTTPException(status_code=409,
                                     detail=f"Publish job already pending/running: {existing.id}")
-        job = await create_job("upload", user_id, {
-            "generated_video_id": video_id,
-            "platforms": platforms,
-            "publish_options": publish_options,
-        })
+        job = Job(
+            user_id=user_id,
+            job_type="upload",
+            status="pending",
+            input_json=json.dumps({
+                "generated_video_id": video_id,
+                "platforms": platforms,
+                "publish_options": publish_options,
+            }),
+        )
+        db.add(job)
+        await db.commit()
+        await db.refresh(job)
+
         dispatch(task_upload(
             job_id=job.id,
             generated_video_id=video_id,
@@ -437,25 +566,160 @@ async def regenerate_thumbnail(video_id: str, db: AsyncSession = Depends(get_db)
     return {"ok": True, "thumbnail_path": str(thumb_path)}
 
 
+async def _generated_path_still_referenced(db: AsyncSession, path: Path) -> bool:
+    from backend.services.localization_publish_service import (
+        generated_path_still_referenced,
+    )
+    return await generated_path_still_referenced(db, path)
+
+
 @router.delete("/videos/{video_id}")
 async def delete_video(video_id: str, db: AsyncSession = Depends(get_db)):
-    """Delete a generated video and its files."""
-    result = await db.execute(
-        select(GeneratedVideo).where(GeneratedVideo.id == video_id)
-    )
-    video = result.scalar_one_or_none()
+    """Delete a generated video only when no publication/recovery is in flight."""
+    from backend.models.job import Job
+    from backend.models.phase_g import ContentAction, PublicationRecord
+    from backend.models.video_metrics import VideoMetrics
+
+    # Serialize the whole destructive preflight with any localization
+    # promotion/recovery write. Without the SQLite write lock, a rerun could
+    # claim the owning job immediately after this endpoint observed it idle.
+    await db.execute(text("BEGIN IMMEDIATE"))
+
+    video = await db.get(GeneratedVideo, video_id)
     if not video:
+        await db.rollback()
         raise HTTPException(status_code=404, detail="Video not found")
 
-    # Clean up files
-    for path_str in [video.video_path, video.audio_path, video.thumbnail_path]:
-        if path_str:
-            p = Path(path_str)
-            if p.exists():
-                p.unlink(missing_ok=True)
+    # Provider side effects may already be happening. Never remove the local
+    # artifact/row while an upload is queued/running or while provider outcome
+    # is uncertain; that destroys the evidence needed to reconcile the result.
+    active_uploads = (await db.execute(
+        select(Job).where(
+            Job.job_type == "upload",
+            Job.status.in_(["pending", "running"]),
+        )
+    )).scalars().all()
+    for upload_job in active_uploads:
+        try:
+            submitted = json.loads(upload_job.input_json or "{}")
+        except (TypeError, ValueError):
+            continue
+        if (
+            isinstance(submitted, dict)
+            and str(submitted.get("generated_video_id") or "") == video_id
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Video đang có tác vụ xuất bản chạy/chờ. Hãy chờ hoàn tất hoặc hủy tác vụ trước khi xóa.",
+            )
 
+    publication_history = (await db.execute(
+        select(PublicationRecord.id).where(
+            PublicationRecord.generated_video_id == video_id,
+        )
+    )).first()
+    metrics_history = (await db.execute(
+        select(VideoMetrics.id).where(
+            VideoMetrics.generated_video_id == video_id,
+        )
+    )).first()
+    action_rows = (await db.execute(
+        select(ContentAction).where(
+            ContentAction.generated_video_id == video_id,
+        )
+    )).scalars().all()
+    legacy_published = bool(
+        video.status == "uploaded"
+        or video.youtube_video_id
+        or video.tiktok_publish_id
+        or video.instagram_media_id
+        or bool(_safe_json(video.uploaded_platforms_json, []))
+    )
+    if publication_history or metrics_history or legacy_published:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Video này đã có lịch sử xuất bản/đo lường nên không thể xóa vật lý "
+                "mà không làm mất provenance. Hãy giữ bản ghi hoặc dùng luồng lưu trữ/archive."
+            ),
+        )
+
+    owner_job = None
+    if str(video.source_type or "").strip().lower() == "localization":
+        localization_jobs = (await db.execute(
+            select(Job).where(Job.job_type == "tool:translate")
+        )).scalars().all()
+        for candidate in localization_jobs:
+            try:
+                out = json.loads(candidate.output_json or "{}")
+            except (TypeError, ValueError):
+                continue
+            if (
+                isinstance(out, dict)
+                and str(out.get("generated_video_id") or "") == video_id
+            ):
+                owner_job = candidate
+                break
+
+        if owner_job is not None and owner_job.status in {
+            "pending", "running", "awaiting_review",
+        }:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Video này thuộc một tác vụ bản địa hóa chưa kết thúc. "
+                    "Hãy hủy/hoàn tất tác vụ đó trước khi xóa."
+                ),
+            )
+
+    paths = [
+        Path(path_str)
+        for path_str in (video.video_path, video.audio_path, video.thumbnail_path)
+        if path_str
+    ]
+    owner_job_id = owner_job.id if owner_job is not None else None
+
+    if owner_job is not None:
+        await db.delete(owner_job)
+    for action in action_rows:
+        action.generated_video_id = None
+        action.mapping_status = "unmapped_deleted"
     await db.delete(video)
     await db.commit()
+
+    # Delete bytes only after canonical DB deletion commits AND only when no
+    # remaining GeneratedVideo/Job still references that exact path. Legacy data
+    # can contain duplicate rows pointing at one physical file; deleting either
+    # row must not punch a hole in the other asset.
+    for path in paths:
+        try:
+            resolved = _safe_resolve_path(str(path))
+        except HTTPException:
+            logger.warning(
+                "Refusing to delete generated artifact outside storage: %s",
+                path,
+            )
+            continue
+        if await _generated_path_still_referenced(db, resolved):
+            continue
+        try:
+            resolved.unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Could not delete generated video artifact %s", resolved)
+
+    if owner_job_id:
+        try:
+            from backend.services.localization_stage_service import (
+                cleanup_localization_workspace,
+            )
+            cleanup_localization_workspace(owner_job_id)
+        except (OSError, ValueError):
+            logger.warning(
+                "Could not remove localization workspace for deleted video %s",
+                video_id,
+            )
+
     return {"ok": True}
 
 
