@@ -37,11 +37,31 @@ def test_planner_merges_short_adjacent_cues_like_opencreator():
     assert plan[2].chunk_id != plan[1].chunk_id
 
 
-def test_planner_does_not_merge_long_cues_only_because_gap_is_small():
+def test_planner_merges_long_cues_when_the_first_is_not_a_sentence_boundary():
     cfg = DubbingConfig()
     plan, chunks = build_plan([
-        _cue(1, 0, 3000, "first long sentence"),
+        _cue(1, 0, 3000, "first half of the same thought"),
+        _cue(2, 3200, 6200, "continues here without a sentence break"),
+    ], cfg)
+    assert len(chunks) == 1
+    assert chunks[0].item_indexes == [0, 1]
+    assert plan[0].chunk_id == plan[1].chunk_id
+
+
+def test_planner_keeps_long_complete_sentences_as_separate_tts_chunks():
+    cfg = DubbingConfig()
+    _, chunks = build_plan([
+        _cue(1, 0, 3000, "first long sentence."),
         _cue(2, 3200, 6200, "second long sentence"),
+    ], cfg)
+    assert len(chunks) == 2
+
+
+def test_planner_does_not_merge_long_continuation_across_a_real_pause():
+    cfg = DubbingConfig(gap_tolerance_ms=1500)
+    _, chunks = build_plan([
+        _cue(1, 0, 3000, "first half of the same thought"),
+        _cue(2, 3501, 6501, "continues after a real pause"),
     ], cfg)
     assert len(chunks) == 2
 
