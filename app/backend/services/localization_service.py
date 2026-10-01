@@ -2176,6 +2176,9 @@ async def synthesize_timed_dub(
         speed_accept=profile.dub_speed_accept,
         speed_max=profile.dub_speed_max,
         rewrite_max_attempts=profile.dub_rewrite_attempts,
+        # Emergency ceiling is NOT a quality limit: it only decides whether an
+        # already-exhausted chunk may still be rendered for human review.
+        emergency_speed_max=profile.dub_emergency_speed_max,
     )
     cues = []
     for i, seg in enumerate(valid_segments):
@@ -2491,18 +2494,35 @@ async def synthesize_timed_dub(
         _scale_chunks_for_video_slowdown(chunks, video_slowdown)
 
     unresolved: list[dict] = []
+    soft_overflow: list[dict] = []
     for chunk in chunks:
         speed = required_speed(chunk.actual_duration_ms, chunk.available_ms)
-        if speed > config.speed_max + 1e-6:
-            unresolved.append({
-                "chunk_id": chunk.id,
-                "reason": "timing_overflow",
-                "required_speed": round(speed, 4),
-                "speed_max": config.speed_max,
-                "available_ms": chunk.available_ms,
-                "tts_duration_ms": chunk.actual_duration_ms,
-                "segment_ids": [plan[i].segment_id for i in chunk.item_indexes],
+        if speed <= config.speed_max + 1e-6:
+            continue
+        issue = {
+            "chunk_id": chunk.id,
+            "reason": "timing_overflow",
+            "required_speed": round(speed, 4),
+            "speed_max": config.speed_max,
+            "available_ms": chunk.available_ms,
+            "tts_duration_ms": chunk.actual_duration_ms,
+            "segment_ids": [plan[i].segment_id for i in chunk.item_indexes],
+        }
+        if speed <= config.emergency_speed_max + 1e-6:
+            # Bounded soft overflow: every fitting strategy is already spent,
+            # the chunk can still be rendered inside its window, and the
+            # result is NOT publishable until a human acknowledges this
+            # exact QC revision. Both ceilings are persisted so Studio/QC
+            # can explain why review is required.
+            soft_overflow.append({
+                **issue,
+                "emergency_speed_max": round(config.emergency_speed_max, 4),
+                "soft_overflow": True,
+                "requires_human_review": True,
             })
+        else:
+            issue["emergency_speed_max"] = round(config.emergency_speed_max, 4)
+            unresolved.append(issue)
     if unresolved and fail_on_overflow:
         raise LocalizationTimingError(
             unresolved,
@@ -2529,8 +2549,14 @@ async def synthesize_timed_dub(
             },
         )
     issues.extend(unresolved)
+    issues.extend(soft_overflow)
 
-    fitted_plan, fitted_chunks, report = fit_timeline(plan, chunks, config)
+    fitted_plan, fitted_chunks, report = fit_timeline(
+        plan,
+        chunks,
+        config,
+        soft_overflow_chunk_ids={issue["chunk_id"] for issue in soft_overflow},
+    )
     report.rewrite_count = rewrite_count
 
     timed_chunks: list[tuple[int, Path]] = []
@@ -2558,6 +2584,11 @@ async def synthesize_timed_dub(
                 "segment_ids": [fitted_plan[i].segment_id for i in chunk.item_indexes],
             })
 
+    soft_overflow_segments = {
+        segment_id
+        for issue in soft_overflow
+        for segment_id in (issue.get("segment_ids") or [])
+    }
     item_by_segment = {item.segment_id: item for item in fitted_plan}
     for seg in out.segments:
         item = item_by_segment.get(seg.id)
@@ -2572,6 +2603,10 @@ async def synthesize_timed_dub(
             item.speed_factor > 1.001 or video_slowdown > 1.001
         ) else "fit"
         seg.qc_status = "review" if item.speed_factor > config.speed_accept else "pass"
+        if seg.id in soft_overflow_segments:
+            # A soft-overflow segment may never look clean to QC.
+            seg.qc_status = "review"
+            seg.timing_status = "overflow"
 
     total_duration_ms = max(
         round(source_duration_s * 1000 * video_slowdown),

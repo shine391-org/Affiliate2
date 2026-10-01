@@ -1821,6 +1821,16 @@ async def run_tool_translate(
                             "chunk_count": dub_chunk_count,
                             "max_raw_required_speed": max_dubbing_speed,
                             "max_fitted_speed_factor": max_fitted_dubbing_speed,
+                            # Both ceilings travel with the manifest so Studio/QC
+                            # can explain exactly why human review is required.
+                            "speed_max": profile.dub_speed_max,
+                            "emergency_speed_max": profile.dub_emergency_speed_max,
+                            "soft_overflow_chunk_ids": [
+                                issue.get("chunk_id")
+                                for issue in timing_issues
+                                if isinstance(issue, dict)
+                                and issue.get("soft_overflow") is True
+                            ],
                             "rewrite_count": dubbing_rewrite_count,
                             "rewrite_provider": profile.rewrite_provider,
                             "rewrite_model": profile.rewrite_model,

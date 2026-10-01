@@ -129,6 +129,12 @@ class LocalizationProfile(BaseModel):
     dub_gap_tolerance_ms: int = Field(default=1500, ge=0, le=5000)
     dub_speed_accept: float = Field(default=1.15, ge=1.0, le=2.0)
     dub_speed_max: float = Field(default=1.30, ge=1.0, le=2.0)
+    # Emergency hard ceiling, applied ONLY after rewrite, silence borrowing and
+    # bounded video retime are exhausted. Between dub_speed_max and this value a
+    # chunk is still rendered, but the overflow is persisted and QC is forced to
+    # NEEDS_REVIEW so a human must acknowledge the exact revision before
+    # Publish. It is never a silent quality downgrade and never a READY result.
+    dub_emergency_speed_max: float = Field(default=1.35, ge=1.0, le=1.5)
     dub_rewrite_attempts: int = Field(default=2, ge=0, le=5)
 
     audio_mode: Literal["hq_clean", "fast_duck"] = "hq_clean"
@@ -191,6 +197,10 @@ class LocalizationProfile(BaseModel):
     def validate_dubbing_policy(self):
         if self.dub_speed_accept > self.dub_speed_max:
             raise ValueError("dub_speed_accept must be <= dub_speed_max")
+        if self.dub_emergency_speed_max < self.dub_speed_max:
+            raise ValueError(
+                "dub_emergency_speed_max must be >= dub_speed_max"
+            )
         if self.video_retime_max_slowdown < 1.0:
             raise ValueError("video_retime_max_slowdown must be >= 1.0")
         if self.translation_total_timeout_s < self.translation_attempt_timeout_s:
