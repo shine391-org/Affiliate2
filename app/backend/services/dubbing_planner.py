@@ -54,6 +54,8 @@ class DubbingCue:
     text: str
     speaker_id: str | None = None
     voice_id: str | None = None
+    source_text: str = ""
+    timing_locked: bool = False
 
     @property
     def duration_ms(self) -> int:
@@ -78,6 +80,7 @@ class PlanItem:
     chunk_id: int = 0
     rewrite_attempts: int = 0
     warning: str = ""
+    timing_locked: bool = False
 
 
 @dataclass(slots=True)
@@ -104,7 +107,14 @@ class DubbingReport:
     rewrite_count: int = 0
 
 
-_STRONG_END = re.compile(r"[.!?。！？…][\"'”’」』）】》]*\s*$")
+_STRONG_END = re.compile(r"[.!?。！？…][\"'”’」』）】》)\]}»]*\s*$")
+
+# Semantic segmentation already treats gaps up to 350 ms as a continuous thought.
+# Preserve that continuity through TTS so a sentence split into two healthy-sized
+# cues does not become two independent syntheses with a prosody reset between them.
+_NATURAL_CONTINUATION_GAP_MS = 350
+_NATURAL_CONTINUATION_MAX_SPAN_MS = 8000
+_MAX_NATURAL_CUE_OVERLAP_MS = 120
 
 
 def clean_text_for_speech(text: str) -> str:
@@ -150,6 +160,7 @@ def build_plan(
     config: DubbingConfig,
     *,
     language: str = "Vietnamese",
+    timeline_end_ms: int | None = None,
 ) -> tuple[list[PlanItem], list[DubbingChunk]]:
     config.validate()
     ordered = sorted(cues, key=lambda x: (x.start_ms, x.index))
@@ -171,6 +182,7 @@ def build_plan(
             speaker_id=cue.speaker_id,
             voice_id=cue.voice_id,
             estimated_duration_ms=estimate_spoken_ms(cue.text, language),
+            timing_locked=cue.timing_locked,
         )
         for cue in ordered
     ]
@@ -189,27 +201,24 @@ def build_plan(
         prev = ordered[i - 1]
         cue = ordered[i]
         gap = cue.start_ms - prev.end_ms
-        should_merge_short = (
-            gap <= config.gap_tolerance_ms
-            and (
-                prev.duration_ms < config.min_cue_duration_ms
-                or cue.duration_ms < config.min_cue_duration_ms
-            )
+        natural_gap = (
+            -_MAX_NATURAL_CUE_OVERLAP_MS <= gap
+            <= min(config.gap_tolerance_ms, _NATURAL_CONTINUATION_GAP_MS)
         )
-        # Strong sentence boundaries are useful only when they do not strand
-        # a micro-cue. A very short following cue must remain mergeable with
-        # the previous chunk (same speaker/voice, within the gap tolerance),
-        # otherwise sub-second utterances can become impossible dubbing slots.
-        strong_boundary = (
-            bool(_STRONG_END.search(prev.text))
-            and prev.duration_ms >= config.min_cue_duration_ms
-            and cue.duration_ms >= config.min_cue_duration_ms
+        sentence_boundary = bool(
+            _STRONG_END.search(prev.text)
+            or _STRONG_END.search(prev.source_text or "")
         )
-        speaker_change = (
-            prev.speaker_id is not None
-            and cue.speaker_id is not None
-            and prev.speaker_id != cue.speaker_id
+        continuation_span_ms = max(current.end_ms, cue.end_ms) - current.start_ms
+        should_merge_continuation = (
+            not sentence_boundary
+            and natural_gap
+            and continuation_span_ms <= _NATURAL_CONTINUATION_MAX_SPAN_MS
         )
+        # Complete sentences are boundaries regardless of cue duration.
+        # Viability is handled separately, using actual silence budgets.
+        strong_boundary = sentence_boundary
+        speaker_change = prev.speaker_id != cue.speaker_id
         # An explicit voice override must never bleed into a neighbouring
         # default-voice cue (or vice versa). None is meaningful here: it means
         # "resolve the profile/speaker default", so None <-> explicit is a
@@ -217,7 +226,9 @@ def build_plan(
         voice_change = prev.voice_id != cue.voice_id
         must_split = (
             len(current.item_indexes) >= config.max_chunk_size
-            or not should_merge_short
+            or continuation_span_ms > _NATURAL_CONTINUATION_MAX_SPAN_MS
+            or not should_merge_continuation
+            or prev.timing_locked or cue.timing_locked
             or strong_boundary
             or speaker_change
             or voice_change
@@ -234,17 +245,15 @@ def build_plan(
             )
         else:
             current.item_indexes.append(i)
-            current.end_ms = cue.end_ms
+            current.end_ms = max(current.end_ms, cue.end_ms)
 
     chunks.append(current)
+    allocate_silence(plan, chunks, config, timeline_end_ms=timeline_end_ms)
 
-    # A hard max-size split can strand a final aligned syllable in a window
-    # far shorter than even its conservative speech estimate (real regression:
-    # b8193843 left Vietnamese "sẽ" in 20ms). When the split itself created an
-    # impossible singleton and no speaker/voice/gap boundary exists, merge that
-    # one cue back into the preceding chunk. The exceptional chunk is at most
-    # max_chunk_size + 1; preserving a viable speech window is more important
-    # than enforcing a soft synthesis batch size that created invalid timing.
+    # Only rescue a still-impossible continuation after allocating silence.
+    # Never join text across a real pause, sentence, speaker, voice or lock.
+    # A size/span split may still need one short continuation appended; that
+    # exception remains bounded by max_chunk_size + 1 and the span ceiling.
     for chunk_pos in range(len(chunks) - 1, 0, -1):
         chunk = chunks[chunk_pos]
         previous = chunks[chunk_pos - 1]
@@ -252,20 +261,45 @@ def build_plan(
             continue
         orphan_idx = chunk.item_indexes[0]
         orphan = plan[orphan_idx]
-        orphan_window_ms = orphan.original_end_ms - orphan.original_start_ms
+        orphan_window_ms = chunk.available_ms
         if orphan.estimated_duration_ms <= orphan_window_ms * config.speed_max:
             continue
         previous_last = ordered[previous.item_indexes[-1]]
         orphan_cue = ordered[orphan_idx]
+        orphan_gap = orphan_cue.start_ms - previous_last.end_ms
         if (
             previous_last.speaker_id != orphan_cue.speaker_id
             or previous_last.voice_id != orphan_cue.voice_id
-            or orphan_cue.start_ms - previous_last.end_ms > config.gap_tolerance_ms
+            or orphan_gap < -_MAX_NATURAL_CUE_OVERLAP_MS
+            or orphan_gap > min(config.gap_tolerance_ms, _NATURAL_CONTINUATION_GAP_MS)
+            or previous_last.timing_locked or orphan_cue.timing_locked
+            or _STRONG_END.search(previous_last.text)
+            or _STRONG_END.search(previous_last.source_text)
+        ):
+            continue
+        rescue_span_ms = max(previous.end_ms, chunk.end_ms) - previous.start_ms
+        if (
+            len(previous.item_indexes) >= config.max_chunk_size + 1
+            or previous.available_ms > _NATURAL_CONTINUATION_MAX_SPAN_MS
+            or (
+                rescue_span_ms > _NATURAL_CONTINUATION_MAX_SPAN_MS
+                and (
+                    orphan_window_ms >= config.min_cue_duration_ms
+                    or rescue_span_ms > (
+                        _NATURAL_CONTINUATION_MAX_SPAN_MS
+                        + config.gap_tolerance_ms + config.min_cue_duration_ms
+                    )
+                )
+            )
         ):
             continue
         previous.item_indexes.extend(chunk.item_indexes)
-        previous.end_ms = chunk.end_ms
+        previous.end_ms = max(previous.end_ms, chunk.end_ms)
         chunks.pop(chunk_pos)
+
+    # Rescue may remove an overlap pivot that capped a split chunk. Rebuild
+    # windows for the final grouping so that cap cannot truncate a merged cue.
+    allocate_silence(plan, chunks, config, timeline_end_ms=timeline_end_ms)
 
     # Merging an intermediate orphan removes a chunk, so normalize IDs before
     # persisting plans/artifact names and before targeted chunk regeneration can
@@ -277,6 +311,115 @@ def build_plan(
     return plan, chunks
 
 
+
+
+def allocate_silence(
+    plan: list[PlanItem],
+    chunks: list[DubbingChunk],
+    config: DubbingConfig,
+    *,
+    timeline_end_ms: int | None = None,
+    only_chunk_ids: set[int] | None = None,
+) -> list[DubbingChunk]:
+    """Demand-driven allocation on the same chunk timeline, before text rescue.
+
+    Prefer following silence so onset stays anchored; use preceding silence only
+    if necessary. Retain min(source gap, 350ms) at every separated speech boundary.
+    Recompute selected windows from source anchors on every call, reclaiming
+    estimated slack once measured audio is available. Spend trailing slack toward
+    1.0x first; only borrow before onset to reach the acceptable speed ceiling.
+    Borrow limits are relative to originals, not the previous allocation.
+    Expert timing locks are immutable. Insufficient budget remains an overflow
+    for the canonical rewrite/retime/QC path, never an excuse to erase a pause.
+    """
+    config.validate()
+    if timeline_end_ms is not None and timeline_end_ms < 0:
+        raise ValueError("timeline_end_ms must be >= 0")
+    original = [
+        (min(plan[idx].original_start_ms for idx in c.item_indexes),
+         max(plan[idx].original_end_ms for idx in c.item_indexes))
+        for c in chunks
+    ]
+    locked = [any(plan[idx].timing_locked for idx in c.item_indexes) for c in chunks]
+    immutable = [
+        locked[pos] or (only_chunk_ids is not None and c.id not in only_chunk_ids)
+        for pos, c in enumerate(chunks)
+    ]
+    for pos, chunk in enumerate(chunks):
+        if not immutable[pos]:
+            chunk.start_ms, chunk.end_ms = original[pos]
+
+    # Alignment may overlap by <=120ms even when a hard boundary forces split.
+    # Keep the later onset and cap the earlier flexible slot; if the earlier
+    # slot is immutable, move only the later flexible onset instead. Originals
+    # remain source coordinates, so measured retries normalize the same pivot.
+    for pos in range(1, len(chunks)):
+        previous, chunk = chunks[pos - 1], chunks[pos]
+        overlap = previous.end_ms - chunk.start_ms
+        if overlap <= 0:
+            continue
+        if immutable[pos - 1] and immutable[pos]:
+            reason = "expert timing conflict" if locked[pos - 1] and locked[pos] else "immutable timing conflict"
+            raise ValueError(f"{reason}: chunks {previous.id} and {chunk.id} overlap by {overlap}ms")
+        if overlap > _MAX_NATURAL_CUE_OVERLAP_MS:
+            raise ValueError(
+                f"chunk timestamp overlap {overlap}ms exceeds "
+                f"{_MAX_NATURAL_CUE_OVERLAP_MS}ms tolerance: chunks {previous.id} and {chunk.id}"
+            )
+        if not immutable[pos - 1]:
+            if chunk.start_ms <= previous.start_ms:
+                raise ValueError(f"timing conflict: chunk {previous.id} has no positive window after overlap normalization")
+            previous.end_ms = chunk.start_ms
+        else:
+            if previous.end_ms >= chunk.end_ms:
+                raise ValueError(f"timing conflict: chunk {chunk.id} has no positive window after overlap normalization")
+            chunk.start_ms = previous.end_ms
+    # Allocate the later cue first: it may need the tail of the preceding gap,
+    # which the preceding cue must not consume before that request is known.
+    for pos in range(len(chunks) - 1, -1, -1):
+        chunk = chunks[pos]
+        if only_chunk_ids is not None and chunk.id not in only_chunk_ids:
+            continue
+        if any(plan[idx].timing_locked for idx in chunk.item_indexes):
+            continue
+        start, end = original[pos]
+        duration = chunk.actual_duration_ms or sum(
+            plan[idx].estimated_duration_ms for idx in chunk.item_indexes
+        )
+        needed = max(0, duration - chunk.available_ms)
+        if not needed:
+            continue
+        span_limit = max(_NATURAL_CONTINUATION_MAX_SPAN_MS, end - start)
+        if pos + 1 < len(chunks):
+            source_gap = max(0, original[pos + 1][0] - end)
+            reserve = min(source_gap, _NATURAL_CONTINUATION_GAP_MS)
+            boundary = chunks[pos + 1].start_ms - reserve
+        else:
+            boundary = end if timeline_end_ms is None else timeline_end_ms
+        extension = max(0, min(
+            needed, boundary - chunk.end_ms,
+            end + config.gap_tolerance_ms - chunk.end_ms,
+            span_limit - chunk.available_ms,
+        ))
+        chunk.end_ms += extension
+        # Prefer a mild speed-up to moving onset unnecessarily. Following
+        # silence, when sufficient, has already provided the full natural slot.
+        needed = max(0, math.ceil(duration / config.speed_accept) - chunk.available_ms)
+        if not needed:
+            continue
+        if pos:
+            source_gap = max(0, start - original[pos - 1][1])
+            reserve = min(source_gap, _NATURAL_CONTINUATION_GAP_MS)
+            boundary = chunks[pos - 1].end_ms + reserve
+        else:
+            boundary = 0
+        extension = max(0, min(
+            needed, chunk.start_ms - boundary,
+            chunk.start_ms - max(0, start - config.gap_tolerance_ms),
+            span_limit - chunk.available_ms,
+        ))
+        chunk.start_ms -= extension
+    return chunks
 
 
 def borrow_following_silence(
