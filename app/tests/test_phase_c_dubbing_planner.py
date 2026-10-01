@@ -25,7 +25,7 @@ def _cue(index, start, end, text, speaker=None, voice=None, source=None):
     )
 
 
-def test_planner_merges_short_adjacent_cues_like_opencreator():
+def test_planner_keeps_viable_short_sentences_separate():
     cfg = DubbingConfig()
     plan, chunks = build_plan([
         _cue(1, 0, 800, "Yes."),
@@ -33,8 +33,8 @@ def test_planner_merges_short_adjacent_cues_like_opencreator():
         _cue(3, 5000, 6000, "next section"),
     ], cfg)
     assert len(plan) == 3
-    assert len(chunks) == 2
-    assert plan[0].chunk_id == plan[1].chunk_id
+    assert len(chunks) == 3
+    assert plan[0].chunk_id != plan[1].chunk_id
     assert plan[2].chunk_id != plan[1].chunk_id
 
 
@@ -106,12 +106,12 @@ def test_short_cue_merge_cannot_bypass_span_limit_real_tail():
 
 def test_span_split_still_rescues_impossible_micro_cue():
     _, chunks = build_plan([
-        _cue(1, 0, 7900, "a healthy previous cue"),
-        _cue(2, 8786, 8807, "Ừ"),
+        _cue(1, 0, 8000, "a healthy previous cue"),
+        _cue(2, 8000, 8021, "Ừ"),
     ], DubbingConfig())
     assert len(chunks) == 1
     assert chunks[0].item_indexes == [0, 1]
-    assert chunks[0].available_ms == 8807
+    assert chunks[0].available_ms == 8021
 
 
 def test_orphan_rescue_cannot_keep_growing_an_oversized_chunk():
@@ -120,8 +120,9 @@ def test_orphan_rescue_cannot_keep_growing_an_oversized_chunk():
         _cue(2, 8786, 8807, "Ừ"),
         _cue(3, 9693, 9714, "Ừ"),
     ], DubbingConfig())
-    assert [ch.item_indexes for ch in chunks] == [[0], [1, 2]]
+    assert [ch.item_indexes for ch in chunks] == [[0], [1], [2]]
     assert all(ch.available_ms <= 8000 for ch in chunks)
+    assert all(ch.available_ms * 1.30 >= 278 for ch in chunks[1:])
 
 
 def test_orphan_rescue_cannot_create_an_unbounded_span():
@@ -162,27 +163,29 @@ def test_compiled_strong_sentence_endings(ending):
     assert not _STRONG_END.search("first half of the same thought")
 
 
-def test_orphan_rescue_merges_real_21ms_cue_across_viability_gap():
+def test_orphan_real_pause_is_not_erased_by_text_rescue():
     _, chunks = build_plan([
         _cue(1, 245, 1019, "Cắt phần môi xuống cho tôi"),
         _cue(2, 1905, 1926, "Ừ"),
     ], DubbingConfig(), language="Vietnamese")
-    assert len(chunks) == 1
-    assert chunks[0].item_indexes == [0, 1]
-    assert (chunks[0].start_ms, chunks[0].end_ms) == (245, 1926)
+    assert [c.item_indexes for c in chunks] == [[0], [1]]
+    assert chunks[1].start_ms >= chunks[0].end_ms + 350
+    assert chunks[1].available_ms * 1.30 >= 278
 
 
-@pytest.mark.parametrize("gap,limit,merged", [
-    (1000, 1500, True), (1500, 1500, True), (1501, 1500, False),
-    (886, 800, False), (800, 800, True),
+@pytest.mark.parametrize("gap,limit", [
+    (1000, 1500), (1500, 1500), (1501, 1500), (886, 800), (800, 800),
 ])
-def test_orphan_rescue_uses_configured_viability_gap(gap, limit, merged):
+def test_orphan_allocation_respects_budget_without_erasing_pause(gap, limit):
     cfg = DubbingConfig(max_chunk_size=1, gap_tolerance_ms=limit)
     _, chunks = build_plan([
         _cue(1, 0, 1000, "first"),
         _cue(2, 1000 + gap, 1021 + gap, "Ừ"),
     ], cfg)
-    assert len(chunks) == (1 if merged else 2)
+    assert len(chunks) == 2
+    assert chunks[1].available_ms * cfg.speed_max >= 278
+    assert 1021 + gap - chunks[1].start_ms <= 21 + limit
+    assert chunks[1].start_ms - chunks[0].end_ms >= 350
 
 
 @pytest.mark.parametrize("speaker,voice", [("b", "v1"), ("a", "v2"), ("a", None), (None, "v1")])
@@ -222,15 +225,14 @@ def test_source_sentence_boundary_accepts_ascii_closing_parenthesis():
     assert len(chunks) == 2
 
 
-def test_planner_does_not_orphan_short_cue_after_strong_boundary():
+def test_viable_short_cue_after_sentence_boundary_remains_separate():
     cfg = DubbingConfig()
     plan, chunks = build_plan([
         _cue(1, 0, 3000, "First long sentence."),
         _cue(2, 3200, 3500, "ok"),
     ], cfg)
-    assert len(chunks) == 1
-    assert chunks[0].item_indexes == [0, 1]
-    assert plan[0].chunk_id == plan[1].chunk_id
+    assert [c.item_indexes for c in chunks] == [[0], [1]]
+    assert plan[0].chunk_id != plan[1].chunk_id
 
 
 def test_planner_respects_max_chunk_size():
@@ -260,7 +262,7 @@ def test_planner_rebalances_max_size_split_that_strands_impossible_micro_cue():
     assert plan[10].chunk_id == plan[15].chunk_id
 
 
-def test_planner_renumbers_chunks_after_rebalancing_an_intermediate_orphan():
+def test_planner_keeps_stable_ids_after_allocating_an_intermediate_orphan():
     cfg = DubbingConfig(max_chunk_size=2, gap_tolerance_ms=1500, speed_max=1.30)
     cues = [
         _cue(1, 0, 1000, "one", speaker="a"),
@@ -271,8 +273,9 @@ def test_planner_renumbers_chunks_after_rebalancing_an_intermediate_orphan():
 
     plan, chunks = build_plan(cues, cfg, language="Vietnamese")
 
-    assert [chunk.id for chunk in chunks] == [1, 2]
-    assert [item.chunk_id for item in plan] == [1, 1, 1, 2]
+    assert [chunk.id for chunk in chunks] == [1, 2, 3]
+    assert [item.chunk_id for item in plan] == [1, 1, 2, 3]
+    assert chunks[1].available_ms * cfg.speed_max >= plan[2].estimated_duration_ms
 
 
 def test_speaker_change_is_hard_chunk_boundary():

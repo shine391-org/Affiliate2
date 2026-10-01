@@ -351,7 +351,7 @@ async def test_c7_rewrite_prompt_keeps_locked_core_and_uses_its_own_profile_inst
 
 
 @pytest.mark.asyncio
-async def test_c7_short_whisper_cues_become_one_tts_chunk(monkeypatch, tmp_path):
+async def test_c7_short_sentences_stay_separate_but_continuations_merge(monkeypatch, tmp_path):
     tx = LocalizationTranscript(
         text="Yes and then continue",
         segments=[
@@ -370,7 +370,7 @@ async def test_c7_short_whisper_cues_become_one_tts_chunk(monkeypatch, tmp_path)
         ],
     )
     generated = []
-    calls = _patch_dub_io(monkeypatch, tmp_path, [1800], generated)
+    calls = _patch_dub_io(monkeypatch, tmp_path, [400, 1250], generated)
 
     result = await ls.synthesize_timed_dub(
         tx,
@@ -380,10 +380,11 @@ async def test_c7_short_whisper_cues_become_one_tts_chunk(monkeypatch, tmp_path)
         user_settings=object(),
         work_dir=tmp_path / "work",
     )
-    assert result.chunk_count == 1
-    assert calls["n"] == 1
-    assert "Có." in generated[0][0] and "và sau đó" in generated[0][0]
-    assert result.max_speed_factor < 1.1
+    assert result.chunk_count == 2
+    assert calls["n"] == 2
+    assert generated[0][0] == "Có."
+    assert generated[1][0] == "và sau đó tiếp tục"
+    assert result.max_speed_factor <= 1.15
     assert all(seg.target_start_ms is not None for seg in result.transcript.segments)
 
 
@@ -435,10 +436,12 @@ async def test_c7_last_chunk_borrows_trailing_silence_without_timing_override(
         user_settings=object(),
         work_dir=tmp_path / "work",
     )
-    # _patch_dub_io reports a 2s canonical source. The final chunk can borrow
-    # the 1.5s trailing silence because no expert timing boundary exists.
-    assert result.chunks[0].end_ms == 2000
-    assert result.chunks[0].available_ms == 2000
+    # Spend only the measured demand at natural speed, not all 1.5s silence.
+    assert result.chunks is not None
+    assert result.chunks[0].end_ms == 800
+    assert result.chunks[0].available_ms == 800
+    assert result.chunks[0].speed_factor == 1.0
+    assert result.chunks[0].start_ms == 0
 
 
 @pytest.mark.asyncio
@@ -508,6 +511,8 @@ async def test_c7_slowdown_accounts_for_integer_timestamp_rounding(monkeypatch, 
             id="s1", source_text="one", translated_text="một",
             source_start_ms=12765, source_end_ms=18817,
             translation_status="success",
+            # No silence budget: exercise rounding/ceiling, not allocation.
+            overrides={"target_start_ms": 12765, "target_end_ms": 18817},
         ),
     ])
     _patch_dub_io(monkeypatch, tmp_path, [8496])
@@ -533,6 +538,8 @@ async def test_c7_rounding_guard_does_not_hide_overflow_at_retime_ceiling(monkey
             id="s1", source_text="one", translated_text="một",
             source_start_ms=12765, source_end_ms=18817,
             translation_status="success",
+            # No silence budget: exercise rounding/ceiling, not allocation.
+            overrides={"target_start_ms": 12765, "target_end_ms": 18817},
         ),
     ])
     _patch_dub_io(monkeypatch, tmp_path, [10000])

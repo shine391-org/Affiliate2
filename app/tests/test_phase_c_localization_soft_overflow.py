@@ -61,23 +61,23 @@ class _StubUserSettings:
     tts_api_key = None
 
 
-async def _run_dub(tmp_path, *, measured_ms, retime="fallback", ceiling=1.12,
+async def _run_dub(tmp_path, monkeypatch, *, measured_ms, retime="fallback", ceiling=1.12,
                    storage_root=None, profile_updates=None):
     """Run the real C7 planner/retime/fit path with only TTS stubbed."""
     from backend.config import settings
     import backend.services.tts_service as tts_service
     import backend.services.video_utils as video_utils
 
-    settings.__class__.STORAGE_ROOT = property(lambda self: storage_root or tmp_path)
+    monkeypatch.setattr(settings.__class__, "STORAGE_ROOT", property(lambda self: storage_root or tmp_path))
 
     async def stub_generate_tts(text, *, output_path, **kwargs):
         _write_wav_ms(Path(output_path), measured_ms)
         return str(output_path)
 
-    tts_service.generate_tts = stub_generate_tts
-    video_utils.probe_duration = lambda p, at: (
+    monkeypatch.setattr(tts_service, "generate_tts", stub_generate_tts)
+    monkeypatch.setattr(video_utils, "probe_duration", lambda p, at: (
         15.0 if Path(p) == SAMPLE else measured_ms / 1000.0
-    )
+    ))
 
     profile = LocalizationProfile.model_validate({
         "id": "qa",
@@ -94,8 +94,15 @@ async def _run_dub(tmp_path, *, measured_ms, retime="fallback", ceiling=1.12,
     })
     work = tmp_path / "work"
     work.mkdir(parents=True, exist_ok=True)
+    transcript = _transcript()
+    # Isolate the ceiling policy from silence allocation. This is the same
+    # 1420ms pre-retime window previously obtained by spending all trailing
+    # silence; an explicit window now prevents borrowing on either side.
+    transcript.segments[0].overrides = {
+        "target_start_ms": 13580, "target_end_ms": 15000,
+    }
     return await svc.synthesize_timed_dub(
-        _transcript(),
+        transcript,
         source_media=SAMPLE,
         target_language="Vietnamese",
         profile=profile,
@@ -107,9 +114,9 @@ async def _run_dub(tmp_path, *, measured_ms, retime="fallback", ceiling=1.12,
 
 
 @pytest.mark.asyncio
-async def test_real_1_3132x_overflow_completes_and_records_both_ceilings(tmp_path):
+async def test_real_1_3132x_overflow_completes_and_records_both_ceilings(tmp_path, monkeypatch):
     """The real sample case: 2088ms speech in a 1590ms window needs 1.3132x."""
-    result = await _run_dub(tmp_path, measured_ms=2088)
+    result = await _run_dub(tmp_path, monkeypatch, measured_ms=2088)
 
     assert result.chunk_count == 1
     overflow = [
@@ -129,9 +136,9 @@ async def test_real_1_3132x_overflow_completes_and_records_both_ceilings(tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_over_emergency_ceiling_still_fails_hard(tmp_path):
+async def test_over_emergency_ceiling_still_fails_hard(tmp_path, monkeypatch):
     with pytest.raises(svc.LocalizationTimingError) as excinfo:
-        await _run_dub(tmp_path, measured_ms=4000)
+        await _run_dub(tmp_path, monkeypatch, measured_ms=4000)
     issues = excinfo.value.issues
     assert [issue["chunk_id"] for issue in issues] == [1]
     assert issues[0]["required_speed"] > 1.35
@@ -140,8 +147,8 @@ async def test_over_emergency_ceiling_still_fails_hard(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_within_normal_ceiling_is_unchanged(tmp_path):
-    result = await _run_dub(tmp_path, measured_ms=1800, retime="off", ceiling=1.0)
+async def test_within_normal_ceiling_is_unchanged(tmp_path, monkeypatch):
+    result = await _run_dub(tmp_path, monkeypatch, measured_ms=1800, retime="off", ceiling=1.0)
     assert not [
         issue for issue in result.issues if issue["reason"] == "timing_overflow"
     ]

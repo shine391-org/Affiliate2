@@ -36,7 +36,7 @@ from backend.services.dubbing_planner import (
     DubbingCue,
     PlanItem,
     atempo_filter,
-    borrow_following_silence,
+    allocate_silence,
     build_plan,
     chunk_text,
     estimate_spoken_ms,
@@ -2386,14 +2386,12 @@ async def synthesize_timed_dub(
             speaker_id=seg.speaker_id,
             voice_id=(str(override.get("voice_id")).strip() or None)
                 if override.get("voice_id") is not None else None,
+            timing_locked=any(key in override for key in ("target_start_ms", "target_end_ms")),
         ))
-    plan, chunks = build_plan(cues, config, language=target_language)
     segment_by_id = {seg.id: seg for seg in out.segments}
 
-    # Probe once up front so the planner can use real trailing source silence
-    # for an ordinary final chunk. An explicit expert timing override is a hard
-    # user boundary, so never extend that final chunk beyond its requested end.
-    # The same measured duration is reused later when composing the dub track.
+    # Probe before planning: trailing silence must be available before an orphan
+    # rescue can merge text. Reuse the same duration when composing the track.
     from backend.services.video_utils import probe_duration
     source_duration_s = await asyncio.to_thread(probe_duration, source_media, 0.0)
     source_duration_ms = (
@@ -2401,19 +2399,8 @@ async def synthesize_timed_dub(
         if source_duration_s > 0
         else None
     )
-    final_chunk_has_timing_override = bool(chunks) and any(
-        any(
-            key in (segment_by_id[plan[idx].segment_id].overrides or {})
-            for key in ("target_start_ms", "target_end_ms")
-        )
-        for idx in chunks[-1].item_indexes
-    )
-    chunks = borrow_following_silence(
-        chunks,
-        max_borrow_ms=min(profile.dub_gap_tolerance_ms, 1500),
-        timeline_end_ms=(
-            None if final_chunk_has_timing_override else source_duration_ms
-        ),
+    plan, chunks = build_plan(
+        cues, config, language=target_language, timeline_end_ms=source_duration_ms,
     )
 
     auto_references: dict[str, dict] = {}
@@ -2451,6 +2438,8 @@ async def synthesize_timed_dub(
         })
         rewrite_unavailable_recorded = True
 
+    rewrite_context: dict[int, tuple[int, dict]] = {}
+    allocation_ids = regenerate_chunk_ids if targeted_regeneration else None
     for chunk in chunks:
         speaker_id = _chunk_speaker(plan, chunk)
         explicit_voice = chunk.voice_id
@@ -2590,6 +2579,25 @@ async def synthesize_timed_dub(
                 reference_language=ref.get("language"),
             )
 
+        chunk.actual_duration_ms = duration_ms
+        rewrite_context[chunk.id] = (attempts, rewrite_state)
+
+    # Measure all neighbours before reclaiming provisional estimated slack.
+    # A shared gap must not be reserved by a later cue's outdated estimate and
+    # force an unnecessary measured rewrite of the current cue.
+    allocate_silence(
+        plan, chunks, config, timeline_end_ms=source_duration_ms,
+        only_chunk_ids=allocation_ids,
+    )
+    for chunk in chunks:
+        is_target_chunk = not targeted_regeneration or chunk.id in regenerate_chunk_ids
+        attempts, rewrite_state = rewrite_context[chunk.id]
+        duration_ms = chunk.actual_duration_ms
+        speaker_id = _chunk_speaker(plan, chunk)
+        voice = _voice_for_chunk(profile, runtime, speaker_id, chunk.voice_id)
+        path = raw_paths[chunk.id]
+        ref_key = speaker_id or "__default__"
+        ref = auto_references.get(ref_key) or auto_references.get("__default__") or {}
         while (
             is_target_chunk
             and not rewrite_disabled
@@ -2636,6 +2644,11 @@ async def synthesize_timed_dub(
                 reference_audio=ref.get("audio"),
                 reference_text=ref.get("text"),
                 reference_language=ref.get("language"),
+            )
+            chunk.actual_duration_ms = duration_ms
+            allocate_silence(
+                plan, chunks, config, timeline_end_ms=source_duration_ms,
+                only_chunk_ids=allocation_ids,
             )
         if (
             is_target_chunk
