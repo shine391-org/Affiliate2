@@ -17,6 +17,7 @@ import hashlib
 import json
 import logging
 import math
+import re
 import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -48,6 +49,18 @@ logger = logging.getLogger(__name__)
 _TRANSLATION_BATCH_SIZE = 12
 _CONTEXT_CHARS = 10_000
 _DUBBING_SYNTHESIS_RULES_VERSION = 1
+_EDGE_TTS_BOUNDARY_RULE = "edge-boundary-trim-v1"
+
+# Edge TTS often wraps very short utterances in relatively large digital
+# leading/trailing silence. Measuring that container padding as spoken duration
+# makes the timeline planner accelerate speech that is not actually long.
+# Trim only clearly silent boundaries, retain a small safety pad, and leave all
+# other providers untouched.
+_EDGE_TTS_TRIM_THRESHOLD_DB = -60
+_EDGE_TTS_TRIM_MIN_SILENCE_S = 0.12
+_EDGE_TTS_TRIM_START_PAD_S = 0.06
+_EDGE_TTS_TRIM_END_PAD_S = 0.08
+_EDGE_TTS_TRIM_MIN_SAVING_MS = 20
 
 _PRESET_INSTRUCTIONS = {
     "natural_vietnamese": (
@@ -1623,6 +1636,170 @@ async def _audio_duration_ms(path: Path) -> int:
     return max(0, round(float(seconds) * 1000))
 
 
+def _trim_edge_tts_boundary_silence_sync(
+    audio_path: Path,
+    raw_duration_ms: int,
+) -> int:
+    """Trim only leading/trailing digital silence from an Edge-TTS chunk.
+
+    First detect silence regions, then trim only regions touching the start or
+    end of the file. Internal pauses are deliberately preserved. A small pad is
+    retained on both sides so soft consonant onsets/tails are not clipped.
+    Failure is non-fatal: the original artifact/duration remains authoritative.
+    """
+    from backend.services.video_utils import probe_duration
+
+    if raw_duration_ms <= 0 or not audio_path.is_file():
+        return raw_duration_ms
+
+    duration_s = raw_duration_ms / 1000.0
+    detect_cmd = [
+        "ffmpeg", "-hide_banner", "-nostats",
+        "-i", str(audio_path),
+        "-af",
+        (
+            "silencedetect="
+            f"noise={_EDGE_TTS_TRIM_THRESHOLD_DB}dB:"
+            f"d={_EDGE_TTS_TRIM_MIN_SILENCE_S}"
+        ),
+        "-f", "null", "-",
+    ]
+    try:
+        detected = subprocess.run(
+            detect_cmd,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Edge TTS silence detection failed open for %s: %s",
+            audio_path.name,
+            exc,
+        )
+        return raw_duration_ms
+
+    if detected.returncode != 0:
+        logger.warning(
+            "Edge TTS silence detection skipped for %s: %s",
+            audio_path.name,
+            (detected.stderr or "")[-300:],
+        )
+        return raw_duration_ms
+
+    events: list[tuple[str, float]] = []
+    pattern = re.compile(r"silence_(start|end):\s*(-?\d+(?:\.\d+)?)")
+    for match in pattern.finditer(detected.stderr or ""):
+        try:
+            events.append((match.group(1), float(match.group(2))))
+        except ValueError:
+            continue
+
+    regions: list[tuple[float, float]] = []
+    open_start: float | None = None
+    for kind, value in events:
+        if kind == "start":
+            open_start = max(0.0, value)
+        elif open_start is not None:
+            regions.append((open_start, min(duration_s, max(open_start, value))))
+            open_start = None
+    # Some ffmpeg builds do not emit silence_end when EOF itself is silent.
+    if open_start is not None:
+        regions.append((open_start, duration_s))
+
+    trim_start_s = 0.0
+    trim_end_s = duration_s
+    if regions:
+        first_start, first_end = regions[0]
+        if first_start <= 0.03:
+            trim_start_s = max(0.0, first_end - _EDGE_TTS_TRIM_START_PAD_S)
+
+        last_start, last_end = regions[-1]
+        if last_end >= duration_s - 0.03:
+            trim_end_s = min(
+                duration_s,
+                last_start + _EDGE_TTS_TRIM_END_PAD_S,
+            )
+
+    if trim_end_s <= trim_start_s:
+        return raw_duration_ms
+
+    expected_duration_ms = round((trim_end_s - trim_start_s) * 1000)
+    if raw_duration_ms - expected_duration_ms < _EDGE_TTS_TRIM_MIN_SAVING_MS:
+        return raw_duration_ms
+
+    trimmed = audio_path.with_name(
+        audio_path.stem + ".boundary-trim.wav"
+    )
+    trimmed.unlink(missing_ok=True)
+    trim_cmd = [
+        "ffmpeg", "-y", "-loglevel", "error",
+        "-i", str(audio_path),
+        "-vn",
+        "-af",
+        (
+            f"atrim=start={trim_start_s:.6f}:end={trim_end_s:.6f},"
+            "asetpts=PTS-STARTPTS"
+        ),
+        "-ar", "48000", "-ac", "2",
+        "-c:a", "pcm_s16le",
+        str(trimmed),
+    ]
+
+    try:
+        result = subprocess.run(
+            trim_cmd,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if (
+            result.returncode != 0
+            or not trimmed.exists()
+            or trimmed.stat().st_size == 0
+        ):
+            logger.warning(
+                "Edge TTS boundary trim skipped for %s: %s",
+                audio_path.name,
+                (result.stderr or "")[-300:],
+            )
+            return raw_duration_ms
+
+        trimmed_duration_ms = max(
+            0,
+            round(float(probe_duration(trimmed, 0.0)) * 1000),
+        )
+        saved_ms = raw_duration_ms - trimmed_duration_ms
+        if (
+            trimmed_duration_ms <= 0
+            or trimmed_duration_ms > raw_duration_ms + 20
+            or saved_ms < _EDGE_TTS_TRIM_MIN_SAVING_MS
+        ):
+            return raw_duration_ms
+
+        trimmed.replace(audio_path)
+        logger.info(
+            "Edge TTS boundary trim: %s %dms -> %dms (saved %dms; "
+            "start=%.3fs end=%.3fs)",
+            audio_path.name,
+            raw_duration_ms,
+            trimmed_duration_ms,
+            saved_ms,
+            trim_start_s,
+            trim_end_s,
+        )
+        return trimmed_duration_ms
+    except Exception as exc:
+        logger.warning(
+            "Edge TTS boundary trim failed open for %s: %s",
+            audio_path.name,
+            exc,
+        )
+        return raw_duration_ms
+    finally:
+        trimmed.unlink(missing_ok=True)
+
+
 async def _generate_tts_chunk(
     text: str,
     *,
@@ -1659,6 +1836,13 @@ async def _generate_tts_chunk(
                 target_language=target_language,
             )
             duration = await _audio_duration_ms(output_path)
+            provider_value = getattr(runtime.provider, "value", str(runtime.provider))
+            if duration > 0 and provider_value == "edge_tts":
+                duration = await asyncio.to_thread(
+                    _trim_edge_tts_boundary_silence_sync,
+                    output_path,
+                    duration,
+                )
             if duration > 0:
                 return duration
             last = RuntimeError("TTS generated zero-duration audio")
@@ -1700,6 +1884,11 @@ def _chunk_synthesis_identity(
         "reference_text": reference_text,
         "reference_language": reference_language,
     }
+    # Only Edge TTS changed its raw-artifact post-processing contract. Include
+    # that rule in Edge identities so existing Edge chunks regenerate once,
+    # without forcing paid/clone providers to synthesize again.
+    if provider == "edge_tts":
+        payload["boundary_postprocess"] = _EDGE_TTS_BOUNDARY_RULE
     raw = json.dumps(
         payload,
         ensure_ascii=False,
