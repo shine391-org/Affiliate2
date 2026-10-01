@@ -105,7 +105,7 @@ class DubbingReport:
     rewrite_count: int = 0
 
 
-_STRONG_END = re.compile(r"[.!?。！？…][\"'”’」』）】》]*\s*$")
+_STRONG_END = re.compile(r"[.!?。！？…][\"'”’」』）】》)\\]}»]*\\s*$")
 
 # Semantic segmentation already treats gaps up to 350 ms as a continuous thought.
 # Preserve that continuity through TTS so a sentence split into two healthy-sized
@@ -279,10 +279,12 @@ def build_plan(
             continue
         previous_last = ordered[previous.item_indexes[-1]]
         orphan_cue = ordered[orphan_idx]
+        orphan_gap = orphan_cue.start_ms - previous_last.end_ms
         if (
             previous_last.speaker_id != orphan_cue.speaker_id
             or previous_last.voice_id != orphan_cue.voice_id
-            or orphan_cue.start_ms - previous_last.end_ms > config.gap_tolerance_ms
+            or orphan_gap < -_MAX_NATURAL_CUE_OVERLAP_MS
+            or orphan_gap > min(config.gap_tolerance_ms, _NATURAL_CONTINUATION_GAP_MS)
         ):
             continue
         previous.item_indexes.extend(chunk.item_indexes)
