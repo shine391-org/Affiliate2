@@ -199,6 +199,7 @@ async def test_rerun_from_separation_rebinds_source_identity(monkeypatch):
 
     class FakeRun:
         job_id = "job-source-reset"
+        request = {}
 
         def first_incomplete_stage(self):
             return "dubbing"
@@ -208,6 +209,9 @@ async def test_rerun_from_separation_rebinds_source_identity(monkeypatch):
 
         def refresh_source_identity(self):
             events.append(("refresh_source_identity",))
+
+        def update_request(self, value):
+            self.request = value
 
     async def fake_inactive(job_id):
         events.append(("inactive", job_id))
@@ -251,6 +255,7 @@ async def test_translation_rerun_distinguishes_auto_resume_from_explicit_recompu
 
     class FakeRun:
         job_id = "job-translation-rerun"
+        request = {}
 
         def first_incomplete_stage(self):
             return "translation"
@@ -260,6 +265,9 @@ async def test_translation_rerun_distinguishes_auto_resume_from_explicit_recompu
 
         def refresh_source_identity(self):
             raise AssertionError("translation rerun must not rebind source identity")
+
+        def update_request(self, value):
+            self.request = value
 
     async def fake_inactive(job_id):
         events.append(("inactive", job_id))
@@ -1157,6 +1165,9 @@ async def test_rerun_dubbing_preserves_persisted_tts_binding(monkeypatch):
         def refresh_source_identity(self):
             events.append(("refresh_source_identity",))
 
+        def update_request(self, value):
+            self.request = value
+
     async def fake_inactive(job_id):
         return None
 
@@ -1209,6 +1220,9 @@ async def test_rerun_downstream_of_dubbing_does_not_rebind_tts(monkeypatch):
 
         def refresh_source_identity(self):
             raise AssertionError("render-only rerun must not refresh source")
+
+        def update_request(self, value):
+            self.request = value
 
     async def fake_inactive(job_id):
         return None
@@ -1407,6 +1421,9 @@ async def test_continue_after_translation_rejects_stale_review_revision(monkeypa
             return stage == "translation"
 
     fake_run = FakeRun()
+    async def fake_inactive(job_id):
+        return None
+    monkeypatch.setattr(api, "_assert_job_inactive", fake_inactive)
     monkeypatch.setattr(api, "_claim_job_mutation", _fake_claim)
     monkeypatch.setattr(api, "_restore_job_mutation", _fake_restore)
     monkeypatch.setattr(api, "_load_run", lambda job_id: fake_run)

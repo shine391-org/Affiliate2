@@ -259,7 +259,8 @@ async def _promote_localization_output_unlocked(
             existing is not None
             and (
                 _already_published(existing)
-                or await _publication_is_live_or_uncertain(db, existing.id)
+                or await _publication_is_live_or_uncertain(db, str(existing.id))
+                or await _publication_identity_locked(db, str(existing.id))
             )
         )
         # A new unresolved/FAILED QC version must not replace the last READY
