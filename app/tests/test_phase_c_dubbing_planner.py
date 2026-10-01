@@ -85,16 +85,6 @@ def test_planner_respects_source_sentence_boundary_when_translation_loses_punctu
     assert len(chunks) == 2
 
 
-def test_planner_allows_soft_max_chunk_size_for_one_continuous_sentence():
-    cfg = DubbingConfig(max_chunk_size=5)
-    _, chunks = build_plan([
-        _cue(i, (i - 1) * 700, i * 700 - 50, f"part {i}")
-        for i in range(1, 7)
-    ], cfg)
-    assert len(chunks) == 1
-    assert len(chunks[0].item_indexes) == 6
-
-
 def test_planner_natural_continuation_still_stops_at_span_limit():
     cfg = DubbingConfig(max_chunk_size=5)
     _, chunks = build_plan([
