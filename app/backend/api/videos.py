@@ -567,36 +567,10 @@ async def regenerate_thumbnail(video_id: str, db: AsyncSession = Depends(get_db)
 
 
 async def _generated_path_still_referenced(db: AsyncSession, path: Path) -> bool:
-    """True when another canonical row/job still owns these exact local bytes."""
-    resolved = path.resolve()
-    generated = (await db.execute(select(GeneratedVideo))).scalars().all()
-    for row in generated:
-        for candidate in (row.video_path, row.audio_path, row.thumbnail_path):
-            if not candidate:
-                continue
-            try:
-                if Path(candidate).resolve() == resolved:
-                    return True
-            except (OSError, ValueError):
-                continue
-
-    from backend.models.job import Job
-    jobs = (await db.execute(
-        select(Job).where(Job.output_json.isnot(None))
-    )).scalars().all()
-    for row in jobs:
-        try:
-            output = json.loads(row.output_json or "{}")
-        except (TypeError, ValueError):
-            continue
-        if not isinstance(output, dict) or not output.get("file"):
-            continue
-        try:
-            if Path(output["file"]).resolve() == resolved:
-                return True
-        except (OSError, ValueError):
-            continue
-    return False
+    from backend.services.localization_publish_service import (
+        generated_path_still_referenced,
+    )
+    return await generated_path_still_referenced(db, path)
 
 
 @router.delete("/videos/{video_id}")

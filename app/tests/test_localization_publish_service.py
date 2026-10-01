@@ -475,6 +475,71 @@ async def test_stale_caller_pointer_cannot_duplicate_cross_process_promotion(sto
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("owner,reference_count,path_style", [
+    ("video_path", 2, "native"),
+    ("video_path", 1, "forward_slashes"),
+    ("video_path", 1, "dot_segment"),
+    ("video_path_landscape", 1, "native"),
+    ("job", 1, "native"),
+])
+async def test_promotion_preserves_shared_artifact_files(
+    storage_root, owner, reference_count, path_style,
+):
+    job_id, old_path = await _make_job(storage_root)
+    owner_job_id = str(uuid4())
+    shared_video_ids = []
+    try:
+        first = await publish.promote_localization_output(job_id)
+        old_id = first["generated_video_id"]
+        shared_path = old_path.resolve()
+        stored_path = str(shared_path)
+        if path_style == "forward_slashes":
+            stored_path = shared_path.as_posix()
+        elif path_style == "dot_segment":
+            stored_path = str(shared_path.parent) + "/./" + shared_path.name
+        async with AsyncSessionLocal() as db:
+            for _ in range(reference_count):
+                if owner == "job":
+                    db.add(Job(
+                        id=owner_job_id, job_type="tool:translate", status="success",
+                        output_json=json.dumps({"file": stored_path}),
+                    ))
+                else:
+                    shared_id = str(uuid4())
+                    shared_video_ids.append(shared_id)
+                    db.add(GeneratedVideo(
+                        id=shared_id, source_type="localization",
+                        **{owner: stored_path}, status="uploaded",
+                    ))
+            new_path = storage_root / f"{job_id}-replacement.mp4"
+            new_path.write_bytes(b"replacement-version")
+            job = await db.get(Job, job_id)
+            output = json.loads(job.output_json)
+            output["file"] = str(new_path)
+            job.output_json = json.dumps(output)
+            await db.commit()
+
+        result = await publish.promote_localization_output(job_id)
+        assert result["generated_video_id"] == old_id
+        assert result["publish_ready"] is True
+        assert old_path.exists(), "Another canonical record still owns these bytes"
+        async with AsyncSessionLocal() as db:
+            video = await db.get(GeneratedVideo, old_id)
+            assert video.video_path == str(new_path.resolve())
+    finally:
+        async with AsyncSessionLocal() as db:
+            for shared_id in shared_video_ids:
+                row = await db.get(GeneratedVideo, shared_id)
+                if row:
+                    await db.delete(row)
+            row = await db.get(Job, owner_job_id)
+            if row:
+                await db.delete(row)
+            await db.commit()
+        await _cleanup(job_id)
+
+
+@pytest.mark.asyncio
 async def test_failed_publication_attempt_freezes_generated_video_artifact_identity(storage_root):
     job_id, old_path = await _make_job(storage_root)
     old_id = None

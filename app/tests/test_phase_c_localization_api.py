@@ -340,12 +340,21 @@ async def test_existing_rerun_dispatches_persisted_effective_profile(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_explicit_tts_rebind_updates_only_tts_and_invalidates_from_dubbing(monkeypatch):
+@pytest.mark.parametrize("request_field,expected", [
+    ("voice_id", "vi-VN-HoaiMyNeural"),
+    ("regenerate_chunk_ids", []),
+])
+async def test_explicit_tts_rebind_updates_only_tts_and_invalidates_from_dubbing(
+    monkeypatch, request_field, expected,
+):
     events = []
 
     class FakeRun:
         job_id = "job-rebind-tts"
-        request = {"target_language": "Vietnamese", "mode": "full_dub"}
+        request = {
+            "target_language": "Vietnamese", "mode": "full_dub",
+            "voice_id": "old-manual-voice", "regenerate_chunk_ids": [2],
+        }
         effective_profile = {
             "id": "hq",
             "name": "HQ",
@@ -400,6 +409,7 @@ async def test_explicit_tts_rebind_updates_only_tts_and_invalidates_from_dubbing
     assert run.effective_profile["tts_voice"] == "vi-VN-HoaiMyNeural"
     assert run.effective_profile["translation_model"] == "qwen-translation"
     assert run.request["tts_binding_mode"] == "inherit"
+    assert run.request.get(request_field) == expected
     assert ("invalidate", "dubbing", True, set()) in events
     assert not any(event[0] == "invalidate" and event[1] != "dubbing" for event in events)
     assert events[-1] == ("dispatch", run.job_id)
@@ -1146,6 +1156,7 @@ async def test_rerun_dubbing_preserves_persisted_tts_binding(monkeypatch):
             "mode": "full_dub",
             "target_language": "Vietnamese",
             "tts_binding_mode": "pinned",
+            "regenerate_chunk_ids": [2],
         }
         effective_profile = {
             "translation_model": "keep-translation",
@@ -1197,6 +1208,7 @@ async def test_rerun_dubbing_preserves_persisted_tts_binding(monkeypatch):
     assert result["from_stage"] == "dubbing"
     assert result["smart_retry"] is False
     assert run.effective_profile == original_profile
+    assert not run.request.get("regenerate_chunk_ids")
     assert events == [
         ("invalidate", "dubbing", True, set()),
         ("dispatch", run.job_id, "edge_tts"),

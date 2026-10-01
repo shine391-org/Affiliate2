@@ -112,6 +112,39 @@ def _safe_storage_file(path_value: str | Path | None) -> Path | None:
         return None
 
 
+async def generated_path_still_referenced(db, path: Path) -> bool:
+    """Check physical path ownership, not non-unique/un-normalized SQL strings."""
+    resolved = path.resolve()
+    generated = (await db.execute(select(
+        GeneratedVideo.video_path,
+        GeneratedVideo.video_path_landscape,
+        GeneratedVideo.audio_path,
+        GeneratedVideo.thumbnail_path,
+    ))).all()
+    for row in generated:
+        for candidate in row:
+            if not candidate:
+                continue
+            try:
+                if Path(candidate).resolve() == resolved:
+                    return True
+            except (OSError, ValueError, TypeError):
+                continue
+
+    outputs = (await db.execute(
+        select(Job.output_json).where(Job.output_json.isnot(None))
+    )).scalars().all()
+    for raw in outputs:
+        try:
+            output = json.loads(raw)
+            if isinstance(output, dict) and output.get("file"):
+                if Path(output["file"]).resolve() == resolved:
+                    return True
+        except (OSError, ValueError, TypeError):
+            continue
+    return False
+
+
 def _publishable_qc(output: dict) -> bool:
     status = str(output.get("qc_status") or "").upper()
     if status == "READY":
@@ -340,16 +373,15 @@ async def _promote_localization_output_unlocked(
     cleanup_candidate = old_path or previous_path
     if cleanup_candidate and cleanup_candidate.resolve() != video_path.resolve():
         async with AsyncSessionLocal() as db:
-            referenced = (await db.execute(
-                select(GeneratedVideo.id).where(
-                    GeneratedVideo.video_path == str(cleanup_candidate)
-                )
-            )).scalar_one_or_none()
-        if referenced is None:
-            try:
-                cleanup_candidate.unlink(missing_ok=True)
-            except OSError:
-                pass
+            # Keep the ownership check and unlink under the same cross-process
+            # write lock used by promotion, so a new reference cannot race it.
+            await db.execute(text("BEGIN IMMEDIATE"))
+            if not await generated_path_still_referenced(db, cleanup_candidate):
+                try:
+                    cleanup_candidate.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            await db.commit()
 
     return {
         "promoted": True,

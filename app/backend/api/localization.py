@@ -1014,6 +1014,12 @@ async def rebind_localization_tts(job_id: str, body: TTSRebindRequest):
         run.update_request({
             **run.request,
             "tts_binding_mode": "inherit",
+            # The dispatcher forwards this manual override ahead of the
+            # effective profile; don't let the previous voice undo the rebind.
+            "voice_id": binding.get("tts_voice") or "",
+            # Rebinding deletes every raw chunk, so a previous targeted retry
+            # must not demand reusable non-target artifacts that no longer exist.
+            "regenerate_chunk_ids": [],
             "qc_human_approved": False,
         })
         run.invalidate_from("dubbing", delete_artifacts=True)
@@ -1104,6 +1110,12 @@ async def rerun_localization_job(job_id: str, body: RerunRequest):
                     "regenerate_chunk_ids": failed_chunk_ids,
                 })
                 delete_artifacts = False
+        else:
+            # Artifacts of this stage are about to be deleted, so a targeted
+            # retry recorded by an earlier attempt can no longer be honored;
+            # carrying it forward would demand reusable chunks that are gone.
+            rerun_request.pop("regenerate_chunk_ids", None)
+            run.update_request(rerun_request)
 
         run.invalidate_from(
             stage,
