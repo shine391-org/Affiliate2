@@ -105,7 +105,7 @@ class DubbingReport:
     rewrite_count: int = 0
 
 
-_STRONG_END = re.compile(r"[.!?。！？…][\"'”’」』）】》)\\]}»]*\\s*$")
+_STRONG_END = re.compile(r"[.!?。！？…][\"'”’」』）】》)\]}»]*\s*$")
 
 # Semantic segmentation already treats gaps up to 350 ms as a continuous thought.
 # Preserve that continuity through TTS so a sentence split into two healthy-sized
@@ -267,6 +267,9 @@ def build_plan(
     # one cue back into the preceding chunk. The exceptional chunk is at most
     # max_chunk_size + 1; preserving a viable speech window is more important
     # than enforcing a soft synthesis batch size that created invalid timing.
+    # This viability rescue may cross a larger configured gap than the
+    # ordinary <=350ms continuation merge; otherwise the impossible slot
+    # survives and cannot be rendered within the speed ceiling.
     for chunk_pos in range(len(chunks) - 1, 0, -1):
         chunk = chunks[chunk_pos]
         previous = chunks[chunk_pos - 1]
@@ -284,7 +287,7 @@ def build_plan(
             previous_last.speaker_id != orphan_cue.speaker_id
             or previous_last.voice_id != orphan_cue.voice_id
             or orphan_gap < -_MAX_NATURAL_CUE_OVERLAP_MS
-            or orphan_gap > min(config.gap_tolerance_ms, _NATURAL_CONTINUATION_GAP_MS)
+            or orphan_gap > config.gap_tolerance_ms
         ):
             continue
         previous.item_indexes.extend(chunk.item_indexes)
