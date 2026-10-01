@@ -48,7 +48,8 @@ logger = logging.getLogger(__name__)
 
 _TRANSLATION_BATCH_SIZE = 12
 _CONTEXT_CHARS = 10_000
-_DUBBING_SYNTHESIS_RULES_VERSION = 2
+_DUBBING_SYNTHESIS_RULES_VERSION = 1
+_EDGE_TTS_BOUNDARY_RULE = "edge-boundary-trim-v1"
 
 # Edge TTS often wraps very short utterances in relatively large digital
 # leading/trailing silence. Measuring that container padding as spoken duration
@@ -1883,6 +1884,11 @@ def _chunk_synthesis_identity(
         "reference_text": reference_text,
         "reference_language": reference_language,
     }
+    # Only Edge TTS changed its raw-artifact post-processing contract. Include
+    # that rule in Edge identities so existing Edge chunks regenerate once,
+    # without forcing paid/clone providers to synthesize again.
+    if provider == "edge_tts":
+        payload["boundary_postprocess"] = _EDGE_TTS_BOUNDARY_RULE
     raw = json.dumps(
         payload,
         ensure_ascii=False,
