@@ -12,13 +12,14 @@ from backend.services.dubbing_planner import (
 )
 
 
-def _cue(index, start, end, text, speaker=None, voice=None):
+def _cue(index, start, end, text, speaker=None, voice=None, source=None):
     return DubbingCue(
         index=index,
         segment_id=f"s{index}",
         start_ms=start,
         end_ms=end,
         text=text,
+        source_text=source or "",
         speaker_id=speaker,
         voice_id=voice,
     )
@@ -64,6 +65,53 @@ def test_planner_does_not_merge_long_continuation_across_a_real_pause():
         _cue(2, 3501, 6501, "continues after a real pause"),
     ], cfg)
     assert len(chunks) == 2
+
+
+def test_planner_does_not_merge_short_cue_across_a_real_pause():
+    cfg = DubbingConfig(gap_tolerance_ms=1500)
+    _, chunks = build_plan([
+        _cue(1, 0, 400, "yes"),
+        _cue(2, 1200, 2600, "continue after the pause"),
+    ], cfg)
+    assert len(chunks) == 2
+
+
+def test_planner_respects_source_sentence_boundary_when_translation_loses_punctuation():
+    cfg = DubbingConfig()
+    _, chunks = build_plan([
+        _cue(1, 0, 3000, "cau dau", source="第一句。"),
+        _cue(2, 3150, 6000, "cau tiep theo", source="第二句"),
+    ], cfg)
+    assert len(chunks) == 2
+
+
+def test_planner_allows_soft_max_chunk_size_for_one_continuous_sentence():
+    cfg = DubbingConfig(max_chunk_size=5)
+    _, chunks = build_plan([
+        _cue(i, (i - 1) * 700, i * 700 - 50, f"part {i}")
+        for i in range(1, 7)
+    ], cfg)
+    assert len(chunks) == 1
+    assert len(chunks[0].item_indexes) == 6
+
+
+def test_planner_natural_continuation_still_stops_at_span_limit():
+    cfg = DubbingConfig(max_chunk_size=5)
+    _, chunks = build_plan([
+        _cue(1, 0, 4000, "first half"),
+        _cue(2, 4200, 8100, "second half"),
+    ], cfg)
+    assert len(chunks) == 2
+
+
+def test_planner_nested_overlap_never_shrinks_chunk_end():
+    cfg = DubbingConfig()
+    _, chunks = build_plan([
+        _cue(1, 0, 3000, "continuing thought"),
+        _cue(2, 2950, 2990, "tail"),
+    ], cfg)
+    assert len(chunks) == 1
+    assert chunks[0].end_ms == 3000
 
 
 def test_planner_does_not_orphan_short_cue_after_strong_boundary():
