@@ -48,27 +48,14 @@ DEFAULT_VOICE = "en-US-AndrewMultilingualNeural"
 
 
 def _add_natural_pauses(text: str) -> str:
+    """Preserve source punctuation without inventing new prosody boundaries.
+
+    Edge TTS already interprets punctuation. Injecting em-dashes before generic
+    transition words such as "Now" or "But" creates pauses that were never in
+    the translated script and makes chunk boundaries sound random. Keep only
+    normalization of ellipsis that already exists in the input.
     """
-    Add natural pauses to script text using punctuation.
-    Edge TTS interprets ellipsis and dashes as pauses, so we convert
-    pause-worthy spots into punctuation the engine will respect.
-    """
-    processed = text
-
-    # Add ellipsis after "..." for dramatic pause (engine respects these)
-    processed = re.sub(r'\.{3,}\s*', '... ', processed)
-
-    # Add a dash pause before emphasis transitions
-    for phrase in ["But ", "However ", "Now ", "Here's the thing"]:
-        lower = phrase.lower()
-        # Match both capitalized and lowercase
-        processed = processed.replace(phrase, f"— {phrase}")
-        processed = processed.replace(lower, f"— {lower}")
-
-    # Clean up any double-dash artifacts
-    processed = processed.replace("— — ", "— ")
-
-    return processed
+    return re.sub(r'\.{3,}\s*', '... ', text)
 
 
 async def generate_voice(
