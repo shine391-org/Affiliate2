@@ -297,6 +297,10 @@ def build_plan(
         previous.end_ms = max(previous.end_ms, chunk.end_ms)
         chunks.pop(chunk_pos)
 
+    # Rescue may remove an overlap pivot that capped a split chunk. Rebuild
+    # windows for the final grouping so that cap cannot truncate a merged cue.
+    allocate_silence(plan, chunks, config, timeline_end_ms=timeline_end_ms)
+
     # Merging an intermediate orphan removes a chunk, so normalize IDs before
     # persisting plans/artifact names and before targeted chunk regeneration can
     # address them later.
@@ -336,11 +340,40 @@ def allocate_silence(
          max(plan[idx].original_end_ms for idx in c.item_indexes))
         for c in chunks
     ]
+    locked = [any(plan[idx].timing_locked for idx in c.item_indexes) for c in chunks]
+    immutable = [
+        locked[pos] or (only_chunk_ids is not None and c.id not in only_chunk_ids)
+        for pos, c in enumerate(chunks)
+    ]
     for pos, chunk in enumerate(chunks):
-        if only_chunk_ids is not None and chunk.id not in only_chunk_ids:
-            continue
-        if not any(plan[idx].timing_locked for idx in chunk.item_indexes):
+        if not immutable[pos]:
             chunk.start_ms, chunk.end_ms = original[pos]
+
+    # Alignment may overlap by <=120ms even when a hard boundary forces split.
+    # Keep the later onset and cap the earlier flexible slot; if the earlier
+    # slot is immutable, move only the later flexible onset instead. Originals
+    # remain source coordinates, so measured retries normalize the same pivot.
+    for pos in range(1, len(chunks)):
+        previous, chunk = chunks[pos - 1], chunks[pos]
+        overlap = previous.end_ms - chunk.start_ms
+        if overlap <= 0:
+            continue
+        if immutable[pos - 1] and immutable[pos]:
+            reason = "expert timing conflict" if locked[pos - 1] and locked[pos] else "immutable timing conflict"
+            raise ValueError(f"{reason}: chunks {previous.id} and {chunk.id} overlap by {overlap}ms")
+        if overlap > _MAX_NATURAL_CUE_OVERLAP_MS:
+            raise ValueError(
+                f"chunk timestamp overlap {overlap}ms exceeds "
+                f"{_MAX_NATURAL_CUE_OVERLAP_MS}ms tolerance: chunks {previous.id} and {chunk.id}"
+            )
+        if not immutable[pos - 1]:
+            if chunk.start_ms <= previous.start_ms:
+                raise ValueError(f"timing conflict: chunk {previous.id} has no positive window after overlap normalization")
+            previous.end_ms = chunk.start_ms
+        else:
+            if previous.end_ms >= chunk.end_ms:
+                raise ValueError(f"timing conflict: chunk {chunk.id} has no positive window after overlap normalization")
+            chunk.start_ms = previous.end_ms
     # Allocate the later cue first: it may need the tail of the preceding gap,
     # which the preceding cue must not consume before that request is known.
     for pos in range(len(chunks) - 1, -1, -1):

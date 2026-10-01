@@ -95,6 +95,93 @@ def test_real_pause_is_never_removed_by_text_rescue(gap):
     assert chunks[1].start_ms - chunks[0].end_ms >= min(gap, 350)
 
 
+@pytest.mark.parametrize("boundary", ["sentence", "source_sentence", "speaker", "voice"])
+@pytest.mark.parametrize("overlap_ms", [1, 50, 120])
+def test_hard_boundary_normalizes_small_alignment_overlap(boundary, overlap_ms):
+    first = cue(1, 0, 1000, "Được." if boundary == "sentence" else "first")
+    second = cue(2, 1000 - overlap_ms, 1300, "next")
+    if boundary == "source_sentence":
+        first.source_text = "Done。"
+    elif boundary == "speaker":
+        second.speaker_id = "other"
+    elif boundary == "voice":
+        second.voice_id = "other"
+    cfg = dp.DubbingConfig()
+    plan, chunks = dp.build_plan([first, second], cfg)
+    assert [c.item_indexes for c in chunks] == [[0], [1]]
+    anchors = [(p.original_start_ms, p.original_end_ms) for p in plan]
+    for c, duration in zip(chunks, [1000, 1300 - second.start_ms]):
+        c.actual_duration_ms = duration
+    dp.allocate_silence(plan, chunks, cfg)
+    windows = [(c.start_ms, c.end_ms) for c in chunks]
+    assert windows == [(0, second.start_ms), (second.start_ms, 1300)]
+    dp.allocate_silence(plan, chunks, cfg)
+    assert windows == [(c.start_ms, c.end_ms) for c in chunks]
+    assert anchors == [(p.original_start_ms, p.original_end_ms) for p in plan]
+    fitted, _, report = dp.fit_timeline(plan, chunks, cfg)
+    assert fitted[0].target_end_ms <= fitted[1].target_start_ms
+    assert not report.failed_chunk_ids
+
+
+@pytest.mark.parametrize("locked_index", [0, 1])
+def test_overlap_normalization_preserves_locked_window(locked_index):
+    cues = [cue(1, 0, 1000, "First."), cue(2, 950, 1300, "next")]
+    cues[locked_index].timing_locked = True
+    cfg = dp.DubbingConfig()
+    plan, chunks = dp.build_plan(cues, cfg)
+    expected = [(0, 1000), (1000, 1300)] if locked_index == 0 else [(0, 950), (950, 1300)]
+    for c, duration in zip(chunks, [1000, 350]):
+        c.actual_duration_ms = duration
+    dp.allocate_silence(plan, chunks, cfg)
+    assert [(c.start_ms, c.end_ms) for c in chunks] == expected
+    assert (chunks[locked_index].start_ms, chunks[locked_index].end_ms) == (
+        cues[locked_index].start_ms, cues[locked_index].end_ms,
+    )
+    dp.fit_timeline(plan, chunks, cfg)
+
+
+@pytest.mark.parametrize("overlap_ms", [1, 50, 121])
+def test_both_locked_overlap_is_explicit_expert_timing_conflict(overlap_ms):
+    with pytest.raises(ValueError, match="expert timing conflict"):
+        dp.build_plan([
+            cue(1, 0, 1000, "First.", timing_locked=True),
+            cue(2, 1000 - overlap_ms, 1300, "next", timing_locked=True),
+        ], dp.DubbingConfig())
+
+
+def test_large_alignment_overlap_is_not_silently_normalized():
+    with pytest.raises(ValueError, match="overlap.*120"):
+        dp.build_plan([
+            cue(1, 0, 1000, "First."), cue(2, 879, 1300, "next"),
+        ], dp.DubbingConfig())
+
+
+def test_overlap_normalization_never_collapses_a_flexible_cue_to_zero():
+    with pytest.raises(ValueError, match="no positive window"):
+        dp.build_plan([
+            cue(1, 0, 1000, "First.", timing_locked=True),
+            cue(2, 950, 970, "next"),
+        ], dp.DubbingConfig())
+
+
+@pytest.mark.parametrize("target_id", [1, 2])
+def test_overlap_normalization_preserves_non_target_window(target_id):
+    cfg = dp.DubbingConfig()
+    plan, chunks = dp.build_plan([
+        cue(1, 0, 1000, "First."), cue(2, 950, 1300, "next"),
+    ], cfg)
+    # Simulate a saved non-target slot; reset only the selected slot.
+    chunks[0].start_ms, chunks[0].end_ms = 0, 1000
+    chunks[1].start_ms, chunks[1].end_ms = 950, 1300
+    for c, duration in zip(chunks, [1000, 350]):
+        c.actual_duration_ms = duration
+    frozen = (chunks[2 - target_id].start_ms, chunks[2 - target_id].end_ms)
+    dp.allocate_silence(plan, chunks, cfg, only_chunk_ids={target_id})
+    assert (chunks[2 - target_id].start_ms, chunks[2 - target_id].end_ms) == frozen
+    assert chunks[0].end_ms <= chunks[1].start_ms
+    dp.fit_timeline(plan, chunks, cfg)
+
+
 def test_allocator_never_extends_ordinary_chunk_beyond_eight_seconds():
     plan, chunks = dp.build_plan([
         cue(1, 0, 7900, "First."), cue(2, 9900, 11000, "Second."),
@@ -192,6 +279,96 @@ async def test_pipeline_preserves_pause_with_measured_audio(
         speech = array.array("h", wav.readframes(round(0.150 * rate)))
     assert max(map(abs, pause)) == 0
     assert max(map(abs, speech)) > 1000
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("locks", [(False, False), (True, False), (False, True), (True, True)])
+async def test_pipeline_normalizes_overlap_before_real_audio_fitting(tmp_path, monkeypatch, locks):
+    import array
+    import math
+    import wave
+    from backend.core.localization import (
+        LocalizationProfile, LocalizationSegment, LocalizationTranscript,
+    )
+    from backend.services import localization_service as svc
+    from backend.services.tts_service import TTSProvider
+    from backend.services.video_utils import probe_duration
+
+    def tone(path, duration_ms):
+        rate = 16000
+        samples = array.array("h", (
+            round(5000 * math.sin(2 * math.pi * 440 * n / rate))
+            for n in range(rate * duration_ms // 1000)
+        ))
+        with wave.open(str(path), "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(rate)
+            wav.writeframes(samples.tobytes())
+
+    source = tmp_path / "source.wav"
+    tone(source, 1300)
+    generated = []
+    async def generate(text, *, output_path, **kwargs):
+        generated.append(text)
+        duration = 1000 if text == "Được." else 350
+        tone(output_path, duration)
+        return duration
+
+    runtime = svc.TTSRuntimeConfig(
+        provider=TTSProvider.OPENAI_COMPATIBLE, default_voice="qa", api_key="",
+        model=None, base_url=None, region=None,
+    )
+    monkeypatch.setattr(svc, "_tts_config", lambda *_: runtime)
+    monkeypatch.setattr(svc, "_generate_tts_chunk", generate)
+    tx = LocalizationTranscript(segments=[
+        LocalizationSegment(
+            id=f"s{i}", source_text=text, translated_text=text,
+            source_start_ms=start, source_end_ms=end, translation_status="success",
+            overrides={"target_start_ms": start, "target_end_ms": end} if locks[i] else {},
+        )
+        for i, (start, end, text) in enumerate([(0, 1000, "Được."), (950, 1300, "Next.")])
+    ])
+    profile = LocalizationProfile(
+        id="qa", name="QA", dub_rewrite_attempts=0, video_retime_mode="off",
+    )
+    async def run():
+        return await svc.synthesize_timed_dub(
+            tx, source_media=source, target_language="Vietnamese", profile=profile,
+            user_settings=object(), work_dir=tmp_path / "work",
+        )
+    if all(locks):
+        with pytest.raises(ValueError, match="expert timing conflict"):
+            await run()
+        assert generated == []  # Fail before spending on TTS, not during render.
+        return
+    result = await run()
+    assert generated == ["Được.", "Next."]
+    assert result.chunks is not None and result.plan is not None
+    expected = [(0, 1000), (1000, 1300)] if locks[0] else [(0, 950), (950, 1300)]
+    assert [(c.start_ms, c.end_ms) for c in result.chunks] == expected
+    assert result.plan[0].target_end_ms <= result.plan[1].target_start_ms
+    assert not [i for i in result.issues if i["reason"] == "timing_overflow"]
+    # Actual FFmpeg atempo/composition and actual source duration probe.
+    assert abs(probe_duration(result.dub_track) - 1.3) < 0.01
+    with wave.open(str(result.dub_track), "rb") as wav:
+        samples = array.array("h", wav.readframes(wav.getnframes()))
+    assert max(map(abs, samples)) > 1000
+
+
+def test_overlap_chain_has_repeatable_non_overlap_pivots():
+    cfg = dp.DubbingConfig()
+    plan, chunks = dp.build_plan([
+        cue(1, 0, 1000, "First."), cue(2, 950, 1300, "Second."),
+        cue(3, 1250, 1600, "Third."),
+    ], cfg)
+    expected = [(0, 950), (950, 1250), (1250, 1600)]
+    assert [(c.start_ms, c.end_ms) for c in chunks] == expected
+    for c, duration in zip(chunks, [1000, 350, 350]):
+        c.actual_duration_ms = duration
+    dp.allocate_silence(plan, chunks, cfg)
+    assert [(c.start_ms, c.end_ms) for c in chunks] == expected
+    dp.fit_timeline(plan, chunks, cfg)
 
 
 def test_randomized_allocation_preserves_boundaries_and_retry_invariants():
