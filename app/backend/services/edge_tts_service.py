@@ -75,7 +75,7 @@ async def generate_voice(
     import asyncio
     import edge_tts
 
-    # Add natural pauses via punctuation and use native rate/pitch.
+    # Preserve the script's own punctuation and use native rate/pitch.
     if not 0.75 <= float(speed) <= 1.25:
         raise VoiceGenerationError("Edge TTS speed must be between 0.75x and 1.25x")
     processed_text = _add_natural_pauses(text) if use_ssml else text
