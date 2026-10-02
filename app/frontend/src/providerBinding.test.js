@@ -17,6 +17,7 @@ import {
   providerBindingFromStage,
   providerBindingMismatch,
   rebindProvidersPayload,
+  safeEndpointLabel,
 } from "./providerBinding.js"
 
 const drifted = {
@@ -107,4 +108,25 @@ test("fallback-only drift displays the full translation and rewrite chains witho
     assert.notEqual(before, after)
     assert.doesNotMatch(before + after, /HIDDEN/)
   }
+})
+
+
+test("endpoint-only drift is visible without leaking URL credentials or query secrets", () => {
+  const before = bindingSideSummary({
+    translation_routes: [{
+      connection_id: "conn-a", model: "model-a",
+      base_url: "https://user:password@old.example.test/v1?api_key=SECRET#frag",
+    }],
+  })
+  const after = bindingSideSummary({
+    translation_routes: [{
+      connection_id: "conn-a", model: "model-a",
+      base_url: "https://user:password@new.example.test/v2?token=SECRET2",
+    }],
+  })
+  assert.notEqual(before, after)
+  assert.match(before, /endpoint https:\/\/old\.example\.test\/v1/)
+  assert.match(after, /endpoint https:\/\/new\.example\.test\/v2/)
+  assert.doesNotMatch(before + after, /password|SECRET|api_key|token=/)
+  assert.equal(safeEndpointLabel("not a valid url"), "custom endpoint")
 })
