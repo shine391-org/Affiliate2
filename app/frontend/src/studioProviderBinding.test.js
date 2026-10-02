@@ -92,6 +92,11 @@ test("modal explains separate snapshot and rebind start stages", () => {
 test("no frontend provider resolution or secret comparison leaks into the binding helper", () => {
   assert.ok(!helper.includes("api_key"))
   assert.ok(!helper.includes("secret"))
-  assert.ok(!helper.includes("base_url"))
   assert.ok(!helper.includes("=== current"))
+  // base_url may be read, but only to render a stripped identity label. Any
+  // read left over after removing the safeEndpointLabel() call sites would put
+  // raw credentials, query secrets or fragments back on screen.
+  const withoutSanitisers = helper.replace(/safeEndpointLabel\([^)]*\)/g, "")
+  assert.ok(!withoutSanitisers.includes("base_url"),
+    "every base_url read must go through safeEndpointLabel")
 })
