@@ -130,3 +130,25 @@ test("endpoint-only drift is visible without leaking URL credentials or query se
   assert.doesNotMatch(before + after, /password|SECRET|api_key|token=/)
   assert.equal(safeEndpointLabel("not a valid url"), "custom endpoint")
 })
+
+
+test("TTS summary exposes full safe binding identity including endpoint drift", () => {
+  const before = bindingSideSummary({
+    tts: {
+      tts_connection_id: "tts-a", tts_provider: "openai_compatible_tts",
+      tts_model: "voice-model", tts_voice: "voice-a", tts_region: "local",
+      tts_base_url: "http://user:secret@127.0.0.1:9000/v1?key=HIDDEN",
+    },
+  })
+  const after = bindingSideSummary({
+    tts: {
+      tts_connection_id: "tts-a", tts_provider: "openai_compatible_tts",
+      tts_model: "voice-model", tts_voice: "voice-a", tts_region: "local",
+      tts_base_url: "http://user:secret@127.0.0.1:9880/v1?key=HIDDEN2",
+    },
+  })
+  assert.notEqual(before, after)
+  assert.match(before, /tts-a.*openai_compatible_tts.*voice-model.*voice-a.*region local.*127\.0\.0\.1:9000\/v1/)
+  assert.match(after, /127\.0\.0\.1:9880\/v1/)
+  assert.doesNotMatch(before + after, /secret|HIDDEN|key=/)
+})
