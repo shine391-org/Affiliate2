@@ -63,3 +63,101 @@ async def test_upload_finite_timeouts_and_resource_cleanup(tmp_path, monkeypatch
     assert all(handle.closed for handle in handles)
     if failure not in (httpx.ConnectTimeout, httpx.ConnectError):
         assert len(handles) == 1
+
+
+@pytest.mark.asyncio
+async def test_facebook_publish_confirmation_timeout_is_uncertain(tmp_path, monkeypatch):
+    from backend.core.exceptions import UploadOutcomeUncertainError
+
+    path = tmp_path / "video.mp4"
+    path.write_bytes(b"video")
+    async def uploaded(*_args, **_kwargs):
+        return None
+    monkeypatch.setattr(meta, "_upload_binary", uploaded)
+
+    instances = []
+    class Client:
+        def __init__(self, **_kwargs):
+            self.index = len(instances)
+            instances.append(self)
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_args):
+            return None
+        async def post(self, *_args, **_kwargs):
+            if self.index == 0:
+                return httpx.Response(200, json={"video_id": "fb-123", "upload_url": "https://upload.invalid"})
+            raise httpx.ReadTimeout("finish response lost")
+
+    monkeypatch.setattr(meta.httpx, "AsyncClient", Client)
+    with pytest.raises(UploadOutcomeUncertainError) as error:
+        await meta.upload_facebook_reel(
+            video_path=str(path), description="test", page_id="page", access_token="token",
+        )
+    assert error.value.provider_result == {"video_id": "fb-123"}
+
+
+@pytest.mark.asyncio
+async def test_instagram_publish_confirmation_timeout_is_uncertain(tmp_path, monkeypatch):
+    from backend.core.exceptions import UploadOutcomeUncertainError
+
+    path = tmp_path / "video.mp4"
+    path.write_bytes(b"video")
+    async def uploaded(*_args, **_kwargs):
+        return None
+    async def processed(**_kwargs):
+        return None
+    monkeypatch.setattr(meta, "_upload_binary", uploaded)
+    monkeypatch.setattr(meta, "_wait_instagram_container", processed)
+
+    instances = []
+    class Client:
+        def __init__(self, **_kwargs):
+            self.index = len(instances)
+            instances.append(self)
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_args):
+            return None
+        async def post(self, *_args, **_kwargs):
+            if self.index == 0:
+                return httpx.Response(200, json={"id": "ig-container", "uri": "https://upload.invalid"})
+            raise httpx.ReadTimeout("publish response lost")
+
+    monkeypatch.setattr(meta.httpx, "AsyncClient", Client)
+    with pytest.raises(UploadOutcomeUncertainError) as error:
+        await meta.upload_instagram_reel(
+            video_path=str(path), caption="test", ig_user_id="ig-user", access_token="token",
+        )
+    assert error.value.provider_result == {"container_id": "ig-container"}
+
+
+@pytest.mark.asyncio
+async def test_facebook_permalink_lookup_failure_keeps_success(tmp_path, monkeypatch):
+    path = tmp_path / "video.mp4"
+    path.write_bytes(b"video")
+    async def uploaded(*_args, **_kwargs):
+        return None
+    monkeypatch.setattr(meta, "_upload_binary", uploaded)
+
+    instances = []
+    class Client:
+        def __init__(self, **_kwargs):
+            self.index = len(instances)
+            instances.append(self)
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_args):
+            return None
+        async def post(self, *_args, **_kwargs):
+            if self.index == 0:
+                return httpx.Response(200, json={"video_id": "fb-123", "upload_url": "https://upload.invalid"})
+            return httpx.Response(200, json={"success": True})
+        async def get(self, *_args, **_kwargs):
+            raise httpx.ReadTimeout("permalink lookup timed out")
+
+    monkeypatch.setattr(meta.httpx, "AsyncClient", Client)
+    result = await meta.upload_facebook_reel(
+        video_path=str(path), description="test", page_id="page", access_token="token",
+    )
+    assert result == {"video_id": "fb-123", "url": ""}
