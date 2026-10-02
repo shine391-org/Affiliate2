@@ -1216,3 +1216,33 @@ async def test_no_drift_rebind_is_byte_preserving_noop(storage, dispatch, tts_he
     assert _manifest_bytes(run) == before
     assert dispatch.calls == tts_health == []
     assert await api._job_status(run.job_id) == "failed"
+
+
+@pytest.mark.asyncio
+async def test_provider_rebind_uses_canonical_localization_tts_preflight(
+    storage, dispatch, monkeypatch, tts_health,
+):
+    from backend.services import localization_service
+
+    await _seed_settings(profile_payload=_profile_payload(pinned=False))
+    run = await _create_run("canonical-preflight", storage=storage)
+    _complete_translation_and_dubbing(run)
+    await _seed_job(run.job_id)
+    await _update_settings(preferred_tts_voice="vi-VN-NamMinhNeural")
+    before = {str(p.relative_to(run.root)): p.read_bytes() for p in run.root.rglob("*") if p.is_file()}
+    calls = []
+
+    async def reject(user_settings, profile, target_language):
+        calls.append((user_settings.user_id, profile.tts_voice, target_language))
+        raise ValueError("canonical provider preflight rejected this binding")
+
+    monkeypatch.setattr(localization_service, "validate_localization_tts_preflight", reject)
+    with pytest.raises(api.HTTPException) as error:
+        await api.rebind_localization_providers(run.job_id, api.ProviderRebindRequest())
+
+    assert error.value.status_code == 400
+    assert calls == [("local", "vi-VN-NamMinhNeural", "Vietnamese")]
+    after = {str(p.relative_to(run.root)): p.read_bytes() for p in run.root.rglob("*") if p.is_file()}
+    assert after == before
+    assert dispatch.calls == []
+    assert tts_health == []
