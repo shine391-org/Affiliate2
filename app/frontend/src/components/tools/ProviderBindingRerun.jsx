@@ -11,7 +11,7 @@ import {
   providerBindingFromStage,
 } from "../../providerBinding"
 
-const STAGE_RESUME_LABELS = { semantic: "Phân tích ngữ nghĩa", translation: "Bản dịch C6", dubbing: "Lồng tiếng" }
+const STAGE_RESUME_LABELS = { asr: "Nhận giọng nói ASR", semantic: "Phân tích ngữ nghĩa", translation: "Bản dịch C6", dubbing: "Lồng tiếng" }
 
 /**
  * Compact drift chip. Renders only when the backend flags a mismatch, so the

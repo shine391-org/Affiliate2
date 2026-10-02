@@ -1407,7 +1407,10 @@ async def discover_tts_voices(body: TTSProbeRequest):
 
 
 def _localization_profile_payload(store):
+    from backend.core.localization import fast_localization_profile
     payload = store.model_dump()
+    # Offered, never automatically persisted or used to overwrite user profiles.
+    payload["presets"] = {"fast": fast_localization_profile().model_dump()}
     payload["prompt_defaults"] = {
         "translation_guardrails": DEFAULT_TRANSLATION_GUARDRAILS,
         "rewrite_guardrails": DEFAULT_REWRITE_GUARDRAILS,

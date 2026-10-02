@@ -399,6 +399,13 @@ export default function LocalizationExpertPanel({ jobId }) {
         </Alert>
       )}
 
+      {stages?.asr?.metadata?.asr && (
+        <Alert severity={stages.asr.metadata.asr.fallback_reason ? "warning" : "info"} variant="outlined">
+          ASR thực tế: {stages.asr.metadata.asr.provider} / {stages.asr.metadata.asr.model}
+          {stages.asr.metadata.asr.fallback_reason ? ` · fallback: ${stages.asr.metadata.asr.fallback_reason}` : ""}
+        </Alert>
+      )}
+
       {detail?.publish_registration_error && (
         <Alert
           severity="error"

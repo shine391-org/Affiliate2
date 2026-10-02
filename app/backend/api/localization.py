@@ -123,6 +123,7 @@ class RenderRerunRequest(BaseModel):
 
 _ASR_KEYS = {
     "asr_provider", "asr_model", "asr_quality",
+    "asr_connection_id", "asr_fallback_to_local", "asr_local_model",
     "alignment_mode", "diarization_mode", "diarization_speakers",
 }
 _AI_TRANSLATION_ROUTE_KEYS = {
@@ -156,7 +157,7 @@ _DUBBING_KEYS = {
     "dub_speed_max", "dub_rewrite_attempts", "video_retime_mode",
     "video_retime_max_slowdown",
 }
-_AUDIO_KEYS = {"audio_mode", "preserve_background", "background_gain_db", "dub_gain_db"}
+_AUDIO_KEYS = {"preserve_background", "background_gain_db", "dub_gain_db"}
 _RENDER_KEYS = {"caption_style", "target_aspect", "render_profile"}
 _QC_KEYS = {"qc_profile"}
 
@@ -237,6 +238,8 @@ def _earliest_stage(stages: list[str]) -> str:
 
 def _profile_invalidation(keys: set[str]) -> str | None:
     stages: list[str] = []
+    if "audio_mode" in keys:
+        stages.append("separation")
     if keys & _ASR_KEYS:
         stages.append("asr")
     if keys & _SEMANTIC_KEYS:
@@ -526,6 +529,10 @@ _REWRITE_BINDING_KEYS = (
     "rewrite_fallback_provider", "rewrite_fallback_model",
     "rewrite_fallback_base_url",
 )
+_ASR_BINDING_KEYS = (
+    "asr_provider", "asr_model", "asr_quality", "asr_connection_id",
+    "asr_fallback_to_local", "asr_local_model",
+)
 _TTS_BINDING_KEYS = (
     "tts_connection_id", "tts_provider", "tts_model", "tts_voice",
     "tts_base_url", "tts_region",
@@ -614,6 +621,7 @@ def _binding_identity(profile: Any) -> dict:
         "translation_routes": _route_identity(translation_routes),
         "rewrite_routes": _route_identity(rewrite_routes),
         "tts": _tts_identity(profile),
+        "asr": {key: profile.get(key, LocalizationProfile.model_fields[key].default) for key in _ASR_BINDING_KEYS},
     }
 
 
@@ -623,6 +631,8 @@ def _binding_diff(job_profile: Any, current_profile: Any, *, is_dub: bool) -> di
     current_identity = _binding_identity(current_profile)
 
     changed: list[str] = []
+    if job_identity["asr"] != current_identity["asr"]:
+        changed.append("asr")
     if job_identity["translation_routes"] != current_identity["translation_routes"]:
         changed.append("translation")
     if is_dub:
@@ -634,6 +644,8 @@ def _binding_diff(job_profile: Any, current_profile: Any, *, is_dub: bool) -> di
     # Identity comparison selects changed fields; the canonical profile
     # dependency contract owns the earliest invalidated stage.
     changed_keys: set[str] = set()
+    if "asr" in changed:
+        changed_keys.update(_ASR_BINDING_KEYS)
     if "translation" in changed:
         changed_keys.update(_TRANSLATION_BINDING_KEYS)
     if "rewrite" in changed:
@@ -704,6 +716,7 @@ async def _describe_provider_binding(run: LocalizationRun, *, user_id: str = "lo
             "translation_routes": identity["translation_routes"],
             "rewrite_routes": identity["rewrite_routes"] if is_dub else None,
             "tts": identity["tts"] if is_dub else None,
+            "asr": identity["asr"],
         }
 
     return {
@@ -726,7 +739,7 @@ def _binding_profile_updates(current: Any, *, is_dub: bool) -> dict:
     """
     if hasattr(current, "model_dump"):
         current = current.model_dump()
-    keys = list(_TRANSLATION_BINDING_KEYS)
+    keys = list(_ASR_BINDING_KEYS) + list(_TRANSLATION_BINDING_KEYS)
     if is_dub:
         keys += list(_REWRITE_BINDING_KEYS) + list(_TTS_BINDING_KEYS)
     return {key: current.get(key) for key in keys}
@@ -1147,6 +1160,9 @@ async def localization_expert_override(job_id: str, body: ExpertOverrideRequest)
                     "translation_review_pending": False,
                     "translation_review_approved": False,
                 })
+            if STAGES.index(stage) <= STAGES.index("dubbing"):
+                # Deleted raw chunks cannot satisfy an old targeted retry.
+                next_request.pop("regenerate_chunk_ids", None)
             run.update_request(next_request)
             run.invalidate_from(stage, delete_artifacts=True)
         else:

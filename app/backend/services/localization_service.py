@@ -181,6 +181,13 @@ def materialize_localization_profile(
     ]
 
     data = profile.model_dump()
+    # Model selection is content identity: resolve quality aliases ONCE, so
+    # reruns cannot silently inherit a later quality-map/default change.
+    if profile.asr_provider == "faster_whisper":
+        from backend.services.whisper_service import resolve_whisper_model
+        data["asr_model"] = resolve_whisper_model(profile.asr_quality, profile.asr_model)
+    else:
+        data["asr_model"] = profile.asr_model or "whisper-large-v3-turbo"
     data["translation_routes"] = translation_routes
     first = translation_routes[0]
     data.update({
@@ -244,9 +251,7 @@ def materialize_localization_profile(
 
         tts = _tts_config(user_settings, profile, target_language)
         data.update({
-            "tts_connection_id": getattr(tts, "connection_id", None)
-                or profile.tts_connection_id
-                or getattr(user_settings, "tts_connection_id", None),
+            "tts_connection_id": getattr(tts, "connection_id", None),
             "tts_provider": getattr(tts.provider, "value", str(tts.provider)),
             "tts_model": tts.model,
             "tts_voice": tts.default_voice or None,
@@ -263,24 +268,84 @@ async def transcribe_for_localization(
     *,
     language: str | None = None,
     user_settings=None,
+    gpu_gate=None,
+    cancel_check=None,
 ) -> LocalizationTranscript:
-    """C5: faster-whisper transcription followed by optional WhisperX alignment."""
-    from backend.services.whisper_service import whisper_service
+    """Canonical C5 routing. Remote I/O never holds the local GPU gate."""
+    from contextlib import asynccontextmanager
+    from backend.services.whisper_service import whisper_service, resolve_whisper_model
 
-    tx = await whisper_service.transcribe(
-        str(media_path),
-        language=language,
-        quality=profile.asr_quality,
-        model_name=profile.asr_model,
-    )
-    transcript = localization_transcript_from_source(
-        text=tx.get("text"),
-        language=tx.get("language"),
-        source="whisper",
-        raw_segments=tx.get("segments") or [],
-    )
+    if gpu_gate is None:
+        from backend.core.tool_runners import localization_gpu_gate
+        gpu_gate = localization_gpu_gate
+
+    @asynccontextmanager
+    async def local_compute():
+        async with gpu_gate():
+            try:
+                yield
+            finally:
+                from backend.core.tool_runners import _release_localization_torch_cache_sync
+                await asyncio.to_thread(_release_localization_torch_cache_sync)
+
+    fallback_reason = None
+    requested_provider = profile.asr_provider
+    model = profile.asr_model
+    transcript = None
+    if requested_provider == "groq":
+        from backend.services.groq_asr_service import transcribe_groq, GroqASRError
+        try:
+            remote_call = transcribe_groq(
+                media_path, profile, user_settings, language=language,
+            )
+            if cancel_check is None:
+                transcript = await remote_call
+            else:
+                # Existing jobs cancel via a persisted DB flag, not Task.cancel.
+                task = asyncio.create_task(remote_call)
+                try:
+                    while not task.done():
+                        await asyncio.wait({task}, timeout=0.5)
+                        if await cancel_check():
+                            from backend.core.exceptions import JobCancelledError
+                            raise JobCancelledError("Localization cancelled during Groq ASR")
+                    transcript = await task
+                finally:
+                    if not task.done():
+                        task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+        except GroqASRError as exc:
+            if not (profile.asr_fallback_to_local and exc.fallback_eligible):
+                raise
+            # The fallback model is its own explicit selection, never Groq's
+            # model name or an implicit quality downgrade to base.
+            model = profile.asr_local_model
+            if not model or not str(model).strip():
+                raise ValueError("Choose an explicit local ASR fallback model.") from exc
+            fallback_reason = str(exc)
+
+    if transcript is None:
+        model = resolve_whisper_model(profile.asr_quality, model)
+        async with local_compute():
+            tx = await whisper_service.transcribe(
+                str(media_path), language=language,
+                quality=profile.asr_quality, model_name=model,
+            )
+        transcript = localization_transcript_from_source(
+            text=tx.get("text"), language=tx.get("language"), source="whisper",
+            raw_segments=tx.get("segments") or [],
+        )
     if not transcript.segments:
         raise ValueError("No speech detected — nothing to localize.")
+    transcript.metadata["asr"] = {
+        **transcript.metadata.get("asr", {}),
+        "provider": "faster_whisper" if fallback_reason or requested_provider == "faster_whisper" else "groq",
+        "model": model or "whisper-large-v3-turbo",
+        "requested_provider": requested_provider,
+        "requested_model": profile.asr_model,
+        "connection_id": getattr(profile, "asr_connection_id", None),
+        "fallback_reason": fallback_reason,
+    }
 
     if profile.alignment_mode != "off" or profile.diarization_mode != "off":
         from backend.services.alignment_service import align_localization_transcript
@@ -288,12 +353,13 @@ async def transcribe_for_localization(
         if user_settings is not None and getattr(user_settings, "huggingface_token_encrypted", None):
             from backend.core.crypto import decrypt_safe
             hf_token = decrypt_safe(user_settings.huggingface_token_encrypted) or ""
-        transcript, report = await align_localization_transcript(
-            media_path,
-            transcript,
-            profile,
-            huggingface_token=hf_token,
-        )
+        async with local_compute():
+            transcript, report = await align_localization_transcript(
+                media_path,
+                transcript,
+                profile,
+                huggingface_token=hf_token,
+            )
         transcript.metadata["alignment"] = asdict(report)
     return transcript
 

@@ -1336,11 +1336,15 @@ async def run_tool_translate(
                         _sep_forward = _separation_progress_forwarder(
                             job_id, user_id, [SEPARATION_PROGRESS_START],
                         )
-                        vocals_file, background_file = await separate_vocals_background(
-                            source_path,
-                            run.stage_dir("separation"),
-                            on_progress=_sep_forward,
-                        )
+                        async with localization_gpu_gate():
+                            try:
+                                vocals_file, background_file = await separate_vocals_background(
+                                    source_path,
+                                    run.stage_dir("separation"),
+                                    on_progress=_sep_forward,
+                                )
+                            finally:
+                                await asyncio.to_thread(_release_localization_torch_cache_sync)
                         run.complete(
                             "separation",
                             artifacts={
@@ -1368,7 +1372,7 @@ async def run_tool_translate(
             else:
                 await _tool_progress(
                     job_id, 16,
-                    f"Transcribing/alignment with {profile.asr_model or profile.asr_quality}...",
+                    f"Transcribing/alignment · {profile.asr_provider}/{profile.asr_model or profile.asr_quality}...",
                     user_id,
                 )
                 run.start("asr")
@@ -1377,7 +1381,9 @@ async def run_tool_translate(
                         asr_input,
                         profile,
                         user_settings=user_settings,
+                        cancel_check=lambda: job_cancelled(job_id),
                     )
+                    await _cancel_checkpoint("ASR artifact publication")
                     path = run.save_json("asr", "transcript.json", transcript.model_dump())
                     run.complete(
                         "asr",
@@ -1388,18 +1394,8 @@ async def run_tool_translate(
                     run.fail("asr", exc)
                     raise
 
-        if needs_separation or needs_asr:
-            async with localization_gpu_gate():
-                try:
-                    await _run_gpu_audio_pipeline()
-                finally:
-                    # Release unused Demucs/WhisperX allocator memory even when
-                    # separation/ASR fails or the task is cancelled. Without a
-                    # finally, exactly the failure path that stops a job can
-                    # leave multi-GB resident memory pinned in the backend.
-                    await asyncio.to_thread(_release_localization_torch_cache_sync)
-        else:
-            await _run_gpu_audio_pipeline()
+        # C5 owns its local compute gate, not remote network I/O.
+        await _run_gpu_audio_pipeline()
 
         await _cancel_checkpoint("semantic segmentation")
         source_segment_count = len(transcript.segments)
@@ -2089,7 +2085,9 @@ async def run_tool_translate(
             "localization_profile": profile.id,
             "localization_manifest": str(run.manifest_path),
             "asr_quality": profile.asr_quality,
-            "asr_model": profile.asr_model,
+            "asr_provider": transcript.metadata.get("asr", {}).get("provider", profile.asr_provider),
+            "asr_model": transcript.metadata.get("asr", {}).get("model") or profile.asr_model,
+            "asr_fallback_reason": transcript.metadata.get("asr", {}).get("fallback_reason"),
             "alignment_mode": profile.alignment_mode,
             "diarization_mode": profile.diarization_mode,
             "render_profile": profile.render_profile,

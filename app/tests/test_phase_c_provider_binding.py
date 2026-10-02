@@ -37,6 +37,55 @@ UID = "local"
 SOURCE_BYTES = b"provider-binding-source-media"
 
 
+@pytest.mark.asyncio
+async def test_fast_asr_rebind_keeps_separation_and_policy(storage, dispatch):
+    payload = _profile_payload(pinned=True)
+    payload["profiles"][0].update({"asr_model": "large-v3"})
+    await _seed_settings(profile_payload=payload)
+    await _seed_job("fast-asr-rebind")
+    run = await _create_run("fast-asr-rebind", storage=storage)
+    _mark_complete(run, "separation", ("vocals", "background"))
+    _mark_complete(run, "asr", ("transcript.json",))
+    _complete_translation_and_dubbing(run)
+    before = run.record("separation").copy()
+    run.update_request({**run.request, "regenerate_chunk_ids": [1]})
+    run.update_effective_profile({**run.effective_profile, "translation_instructions": "job-only override"})
+    payload["profiles"][0]["asr_model"] = "medium"
+    await _update_settings(localization_profiles_json=json.dumps(payload))
+    result = await api.rebind_localization_providers(run.job_id, api.ProviderRebindRequest())
+    fresh = stages.LocalizationRun.load(run.job_id)
+    assert result["from_stage"] == "asr"
+    assert result["changed_stages"] == ["asr"]
+    assert fresh.record("separation") == before
+    assert fresh.effective_profile["asr_model"] == "medium"
+    assert fresh.effective_profile["translation_instructions"] == "job-only override"
+    assert fresh.request["regenerate_chunk_ids"] == []
+    assert not fresh.is_complete("asr")
+    assert dispatch.calls == [run.job_id]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("updates,expected", [({"audio_mode": "fast_duck"}, "separation"), ({"preserve_background": False, "background_gain_db": -15}, "audio_mix")])
+async def test_fast_profile_override_real_artifact_invalidation(storage, updates, expected):
+    await _seed_settings(profile_payload=_profile_payload(pinned=True))
+    await _seed_job("fast-profile-invalidate")
+    run = await _create_run("fast-profile-invalidate", storage=storage)
+    _mark_complete(run, "separation", ("vocals", "background"))
+    _mark_complete(run, "asr", ("transcript.json",))
+    _complete_translation_and_dubbing(run)
+    before = {stage: run.record(stage).copy() for stage in stages.STAGES}
+    run.update_request({**run.request, "regenerate_chunk_ids": [1], "mask_box": {"custom": True}})
+    result = await api.localization_expert_override(run.job_id, api.ExpertOverrideRequest(profile_updates=updates))
+    fresh = stages.LocalizationRun.load(run.job_id)
+    assert result["invalidated_from"] == expected
+    for stage in stages.STAGES[:stages.STAGES.index(expected)]:
+        assert fresh.record(stage) == before[stage]
+    assert not fresh.is_complete(expected)
+    assert fresh.request["mask_box"] == {"custom": True}
+    if stages.STAGES.index(expected) <= stages.STAGES.index("dubbing"):
+        assert not fresh.request.get("regenerate_chunk_ids")
+
+
 # ── schema / storage isolation ──────────────────────────────────────────────
 
 async def _create_schema():

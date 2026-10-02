@@ -70,7 +70,7 @@ def test_profile_invalidation_uses_earliest_quality_stage():
     assert api._profile_invalidation({"rewrite_base_url"}) == "dubbing"
     assert api._profile_invalidation({"rewrite_instructions"}) == "dubbing"
     assert api._profile_invalidation({"rewrite_guardrails"}) == "dubbing"
-    assert api._profile_invalidation({"audio_mode"}) == "audio_mix"
+    assert api._profile_invalidation({"audio_mode"}) == "separation"
     assert api._profile_invalidation({"render_profile"}) == "final_render"
     assert api._profile_invalidation({"translation_model", "tts_model"}) == "semantic"
     assert api._profile_invalidation({"asr_model", "render_profile"}) == "asr"
@@ -940,7 +940,8 @@ async def test_rerender_accepts_canonical_ready_upstream(monkeypatch, mode):
 
 
 @pytest.mark.asyncio
-async def test_canonical_rerender_resume_never_calls_upstream_processors(monkeypatch, tmp_path):
+@pytest.mark.parametrize("asr_fallback", [False, True])
+async def test_canonical_rerender_resume_never_calls_upstream_processors(monkeypatch, tmp_path, asr_fallback):
     from backend.core import tool_runners
     from backend.core.localization import LocalizationProfile, LocalizationSegment, LocalizationTranscript
 
@@ -964,12 +965,15 @@ async def test_canonical_rerender_resume_never_calls_upstream_processors(monkeyp
             translation_status="success",
             timing_status="fit",
         )],
+        metadata={"asr": {"provider":"faster_whisper", "model":"medium", "fallback_reason":"Groq timeout"}} if asr_fallback else {},
     )
     profile = LocalizationProfile(
         id="rerender-test",
         name="Rerender test",
         audio_mode="fast_duck",
         target_aspect="9:16",
+        asr_provider="groq" if asr_fallback else "faster_whisper",
+        asr_model="whisper-large-v3-turbo" if asr_fallback else "large-v3",
     )
     statuses = {
         stage: "complete"
@@ -1047,6 +1051,10 @@ async def test_canonical_rerender_resume_never_calls_upstream_processors(monkeyp
 
     globals_artifacts = artifacts
     fake_run = FakeRun()
+    success = {}
+
+    async def capture_success(*args, **kwargs):
+        success.update(kwargs.get("extra_output", {}))
 
     async def fail_upstream(*args, **kwargs):
         raise AssertionError("rerender must not execute upstream processing")
@@ -1068,7 +1076,7 @@ async def test_canonical_rerender_resume_never_calls_upstream_processors(monkeyp
     )
     monkeypatch.setattr(tool_runners, "_load_user_settings", fake_noop)
     monkeypatch.setattr(tool_runners, "_tool_progress", fake_noop)
-    monkeypatch.setattr(tool_runners, "_tool_success", fake_noop)
+    monkeypatch.setattr(tool_runners, "_tool_success", capture_success)
     monkeypatch.setattr(tool_runners, "_tool_fail", fake_noop)
     monkeypatch.setattr("backend.api.tools.tool_out_path", lambda job_id, suffix: tmp_path / f"out{suffix}")
     monkeypatch.setattr("backend.services.localization_service.transcribe_for_localization", fail_upstream)
@@ -1101,6 +1109,10 @@ async def test_canonical_rerender_resume_never_calls_upstream_processors(monkeyp
     assert failures == []
     assert statuses["final_render"] == "complete"
     assert statuses["qc"] == "complete"
+    if asr_fallback:
+        assert success["asr_provider"] == "faster_whisper"
+        assert success["asr_model"] == "medium"
+        assert success["asr_fallback_reason"] == "Groq timeout"
 
 
 @pytest.mark.asyncio

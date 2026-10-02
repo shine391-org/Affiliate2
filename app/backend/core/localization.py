@@ -54,9 +54,16 @@ class LocalizationProfile(BaseModel):
     name: str
 
     download_quality: Literal["best", "2160p", "1440p", "1080p", "720p", "480p"] = "best"
-    asr_provider: Literal["faster_whisper"] = "faster_whisper"
+    asr_provider: Literal["faster_whisper", "groq"] = "faster_whisper"
     asr_model: str | None = None
     asr_quality: Literal["fast", "balanced", "accurate", "best"] = "best"
+    # Cloud ASR via Groq (optional). When set, transcription uses this
+    # connection instead of local faster-whisper.
+    asr_connection_id: str | None = None
+    # Opt-in: fall back to local faster-whisper when cloud ASR fails.
+    asr_fallback_to_local: bool = False
+    # Explicit local model to use when falling back (e.g. "base", "small").
+    asr_local_model: str | None = None
     alignment_mode: Literal["off", "whisperx"] = "whisperx"
     diarization_mode: Literal["off", "auto", "whisperx"] = "auto"
     diarization_speakers: int | None = Field(default=None, ge=1, le=16)
@@ -195,6 +202,12 @@ class LocalizationProfile(BaseModel):
 
     @model_validator(mode="after")
     def validate_dubbing_policy(self):
+        if self.asr_provider == "groq":
+            if self.asr_model not in {None, "whisper-large-v3-turbo"}:
+                raise ValueError("Groq ASR requires whisper-large-v3-turbo, not a chat/local model")
+            self.asr_model = "whisper-large-v3-turbo"
+            if self.asr_fallback_to_local and not (self.asr_local_model or "").strip():
+                raise ValueError("Choose an explicit local ASR fallback model")
         if self.dub_speed_accept > self.dub_speed_max:
             raise ValueError("dub_speed_accept must be <= dub_speed_max")
         if self.dub_emergency_speed_max < self.dub_speed_max:
@@ -250,6 +263,27 @@ def default_localization_profile() -> LocalizationProfile:
     return LocalizationProfile(
         id="vi-affiliate-hq",
         name="Vietnam Affiliate HQ",
+    )
+
+
+def fast_localization_profile() -> LocalizationProfile:
+    """Fast preset without relaxing the existing timing or QC ceilings."""
+    return LocalizationProfile(
+        id="vi-affiliate-fast",
+        name="Vietnam Affiliate Fast",
+        asr_model="small",
+        asr_quality="balanced",
+        alignment_mode="off",
+        diarization_mode="off",
+        audio_mode="fast_duck",
+        preserve_background=False,
+        background_gain_db=-18.0,
+        semantic_segmentation=False,
+        render_profile="balanced",
+
+        dub_rewrite_attempts=1,
+        tts_provider="edge_tts",
+        tts_voice="vi-VN-HoaiMyNeural",
     )
 
 

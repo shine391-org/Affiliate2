@@ -660,6 +660,8 @@ export default function StudioLocalize({ source, sourcesLoading }) {
             )}
           </Box>
 
+          {selectedProfile && <Alert severity="info" variant="outlined">ASR <strong>{selectedProfile.asr_provider || "faster_whisper"}</strong> · <strong>{selectedProfile.asr_model || selectedProfile.asr_quality}</strong>{selectedProfile.asr_fallback_to_local ? ` · dự phòng local ${selectedProfile.asr_local_model}` : ""}</Alert>}
+          {stages.asr?.metadata?.asr && <Alert severity={stages.asr.metadata.asr.fallback_reason ? "warning" : "info"}>ASR thực tế: {stages.asr.metadata.asr.provider} / {stages.asr.metadata.asr.model}{stages.asr.metadata.asr.fallback_reason ? ` · fallback: ${stages.asr.metadata.asr.fallback_reason}` : ""}</Alert>}
           {selectedProfile && <Alert severity="info" variant="outlined">C6 <strong>{selectedProfile.translation_model || "mặc định kết nối"}</strong> · C7 <strong>{selectedProfile.rewrite_model || "mặc định kết nối"}</strong>. Đây là hai mô hình độc lập.</Alert>}
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
             <Button variant="outlined" onClick={() => navigate("/settings?section=localization")}>Quản lý hồ sơ</Button>
