@@ -379,8 +379,10 @@ async def _resolve_current_tts_binding(
     from sqlalchemy import select
     from backend.database import AsyncSessionLocal
     from backend.models.user_settings import UserSettings
-    from backend.services.localization_service import _tts_config
-    from backend.services.tts_service import test_tts_connection
+    from backend.services.localization_service import (
+        _tts_config,
+        validate_localization_tts_preflight,
+    )
 
     async with AsyncSessionLocal() as db:
         row = (await db.execute(
@@ -403,13 +405,11 @@ async def _resolve_current_tts_binding(
     try:
         profile = LocalizationProfile.model_validate(candidate)
         runtime = _tts_config(row, profile, target_language)
-        health = await test_tts_connection(
-            provider=runtime.provider,
-            api_key=runtime.api_key,
-            base_url=runtime.base_url,
-            model=runtime.model,
-            voice_id=runtime.default_voice,
-            region=runtime.region,
+        # Reuse the same canonical preflight used by a fresh localization job.
+        # This keeps deterministic provider checks (for example GPT-SoVITS
+        # language constraints) and provider health semantics in one place.
+        health = await validate_localization_tts_preflight(
+            row, profile, target_language,
         )
     except (ValueError, VoiceGenerationError, httpx.HTTPError, OSError) as exc:
         raise HTTPException(
