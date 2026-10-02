@@ -5,7 +5,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from backend.core.exceptions import UploadError, UploadOutcomeUncertainError
+from backend.core.exceptions import UploadOutcomeUncertainError
 from backend.services import meta_uploader as meta
 
 
