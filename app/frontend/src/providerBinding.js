@@ -50,6 +50,20 @@ export function providerBindingFromStage(binding) {
 
 const routes = (side, key) => (Array.isArray(side?.[key]) ? side[key] : [])
 
+/** Render endpoint identity without leaking URL credentials/query tokens. */
+export function safeEndpointLabel(value) {
+  const raw = String(value || "").trim()
+  if (!raw) return ""
+  try {
+    const url = new URL(raw)
+    const port = url.port ? `:${url.port}` : ""
+    const path = url.pathname === "/" ? "" : url.pathname.replace(/\/+$/, "")
+    return `${url.protocol}//${url.hostname}${port}${path}`
+  } catch {
+    return "custom endpoint"
+  }
+}
+
 export function bindingTranslationRoutes(side) {
   return routes(side, "translation_routes")
 }
@@ -59,9 +73,16 @@ export function bindingRewriteRoutes(side) {
 }
 
 export function bindingTtsLabel(side) {
-  const provider = side?.tts?.tts_provider || ""
-  const voice = side?.tts?.tts_voice || ""
-  return [provider, voice].filter(Boolean).join(" · ")
+  const tts = side?.tts || {}
+  const endpoint = safeEndpointLabel(tts.tts_base_url)
+  return [
+    tts.tts_connection_id,
+    tts.tts_provider,
+    tts.tts_model,
+    tts.tts_voice,
+    tts.tts_region ? `region ${tts.tts_region}` : null,
+    endpoint ? `endpoint ${endpoint}` : null,
+  ].filter(Boolean).join(" · ")
 }
 
 /** "Dùng cấu hình hiện tại" is only safe when the backend resolved a current binding. */
@@ -76,10 +97,12 @@ export function rebindProvidersPayload(source = "settings") {
 /** Compact, ordered identity labels for every primary and fallback route. */
 export function bindingSideSummary(side) {
   if (!side) return "không khả dụng"
-  const chain = (items, label) => items.map((route, index) => (
-    `${label} ${index === 0 ? "Primary" : `Fallback ${index}`}: ` +
-    [route.connection_id, route.model].filter(Boolean).join(" / ")
-  ))
+  const chain = (items, label) => items.map((route, index) => {
+    const identity = [route.connection_id, route.model].filter(Boolean).join(" / ")
+    const endpoint = safeEndpointLabel(route.base_url)
+    return `${label} ${index === 0 ? "Primary" : `Fallback ${index}`}: ` +
+      [identity, endpoint ? `endpoint ${endpoint}` : null].filter(Boolean).join(" · ")
+  })
   return [
     ...chain(bindingTranslationRoutes(side), "C6"),
     ...chain(bindingRewriteRoutes(side), "C7"),
