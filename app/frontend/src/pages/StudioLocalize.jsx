@@ -16,6 +16,7 @@ import LocalizationExpertPanel from "../components/tools/LocalizationExpertPanel
 import { ProviderBindingChip, ProviderBindingRerunDialog } from "../components/tools/ProviderBindingRerun"
 import LocalizationBatch from "./LocalizationBatch"
 import { providerBindingMismatch, rebindProvidersPayload } from "../providerBinding"
+import { useJobBoundBindingPrompt } from "../useJobBoundBindingPrompt"
 import { LOCALIZE_STEPS, localizeStepForDetail } from "../studioModel"
 import {
   buildLocalizationRenderPayload,
@@ -69,7 +70,7 @@ export default function StudioLocalize({ source, sourcesLoading }) {
   const [autoRepair, setAutoRepair] = useState(false)
   const [autoRepairBusy, setAutoRepairBusy] = useState(false)
   const [retryingFailure, setRetryingFailure] = useState(false)
-  const [bindingPrompt, setBindingPrompt] = useState(null)
+
   const [continuingReview, setContinuingReview] = useState(false)
   const [focusedFailureKey, setFocusedFailureKey] = useState("")
   const [detail, setDetail] = useState(null)
@@ -86,6 +87,11 @@ export default function StudioLocalize({ source, sourcesLoading }) {
   }
   const [expertOpen, setExpertOpen] = useState(false)
   const jobId = params.get("job") || ""
+  const { bindingPrompt, setBindingPrompt, openBindingPrompt, consumeBindingPrompt } = useJobBoundBindingPrompt(jobId)
+  useEffect(() => {
+    setRetryingFailure(false)
+  }, [jobId])
+
   const requestedStep = params.get("step") || ""
   const activeStep = LOCALIZE_STEPS.some((item) => item.value === requestedStep)
     ? requestedStep
@@ -364,7 +370,7 @@ export default function StudioLocalize({ source, sourcesLoading }) {
     // A drifted provider binding must be an explicit choice: never silently
     // adopt Settings mid-recovery. Keep the job's own snapshot by default.
     if (providerBindingMismatch(detail)) {
-      setBindingPrompt({ action: "failure" })
+      openBindingPrompt("failure")
       return
     }
     setRetryingFailure(true)
@@ -379,8 +385,8 @@ export default function StudioLocalize({ source, sourcesLoading }) {
 
   const keepSnapshotAndRerun = async () => {
     if (!jobId) return
-    const action = bindingPrompt?.action
-    setBindingPrompt(null)
+    const action = consumeBindingPrompt()
+    if (action === null) return
     setRetryingFailure(true)
     try {
       if (action === "failure") {
@@ -399,8 +405,7 @@ export default function StudioLocalize({ source, sourcesLoading }) {
   }
 
   const useCurrentProvidersAndRerun = async () => {
-    if (!jobId) return
-    setBindingPrompt(null)
+    if (!jobId || consumeBindingPrompt() === null) return
     setRetryingFailure(true)
     try {
       await rebindProvidersAndRerun()
@@ -940,7 +945,7 @@ export default function StudioLocalize({ source, sourcesLoading }) {
         {panels[activeStep]}
       </Stack>
       <ProviderBindingRerunDialog
-        open={Boolean(bindingPrompt)}
+        open={Boolean(bindingPrompt && bindingPrompt.jobId === jobId)}
         binding={detail?.provider_binding}
         requestedStage={bindingPrompt?.action === "failure" ? null : bindingPrompt?.action}
         busy={retryingFailure}

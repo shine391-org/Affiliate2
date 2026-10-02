@@ -4,27 +4,14 @@ import {
   PROVIDER_BINDING_CURRENT_UNAVAILABLE_LABEL,
   PROVIDER_BINDING_KEEP_LABEL,
   PROVIDER_BINDING_MISMATCH_LABEL,
-  bindingRewriteRoutes,
-  bindingTranslationRoutes,
-  bindingTtsLabel,
+  bindingSideSummary,
   changedStagesLabel,
   currentProvidersAvailable,
   providerBinding,
   providerBindingFromStage,
 } from "../../providerBinding"
 
-const STAGE_RESUME_LABELS = { translation: "Bản dịch C6", dubbing: "Lồng tiếng" }
-
-const sideSummary = (side) => {
-  if (!side) return "không khả dụng"
-  const translation = bindingTranslationRoutes(side)[0]
-  const rewrite = bindingRewriteRoutes(side)[0]
-  return [
-    translation ? "C6 " + [translation.connection_id, translation.model].filter(Boolean).join(" / ") : null,
-    rewrite ? "C7 " + [rewrite.connection_id, rewrite.model].filter(Boolean).join(" / ") : null,
-    bindingTtsLabel(side) ? "TTS " + bindingTtsLabel(side) : null,
-  ].filter(Boolean).join(" · ") || "chưa cấu hình"
-}
+const STAGE_RESUME_LABELS = { semantic: "Phân tích ngữ nghĩa", translation: "Bản dịch C6", dubbing: "Lồng tiếng" }
 
 /**
  * Compact drift chip. Renders only when the backend flags a mismatch, so the
@@ -75,15 +62,15 @@ export function ProviderBindingRerunDialog({
           <Typography variant="body2">
             {stages ? "Cấu hình đã đổi ở: " + stages + ". " : ""}
             {resumeStage ? "Giữ cấu hình job sẽ chạy lại từ " + (STAGE_RESUME_LABELS[resumeStage] || resumeStage) + ". " : "Giữ cấu hình job sẽ thử lại đúng bước lỗi. "}
-            {rebindStage ? "Dùng cấu hình hiện tại sẽ chạy lại từ " + STAGE_RESUME_LABELS[rebindStage] + "." : ""}
+            {rebindStage ? "Dùng cấu hình hiện tại sẽ chạy lại từ " + STAGE_RESUME_LABELS[rebindStage] + " và các bước phía sau." : ""}
           </Typography>
           <Box>
             <Typography variant="caption" color="text.secondary">Cấu hình của job</Typography>
-            <Typography variant="body2">{sideSummary(binding?.job)}</Typography>
+            <Typography variant="body2">{bindingSideSummary(binding?.job)}</Typography>
           </Box>
           <Box>
             <Typography variant="caption" color="text.secondary">Cấu hình hiện tại</Typography>
-            <Typography variant="body2">{sideSummary(binding?.current)}</Typography>
+            <Typography variant="body2">{bindingSideSummary(binding?.current)}</Typography>
           </Box>
           <Typography variant="caption" color="text.secondary">
             {PROVIDER_BINDING_KEEP_LABEL + ": giữ nguyên ảnh chụp provider lúc tạo job và bước yêu cầu ban đầu."}

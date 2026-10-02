@@ -6,6 +6,7 @@ import {
   PROVIDER_BINDING_KEEP_LABEL,
   PROVIDER_BINDING_CURRENT_LABEL,
   PROVIDER_BINDING_CURRENT_UNAVAILABLE_LABEL,
+  bindingSideSummary,
   bindingRewriteRoutes,
   bindingTranslationRoutes,
   bindingTtsLabel,
@@ -57,7 +58,8 @@ test("changed stages are normalised to a compact Vietnamese summary", () => {
   assert.equal(changedStagesLabel({ changed_stages: ["tts"] }), "TTS")
 })
 
-test("rebind resumes from the canonical translation or dubbing stage only", () => {
+test("rebind accepts the canonical semantic, translation and dubbing stages", () => {
+  assert.equal(providerBindingFromStage({ from_stage: "semantic" }), "semantic")
   assert.equal(providerBindingFromStage({ from_stage: "translation" }), "translation")
   assert.equal(providerBindingFromStage({ from_stage: "dubbing" }), "dubbing")
   assert.equal(providerBindingFromStage({ from_stage: null }), null)
@@ -89,4 +91,20 @@ test("rebind-providers posts source=settings and keeps stable Vietnamese copy", 
   assert.equal(PROVIDER_BINDING_KEEP_LABEL, "Chạy lại với cấu hình của job")
   assert.equal(PROVIDER_BINDING_CURRENT_LABEL, "Dùng cấu hình hiện tại")
   assert.equal(PROVIDER_BINDING_CURRENT_UNAVAILABLE_LABEL, "Cấu hình hiện tại không khả dụng — không thể dùng cấu hình hiện tại.")
+})
+
+test("fallback-only drift displays the full translation and rewrite chains without credentials", () => {
+  for (const field of ["translation_routes", "rewrite_routes"]) {
+    const primary = { connection_id: "primary", model: "model-a", api_key: "HIDDEN_KEY" }
+    const before = bindingSideSummary({ [field]: [primary, { connection_id: "old-fallback", model: "old" }] })
+    const after = bindingSideSummary({ [field]: [primary,
+      { connection_id: "new-fallback", model: "new", token: "HIDDEN_TOKEN" },
+      { connection_id: "last-fallback", model: "last", secret: "HIDDEN_SECRET" }] })
+    assert.match(before, /Primary: primary \/ model-a/)
+    assert.match(after, /Primary: primary \/ model-a/)
+    assert.match(before, /Fallback 1: old-fallback \/ old/)
+    assert.match(after, /Fallback 1: new-fallback \/ new.*Fallback 2: last-fallback \/ last/)
+    assert.notEqual(before, after)
+    assert.doesNotMatch(before + after, /HIDDEN/)
+  }
 })

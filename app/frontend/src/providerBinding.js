@@ -18,7 +18,7 @@ const CHANGED_STAGE_LABELS = {
   tts: "TTS",
 }
 
-const REBIND_STAGES = ["translation", "dubbing"]
+const REBIND_STAGES = ["semantic", "translation", "dubbing"]
 
 /** The canonical provider-binding block, verbatim, or null when absent. */
 export function providerBinding(detail) {
@@ -42,7 +42,7 @@ export function changedStagesLabel(binding) {
   return changedStages(binding).map((stage) => CHANGED_STAGE_LABELS[stage]).join(" · ")
 }
 
-/** Rebind may only resume from translation (review-paused) or dubbing. */
+/** Earliest stage comes from the canonical backend dependency contract. */
 export function providerBindingFromStage(binding) {
   const stage = binding?.from_stage
   return REBIND_STAGES.includes(stage) ? stage : null
@@ -71,4 +71,18 @@ export function currentProvidersAvailable(binding) {
 
 export function rebindProvidersPayload(source = "settings") {
   return { source }
+}
+
+/** Compact, ordered identity labels for every primary and fallback route. */
+export function bindingSideSummary(side) {
+  if (!side) return "không khả dụng"
+  const chain = (items, label) => items.map((route, index) => (
+    `${label} ${index === 0 ? "Primary" : `Fallback ${index}`}: ` +
+    [route.connection_id, route.model].filter(Boolean).join(" / ")
+  ))
+  return [
+    ...chain(bindingTranslationRoutes(side), "C6"),
+    ...chain(bindingRewriteRoutes(side), "C7"),
+    bindingTtsLabel(side) ? "TTS " + bindingTtsLabel(side) : null,
+  ].filter(Boolean).join(" · ") || "chưa cấu hình"
 }

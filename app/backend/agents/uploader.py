@@ -4,6 +4,7 @@
 Agent 5: Upload Orchestrator
 Uploads generated videos to YouTube and/or TikTok.
 """
+import asyncio
 import hashlib
 import json
 import logging
@@ -413,6 +414,21 @@ class UploadAgent:
                     logger.warning(f"Unknown upload platform: {platform}")
                     errors.append(f"Unknown platform: {platform}")
 
+            except asyncio.CancelledError:
+                if platform in {"instagram", "facebook"}:
+                    # Cancellation may race external success. Preserve an
+                    # uncertain outcome so a later publish cannot blindly retry.
+                    try:
+                        await self._finish_publication_record(
+                            publication_id, platform, "OUTCOME_UNKNOWN",
+                            error_message="Meta upload cancelled; verify the destination before retrying.",
+                        )
+                    finally:
+                        await update_job_status(
+                            job_id, "cancelled",
+                            current_step="Meta upload cancelled; verify the destination before retrying.",
+                        )
+                raise
             except UploadAuthError as e:
                 logger.error(f"Upload auth error for {platform}: {e}")
                 errors.append(f"{platform}: {str(e)}")

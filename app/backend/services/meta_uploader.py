@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import aclosing
 from pathlib import Path
 
 import httpx
@@ -23,6 +24,9 @@ logger = logging.getLogger(__name__)
 GRAPH_API_VERSION = "v24.0"
 GRAPH_API_BASE = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
 RUPLOAD_BASE = "https://rupload.facebook.com/ig-api-upload"
+# Inactivity budgets per network phase; a large upload may make progress for
+# longer than these values, but a stalled peer cannot wait forever.
+BINARY_UPLOAD_TIMEOUT = httpx.Timeout(connect=30, pool=30, read=120, write=300)
 
 
 def _raise_graph_error(response: httpx.Response, action: str) -> None:
@@ -92,12 +96,25 @@ async def _upload_binary(
                     break
                 yield chunk
 
-    async with httpx.AsyncClient(timeout=None, follow_redirects=True) as client:
-        response = await client.post(
-            upload_url,
-            headers=headers,
-            content=_chunks(),
-        )
+    try:
+        # Explicitly close a partially consumed generator on timeout/cancel.
+        async with aclosing(_chunks()) as chunks:
+            async with httpx.AsyncClient(timeout=BINARY_UPLOAD_TIMEOUT, follow_redirects=True) as client:
+                response = await client.post(
+                    upload_url,
+                    headers=headers,
+                    content=chunks,
+                )
+    except httpx.TimeoutException as exc:
+        raise UploadError(
+            "Meta binary upload timed out. Check the connection and destination "
+            "status before retrying; no automatic retry was attempted."
+        ) from exc
+    except httpx.RequestError as exc:
+        raise UploadError(
+            "Meta binary upload connection failed. Check the connection and "
+            "destination status before retrying."
+        ) from exc
     if response.status_code not in {200, 201}:
         _raise_graph_error(response, "Meta binary upload")
 

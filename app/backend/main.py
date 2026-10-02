@@ -270,6 +270,8 @@ def create_app() -> FastAPI:
     # of time when binding to 0.0.0.0, so we additionally accept the exact
     # same-origin Host used for this request. Cross-site origins remain blocked.
     # Reverse-proxy/custom-domain deployments can use FRONTEND_URL explicitly.
+    # Browser origin protection is not client authentication. Headerless clients
+    # can reach the API on an explicitly enabled LAN bind; use trusted networks.
     lan_mode = settings.HOST == "0.0.0.0"
     allowed_origins = frontend_origins | {
         f"http://localhost:{settings.PORT}",

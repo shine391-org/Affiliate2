@@ -12,6 +12,7 @@ import useAppStore from "../../store/appStore"
 import { resolveAiStageSelection } from "../../localizationPreview"
 import { ProviderBindingChip, ProviderBindingRerunDialog } from "./ProviderBindingRerun"
 import { providerBindingMismatch, rebindProvidersPayload } from "../../providerBinding"
+import { useJobBoundBindingPrompt } from "../../useJobBoundBindingPrompt"
 
 const STAGE_LABELS = {
   separation: "Tách âm thanh",
@@ -100,7 +101,11 @@ export default function LocalizationExpertPanel({ jobId }) {
   const [detail, setDetail] = useState(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
-  const [bindingPrompt, setBindingPrompt] = useState(null)
+  const { bindingPrompt, setBindingPrompt, openBindingPrompt, consumeBindingPrompt } = useJobBoundBindingPrompt(jobId)
+
+  useEffect(() => {
+    setBusy(false)
+  }, [jobId])
 
   const load = useCallback(async () => {
     if (!jobId) return
@@ -152,7 +157,7 @@ export default function LocalizationExpertPanel({ jobId }) {
     // Drifted providers are an explicit choice: keep the job snapshot by
     // default, or adopt Settings through rebind-providers.
     if (providerBindingMismatch(detail)) {
-      setBindingPrompt({ action: stage })
+      openBindingPrompt(stage)
       return
     }
     setBusy(true)
@@ -170,8 +175,8 @@ export default function LocalizationExpertPanel({ jobId }) {
   }
 
   const keepSnapshotRerun = async () => {
-    const stage = bindingPrompt?.action
-    setBindingPrompt(null)
+    const stage = consumeBindingPrompt()
+    if (stage === null) return
     setBusy(true)
     try {
       await performRerun(stage)
@@ -187,7 +192,7 @@ export default function LocalizationExpertPanel({ jobId }) {
   }
 
   const useCurrentProvidersRerun = async () => {
-    setBindingPrompt(null)
+    if (consumeBindingPrompt() === null) return
     setBusy(true)
     try {
       const { data } = await http.post("/api/localization/jobs/" + jobId + "/rebind-providers", rebindProvidersPayload())
@@ -576,7 +581,7 @@ export default function LocalizationExpertPanel({ jobId }) {
       ))}
 
       <ProviderBindingRerunDialog
-        open={Boolean(bindingPrompt)}
+        open={Boolean(bindingPrompt && bindingPrompt.jobId === jobId)}
         binding={detail?.provider_binding}
         requestedStage={bindingPrompt?.action}
         busy={busy}

@@ -2,6 +2,7 @@
 """Phase-C localization control plane: batch, resume, QC exceptions, expert overrides."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from pathlib import Path
@@ -371,6 +372,8 @@ async def _resolve_current_tts_binding(
     *,
     voice_id: str | None = None,
     model: str | None = None,
+    preserve_binding: bool = False,
+    user_id: str = "local",
 ) -> dict:
     """Resolve and cheaply validate the current Settings-owned TTS connection."""
     from sqlalchemy import select
@@ -381,28 +384,39 @@ async def _resolve_current_tts_binding(
 
     async with AsyncSessionLocal() as db:
         row = (await db.execute(
-            select(UserSettings).where(UserSettings.user_id == "local")
+            select(UserSettings).where(UserSettings.user_id == user_id)
         )).scalar_one_or_none()
 
     candidate = dict(effective_profile)
-    candidate.update({
-        "tts_connection_id": None,
-        "tts_provider": None,
-        "tts_model": model.strip() if model and model.strip() else None,
-        "tts_voice": voice_id.strip() if voice_id and voice_id.strip() else None,
-        "tts_base_url": None,
-        "tts_region": None,
-    })
-    profile = LocalizationProfile.model_validate(candidate)
-    runtime = _tts_config(row, profile, target_language)
-    health = await test_tts_connection(
-        provider=runtime.provider,
-        api_key=runtime.api_key,
-        base_url=runtime.base_url,
-        model=runtime.model,
-        voice_id=runtime.default_voice,
-        region=runtime.region,
-    )
+    if not preserve_binding:
+        candidate.update({
+            "tts_connection_id": None,
+            "tts_provider": None,
+            "tts_model": model.strip() if model and model.strip() else None,
+            "tts_voice": voice_id.strip() if voice_id and voice_id.strip() else None,
+            "tts_base_url": None,
+            "tts_region": None,
+        })
+    from backend.core.exceptions import VoiceGenerationError
+    import httpx
+
+    try:
+        profile = LocalizationProfile.model_validate(candidate)
+        runtime = _tts_config(row, profile, target_language)
+        health = await test_tts_connection(
+            provider=runtime.provider,
+            api_key=runtime.api_key,
+            base_url=runtime.base_url,
+            model=runtime.model,
+            voice_id=runtime.default_voice,
+            region=runtime.region,
+        )
+    except (ValueError, VoiceGenerationError, httpx.HTTPError, OSError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Current TTS preflight failed. Check the selected connection, credentials, "
+                   "endpoint, model and voice in Settings before trying again.",
+        ) from exc
     if not health.get("ok"):
         raise HTTPException(
             status_code=400,
@@ -617,9 +631,16 @@ def _binding_diff(job_profile: Any, current_profile: Any, *, is_dub: bool) -> di
         if job_identity["tts"] != current_identity["tts"]:
             changed.append("tts")
 
-    from_stage = None
-    if changed:
-        from_stage = "translation" if "translation" in changed else "dubbing"
+    # Identity comparison selects changed fields; the canonical profile
+    # dependency contract owns the earliest invalidated stage.
+    changed_keys: set[str] = set()
+    if "translation" in changed:
+        changed_keys.update(_TRANSLATION_BINDING_KEYS)
+    if "rewrite" in changed:
+        changed_keys.update(_REWRITE_BINDING_KEYS)
+    if "tts" in changed:
+        changed_keys.update(_TTS_BINDING_KEYS)
+    from_stage = _profile_invalidation(changed_keys)
     return {"changed_stages": changed, "from_stage": from_stage}
 
 
@@ -1353,6 +1374,16 @@ async def rebind_localization_providers(job_id: str, body: ProviderRebindRequest
                 "cleared_profile_fields": [],
             }
 
+        if "tts" in changed_stages:
+            # Validate the exact profile-selected binding, not the global TTS
+            # default. No transaction, manifest write or deletion precedes this.
+            await _resolve_current_tts_binding(
+                current_profile.model_dump(),
+                str(run.request.get("target_language") or "Vietnamese"),
+                preserve_binding=True,
+                user_id=await _job_user_id(job_id),
+            )
+
         updates = _binding_profile_updates(current_profile, is_dub=is_dub)
         resets = _provider_scoped_tts_resets(run.effective_profile, updates) if is_dub else {}
         request_updates = {
@@ -1365,7 +1396,7 @@ async def rebind_localization_providers(job_id: str, body: ProviderRebindRequest
             # The dispatcher forwards this manual override ahead of the
             # effective profile; don't let the previous voice undo the rebind.
             request_updates["voice_id"] = updates.get("tts_voice") or ""
-        if from_stage == "translation":
+        if STAGES.index(from_stage) <= STAGES.index("translation"):
             # Translation is about to be recomputed, so a previous approval
             # cannot describe the new artifact.
             request_updates["translation_review_pending"] = False
@@ -1410,7 +1441,7 @@ async def rebind_localization_providers(job_id: str, body: ProviderRebindRequest
             "awaiting_translation_review": review_pending,
             "cleared_profile_fields": sorted(resets),
         }
-    except Exception as exc:
+    except (Exception, asyncio.CancelledError) as exc:
         if transaction is not None:
             try:
                 transaction.rollback()
@@ -1425,7 +1456,7 @@ async def rebind_localization_providers(job_id: str, body: ProviderRebindRequest
         if not dispatched:
             from backend.agents.job_helper import restore_job_restart_claim
             await restore_job_restart_claim(job_id, claim)
-        if isinstance(exc, HTTPException):
+        if isinstance(exc, (HTTPException, asyncio.CancelledError)):
             raise
         raise HTTPException(
             status_code=503,

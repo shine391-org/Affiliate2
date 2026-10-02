@@ -675,13 +675,19 @@ class TestJobs:
 class TestMedia:
     def test_an_image_can_be_uploaded_and_served_back(self, client):
         import io
+        from PIL import Image
+
+        image_bytes = io.BytesIO()
+        Image.new("RGB", (2, 2), "red").save(image_bytes, format="PNG")
+        payload = image_bytes.getvalue()
         r = client.post("/api/media/upload", files={
-            "file": ("pic.png", io.BytesIO(b"\x89PNG\r\n\x1a\n" + b"\x00" * 500),
-                     "image/png")})
+            "file": ("pic.png", io.BytesIO(payload), "image/png")})
         assert r.status_code in (200, 201), r.text
         name = r.json().get("filename") or Path(r.json().get("url", "")).name
-        if name:
-            assert client.get(f"/api/media/{name}").status_code == 200
+        assert name
+        served = client.get(f"/api/media/{name}")
+        assert served.status_code == 200
+        assert served.content == payload
 
     def test_a_non_image_is_refused(self, client):
         import io

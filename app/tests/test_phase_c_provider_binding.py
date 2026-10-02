@@ -200,6 +200,7 @@ def _mark_complete(run, stage: str, names: tuple[str, ...]):
 
 
 def _complete_translation_and_dubbing(run):
+    _mark_complete(run, "semantic", ("transcript.json",))
     _mark_complete(run, "translation", ("transcript.json",))
     _mark_complete(run, "dubbing", ("transcript.json", "plan.json", "chunks.json", "dub_track.wav"))
     _mark_complete(run, "audio_mix", ("mixed_audio.wav",))
@@ -296,7 +297,7 @@ async def test_settings_drift_does_not_mutate_old_job(storage):
 
 
 @pytest.mark.asyncio
-async def test_translation_drift_maps_to_translation_stage(storage):
+async def test_translation_drift_maps_to_semantic_stage(storage):
     await _seed_settings(profile_payload=_profile_payload(pinned=True))
     run = await _create_run("job-bind-translation", storage=storage)
 
@@ -309,7 +310,7 @@ async def test_translation_drift_maps_to_translation_stage(storage):
     binding = await api._describe_provider_binding(run, user_id=UID)
 
     assert binding["changed_stages"] == ["translation"]
-    assert binding["from_stage"] == "translation"
+    assert binding["from_stage"] == "semantic"
     assert binding["job"]["translation_routes"] == [
         {"connection_id": "conn-a", "model": "model-a", "base_url": None}
     ]
@@ -331,7 +332,7 @@ async def test_inherited_rewrite_route_follows_active_ai_model(storage):
     binding = await api._describe_provider_binding(run, user_id=UID)
 
     assert binding["changed_stages"] == ["translation", "rewrite"]
-    assert binding["from_stage"] == "translation"
+    assert binding["from_stage"] == "semantic"
 
 
 @pytest.mark.asyncio
@@ -371,7 +372,7 @@ async def test_all_stages_drift_reports_ordered_changed_stages(storage):
     binding = await api._describe_provider_binding(run, user_id=UID)
 
     assert binding["changed_stages"] == ["translation", "rewrite", "tts"]
-    assert binding["from_stage"] == "translation"
+    assert binding["from_stage"] == "semantic"
 
 
 @pytest.mark.asyncio
@@ -511,7 +512,7 @@ async def test_rebind_providers_adopts_only_binding_fields(storage, dispatch):
     )
 
     assert result["ok"] is True
-    assert result["from_stage"] == "translation"
+    assert result["from_stage"] == "semantic"
     assert result["changed_stages"] == ["translation", "rewrite", "tts"]
     assert result["awaiting_translation_review"] is False
     assert dispatch.calls == ["job-rebind-bindings"]
@@ -536,7 +537,7 @@ async def test_rebind_providers_adopts_only_binding_fields(storage, dispatch):
     assert updated.request["tts_binding_mode"] == "inherit"
     assert updated.request["voice_id"] == "vi-VN-NamMinhNeural"
     assert updated.request["qc_human_approved"] is False
-    # Translation is the earliest changed stage: dubbing artifacts are gone.
+    # Semantic is the earliest dependency: all downstream artifacts are gone.
     assert updated.record("translation")["status"] == "invalidated"
     assert updated.record("dubbing")["status"] == "invalidated"
     assert updated.record("separation")["status"] == "pending"
@@ -715,7 +716,7 @@ async def test_rebind_providers_review_gate_with_translation_drift_reruns_review
         "job-rebind-review-drift", api.ProviderRebindRequest(source="settings"),
     )
 
-    assert result["from_stage"] == "translation"
+    assert result["from_stage"] == "semantic"
     assert result["awaiting_translation_review"] is False
     assert dispatch.calls == ["job-rebind-review-drift"]
     updated = stages.LocalizationRun.load("job-rebind-review-drift")
@@ -1064,3 +1065,154 @@ def test_manifest_transaction_commit_discards_backups(storage, tmp_path):
     assert not (run.root / "dubbing").exists()
     reloaded = stages.LocalizationRun.load("job-txn-commit")
     assert reloaded.record("translation")["status"] == "invalidated"
+
+
+@pytest.fixture(autouse=True)
+def tts_health(monkeypatch):
+    from backend.services import tts_service
+    calls = []
+
+    async def healthy(**kwargs):
+        calls.append(kwargs)
+        return {"ok": True}
+
+    monkeypatch.setattr(tts_service, "test_tts_connection", healthy)
+    return calls
+
+
+@pytest.mark.parametrize("field,value,stage", [
+    ("translation_provider", "other", "semantic"),
+    ("translation_model", "other-model", "semantic"),
+    ("translation_fallback_provider", "fallback", "semantic"),
+    ("translation_fallback_model", "fallback-model", "semantic"),
+    ("translation_routes", [{"connection_id": "a", "model": "a"}, {"connection_id": "b", "model": "b"}], "semantic"),
+    ("rewrite_model", "rewrite-new", "dubbing"),
+    ("tts_voice", "new-voice", "dubbing"),
+])
+def test_binding_diff_uses_profile_dependency_contract(field, value, stage):
+    old = {"translation_provider": "a", "translation_model": "a",
+           "translation_fallback_provider": "old-fallback"}
+    current = {**old, field: value}
+    assert api._binding_diff(old, current, is_dub=True)["from_stage"] == stage
+    assert api._profile_invalidation({field}) == stage
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("drift", ["primary", "model", "fallback"])
+async def test_translation_rebind_removes_semantic_and_all_downstream(storage, dispatch, tts_health, drift):
+    payload = _profile_payload(pinned=True)
+    await _seed_settings(profile_payload=payload)
+    run = await _create_run("semantic-drift", storage=storage)
+    _mark_complete(run, "asr", ("transcript.json",))
+    _complete_translation_and_dubbing(run)
+    before_asr = _snapshot_tree(run, "asr")
+    await _seed_job(run.job_id)
+    route = payload["profiles"][0]["translation_routes"][0]
+    if drift == "primary":
+        route["connection_id"] = "conn-b"
+    elif drift == "model":
+        route["model"] = "new-model"
+    else:
+        payload["profiles"][0]["translation_routes"].append({"connection_id": "conn-b", "model": "fallback"})
+    row = await _load_settings_row()
+    connections = json.loads(row.ai_connections_json)
+    connections["conn-b"] = {"provider": "compatible", "model": "fallback", "base_url": "http://127.0.0.1:9002/v1"}
+    await _update_settings(ai_connections_json=json.dumps(connections), localization_profiles_json=json.dumps(payload))
+    result = await api.rebind_localization_providers(run.job_id, api.ProviderRebindRequest())
+    updated = stages.LocalizationRun.load(run.job_id)
+    assert result["from_stage"] == "semantic"
+    for stage in stages.STAGES[stages.STAGES.index("semantic"):]:
+        assert updated.record(stage)["status"] == "invalidated"
+        assert not (updated.root / stage).exists()
+    assert _snapshot_tree(updated, "asr") == before_asr
+    assert dispatch.calls == [run.job_id]
+    assert tts_health == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["failed", "awaiting_review"])
+@pytest.mark.parametrize("failure", ["rejected", "credential", "transport", "cancelled"])
+async def test_tts_preflight_preserves_every_byte_and_releases_claim(storage, dispatch, monkeypatch, status, failure):
+    import httpx
+    from fastapi import HTTPException
+    from backend.core.exceptions import VoiceGenerationError
+    from backend.services import tts_service
+    await _seed_settings(profile_payload=_profile_payload(pinned=False))
+    run = await _create_run("preflight-failure", storage=storage, review=True,
+                            request_extra={"translation_review_pending": status == "awaiting_review"})
+    _complete_translation_and_dubbing(run)
+    await _seed_job(run.job_id, status=status)
+    await _update_settings(preferred_tts_voice="vi-VN-NamMinhNeural", ai_model="new-model")
+    before = {str(p.relative_to(run.root)): p.read_bytes() for p in run.root.rglob("*") if p.is_file()}
+
+    async def unhealthy(**kwargs):
+        assert kwargs["voice_id"] == "vi-VN-NamMinhNeural"
+        if failure == "credential":
+            raise VoiceGenerationError("Bad credential")
+        if failure == "transport":
+            raise httpx.ConnectTimeout("unreachable")
+        if failure == "cancelled":
+            raise asyncio.CancelledError()
+        return {"ok": False, "message": "Select a valid TTS model in Settings"}
+
+    def forbidden_begin(self):
+        pytest.fail("Transaction must not begin before successful TTS preflight")
+
+    monkeypatch.setattr(tts_service, "test_tts_connection", unhealthy)
+    monkeypatch.setattr(stages.ManifestTransaction, "begin", forbidden_begin)
+    expected = asyncio.CancelledError if failure == "cancelled" else HTTPException
+    with pytest.raises(expected) as error:
+        await api.rebind_localization_providers(run.job_id, api.ProviderRebindRequest())
+    if failure != "cancelled":
+        assert error.value.status_code == 400
+        assert "Settings" in error.value.detail
+    after = {str(p.relative_to(run.root)): p.read_bytes() for p in run.root.rglob("*") if p.is_file()}
+    assert after == before
+    assert dispatch.calls == []
+    assert await api._job_status(run.job_id) == status
+    # Prove the claim can be acquired again, rather than merely checking status.
+    claim = await api._claim_job_mutation(run.job_id)
+    await api._restore_job_mutation(run.job_id, claim)
+
+
+@pytest.mark.asyncio
+async def test_preflight_targets_profile_connection_not_global_default(storage, dispatch, tts_health):
+    payload = _profile_payload(pinned=True)
+    await _seed_settings(profile_payload=payload)
+    run = await _create_run("pinned-preflight", storage=storage)
+    _complete_translation_and_dubbing(run)
+    await _seed_job(run.job_id)
+    payload["profiles"][0].update({
+        "tts_connection_id": "tts-profile", "tts_provider": "openai_compatible_tts",
+        "tts_model": "profile-model", "tts_voice": "profile-voice",
+        "tts_base_url": "http://127.0.0.1:9999/custom", "tts_region": "profile-region",
+    })
+    await _update_settings(localization_profiles_json=json.dumps(payload), tts_connections_json=json.dumps({
+        "tts-profile": {"provider": "openai_compatible_tts", "base_url": "http://127.0.0.1:9998/v1"},
+    }))
+    result = await api.rebind_localization_providers(run.job_id, api.ProviderRebindRequest())
+    assert len(tts_health) == 1
+    checked = tts_health[0]
+    assert checked["provider"].value == "openai_compatible_tts"
+    assert checked["model"] == "profile-model"
+    assert checked["voice_id"] == "profile-voice"
+    assert checked["base_url"] == "http://127.0.0.1:9999/custom"
+    assert checked["region"] == "profile-region"
+    assert result["from_stage"] == "dubbing"
+    assert dispatch.calls == [run.job_id]
+    assert stages.LocalizationRun.load(run.job_id).effective_profile["tts_connection_id"] == "tts-profile"
+
+
+@pytest.mark.asyncio
+async def test_no_drift_rebind_is_byte_preserving_noop(storage, dispatch, tts_health):
+    await _seed_settings(profile_payload=_profile_payload(pinned=True))
+    run = await _create_run("noop-rebind", storage=storage)
+    _complete_translation_and_dubbing(run)
+    await _seed_job(run.job_id)
+    before = _manifest_bytes(run)
+    result = await api.rebind_localization_providers(run.job_id, api.ProviderRebindRequest())
+    assert result["from_stage"] is None
+    assert result["changed_stages"] == []
+    assert _manifest_bytes(run) == before
+    assert dispatch.calls == tts_health == []
+    assert await api._job_status(run.job_id) == "failed"
