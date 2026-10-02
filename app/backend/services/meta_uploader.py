@@ -16,7 +16,7 @@ from pathlib import Path
 
 import httpx
 
-from backend.core.exceptions import UploadAuthError, UploadError
+from backend.core.exceptions import UploadAuthError, UploadError, UploadOutcomeUncertainError
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +78,7 @@ async def _upload_binary(
     *,
     file_path: Path,
     access_token: str,
+    provider_result: dict | None = None,
 ) -> None:
     size = file_path.stat().st_size
     headers = {
@@ -106,15 +107,23 @@ async def _upload_binary(
                     content=chunks,
                 )
     except httpx.TimeoutException as exc:
-        raise UploadError(
-            "Meta binary upload timed out. Check the connection and destination "
-            "status before retrying; no automatic retry was attempted."
+        raise UploadOutcomeUncertainError(
+            "Meta binary upload timed out after a provider transaction had started; "
+            "verify the destination before retrying.",
+            provider_result=provider_result,
         ) from exc
     except httpx.RequestError as exc:
-        raise UploadError(
-            "Meta binary upload connection failed. Check the connection and "
-            "destination status before retrying."
+        raise UploadOutcomeUncertainError(
+            "Meta binary upload connection failed after a provider transaction had started; "
+            "verify the destination before retrying.",
+            provider_result=provider_result,
         ) from exc
+    if response.status_code >= 500:
+        raise UploadOutcomeUncertainError(
+            f"Meta binary upload returned HTTP {response.status_code} after the provider "
+            "transaction started; verify the destination before retrying.",
+            provider_result=provider_result,
+        )
     if response.status_code not in {200, 201}:
         _raise_graph_error(response, "Meta binary upload")
 
@@ -149,32 +158,54 @@ async def upload_facebook_reel(
         if not video_id or not upload_url:
             raise UploadError("Facebook did not return video_id/upload_url.")
 
-    await _upload_binary(upload_url, file_path=path, access_token=access_token)
+    await _upload_binary(
+        upload_url,
+        file_path=path,
+        access_token=access_token,
+        provider_result={"video_id": video_id},
+    )
 
-    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-        finish = await client.post(
-            f"{GRAPH_API_BASE}/{page_id}/video_reels",
-            params={
-                "upload_phase": "finish",
-                "video_id": video_id,
-                "video_state": "PUBLISHED",
-                "description": description or "",
-                "access_token": access_token,
-            },
+    try:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            finish = await client.post(
+                f"{GRAPH_API_BASE}/{page_id}/video_reels",
+                params={
+                    "upload_phase": "finish",
+                    "video_id": video_id,
+                    "video_state": "PUBLISHED",
+                    "description": description or "",
+                    "access_token": access_token,
+                },
+            )
+    except httpx.RequestError as exc:
+        raise UploadOutcomeUncertainError(
+            "Facebook publish confirmation was interrupted; verify the Page before retrying.",
+            provider_result={"video_id": video_id},
+        ) from exc
+    if finish.status_code >= 500:
+        raise UploadOutcomeUncertainError(
+            f"Facebook publish returned HTTP {finish.status_code}; verify the Page before retrying.",
+            provider_result={"video_id": video_id},
         )
-        if finish.status_code != 200:
-            _raise_graph_error(finish, "Facebook Reel publish")
+    if finish.status_code != 200:
+        _raise_graph_error(finish, "Facebook Reel publish")
 
-        permalink = ""
-        detail = await client.get(
-            f"{GRAPH_API_BASE}/{video_id}",
-            params={
-                "fields": "permalink_url",
-                "access_token": access_token,
-            },
-        )
+    permalink = ""
+    try:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            detail = await client.get(
+                f"{GRAPH_API_BASE}/{video_id}",
+                params={
+                    "fields": "permalink_url",
+                    "access_token": access_token,
+                },
+            )
         if detail.status_code == 200:
             permalink = str(detail.json().get("permalink_url") or "")
+    except httpx.RequestError:
+        # Publishing already succeeded; permalink lookup is non-essential and
+        # must not turn a successful publish into a retryable failure.
+        logger.warning("Facebook Reel published but permalink lookup failed: %s", video_id)
 
     return {
         "video_id": video_id,
@@ -253,33 +284,52 @@ async def upload_instagram_reel(
         upload_uri,
         file_path=path,
         access_token=access_token,
+        provider_result={"container_id": container_id},
     )
     await _wait_instagram_container(
         container_id=container_id,
         access_token=access_token,
     )
 
-    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-        publish = await client.post(
-            f"{GRAPH_API_BASE}/{ig_user_id}/media_publish",
-            params={
-                "creation_id": container_id,
-                "access_token": access_token,
-            },
+    try:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            publish = await client.post(
+                f"{GRAPH_API_BASE}/{ig_user_id}/media_publish",
+                params={
+                    "creation_id": container_id,
+                    "access_token": access_token,
+                },
+            )
+    except httpx.RequestError as exc:
+        raise UploadOutcomeUncertainError(
+            "Instagram publish confirmation was interrupted; verify Instagram before retrying.",
+            provider_result={"container_id": container_id},
+        ) from exc
+    if publish.status_code >= 500:
+        raise UploadOutcomeUncertainError(
+            f"Instagram publish returned HTTP {publish.status_code}; verify Instagram before retrying.",
+            provider_result={"container_id": container_id},
         )
-        if publish.status_code != 200:
-            _raise_graph_error(publish, "Instagram Reel publish")
-        media_id = str(publish.json().get("id") or "")
-        if not media_id:
-            raise UploadError("Instagram publish returned no media ID.")
+    if publish.status_code != 200:
+        _raise_graph_error(publish, "Instagram Reel publish")
+    media_id = str(publish.json().get("id") or "")
+    if not media_id:
+        raise UploadOutcomeUncertainError(
+            "Instagram publish returned no media ID; verify Instagram before retrying.",
+            provider_result={"container_id": container_id},
+        )
 
-        detail = await client.get(
-            f"{GRAPH_API_BASE}/{media_id}",
-            params={"fields": "permalink", "access_token": access_token},
-        )
-        permalink = ""
+    permalink = ""
+    try:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            detail = await client.get(
+                f"{GRAPH_API_BASE}/{media_id}",
+                params={"fields": "permalink", "access_token": access_token},
+            )
         if detail.status_code == 200:
             permalink = str(detail.json().get("permalink") or "")
+    except httpx.RequestError:
+        logger.warning("Instagram Reel published but permalink lookup failed: %s", media_id)
 
     return {
         "media_id": media_id,
