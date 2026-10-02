@@ -5,7 +5,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from backend.core.exceptions import UploadError
+from backend.core.exceptions import UploadError, UploadOutcomeUncertainError
 from backend.services import meta_uploader as meta
 
 
@@ -43,15 +43,21 @@ async def test_upload_finite_timeouts_and_resource_cleanup(tmp_path, monkeypatch
                 raise failure("interrupted after consuming a chunk")
             return httpx.Response(200)
     monkeypatch.setattr(meta.httpx, "AsyncClient", Client)
-    operation = meta._upload_binary("https://upload.invalid", file_path=path, access_token="test-only")
+    operation = meta._upload_binary(
+        "https://upload.invalid",
+        file_path=path,
+        access_token="test-only",
+        provider_result={"video_id": "vid-123"},
+    )
     if failure is None:
         await asyncio.wait_for(operation, 2)
     else:
-        expected = asyncio.CancelledError if failure is asyncio.CancelledError else UploadError
+        expected = asyncio.CancelledError if failure is asyncio.CancelledError else UploadOutcomeUncertainError
         with pytest.raises(expected) as error:
             await asyncio.wait_for(operation, 2)
-        if expected is UploadError:
-            assert "before retrying" in str(error.value)
+        if expected is UploadOutcomeUncertainError:
+            assert "verify the destination before retrying" in str(error.value)
+            assert error.value.provider_result == {"video_id": "vid-123"}
     assert len(clients) == 1 and clients[0].posts == 1
     assert clients[0].closed
     assert all(handle.closed for handle in handles)
