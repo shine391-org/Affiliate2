@@ -202,10 +202,10 @@ async def upload_facebook_reel(
             )
         if detail.status_code == 200:
             permalink = str(detail.json().get("permalink_url") or "")
-    except httpx.RequestError:
+    except Exception:
         # Publishing already succeeded; permalink lookup is non-essential and
         # must not turn a successful publish into a retryable failure.
-        logger.warning("Facebook Reel published but permalink lookup failed: %s", video_id)
+        logger.warning("Facebook Reel published but permalink lookup failed: %s", video_id, exc_info=True)
 
     return {
         "video_id": video_id,
@@ -328,8 +328,8 @@ async def upload_instagram_reel(
             )
         if detail.status_code == 200:
             permalink = str(detail.json().get("permalink") or "")
-    except httpx.RequestError:
-        logger.warning("Instagram Reel published but permalink lookup failed: %s", media_id)
+    except Exception:
+        logger.warning("Instagram Reel published but permalink lookup failed: %s", media_id, exc_info=True)
 
     return {
         "media_id": media_id,
