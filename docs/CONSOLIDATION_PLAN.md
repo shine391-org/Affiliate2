@@ -146,6 +146,8 @@ The same canonical transcript/timeline becomes reusable by intelligence, Smart C
 
 2026-10-03 regression hardening also enables Fast diarization-only without losing word anchors, applies C6/C7 invariant guards, exposes speaker correction/voice selection in Studio, and blocks clean QC for unverified speaker/voice output. Focused engineering evidence and pending real-media acceptance: [QA_LOCALIZATION_MEASURED_SPEAKERS.md](QA_LOCALIZATION_MEASURED_SPEAKERS.md).
 
+The follow-up review moves all Vietnamese name localization into C6, preserves approved C6 bytes across C7 retries, adds job-local source/output gender confirmation and same-gender distinct voice selection, and makes expert overrides atomic. Canonical chunk retries own provider attempts; deterministic errors stop, transient retries retain compatible chunks and accepted measured rewrites. No stage, engine or dependency was added. See [QA_LOCALIZATION_VI_VOICES_WORKFLOW.md](QA_LOCALIZATION_VI_VOICES_WORKFLOW.md) for regression and real-audio evidence, including unproven perceptual cases.
+
 ### C8 — audio separation/mixing
 
 - preserve useful background/music/ambience

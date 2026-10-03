@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-only
+"""C6 localizes names before review; C7 never silently transliterates them."""
+import asyncio
 import json
-from types import SimpleNamespace
+import wave
 
 import pytest
 from backend.core.localization import LocalizationProfile, LocalizationSegment, LocalizationTranscript
@@ -8,201 +10,178 @@ from backend.services import localization_service as svc
 from backend.services.tts_service import TTSProvider
 
 
-def tx(text='Chị 橙子 gặp 吴小彤'):
-    return LocalizationTranscript(segments=[LocalizationSegment(id='a', source_text='橙子 吴小彤',
-        translated_text=text, source_start_ms=0, source_end_ms=3000, translation_status='success')])
+def tx(text="Ngô Tiểu Đồng 18 tuổi!", source="吴小彤十八岁！"):
+    return LocalizationTranscript(language="zh", segments=[LocalizationSegment(
+        id="a", source_text=source, translated_text=text,
+        source_start_ms=0, source_end_ms=3000, translation_status="success")])
 
 
-def runtime(voice='vi-VN-HoaiMyNeural'):
-    return svc.TTSRuntimeConfig(provider=TTSProvider.EDGE_TTS,default_voice=voice,api_key='',model=None,base_url=None,region=None)
+def runtime(provider=TTSProvider.EDGE_TTS, voice="vi-VN-HoaiMyNeural"):
+    return svc.TTSRuntimeConfig(provider, voice, "", None, None, None)
 
 
-@pytest.mark.asyncio
-async def test_canonical_pipeline_prepares_names_before_tts(tmp_path,monkeypatch):
-    import wave
-    monkeypatch.setattr(svc,'_tts_config',lambda *_: runtime())
-    monkeypatch.setattr(svc,'_profile_ai_route_clients_compat',lambda *_: [object()])
-    monkeypatch.setattr('backend.services.video_utils.probe_duration',lambda *_: 5.0)
-    async def chat(*a,**kw): return '[{"id":"吴小彤","text":"Wu Xiaotong"}]'
-    monkeypatch.setattr(svc,'_call_ai_chat_resilient',chat)
-    spoken=[]
-    async def generate(text,*,output_path,**kwargs):
+def mock_routes(monkeypatch):
+    monkeypatch.setattr(svc, "_profile_ai_route_clients_compat", lambda *_: [object()])
+    monkeypatch.setattr(svc, "_profile_ai_route_specs", lambda *_: [])
+
+
+def mock_audio(monkeypatch):
+    monkeypatch.setattr(svc, "_tts_config", lambda *_: runtime())
+    monkeypatch.setattr("backend.services.video_utils.probe_duration", lambda *_: 3.0)
+    spoken = []
+    async def generate(text, *, output_path, **_kwargs):
         spoken.append(text)
-        with wave.open(str(output_path),'wb') as w:
-            w.setnchannels(1);w.setsampwidth(2);w.setframerate(16000)
-            w.writeframes(b'\x01\x00'*16000)
+        with wave.open(str(output_path), "wb") as handle:
+            handle.setnchannels(1); handle.setsampwidth(2); handle.setframerate(16000)
+            handle.writeframes(b"\x01\x00" * 16000)
         return 1000
-    monkeypatch.setattr(svc,'_generate_tts_chunk',generate)
-    result=await svc.synthesize_timed_dub(tx('吴小彤'),source_media=tmp_path/'source.mp4',
-        target_language='Vietnamese',profile=LocalizationProfile(id='p',name='p',dub_rewrite_attempts=0),
-        user_settings=object(),work_dir=tmp_path/'dub')
-    assert spoken==['Wu Xiaotong']
-    assert result.transcript.segments[0].qc_status=='review'
+    monkeypatch.setattr(svc, "_generate_tts_chunk", generate)
+    return spoken
 
 
 @pytest.mark.asyncio
-async def test_spoken_forms_are_spoken_only_and_cache_validated_result(tmp_path, monkeypatch):
-    calls=[]
-    async def chat(*a, **kw):
-        calls.append(kw)
-        return json.dumps([{'id':'橙子','text':'Cheng Zi'},{'id':'吴小彤','text':'Wu Xiaotong'}])
-    monkeypatch.setattr(svc,'_call_ai_chat_resilient',chat)
-    profile=LocalizationProfile(id='p',name='p')
-    original=tx()
-    for _ in range(2):
-        out=original.model_copy(deep=True)
-        issues=await svc._prepare_dubbing_speech(out,profile=profile,runtime=runtime(),ai=object(),
-            fallback_ai=None,route_state=None,work_dir=tmp_path,progress_cb=None)
-        # Approved text is untouched; only the spoken form and its provenance change.
-        assert out.segments[0].translated_text=='Chị 橙子 gặp 吴小彤'
-        assert issues[0]['spoken_text']=='Chị Cheng Zi gặp Wu Xiaotong'
-        assert issues[0]['before']=='Chị 橙子 gặp 吴小彤'
-        assert out.segments[0].source_text==original.segments[0].source_text
-        assert issues[0]['reason']=='speech_pronunciation_normalized'
-        assert issues[0]['requires_human_review'] is True
-    assert len(calls)==1
-    assert original.segments[0].translated_text=='Chị 橙子 gặp 吴小彤'
+async def test_c6_localizes_name_and_age_for_both_captions_and_tts_before_review(tmp_path, monkeypatch):
+    mock_routes(monkeypatch)
+    calls = []
+    async def chat(*_args, **kwargs):
+        calls.append(kwargs["stage"])
+        assert "Hán–Việt" in kwargs["messages"][0]["content"]
+        return json.dumps([{"id": "a", "text": "Ngô Tiểu Đồng 18 tuổi!",
+                            "localized_terms": {"吴小彤": "Ngô Tiểu Đồng"}}])
+    monkeypatch.setattr(svc, "_call_ai_chat_resilient", chat)
+    profile = LocalizationProfile(id="p", name="P")
+    translated = await svc.translate_transcript(tx(), target_language="Vietnamese", profile=profile,
+        user_settings=None, for_dub=True, checkpoint_dir=tmp_path / "translation")
+    assert translated.metadata["localized_terms"] == {"吴小彤": "Ngô Tiểu Đồng"}
+    spoken = mock_audio(monkeypatch)
+    result = await svc.synthesize_timed_dub(translated, source_media=tmp_path / "source.mp4",
+        target_language="Vietnamese", profile=profile, user_settings=None, work_dir=tmp_path / "dub")
+    assert calls == ["translation"]
+    assert spoken == ["Ngô Tiểu Đồng 18 tuổi!"]
+    assert svc.caption_segments_from_localization(result.transcript)[0]["text"] == spoken[0]
+    assert translated.segments[0].translated_text == spoken[0]
+    assert result.rewrite_count == 0
+    assert not (tmp_path / "dub/speech_forms.json").exists()
 
 
 @pytest.mark.asyncio
-async def test_glossary_precedence_and_changed_glossary_invalidates_cache(tmp_path, monkeypatch):
-    async def forbidden(*a,**kw):
-        pytest.fail('Glossary needs no AI')
-    monkeypatch.setattr(svc,'_call_ai_chat_resilient',forbidden)
-    for spoken in ['Ngô Tiểu Đồng','Wu Xiaotong']:
-        out=tx('吴小彤')
-        issues=await svc._prepare_dubbing_speech(out,profile=LocalizationProfile(id='p',name='p',glossary={'吴小彤':spoken}),
-            runtime=runtime(),ai=None,fallback_ai=None,route_state=None,work_dir=tmp_path,progress_cb=None)
-        assert out.segments[0].translated_text=='吴小彤'
-        assert issues[0]['spoken_text']==spoken
+@pytest.mark.parametrize("provider", list(TTSProvider))
+async def test_legacy_unlocalized_vietnamese_fails_before_tts_or_ai_for_all_providers(tmp_path, monkeypatch, provider):
+    async def forbidden(*_a, **_kw):
+        pytest.fail("C7 must not repair approved names through hidden AI")
+    monkeypatch.setattr(svc, "_call_ai_chat_resilient", forbidden)
+    transcript = tx("吴小彤 18 tuổi!")
+    transcript.metadata["target_language"] = "Vietnamese"
+    with pytest.raises(ValueError, match="rerun translation"):
+        await svc._prepare_dubbing_speech(transcript, profile=LocalizationProfile(id="p", name="P"),
+            runtime=runtime(provider, "opaque-id"), ai=object(), work_dir=tmp_path)
+    assert transcript.segments[0].translated_text == "吴小彤 18 tuổi!"
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('payload', [
-    [], [{'id':'橙子','text':''}], [{'id':'橙子','text':'橙子'}],
-    [{'id':'wrong','text':'Cheng Zi'}], [{'id':'橙子','text':'Cheng Zi'},{'id':'橙子','text':'other'}],
-])
-async def test_invalid_ai_never_deletes_speech_or_publishes_cache(tmp_path,monkeypatch,payload):
-    async def chat(*a,**kw): return json.dumps(payload)
-    monkeypatch.setattr(svc,'_call_ai_chat_resilient',chat)
-    out=tx('Chị 橙子')
-    with pytest.raises(ValueError,match='pronunciation'):
-        await svc._prepare_dubbing_speech(out,profile=LocalizationProfile(id='p',name='p'),runtime=runtime(),
-            ai=object(),fallback_ai=None,route_state=None,work_dir=tmp_path,progress_cb=None)
-    assert out.segments[0].translated_text=='Chị 橙子'
-    assert not (tmp_path/'speech_forms.json').exists()
+async def test_only_explicit_literal_exception_keeps_han_and_other_target_languages_are_unchanged(tmp_path):
+    profile = LocalizationProfile(id="p", name="P", protected_terms=["吴小彤"])
+    transcript = tx("吴小彤 18 tuổi!")
+    transcript.metadata["target_language"] = "vi"
+    assert await svc._prepare_dubbing_speech(transcript, profile=profile, runtime=runtime()) == []
+    transcript.metadata["target_language"] = "zh"
+    assert await svc._prepare_dubbing_speech(transcript, profile=LocalizationProfile(id="p", name="P"), runtime=runtime()) == []
 
 
 @pytest.mark.asyncio
-async def test_chinese_voice_does_not_transliterate(tmp_path,monkeypatch):
-    async def forbidden(*a,**kw): pytest.fail('Native script should be preserved')
-    monkeypatch.setattr(svc,'_call_ai_chat_resilient',forbidden)
-    out=tx()
-    issues=await svc._prepare_dubbing_speech(out,profile=LocalizationProfile(id='p',name='p'),runtime=runtime('zh-CN-XiaoxiaoNeural'),
-        ai=None,fallback_ai=None,route_state=None,work_dir=tmp_path,progress_cb=None)
-    assert issues==[]
-    assert out.segments[0].translated_text==tx().segments[0].translated_text
+async def test_dictionary_and_semantics_survive_checkpoint_and_corrupt_cache_is_retranslated(tmp_path, monkeypatch):
+    mock_routes(monkeypatch)
+    count = 0
+    async def chat(*_args, **_kwargs):
+        nonlocal count
+        count += 1
+        return '[{"id":"a","text":"Ngô Tiểu Đồng 18 tuổi!","localized_terms":{"吴小彤":"Ngô Tiểu Đồng"}}]'
+    monkeypatch.setattr(svc, "_call_ai_chat_resilient", chat)
+    args = dict(target_language="Vietnamese", profile=LocalizationProfile(id="p", name="P"), user_settings=None,
+                for_dub=True, checkpoint_dir=tmp_path)
+    await svc.translate_transcript(tx(), **args)
+    resumed = await svc.translate_transcript(tx(), **args)
+    assert count == 1 and resumed.metadata["localized_terms"] == {"吴小彤": "Ngô Tiểu Đồng"}
+    checkpoint = tmp_path / "checkpoint.json"
+    cache = json.loads(checkpoint.read_text())
+    cache["batches"]["0"]["items"][0]["text"] = "Ngô Tiểu Đồng 81 tuổi!"
+    checkpoint.write_text(json.dumps(cache))
+    assert (await svc.translate_transcript(tx(), **args)).segments[0].translated_text == "Ngô Tiểu Đồng 18 tuổi!"
+    assert count == 2
+    cache = json.loads(checkpoint.read_text())
+    cache["batches"]["0"]["items"] = []
+    checkpoint.write_text(json.dumps(cache))
+    await svc.translate_transcript(tx(), **args)
+    assert count == 3
 
 
 @pytest.mark.asyncio
-async def test_tts_wait_does_not_exhaust_unspent_rewrite_budget(tmp_path,monkeypatch):
-    import asyncio, wave
-    monkeypatch.setattr(svc,'_tts_config',lambda *_: runtime())
-    monkeypatch.setattr(svc,'_profile_ai_route_clients_compat',lambda *_: [object()])
-    monkeypatch.setattr('backend.services.video_utils.probe_duration',lambda *_: 3.0)
-    generated=0
-    async def generate(text,*,output_path,**kwargs):
+async def test_names_are_consistent_across_batches_and_resume_rejects_changed_timing(tmp_path, monkeypatch):
+    mock_routes(monkeypatch)
+    monkeypatch.setattr(svc, "_TRANSLATION_BATCH_SIZE", 1)
+    transcript = tx()
+    transcript.segments.append(transcript.segments[0].model_copy(update={"id": "b", "source_start_ms": 3000, "source_end_ms": 6000}))
+    prompts = []
+    async def chat(*_args, **kwargs):
+        prompts.append(kwargs["messages"][0]["content"])
+        seg_id = "b" if '"id": "b"' in prompts[-1] else "a"
+        return json.dumps([{"id": seg_id, "text": "Ngô Tiểu Đồng 18 tuổi!", "localized_terms": {"吴小彤": "Ngô Tiểu Đồng"}}])
+    monkeypatch.setattr(svc, "_call_ai_chat_resilient", chat)
+    args = dict(target_language="Vietnamese", profile=LocalizationProfile(id="p", name="P"), user_settings=None,
+                for_dub=True, checkpoint_dir=tmp_path)
+    await svc.translate_transcript(transcript, **args)
+    assert '"吴小彤": "Ngô Tiểu Đồng"' in prompts[1]
+    transcript.segments[0].source_end_ms = 2900
+    await svc.translate_transcript(transcript, **args)
+    assert len(prompts) == 4
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("candidate", ["吴小彤 18 tuổi!", "Ngô Tiểu Đồng 81 tuổi!", "Ngô Tiểu Đồng 18 tuổi."])
+async def test_c6_rejects_unlocalized_name_changed_age_and_flattened_exclamation(monkeypatch, candidate):
+    async def chat(*_args, **_kwargs): return json.dumps([{"id": "a", "text": candidate}])
+    monkeypatch.setattr(svc, "_call_ai_chat_resilient", chat)
+    _, failed = await svc._translate_batch_resilient(object(), tx().segments, target_language="Vietnamese",
+        source_language="zh", context="", profile=LocalizationProfile(id="p", name="P"), for_dub=True)
+    assert failed == {0}
+
+
+@pytest.mark.asyncio
+async def test_c7_cannot_remove_localized_name_or_flatten_source_intent(monkeypatch):
+    from backend.services.dubbing_planner import DubbingCue, DubbingConfig, build_plan
+    for candidate in ["Xin chào!", "Ngô Tiểu Đồng.", "吴小彤!"]:
+        plan, chunks = build_plan([DubbingCue(1, "a", 0, 1000, "Xin chào Ngô Tiểu Đồng!")], DubbingConfig())
+        async def chat(*_args, **_kwargs): return json.dumps([{"id": "a", "text": candidate}])
+        monkeypatch.setattr(svc, "_call_ai_chat_resilient", chat)
+        changed = await svc._adapt_chunk_items(object(), plan=plan, chunk=chunks[0], segment_by_id={"a": tx().segments[0]},
+            target_language="Vietnamese", target_ms=1000,
+            profile=LocalizationProfile(id="p", name="P", protected_terms=["Ngô Tiểu Đồng"]),
+            issues=[], state={"measured_duration_ms": 5000})
+        assert not changed and plan[0].spoken_text == "Xin chào Ngô Tiểu Đồng!"
+
+
+@pytest.mark.asyncio
+async def test_tts_wait_does_not_exhaust_unspent_rewrite_budget(tmp_path, monkeypatch):
+    mock_routes(monkeypatch)
+    mock_audio(monkeypatch)
+    generated = 0
+    async def generate(text, *, output_path, **_kwargs):
         nonlocal generated
-        generated+=1
-        await asyncio.sleep(0.04)
-        duration=5000 if generated==1 else 1000
-        with wave.open(str(output_path),'wb') as w:
-            w.setnchannels(1);w.setsampwidth(2);w.setframerate(16000)
-            w.writeframes(b'\x01\x00'*(duration*16))
+        generated += 1
+        await asyncio.sleep(.04)
+        duration = 5000 if generated == 1 else 1000
+        with wave.open(str(output_path), "wb") as handle:
+            handle.setnchannels(1); handle.setsampwidth(2); handle.setframerate(16000)
+            handle.writeframes(b"\x01\x00" * (duration * 16))
         return duration
-    monkeypatch.setattr(svc,'_generate_tts_chunk',generate)
-    seen=[]
-    async def adapt(*args,**kwargs):
-        seen.append(kwargs['deadline_at']-asyncio.get_running_loop().time())
-        for item in kwargs['plan']: item.spoken_text='shorter'
+    monkeypatch.setattr(svc, "_generate_tts_chunk", generate)
+    seen = []
+    async def adapt(*_args, **kwargs):
+        seen.append(kwargs["deadline_at"] - asyncio.get_running_loop().time())
+        for item in kwargs["plan"]: item.spoken_text = "Xin chào"
         return True
-    monkeypatch.setattr(svc,'_adapt_chunk_items',adapt)
-    profile=LocalizationProfile(id='p',name='p',dub_rewrite_attempts=1,video_retime_mode='off').model_copy(update={'rewrite_total_timeout_s':0.02})
-    await svc.synthesize_timed_dub(tx('hello'),source_media=tmp_path/'source.mp4',target_language='Vietnamese',
-        profile=profile,user_settings=object(),work_dir=tmp_path/'dub')
-    assert len(seen)==1 and seen[0]>0
-
-
-@pytest.mark.asyncio
-async def test_duration_rewrite_cannot_reintroduce_unreadable_names(monkeypatch):
-    from backend.services.dubbing_planner import DubbingCue,DubbingConfig,build_plan
-    plan,chunks=build_plan([DubbingCue(1,'a',0,1000,'Chị Wu Xiaotong đến đây với em')],DubbingConfig())
-    segments={'a':tx('Chị Wu Xiaotong đến đây với em').segments[0]}
-    async def chat(*a,**kw): return '[{"id":"a","text":"吴小彤"}]'
-    monkeypatch.setattr(svc,'_call_ai_chat_resilient',chat)
-    issues=[]
-    changed=await svc._adapt_chunk_items(object(),plan=plan,chunk=chunks[0],segment_by_id=segments,
-        target_language='Vietnamese',target_ms=1000,profile=LocalizationProfile(id='p',name='p'),issues=issues,
-        state={'measured_duration_ms':5000})
-    assert changed is False
-    assert plan[0].spoken_text=='Chị Wu Xiaotong đến đây với em'
-
-
-@pytest.mark.asyncio
-async def test_preparation_changes_spoken_audio_but_not_approved_translation(tmp_path,monkeypatch):
-    """The user approved 橙子 in the caption text; only TTS needs a spoken form."""
-    import wave
-    spoken=[]
-    monkeypatch.setattr(svc,'_tts_config',lambda *_: runtime())
-    monkeypatch.setattr(svc,'_profile_ai_route_clients_compat',lambda *_: [object()])
-    monkeypatch.setattr('backend.services.video_utils.probe_duration',lambda *_: 3.0)
-    async def chat(*a,**kw):
-        assert isinstance(kw['messages'],list)
-        return '[{"id":"橙子","text":"Cheng Zi"}]'
-    monkeypatch.setattr(svc,'_call_ai_chat_resilient',chat)
-    async def generate(text,*,output_path,**kwargs):
-        spoken.append(text)
-        with wave.open(str(output_path),'wb') as w:
-            w.setnchannels(1);w.setsampwidth(2);w.setframerate(16000)
-            w.writeframes(b'\x01\x00'*16000)
-        return 1000
-    monkeypatch.setattr(svc,'_generate_tts_chunk',generate)
-    original=tx('Chị 橙子 đến đây với em')
-    result=await svc.synthesize_timed_dub(original,source_media=tmp_path/'source.mp4',target_language='Vietnamese',
-        profile=LocalizationProfile(id='p',name='p',dub_rewrite_attempts=0),user_settings=object(),work_dir=tmp_path/'dub')
-    assert spoken==['Chị Cheng Zi đến đây với em']
-    # Caption/subtitle text and the stored translation stay exactly as approved.
-    assert result.transcript.segments[0].translated_text=='Chị 橙子 đến đây với em'
-    assert result.plan is not None
-    assert result.plan[0].spoken_text=='Chị Cheng Zi đến đây với em'
-    assert svc.caption_segments_from_localization(result.transcript)[0]['text']=='Chị 橙子 đến đây với em'
-    assert result.transcript.segments[0].qc_status=='review'
-
-
-@pytest.mark.asyncio
-async def test_rewrite_is_asked_to_shorten_the_spoken_form_not_the_han_text(monkeypatch):
-    """A rewrite must see the readable form, or it keeps Han and gets rejected."""
-    from backend.services.dubbing_planner import DubbingCue,DubbingConfig,build_plan
-    from backend.services.dubbing_speech import spoken_pairs
-    plan,chunks=build_plan([DubbingCue(1,'a',0,1000,'Em tên là 大奔小发')],DubbingConfig())
-    transcript=tx('Em tên là 大奔小发')
-    transcript.metadata['speech_preparation']={'forms':{'大奔小发':'Da Ben Xiao Fa'},'issues':[]}
-    pairs=spoken_pairs(transcript,profile=LocalizationProfile(id='p',name='p'),runtime=runtime(),
-                       voice_for_chunk=lambda profile,runtime,speaker,override: runtime.default_voice)
-    segments={'a':transcript.segments[0]}
-    svc._apply_spoken_forms(plan,segments,pairs,'Vietnamese')
-    seen={}
-    async def chat(*a,**kw):
-        seen['prompt']=kw['messages'][0]['content']
-        return '[{"id":"a","text":"Tên là Da Ben Xiao Fa"}]'
-    monkeypatch.setattr(svc,'_call_ai_chat_resilient',chat)
-    changed=await svc._adapt_chunk_items(object(),plan=plan,chunk=chunks[0],segment_by_id=segments,
-        target_language='Vietnamese',target_ms=1000,profile=LocalizationProfile(id='p',name='p'),issues=[], state={'measured_duration_ms':5000})
-    assert changed is True
-    assert '大奔小发' not in seen['prompt']
-    assert 'Da Ben Xiao Fa' in seen['prompt']
-    assert plan[0].spoken_text=='Tên là Da Ben Xiao Fa'
-    # The pipeline re-applies pairs after a rewrite; approved text is restored.
-    svc._apply_spoken_forms(plan,segments,pairs,'Vietnamese')
-    assert segments['a'].translated_text=='Tên là 大奔小发'
-    assert plan[0].spoken_text=='Tên là Da Ben Xiao Fa'
+    monkeypatch.setattr(svc, "_adapt_chunk_items", adapt)
+    profile = LocalizationProfile(id="p", name="P", dub_rewrite_attempts=1, video_retime_mode="off").model_copy(update={"rewrite_total_timeout_s": .02})
+    await svc.synthesize_timed_dub(tx("Xin chào mọi người", "你好"), source_media=tmp_path / "source.mp4",
+        target_language="Vietnamese", profile=profile, user_settings=None, work_dir=tmp_path / "dub")
+    assert len(seen) == 1 and seen[0] > 0

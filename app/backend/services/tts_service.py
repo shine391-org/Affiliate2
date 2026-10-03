@@ -6,6 +6,7 @@ Unified interface for: OpenAI TTS, Edge TTS.
 Same pattern as ai_provider.py — factory resolves the right backend.
 """
 import logging
+import re
 from enum import Enum
 from pathlib import Path
 
@@ -41,6 +42,29 @@ DEFAULT_VOICES = {
     TTSProvider.ELEVENLABS: "",
     TTSProvider.GPT_SOVITS: "",
 }
+
+
+def retryable_tts_error(exc: Exception) -> bool:
+    """One retry decision for canonical chunk/stage retries, including causes."""
+    current = exc
+    while current is not None:
+        status = getattr(current, "status_code", None)
+        if not status:
+            http_status = re.search(r"\bHTTP\s+(\d{3})\b", str(current), re.IGNORECASE)
+            status = int(http_status.group(1)) if http_status else None
+        if status and 400 <= int(status) < 500 and int(status) not in {408, 429}:
+            return False
+        if isinstance(current, (ValueError, TypeError)):
+            return False
+        message = str(current).lower()
+        if any(token in message for token in (
+            "api key", "permission", "not configured", "unsupported", "requires reference",
+            "requires a base url", "invalid voice", "invalid model", "resource not found",
+            "matching-gender", "unlocalized vietnamese", "invalid accepted rewrite",
+        )):
+            return False
+        current = current.__cause__
+    return True
 
 
 async def generate_tts(
@@ -94,6 +118,7 @@ async def generate_tts(
         return await generate_voice(
             text, voice_id=voice, api_key=api_key, region=region or "",
             base_url=base_url, output_path=output_path, speed=speed,
+            target_language=target_language,
         )
 
     elif provider == TTSProvider.ELEVENLABS:
@@ -123,6 +148,7 @@ async def list_voices(
     api_key: str = "",
     *,
     base_url: str | None = None,
+    region: str | None = None,
 ) -> list[dict]:
     """List available voices for a provider without generating paid speech."""
     if provider == TTSProvider.OPENAI_TTS:
@@ -142,6 +168,10 @@ async def list_voices(
     if provider == TTSProvider.ELEVENLABS:
         from backend.services.elevenlabs_tts_service import list_voices as list_elevenlabs_voices
         return await list_elevenlabs_voices(api_key=api_key, base_url=base_url)
+
+    if provider == TTSProvider.AZURE:
+        from backend.services.azure_tts_service import list_voices as azure_voices
+        return await azure_voices(api_key=api_key, base_url=base_url, region=region or "")
 
     return []
 
@@ -241,8 +271,8 @@ async def test_tts_connection(
         raise VoiceGenerationError("Azure Speech requires a region or custom endpoint")
     if provider in {TTSProvider.OPENAI_COMPATIBLE, TTSProvider.GPT_SOVITS} and not base_url:
         raise VoiceGenerationError(f"{info['label']} requires a base URL")
-    # No cheap, side-effect-free probe exists for these providers, so this
-    # result is explicitly NOT a verified connection.
+    # This preflight remains configuration-only. Azure's catalogue is queried
+    # separately by voice discovery and the job's speaker resolver.
     return {
         "ok": True,
         "provider": provider.value,
@@ -253,7 +283,7 @@ async def test_tts_connection(
         "voice_count": None,
         "selected_voice_valid": bool(voice),
         "model_valid": bool(selected_model) or provider in {TTSProvider.AZURE, TTSProvider.GPT_SOVITS},
-        "voices": await list_voices(provider, api_key, base_url=base_url),
+        "voices": [] if provider == TTSProvider.AZURE else await list_voices(provider, api_key, base_url=base_url),
         "models": [],
         "message": (
             "Cấu hình hợp lệ. Chưa xác minh kết nối tới nhà cung cấp này; "

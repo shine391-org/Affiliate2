@@ -108,6 +108,7 @@ def _provider_scoped_tts_resets(
     resets: dict[str, Any] = {
         "speaker_voices": {},
         "speaker_reference_audio": {},
+        "voice_genders": {},
     }
     if next_provider not in _CLONE_CAPABLE_TTS_PROVIDERS:
         resets.update({
@@ -153,7 +154,7 @@ _DUBBING_KEYS = {
     "rewrite_retry_attempts", "rewrite_attempt_timeout_s", "rewrite_total_timeout_s",
     "rewrite_guardrails", "rewrite_instructions",
     "tts_connection_id", "tts_provider", "tts_model", "tts_voice", "tts_base_url", "tts_region",
-    "speaker_voices", "speaker_voice_mode", "speaker_reference_audio", "tts_reference_audio",
+    "speaker_voices", "speaker_genders", "voice_genders", "speaker_voice_mode", "speaker_reference_audio", "tts_reference_audio",
     "tts_reference_text", "tts_reference_language", "voice_clone_reference_mode",
     "dub_min_cue_duration_ms",
     "dub_max_chunk_size", "dub_gap_tolerance_ms", "dub_speed_accept",
@@ -332,6 +333,14 @@ def _job_detail(run: LocalizationRun) -> dict:
             "speaker_voices": {**(speaker_state.get("speaker_voices") or {}),
                                **(run.effective_profile.get("speaker_voices") or {})},
             "available_voices": speaker_state.get("available_voices") or [],
+            "voice_catalogue": speaker_state.get("voice_catalogue") or [],
+            "speaker_genders": {**(transcript.get("metadata", {}).get("alignment", {}).get("speaker_genders") or {}),
+                                **(speaker_state.get("speaker_genders") or {}),
+                                **{speaker: {"gender": gender, "confirmed": gender != "unknown", "source": "reviewer"}
+                                   for speaker, gender in (run.effective_profile.get("speaker_genders") or {}).items()}},
+            "voice_genders": {**(speaker_state.get("voice_genders") or {}), **(run.effective_profile.get("voice_genders") or {}),
+                              **{row["voice_id"]: row["gender"] for row in (speaker_state.get("voice_catalogue") or [])
+                                 if row.get("gender") in {"male", "female"}}},
             "shared_voice": run.effective_profile.get("speaker_voice_mode") == "shared",
             "diarization": transcript.get("metadata", {}).get("alignment", {}),
         },
@@ -1061,6 +1070,7 @@ async def retry_localization_publish_registration(job_id: str):
 @router.post("/jobs/{job_id}/override")
 async def localization_expert_override(job_id: str, body: ExpertOverrideRequest):
     claim = await _claim_job_mutation(job_id)
+    transaction = None
     try:
         # Reload only AFTER winning the claim. A losing request may have started
         # from an older manifest snapshot; using it here would overwrite the
@@ -1068,9 +1078,14 @@ async def localization_expert_override(job_id: str, body: ExpertOverrideRequest)
         run = _load_run(job_id)
         _verify_run_source_identity(run)
         invalidations: list[str] = []
+        planned = _profile_invalidation(set(body.profile_updates or {}))
+        if body.segments:
+            planned = _earliest_stage([planned, "translation"] if planned else ["translation"])
+        transaction = ManifestTransaction(run, STAGES[STAGES.index(planned):] if planned else [])
+        transaction.begin()
 
         if body.profile_updates:
-            if {"speaker_voices", "speaker_voice_mode"} & set(body.profile_updates):
+            if {"speaker_voices", "speaker_genders", "voice_genders", "speaker_voice_mode"} & set(body.profile_updates):
                 revision = _review_revision(run, "translation", "transcript")
                 if not revision or revision != body.revision:
                     raise HTTPException(status_code=409, detail="Bản dịch đã thay đổi. Hãy tải lại trước khi sửa giọng.")
@@ -1115,6 +1130,7 @@ async def localization_expert_override(job_id: str, body: ExpertOverrideRequest)
                 )
             transcript = LocalizationTranscript.model_validate(raw)
             by_id = {seg.id: seg for seg in transcript.segments}
+            corrected_speaker = False
 
             for change in body.segments:
                 seg = by_id.get(change.id)
@@ -1136,6 +1152,9 @@ async def localization_expert_override(job_id: str, body: ExpertOverrideRequest)
                     seg.qc_status = "pending"
 
                 if change.speaker_id is not None:
+                    # Existing pitch hints refer to the old diarizer ownership.
+                    (transcript.metadata.get("alignment") or {}).pop("speaker_genders", None)
+                    corrected_speaker = True
                     seg.speaker_id = change.speaker_id.strip() or None
                     for word in seg.source_words:
                         previous = word.get("speaker_id")
@@ -1171,6 +1190,14 @@ async def localization_expert_override(job_id: str, body: ExpertOverrideRequest)
                         overrides["voice_id"] = voice
 
                 seg.overrides = overrides
+
+            if corrected_speaker:
+                state_path = run.root / "dubbing_state.json"
+                if state_path.exists():
+                    from backend.services.dubbing_job_state import write_json_atomic
+                    state = json.loads(state_path.read_text(encoding="utf-8"))
+                    state["speaker_genders"] = {}
+                    write_json_atomic(state_path, state)
 
             path = run.save_json(
                 "translation", "transcript.json", transcript.model_dump()
@@ -1208,7 +1235,10 @@ async def localization_expert_override(job_id: str, body: ExpertOverrideRequest)
             "invalidated_from": stage,
             "effective_profile": run.effective_profile,
         }
+        transaction.commit()
     except Exception:
+        if transaction is not None:
+            transaction.rollback()
         await _restore_job_mutation(job_id, claim)
         raise
 

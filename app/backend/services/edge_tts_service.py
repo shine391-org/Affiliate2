@@ -72,7 +72,6 @@ async def generate_voice(
         output_path = settings.AUDIO_DIR / f"edge_{hash(text) & 0xFFFFFFFF:08x}.mp3"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    import asyncio
     import edge_tts
 
     # Preserve the script's own punctuation and use native rate/pitch.
@@ -82,28 +81,18 @@ async def generate_voice(
     rate_pct = round((float(speed) - 1.0) * 100)
     rate = f"{rate_pct:+d}%"
 
-    last_error = None
-    for attempt in range(3):
-        try:
-            communicate = edge_tts.Communicate(
-                processed_text,
-                voice_id,
-                rate=rate,
-                pitch="+2Hz",
-            )
-            await communicate.save(str(output_path))
-
-            if not output_path.exists() or output_path.stat().st_size == 0:
-                raise VoiceGenerationError("Edge TTS returned empty audio")
-
-            logger.info(f"Edge TTS generated: {output_path} ({output_path.stat().st_size / 1024:.0f}KB, voice={voice_id})")
-            return output_path
-        except Exception as e:
-            last_error = e
-            logger.warning(f"Edge TTS attempt {attempt + 1}/3 failed ({e}), retrying...")
-            await asyncio.sleep(1.0)
-
-    raise VoiceGenerationError(f"Edge TTS generation failed after 3 attempts: {last_error}")
+    # The localization chunk runner owns bounded retries. A nested retry loop
+    # here used to multiply one chunk's three attempts into nine requests.
+    try:
+        communicate = edge_tts.Communicate(processed_text, voice_id, rate=rate, pitch="+0Hz")
+        await communicate.save(str(output_path))
+        if not output_path.exists() or output_path.stat().st_size == 0:
+            raise VoiceGenerationError("Edge TTS returned empty audio")
+        return output_path
+    except VoiceGenerationError:
+        raise
+    except Exception as exc:
+        raise VoiceGenerationError(f"Edge TTS generation failed: {exc}") from exc
 
 
 async def get_voice_list() -> list[dict]:

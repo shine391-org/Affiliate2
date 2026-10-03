@@ -549,7 +549,7 @@ def test_provider_scoped_tts_resets_keeps_clone_reference_for_gpt_sovits():
     resets = api._provider_scoped_tts_resets(
         {"tts_provider": "elevenlabs"}, {"tts_provider": "gpt_sovits"},
     )
-    assert resets == {"speaker_voices": {}, "speaker_reference_audio": {}}
+    assert resets == {"speaker_voices": {}, "speaker_reference_audio": {}, "voice_genders": {}}
 
 
 def test_rebuilt_profile_validates_after_provider_scoped_resets():

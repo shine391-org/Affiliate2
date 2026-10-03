@@ -27,6 +27,8 @@ Branch:
 
 Fixes on `feat/localization-fast-mode` enforce measured-first C7 rewrites, exact-text per-job/per-acoustic-binding calibration, durable unique changed-segment audits, C6/C7 deterministic meaning invariants, safe Fast diarization-only, persisted distinct speaker voices and Studio controls. QC keeps diarization failure, unresolved multi-speaker voice collisions and overlap in review. Focused backend/frontend verification passes; this is not full real-media or perceptual acceptance. See [docs/QA_LOCALIZATION_MEASURED_SPEAKERS.md](docs/QA_LOCALIZATION_MEASURED_SPEAKERS.md) for exact tests, media attempts and remaining gaps. No merge to `master` is part of this review.
 
+The second corrective review localizes names in reviewed C6 text, guards ages and question/exclamation markers, selects distinct voices matching confirmed source gender, and surfaces unverified gender in Studio/QC. Approved C6 remains immutable during C7; accepted measured rewrites, safe chunk reuse, atomic overrides and pre-C7 provider rebind invalidation are covered by focused regressions. Full dubbed-video/intonation acceptance remains pending: the accessible real audio preserved ASR timestamps but speaker inference lacked a token and live Edge access failed certificate verification. See [docs/QA_LOCALIZATION_VI_VOICES_WORKFLOW.md](docs/QA_LOCALIZATION_VI_VOICES_WORKFLOW.md).
+
 ### Real-media failure that triggered donor-first rebuild
 The first 65.7s sample exposed the old C7 prototype:
 - 21 usable translated speech units

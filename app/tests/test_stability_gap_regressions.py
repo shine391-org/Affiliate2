@@ -64,6 +64,8 @@ async def test_library_source_preserved_on_failure(tmp_path, monkeypatch):
 
     mock_profile = LocalizationProfile(id="p1", name="Profile 1", audio_mode="fast_duck")
     monkeypatch.setattr(ls, "materialize_localization_profile", lambda *a, **k: mock_profile)
+    # This checks local ownership, not the live Edge voice catalogue.
+    monkeypatch.setattr(ls, "validate_localization_tts_preflight", AsyncMock())
 
     async def fail_transcribe(*a, **k):
         raise RuntimeError("ASR pipeline simulated crash")
@@ -83,7 +85,7 @@ async def test_library_source_preserved_on_failure(tmp_path, monkeypatch):
     )
 
     tr._tool_fail.assert_awaited_once()
-    assert cleanup_calls == ["released"], "GPU cache cleanup must run even when ASR fails"
+    assert cleanup_calls == [], "Fast duck does not enter the Demucs/PyTorch cleanup owner"
     assert source_file.exists(), "Library source was deleted on failure!"
     assert source_file.read_bytes() == b"content-library-source"
 
@@ -106,6 +108,8 @@ async def test_library_source_preserved_on_success_and_review_pause(tmp_path, mo
 
     mock_profile = LocalizationProfile(id="p1", name="Profile 1", audio_mode="fast_duck")
     monkeypatch.setattr(ls, "materialize_localization_profile", lambda *a, **k: mock_profile)
+    # This checks local ownership, not the live Edge voice catalogue.
+    monkeypatch.setattr(ls, "validate_localization_tts_preflight", AsyncMock())
 
     async def stub_transcribe(*a, **k):
         return LocalizationTranscript(
@@ -126,6 +130,7 @@ async def test_library_source_preserved_on_success_and_review_pause(tmp_path, mo
     monkeypatch.setattr(ls, "prepare_semantic_transcript", stub_prepare)
     monkeypatch.setattr(ls, "translate_transcript", stub_translate)
 
+    monkeypatch.setattr("backend.agents.job_helper.update_job_status", AsyncMock())
     # With review_translation=True, should pause after C6 and preserve library source
     await tr.run_tool_translate(
         job_id="job-lib-pause",
@@ -140,7 +145,11 @@ async def test_library_source_preserved_on_success_and_review_pause(tmp_path, mo
         review_translation=True,
     )
 
-    tr._tool_success.assert_awaited_once()
+    tr._tool_success.assert_not_awaited()  # Review pause is not completed output.
+    assert tr._tool_fail.await_count == 0, repr(tr._tool_fail.await_args)
+    paused = lss.LocalizationRun.load("job-lib-pause")
+    assert paused.request["translation_review_pending"] is True
+    assert paused.is_complete("translation", ("transcript",))
     assert source_file.exists(), "Library source was deleted on review pause!"
     assert source_file.read_bytes() == b"content-library-source-2"
 
@@ -655,10 +664,14 @@ async def test_rerun_preserves_translation_checkpoint_and_skips_finished_batches
 
     # Seed partial checkpoint where batch 0 is completed
     semantic_sig = ls.hashlib.sha256(
-        "".join(f"{s.id}:{s.source_text}" for s in transcript.segments).encode("utf-8")
+        json.dumps([{"id": s.id, "text": s.source_text, "start": s.source_start_ms,
+                     "end": s.source_end_ms, "speaker": s.speaker_id, "words": s.source_words}
+                    for s in transcript.segments], sort_keys=True, ensure_ascii=False).encode("utf-8")
     ).hexdigest()[:16]
     checkpoint_file = trans_dir / "checkpoint.json"
     checkpoint_data = {
+        "meaning_guard_version": 3, "source_language": "en", "protected_terms": [],
+        "speaker_genders": {}, "for_dub": False,
         "semantic_hash": semantic_sig,
         "target_language": "vi",
         "routes": [{
@@ -673,6 +686,7 @@ async def test_rerun_preserves_translation_checkpoint_and_skips_finished_batches
         "glossary_hash": ls.hashlib.sha256(b"{}").hexdigest()[:16],
         "batches": {
             "0": {
+                "items": [{"id": f"s{i}", "text": f"Dịch {i}", "localized_terms": {}} for i in range(12)],
                 "texts": [f"Dịch {i}" for i in range(12)],
                 "failed": [],
             }

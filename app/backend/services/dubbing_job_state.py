@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import asyncio
+from collections import Counter
 from pathlib import Path
 
 from backend.services.dubbing_planner import DubbingRateCalibrator
@@ -63,7 +65,7 @@ class DubbingJobState:
         if self.data.get("scope") != scope:
             self.data = {"version": 1, "scope": scope, "rewrite_audit": []}
         if self.data.get("binding") != binding:
-            self.data.update(binding=binding, speaker_voices={}, measurements={}, available_voices=[])
+            self.data.update(binding=binding, speaker_voices={}, measurements={}, available_voices=[], voice_catalogue=[], accepted_text={})
         self.save()
 
     def save(self) -> None:
@@ -72,8 +74,9 @@ class DubbingJobState:
     @property
     def rewrite_count(self) -> int:
         return len({entry["segment_id"] for entry in self.data["rewrite_audit"]
-                    if entry["before"] != entry["after"]
-                    or entry.get("caption_before") != entry.get("caption_after")})
+                    if entry.get("status", "accepted") == "accepted" and (
+                        entry["before"] != entry["after"]
+                        or entry.get("caption_before") != entry.get("caption_after"))})
 
     def observe(self, identity: str, voice_key: str, text: str,
                 estimated_ms: int, actual_ms: int) -> None:
@@ -99,17 +102,45 @@ class DubbingJobState:
 
 
 async def available_speaker_voices(runtime, language_voice: str) -> list[str]:
+    return [row["voice_id"] for row in await speaker_voice_catalogue(runtime, language_voice)]
+
+
+def voice_gender(row: dict) -> str:
+    # Prefer provider gender metadata, not a name or position in a voice list.
+    value = str(row.get("gender") or row.get("Gender") or (row.get("labels") or {}).get("gender")
+                or row.get("category") or "").lower()
+    return "female" if "female" in value else ("male" if "male" in value else "unknown")
+
+
+async def speaker_voice_catalogue(runtime, language_voice: str) -> list[dict]:
     from backend.services import tts_service
     provider = getattr(runtime.provider, "value", str(runtime.provider))
-    if provider in {"edge_tts", "azure_tts"} and language_voice.startswith("vi-"):
-        return ["vi-VN-HoaiMyNeural", "vi-VN-NamMinhNeural"]
     if provider == "gpt_sovits":
         return []  # Clone identity is the actual reference, not an ignored voice ID.
-    rows = await tts_service.list_voices(runtime.provider, api_key=runtime.api_key, base_url=runtime.base_url)
-    voices = [str(row.get("voice_id") or row.get("ShortName") or "") for row in rows]
-    if provider in {"edge_tts", "azure_tts"}:
-        voices = [voice for voice in voices if voice[:2] == language_voice[:2]]
-    return list(dict.fromkeys(voice for voice in voices if voice))
+    options = {"region": runtime.region} if provider == "azure_tts" else {}
+    rows = await asyncio.wait_for(tts_service.list_voices(
+        runtime.provider, api_key=runtime.api_key, base_url=runtime.base_url, **options), timeout=10)
+    catalogue = {}
+    if provider in {"edge_tts", "azure_tts"} and language_voice.startswith("vi-"):
+        catalogue = {voice: {"voice_id": voice, "gender": gender, "locale": "vi-VN"}
+                     for voice, gender in (("vi-VN-HoaiMyNeural", "female"), ("vi-VN-NamMinhNeural", "male"))}
+    # These multilingual personas support Vietnamese. Only add them when the
+    # selected provider actually advertises them; Azure availability alone is
+    # not proof of Edge availability. Prefer native Vietnamese voices first.
+    multilingual_vi = {"en-US-AndrewMultilingualNeural", "en-US-BrianMultilingualNeural",
+                       "en-US-AvaMultilingualNeural", "en-US-EmmaMultilingualNeural"}
+    for row in rows:
+        voice = str(row.get("voice_id") or row.get("ShortName") or "")
+        if not voice:
+            continue
+        if provider in {"edge_tts", "azure_tts"} and not (
+            voice[:2] == language_voice[:2]
+            or (language_voice.startswith("vi-") and voice in multilingual_vi)
+        ):
+            continue
+        catalogue[voice] = {"voice_id": voice, "gender": voice_gender(row),
+                            "locale": row.get("locale") or row.get("Locale") or ""}
+    return list(catalogue.values())
 
 
 async def resolve_speaker_voices(transcript, *, profile, runtime, state: DubbingJobState,
@@ -127,24 +158,46 @@ async def resolve_speaker_voices(transcript, *, profile, runtime, state: Dubbing
                     if speaker in detected and voice.strip()})
     shared = profile.speaker_voice_mode == "shared"
     provider = getattr(runtime.provider, "value", str(runtime.provider))
-    catalogue = list(state.data.get("available_voices") or [])
+    source_genders = {speaker: dict(value) for speaker, value in
+                      ((transcript.metadata.get("alignment") or {}).get("speaker_genders") or {}).items()
+                      if speaker in detected}
+    source_genders.update({speaker: {"gender": gender, "source": "reviewer", "confirmed": gender != "unknown"}
+                           for speaker, gender in profile.speaker_genders.items() if speaker in detected})
+    catalogue = list(state.data.get("voice_catalogue") or [])
+    if not catalogue and provider in {"edge_tts", "azure_tts"} and language_voice.startswith("vi-"):
+        catalogue = [{"voice_id": voice, "gender": gender, "locale": "vi-VN"}
+                     for voice, gender in (("vi-VN-HoaiMyNeural", "female"), ("vi-VN-NamMinhNeural", "male"))]
+    counts = Counter(value.get("gender") for value in source_genders.values() if value.get("gender") != "unknown")
+    insufficient = len(catalogue) < len(detected) or any(
+        count > sum(row["gender"] == gender for row in catalogue) for gender, count in counts.items())
+    if provider != "gpt_sovits" and (not catalogue or insufficient):
+        try:
+            catalogue = await speaker_voice_catalogue(runtime, language_voice)
+            state.data.pop("voice_catalog_error", None)
+        except Exception as exc:
+            state.data["voice_catalog_error"] = type(exc).__name__
+    genders = {row["voice_id"]: row["gender"] for row in catalogue}
+    # Confirmed built-in/provider metadata wins over a contradictory manual tag.
+    genders = {**profile.voice_genders, **{key: value for key, value in genders.items() if value != "unknown"}}
+    for speaker, voice in list(mapping.items()):
+        wanted = source_genders.get(speaker, {}).get("gender", "unknown")
+        if speaker not in profile.speaker_voices and wanted != "unknown" and genders.get(voice) != wanted:
+            mapping.pop(speaker)
     missing = [speaker for speaker in sorted(detected) if speaker not in mapping]
     if shared:
         mapping = {speaker: runtime.default_voice for speaker in detected}
     elif missing and provider != "gpt_sovits":
-        if len(detected) > 1 and not catalogue:
-            try:
-                catalogue = await available_speaker_voices(runtime, language_voice)
-            except Exception as exc:
-                state.data["voice_catalog_error"] = type(exc).__name__
-        candidates = list(dict.fromkeys([runtime.default_voice, *catalogue]))
+        candidates = list(dict.fromkeys([runtime.default_voice, *[row["voice_id"] for row in catalogue]]))
         used = set(mapping.values())
         for speaker in missing:
-            voice = next((voice for voice in candidates if voice and voice not in used), None)
+            wanted = source_genders.get(speaker, {}).get("gender", "unknown")
+            voice = next((voice for voice in candidates if voice and voice not in used
+                          and (wanted == "unknown" or genders.get(voice) == wanted)), None)
             if voice:
                 mapping[speaker] = voice
                 used.add(voice)
     state.data.update(speaker_voices=mapping, detected_speakers=sorted(detected),
-                      available_voices=catalogue, shared_voice=shared)
+                      available_voices=[row["voice_id"] for row in catalogue], voice_catalogue=catalogue,
+                      speaker_genders=source_genders, voice_genders=genders, shared_voice=shared)
     state.save()
     return mapping

@@ -31,6 +31,61 @@ class AlignmentReport:
     diarization_requested: bool = False
     unassigned_segment_count: int = 0
     overlap_intervals: list[dict] = field(default_factory=list)
+    speaker_genders: dict[str, dict] = field(default_factory=dict)
+
+
+def _source_voice_hints(audio, rows: list[dict], sample_rate: int = 16000) -> dict[str, dict]:
+    """Bounded pitch hints from solo speech, never a verified gender classifier.
+
+    This uses the audio WhisperX already loaded. Short/noisy/overlapping or
+    ambiguous voices remain unknown. A reviewer can correct/confirm in Studio.
+    """
+    import numpy as np
+    results = {}
+    for speaker in sorted({row["speaker"] for row in rows}):
+        frequencies = []
+        remaining = sample_rate * 8
+        for row in rows:
+            if row["speaker"] != speaker or remaining <= 0:
+                continue
+            intervals = [(row["start"], row["end"])]
+            for other in rows:
+                if other["speaker"] == speaker:
+                    continue
+                intervals = [(a, b) for start, end in intervals
+                             for a, b in ((start, min(end, other["start"])), (max(start, other["end"]), end))
+                             if b > a]
+            for start, end in intervals:
+                samples = np.asarray(audio[max(0, round(start * sample_rate)):round(end * sample_rate)], dtype=float)[:remaining]
+                remaining -= len(samples)
+                window, step = round(sample_rate * .05), round(sample_rate * .04)
+                for offset in range(0, len(samples) - window, step):
+                    frame = samples[offset:offset + window]
+                    frame = frame - frame.mean()
+                    power = float(np.dot(frame, frame))
+                    if power / window < .0001:
+                        continue
+                    correlation = np.correlate(frame, frame, mode="full")[window - 1:] / power
+                    low, high = sample_rate // 350, sample_rate // 70
+                    peaks = [lag for lag in range(low + 1, high)
+                             if correlation[lag] > correlation[lag - 1] and correlation[lag] >= correlation[lag + 1]]
+                    if not peaks:
+                        continue
+                    strength = max(correlation[lag] for lag in peaks)
+                    if strength < .6:
+                        continue
+                    lag = next(lag for lag in peaks if correlation[lag] >= max(.6, strength * .9))
+                    frequencies.append(sample_rate / lag)
+        median = float(np.median(frequencies)) if frequencies else 0
+        gender = "unknown"
+        if len(frequencies) >= 30:
+            if 75 <= median < 165 and sum(75 <= f < 165 for f in frequencies) / len(frequencies) >= .7:
+                gender = "male"
+            elif 195 < median <= 330 and sum(195 < f <= 330 for f in frequencies) / len(frequencies) >= .7:
+                gender = "female"
+        results[speaker] = {"gender": gender, "source": "acoustic_pitch", "confirmed": False,
+                            "median_f0_hz": round(median, 1), "voiced_ms": len(frequencies) * 40}
+    return results
 
 
 def _ensure_torch_checkpoint_compat():
@@ -288,6 +343,11 @@ def _align_sync(
                 report.diarization_reason = f"inference_failed:{type(exc).__name__}"
 
     result = _aligned_to_transcript(transcript, aligned_segments, diar_segments)
+    if diar_segments:
+        try:
+            report.speaker_genders = _source_voice_hints(audio, diar_segments)
+        except Exception as exc:
+            logger.warning("Source voice hint unavailable: %s", type(exc).__name__)
     if not report.alignment_applied:
         result.source = transcript.source
     report.unassigned_segment_count = sum(seg.speaker_id is None for seg in result.segments)

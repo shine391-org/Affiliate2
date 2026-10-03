@@ -59,7 +59,7 @@ def _utc_now_iso() -> str:
 _TRANSLATION_BATCH_SIZE = 12
 _CONTEXT_CHARS = 10_000
 _DUBBING_SYNTHESIS_RULES_VERSION = 1
-_EDGE_TTS_BOUNDARY_RULE = "edge-boundary-trim-v2-no-injected-pauses"
+_EDGE_TTS_BOUNDARY_RULE = "edge-boundary-trim-v3-neutral-pitch"
 
 # Edge TTS often wraps very short utterances in relatively large digital
 # leading/trailing silence. Measuring that container padding as spoken duration
@@ -774,6 +774,7 @@ def _translation_prompt(
     transcript_context: str,
     profile: LocalizationProfile,
     for_dub: bool,
+    localized_terms: dict[str, str] | None = None,
 ) -> str:
     preset = _PRESET_INSTRUCTIONS[profile.translation_preset].format(
         language=target_language
@@ -789,6 +790,7 @@ def _translation_prompt(
             "speaker_id": seg.speaker_id,
             "text": seg.source_text,
             "source_duration_ms": seg.source_end_ms - seg.source_start_ms,
+            "source_voice": (profile.speaker_genders or {}).get(seg.speaker_id, "unknown"),
         }
         for seg in batch
     ]
@@ -809,6 +811,10 @@ LOCKED PROTOCOL:
 - Return every input ID exactly once and no extra IDs.
 - Return only the required JSON array; do not add prose or markdown.
 - {timing}
+- Preserve questions, exclamations, pauses, emphasis and the speaker's intent. Keep short replies short; do not invent emotional cues or change who is addressing whom.
+- Preserve all numeric facts, including age. Express written quantities as Arabic digits with the equivalent target-language unit (十八岁 => 18 tuổi).
+- For Vietnamese, translate common nouns and use established Vietnamese/Hán–Việt forms for Chinese personal names (吴小彤 => Ngô Tiểu Đồng), place names and forms of address in BOTH captions and spoken text. Do not substitute English/Pinyin pronunciation or invent another person's identity. Explicit glossary/protected terms take priority.
+- Include localized_terms for proper names in each item; reuse the job dictionary exactly and use the same name across speakers/batches. Empty {{}} is allowed when no proper name occurs.
 
 STYLE:
 {preset}
@@ -822,6 +828,9 @@ GLOSSARY:
 PROTECTED TERMS (preserve literally when present):
 {json.dumps(profile.protected_terms, ensure_ascii=False)}
 
+JOB NAME DICTIONARY (already accepted in earlier batches):
+{json.dumps(localized_terms or {}, ensure_ascii=False)}
+
 FULL SOURCE CONTEXT:
 {transcript_context}
 
@@ -829,7 +838,7 @@ SEGMENTS:
 {json.dumps(items, ensure_ascii=False)}
 
 Return ONLY a JSON array:
-[{{"id":"segment-id","text":"translated speech"}}]
+[{{"id":"segment-id","text":"translated speech","localized_terms":{{"source proper name":"Vietnamese name"}}}}]
 Every input ID must appear exactly once and no extra IDs are allowed."""
 
 
@@ -852,6 +861,38 @@ def _validate_translation_payload(raw: str, batch: list[LocalizationSegment]) ->
     if set(seen) != set(expected):
         raise ValueError("translation response IDs do not match input IDs")
     return [seen[seg_id] for seg_id in expected]
+
+
+def _validate_localized_terms(raw, batch, texts, known, profile, target_language):
+    """Accept a job dictionary atomically with the C6 text that uses it."""
+    from backend.services.dubbing_rewrite_guard import check_translation_meaning, untranslated_han
+    terms = dict(known or {})
+    by_id = {item["id"]: item for item in json.loads(_strip_json_fence(raw))}
+    for segment, text in zip(batch, texts):
+        additions = by_id[segment.id].get("localized_terms", {})
+        if not isinstance(additions, dict):
+            raise ValueError("localized_terms must be an object")
+        for source, target in additions.items():
+            if (not isinstance(source, str) or not isinstance(target, str)
+                    or not source.strip() or len(source) > 120 or len(target) > 120
+                    or source not in segment.source_text or not target.strip() or target not in text
+                    or untranslated_han(target, target_language, allowed=profile.protected_terms)):
+                raise ValueError("Invalid localized proper name")
+            if source in terms and terms[source] != target:
+                raise ValueError(f"Inconsistent localized name: {source}")
+            if source in profile.glossary and profile.glossary[source] != target:
+                raise ValueError(f"Localized name conflicts with glossary: {source}")
+            terms[source] = target
+    for segment, text in zip(batch, texts):
+        violations = check_translation_meaning(
+            segment.source_text, text, None, target_language,
+            glossary={**terms, **profile.glossary}, protected_terms=profile.protected_terms,
+        )
+        # Language-aware numeric/polarity checks run in the caller; this check
+        # enforces dictionary consistency even when the model omits that field.
+        if any(item["kind"] in {"term_lost", "unlocalized_text"} for item in violations):
+            raise ValueError(f"Localized dictionary missing from {segment.id}: {violations}")
+    return terms
 
 
 async def _emit_ai_progress(progress_cb, payload: dict) -> None:
@@ -1072,6 +1113,7 @@ async def _translate_batch_resilient(
     progress_cb=None,
     deadline_at: float | None = None,
     source_language: str | None = None,
+    localized_terms: dict[str, str] | None = None,
 ) -> tuple[list[str], set[int]]:
     if deadline_at is None:
         deadline_at = asyncio.get_running_loop().time() + float(
@@ -1083,6 +1125,7 @@ async def _translate_batch_resilient(
         transcript_context=context,
         profile=profile,
         for_dub=for_dub,
+        localized_terms=localized_terms,
     )
     raw = await _call_ai_chat_resilient(
         ai,
@@ -1099,14 +1142,17 @@ async def _translate_batch_resilient(
     )
     try:
         texts = _validate_translation_payload(raw, batch)
+        accepted_terms = _validate_localized_terms(raw, batch, texts, localized_terms, profile, target_language)
         from backend.services.dubbing_rewrite_guard import check_translation_meaning
         for segment, text in zip(batch, texts):
             violations = check_translation_meaning(
                 segment.source_text, text, source_language, target_language,
-                glossary=profile.glossary, protected_terms=profile.protected_terms,
+                glossary={**accepted_terms, **profile.glossary}, protected_terms=profile.protected_terms,
             )
             if violations:
                 raise ValueError(f"translation meaning guard for {segment.id}: {violations}")
+        if localized_terms is not None:
+            localized_terms.update(accepted_terms)
         return texts, set()
     except (json.JSONDecodeError, ValueError) as exc:
         # A transport-level 200 with unusable structured output is still a
@@ -1139,6 +1185,7 @@ async def _translate_batch_resilient(
                     target_language=target_language, context=context,
                     profile=profile, for_dub=for_dub, fallback_ai=fallback_ai,
                     progress_cb=progress_cb, deadline_at=deadline_at, source_language=source_language,
+                    localized_terms=localized_terms,
                 )
 
         if len(batch) == 1:
@@ -1156,12 +1203,14 @@ async def _translate_batch_resilient(
             target_language=target_language, context=context,
             profile=profile, for_dub=for_dub, fallback_ai=fallback_ai,
             progress_cb=progress_cb, deadline_at=deadline_at, source_language=source_language,
+            localized_terms=localized_terms,
         )
         right, rf = await _translate_batch_resilient(
             ai, batch[mid:], route_state=route_state,
             target_language=target_language, context=context,
             profile=profile, for_dub=for_dub, fallback_ai=fallback_ai,
             progress_cb=progress_cb, deadline_at=deadline_at, source_language=source_language,
+            localized_terms=localized_terms,
         )
         return left + right, lf | {mid + i for i in rf}
 
@@ -1190,7 +1239,9 @@ async def translate_transcript(
 
     checkpoint_file = (checkpoint_dir / "checkpoint.json") if checkpoint_dir else None
     semantic_sig = hashlib.sha256(
-        "".join(f"{s.id}:{s.source_text}" for s in transcript.segments).encode("utf-8")
+        json.dumps([{"id": s.id, "text": s.source_text, "start": s.source_start_ms,
+                     "end": s.source_end_ms, "speaker": s.speaker_id, "words": s.source_words}
+                    for s in transcript.segments], sort_keys=True, ensure_ascii=False).encode("utf-8")
     ).hexdigest()[:16]
     glossary_str = json.dumps(getattr(profile, "glossary", {}) or {}, sort_keys=True, ensure_ascii=False)
     glossary_hash = hashlib.sha256(glossary_str.encode("utf-8")).hexdigest()[:16]
@@ -1201,17 +1252,20 @@ async def translate_transcript(
             "provider": getattr(getattr(client, "provider", None), "value", str(getattr(client, "provider", ""))),
             "model": getattr(client, "model", ""),
             "base_url_override": str(
-                (route_specs[index].get("base_url") if index < len(route_specs) else "") or ""
+                getattr(client, "base_url", None)
+                or (route_specs[index].get("base_url") if index < len(route_specs) else "") or ""
             ).rstrip("/"),
         }
         for index, client in enumerate(route_clients)
     ]
     checkpoint_meta = {
-        "meaning_guard_version": 2,
+        "meaning_guard_version": 3,
         "source_language": transcript.language,
         "protected_terms": profile.protected_terms,
         "semantic_hash": semantic_sig,
         "target_language": target_language,
+        "for_dub": for_dub,
+        "speaker_genders": profile.speaker_genders,
         "routes": route_fingerprint,
         "preset": profile.translation_preset,
         "instructions": (getattr(profile, "translation_instructions", "") or "").strip(),
@@ -1219,11 +1273,13 @@ async def translate_transcript(
         "glossary_hash": glossary_hash,
     }
     completed_batches: dict[str, dict] = {}
+    localized_terms: dict[str, str] = {}
     if checkpoint_file and checkpoint_file.exists():
         try:
             cp_data = json.loads(checkpoint_file.read_text(encoding="utf-8"))
             if all(cp_data.get(k) == v for k, v in checkpoint_meta.items()):
-                completed_batches = cp_data.get("batches", {})
+                saved_batches = cp_data.get("batches", {})
+                completed_batches = saved_batches if isinstance(saved_batches, dict) else {}
                 saved_route_state = cp_data.get("route_state")
                 if isinstance(saved_route_state, dict):
                     route_state.sticky_index = min(
@@ -1252,8 +1308,24 @@ async def translate_transcript(
     for start in range(0, len(out.segments), _TRANSLATION_BATCH_SIZE):
         batch = out.segments[start:start + _TRANSLATION_BATCH_SIZE]
         batch_key = str(start)
-        if batch_key in completed_batches and not completed_batches[batch_key].get("failed"):
-            texts = completed_batches[batch_key]["texts"]
+        cached = completed_batches.get(batch_key)
+        valid_cache = False
+        if isinstance(cached, dict) and not cached.get("failed"):
+            try:
+                payload = json.dumps(cached.get("items"), ensure_ascii=False)
+                texts = _validate_translation_payload(payload, batch)
+                accepted = _validate_localized_terms(payload, batch, texts, localized_terms, profile, target_language)
+                from backend.services.dubbing_rewrite_guard import check_translation_meaning
+                if any(check_translation_meaning(seg.source_text, text, transcript.language, target_language,
+                           glossary={**accepted, **profile.glossary}, protected_terms=profile.protected_terms)
+                       for seg, text in zip(batch, texts)):
+                    raise ValueError("Invalid checkpoint semantics")
+                localized_terms.update(accepted)
+                valid_cache = True
+            except (TypeError, KeyError, ValueError):
+                completed_batches.pop(batch_key, None)
+                logger.warning("Discarding invalid translation checkpoint batch %s", batch_key)
+        if valid_cache:
             failed = set()
         else:
             total_batches = max(
@@ -1276,11 +1348,16 @@ async def translate_transcript(
                 for_dub=for_dub,
                 fallback_ai=fallback_ai,
                 progress_cb=progress_cb,
+                localized_terms=localized_terms,
             )
             if failed:
                 completed_batches.pop(batch_key, None)
             else:
-                completed_batches[batch_key] = {"texts": texts, "failed": []}
+                completed_batches[batch_key] = {"items": [
+                    {"id": seg.id, "text": text, "localized_terms": {
+                        source: target for source, target in localized_terms.items()
+                        if source in seg.source_text and target in text}}
+                    for seg, text in zip(batch, texts)], "texts": texts, "failed": []}
             if checkpoint_file:
                 try:
                     checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
@@ -1329,6 +1406,9 @@ async def translate_transcript(
         "attempt_count": route_state.attempt_count,
         "success_count": route_state.success_count,
     }
+    out.metadata["localized_terms"] = localized_terms
+    out.metadata["localization_policy_version"] = 3
+    out.metadata["target_language"] = target_language
     return out
 
 
@@ -1907,7 +1987,7 @@ async def _generate_tts_chunk(
     reference_language: str | None = None,
     attempts: int = 3,
 ) -> int:
-    from backend.services.tts_service import generate_tts
+    from backend.services.tts_service import generate_tts, retryable_tts_error
 
     last: Exception | None = None
     for _ in range(max(1, attempts)):
@@ -1941,7 +2021,9 @@ async def _generate_tts_chunk(
             last = RuntimeError("TTS generated zero-duration audio")
         except Exception as exc:
             last = exc
-    raise RuntimeError(f"TTS chunk failed after {attempts} attempts: {last}")
+            if not retryable_tts_error(exc):
+                raise
+    raise RuntimeError(f"TTS chunk failed after {attempts} attempts: {last}") from last
 
 
 
@@ -1984,6 +2066,8 @@ def _chunk_synthesis_identity(
     # punctuation regenerate once, without touching paid/clone providers.
     if provider == "edge_tts":
         payload["boundary_postprocess"] = _EDGE_TTS_BOUNDARY_RULE
+    if provider == "azure_tts":
+        payload["target_locale_policy"] = "explicit-vi-v1"
     raw = json.dumps(
         payload,
         ensure_ascii=False,
@@ -2322,9 +2406,9 @@ ITEMS:
 
     current_text = chunk_text(plan, chunk)
     candidate_text = " ".join(mapped[item["id"]] for item in items)
-    from backend.services.dubbing_speech import HAN_SPAN
-    if ((target_language or "").lower() in {"vietnamese", "vi", "vi-vn"}
-            and not HAN_SPAN.search(current_text) and HAN_SPAN.search(candidate_text)):
+    from backend.services.dubbing_rewrite_guard import untranslated_han
+    if untranslated_han(candidate_text, target_language,
+            allowed=[*profile.protected_terms, *profile.glossary.values()]):
         return record_invalid("rewrite_reintroduced_foreign_script")
     # A paraphrase that grows cannot solve a duration overflow. Reject it
     # atomically so neither the plan nor the caption transcript drifts.
@@ -2454,32 +2538,6 @@ async def _prepare_dubbing_speech(transcript, **kwargs):
     )
 
 
-async def _dubbing_spoken_pairs(transcript, *, profile, runtime) -> dict[str, list[tuple[str, str]]]:
-    from backend.services.dubbing_speech import spoken_pairs
-    return spoken_pairs(transcript, profile=profile, runtime=runtime, voice_for_chunk=_voice_for_chunk)
-
-
-def _apply_spoken_forms(
-    plan: list[PlanItem],
-    segment_by_id: dict[str, LocalizationSegment],
-    pairs: dict[str, list[tuple[str, str]]],
-    language: str,
-) -> None:
-    """Keep TTS input readable while caption/stored text stays as approved."""
-    if not pairs:
-        return
-    from backend.services.dubbing_speech import restore_script, to_spoken
-    for item in plan:
-        item_pairs = pairs.get(item.segment_id)
-        if not item_pairs:
-            continue
-        item.spoken_text = to_spoken(item.spoken_text, item_pairs)
-        item.estimated_duration_ms = estimate_spoken_ms(item.spoken_text, language)
-        seg = segment_by_id.get(item.segment_id)
-        if seg is not None and (seg.translated_text or "").strip():
-            seg.translated_text = restore_script(seg.translated_text or "", item_pairs)
-
-
 def _speech_onset_ms(seg: LocalizationSegment) -> int:
     """Anchor speech to the earliest valid word, not padded ASR silence.
 
@@ -2542,6 +2600,9 @@ async def synthesize_timed_dub(
     """C7 donor-derived chunk planner with measured TTS and bounded retiming."""
     work_dir.mkdir(parents=True, exist_ok=True)
     out = transcript.model_copy(deep=True)
+    out.metadata["target_language"] = target_language
+    profile = profile.model_copy(update={"protected_terms": list(dict.fromkeys([
+        *profile.protected_terms, *(out.metadata.get("localized_terms") or {}).values()]))})
     rewrite_ai_error: Exception | None = None
     route_state: _AIStageRouteState | None = None
     try:
@@ -2568,6 +2629,12 @@ async def synthesize_timed_dub(
         language_voice=_default_speech_voice(target_language),
     )
     profile = profile.model_copy(update={"speaker_voices": speaker_voices})
+    # Never knowingly synthesize a different gender to fill an unavailable slot.
+    if profile.speaker_voice_mode != "shared" and getattr(runtime.provider, "value", str(runtime.provider)) != "gpt_sovits":
+        missing_gender_voices = [speaker for speaker, fact in job_state.data.get("speaker_genders", {}).items()
+                                 if fact.get("gender") in {"male", "female"} and speaker not in speaker_voices]
+        if missing_gender_voices:
+            raise ValueError(f"No distinct matching-gender TTS voice for {missing_gender_voices}; select speaker voices or change TTS binding")
     def save_audit():
         job_state.save()
         write_json_atomic(audit_path, job_state.audit_payload())
@@ -2577,12 +2644,31 @@ async def synthesize_timed_dub(
         out, profile=profile, runtime=runtime, ai=ai, fallback_ai=fallback_ai,
         route_state=route_state, work_dir=work_dir, progress_cb=progress_cb,
     )
-    forms = (out.metadata.get("speech_preparation") or {}).get("forms") or {}
-    if forms:
-        from backend.services.dubbing_speech import to_spoken
-        pairs = sorted(forms.items(), key=lambda pair: -len(pair[0]))
-        spoken_terms = [to_spoken(term, pairs) for term in [*profile.protected_terms, *profile.glossary.values()]]
-        profile = profile.model_copy(update={"protected_terms": list(dict.fromkeys([*profile.protected_terms, *spoken_terms]))})
+    # Resume accepted C7 text independently of the immutable, reviewed C6
+    # artifact. Changed input, voice, reference, or policy invalidates replay.
+    approved_text = {seg.id: seg.translated_text for seg in out.segments}
+    acceptance_key = hashlib.sha256(json.dumps({
+        "binding": tts_binding(runtime, target_language), "profile": profile.model_dump(),
+        "source": str(source_media.resolve()),
+        "segments": [{"id": seg.id, "text": seg.translated_text, "source_text": seg.source_text,
+                      "start": seg.source_start_ms, "end": seg.source_end_ms,
+                      "speaker": seg.speaker_id, "words": seg.source_words, "overrides": seg.overrides}
+                     for seg in out.segments],
+        "references": [reference_identity(path) for path in
+                       [profile.tts_reference_audio, *profile.speaker_reference_audio.values()] if path],
+    }, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    if job_state.data.get("acceptance_key") != acceptance_key:
+        job_state.data.update(acceptance_key=acceptance_key, accepted_text={})
+    else:
+        from backend.services.dubbing_rewrite_guard import check_rewrite_meaning
+        for seg in out.segments:
+            accepted = job_state.data.get("accepted_text", {}).get(seg.id)
+            if accepted:
+                if check_rewrite_meaning(seg.translated_text or "", accepted, target_language,
+                        protected_terms=[*profile.protected_terms, *profile.glossary.values()]):
+                    raise ValueError(f"Invalid accepted rewrite for {seg.id}")
+                seg.translated_text = accepted
+    job_state.save()
     rewrite_budget = _rewrite_budget if _rewrite_budget is not None else [float(profile.rewrite_total_timeout_s)]
 
     async def adapt_with_budget(**kwargs):
@@ -2594,10 +2680,6 @@ async def synthesize_timed_dub(
                 deadline_at=started + max(0.0, rewrite_budget[0]),
                 progress_cb=progress_cb, **kwargs,
             )
-            if changed:
-                # A rewrite speaks in readable Latin but must not leak that form
-                # into approved caption/stored translation text.
-                _apply_spoken_forms(kwargs['plan'], segment_by_id, spoken_pairs, target_language)
             return changed
         finally:
             rewrite_budget[0] = max(0.0, rewrite_budget[0] - (asyncio.get_running_loop().time() - started))
@@ -2675,8 +2757,6 @@ async def synthesize_timed_dub(
         cues, config, language=target_language, timeline_end_ms=source_duration_ms,
         split_before_segment_ids=forced_splits,
     )
-    spoken_pairs = await _dubbing_spoken_pairs(out, profile=profile, runtime=runtime)
-    _apply_spoken_forms(plan, segment_by_id, spoken_pairs, target_language)
 
     auto_references: dict[str, dict] = {}
     provider_value = getattr(runtime.provider, "value", str(runtime.provider))
@@ -2716,6 +2796,7 @@ async def synthesize_timed_dub(
     rewrite_context: dict[int, tuple[int, dict]] = {}
     allocation_ids = regenerate_chunk_ids if targeted_regeneration else None
     speaker_resolutions: dict[str, set[str]] = {}
+    resolved_voice_genders: dict[str, set[str]] = {}
 
     def effective_reference(speaker_id):
         ref = auto_references.get(speaker_id or "__default__") or auto_references.get("__default__") or {}
@@ -2742,6 +2823,8 @@ async def synthesize_timed_dub(
             acoustic_identity = "reference:" + reference["sha256"] if reference.get("sha256") else None
         if speaker_id and acoustic_identity:
             speaker_resolutions.setdefault(speaker_id, set()).add(acoustic_identity)
+            gender = job_state.data.get("voice_genders", {}).get(voice, "unknown") if provider_value != "gpt_sovits" else "unknown"
+            resolved_voice_genders.setdefault(speaker_id, set()).add(gender)
         job_state.observe(synthesis_identity, voice_key, speech_text,
                           estimate_spoken_ms(speech_text, target_language), duration_ms)
 
@@ -2911,9 +2994,11 @@ async def synthesize_timed_dub(
                     "duration_after_ms": None, "available_ms": chunk.available_ms,
                     "required_speed_before": required_speed(duration_before_ms, chunk.available_ms),
                     "dub_speed_max": config.speed_max, "timestamp": _utc_now_iso(),
+                    "status": "accepted",
                 }
                 accepted_entries.append(entry)
                 job_state.data["rewrite_audit"].append(entry)
+                job_state.data.setdefault("accepted_text", {})[item.segment_id] = item.spoken_text
             save_audit()
             speech_text = chunk_text(plan, chunk)
             synthesis_identity = _chunk_synthesis_identity(
@@ -3118,6 +3203,7 @@ async def synthesize_timed_dub(
                     if path.is_file():
                         shutil.copy2(path, trial / path.name)
                 write_json_atomic(trial / "dubbing_state.json", job_state.data)
+                trial_audit_start = len(job_state.data["rewrite_audit"])
                 (trial / layout_path.name).write_text(json.dumps({
                     "key": layout_key, "split_before": sorted(forced_splits | new_splits),
                 }, indent=2), encoding="utf-8")
@@ -3163,11 +3249,21 @@ async def synthesize_timed_dub(
                         destination.parent.mkdir(parents=True, exist_ok=True)
                         path.replace(destination)
                     job_state.data = json.loads((work_dir / "dubbing_state.json").read_text(encoding="utf-8"))
-                    job_state.save()
+                    job_state.data.update(acceptance_key=acceptance_key, accepted_text={
+                        seg.id: seg.translated_text for seg in repaired.transcript.segments
+                        if seg.translated_text != approved_text.get(seg.id)})
+                    save_audit()
                     repaired.rewrite_count = job_state.rewrite_count
                     repaired.transcript.metadata["dubbing"]["rewrite_count"] = repaired.rewrite_count
                     repaired.transcript.metadata["dubbing"]["cadence_repair"] = "measured_split"
                     return repaired
+                # A rejected layout never changes the chosen script, but its
+                # paid/measured rewrite trials retain durable before/after proof.
+                trial_state = json.loads((trial / "dubbing_state.json").read_text(encoding="utf-8"))
+                job_state.data["rewrite_audit"].extend(
+                    {**entry, "status": "discarded_cadence_trial"}
+                    for entry in trial_state.get("rewrite_audit", [])[trial_audit_start:])
+                save_audit()
 
     timed_chunks: list[tuple[int, Path]] = []
     fitted_dir = work_dir / "fitted"
@@ -3238,6 +3334,9 @@ async def synthesize_timed_dub(
         "speaker_voice_identities": {speaker: sorted(keys) for speaker, keys in speaker_resolutions.items()},
         "shared_voice": profile.speaker_voice_mode == "shared",
         "available_voices": job_state.data.get("available_voices", []),
+        "voice_catalogue": job_state.data.get("voice_catalogue", []),
+        "speaker_genders": job_state.data.get("speaker_genders", {}),
+        "resolved_voice_genders": {speaker: sorted(values) for speaker, values in resolved_voice_genders.items()},
     }
     max_fitted_speed = max([1.0, *[c.speed_factor for c in fitted_chunks]])
     out.metadata["dubbing"] = {

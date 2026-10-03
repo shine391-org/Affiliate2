@@ -194,6 +194,10 @@ QC profile
 Profiles are used by single and batch jobs.
 Detected diarizer labels belong to one job, not reusable profiles. The job owns `dubbing_state.json`: its effective TTS binding, speaker voice map, exact-text duration observations grouped by acoustic identity, and rewrite ledger. Same-binding resumes/reruns retain this state; incompatible TTS bindings clear voice mappings/calibration. The declared `dubbing/rewrite_audit.json` survives stage cache invalidation and records each accepted before/after before another provider call.
 
+C6 owns Vietnamese names/terms in both reviewed captions and speech, with a job-local term dictionary revalidated on checkpoint resume. C7 never rewrites the approved C6 artifact: accepted measured-overflow text is persisted separately and replayed only for the same input, policy and TTS/reference binding. Rejected cadence trials remain auditable and do not inflate the changed-segment count. Expert profile/segment changes use the existing manifest transaction, including root speaker state, so partial failures roll back together.
+
+Source voice gender hints belong to the job's diarization evidence; pitch is unconfirmed evidence, never a verified gender classifier. Reviewer confirmation and provider voice metadata guide distinct matching voice selection. Same-gender speakers need distinct matching voices advertised by the bound provider, rather than alternating male/female defaults. Insufficient voices fail visibly; unknown, unconfirmed or mismatched gender keeps QC in review. Rebinding resets incompatible output mapping/catalogue/calibration even before first C7, while ASR invalidation also clears source speaker facts.
+
 ## One localization pipeline
 
 Auto, batch and expert modes share one engine:
@@ -253,8 +257,10 @@ Important rules:
 - TTS is timing-aware and block-based
 - duration rewrite requires an actual TTS measurement above the configured speed ceiling; calibration cannot authorize a text change
 - C6/C7 validate numeric values and units, negation and explicit protected terms before accepting AI text
+- C6 localizes names before review; C6/C7 preserve explicit question/exclamation markers and localized protected names
 - HQ and Fast attempt diarization; Fast's diarization-only path preserves ASR word anchors
 - distinct detected speakers require distinct acoustic voices by default; failed diarization, unresolved voice mismatch and overlap keep QC in review
+- source/output gender requires confirmation; uncertain pitch hints do not produce clean READY
 - captions follow final resolved timing
 - preserve useful background/music/ambience
 - automatic QC surfaces exceptions instead of forcing manual inspection of every segment

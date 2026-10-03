@@ -134,6 +134,7 @@ _LANGUAGE_CODES = dict(zip(
     "vietnamese english spanish french german italian portuguese dutch polish russian arabic hindi turkish swedish danish norwegian norwegian finnish japanese korean chinese".split(),
 ))
 _NUMBER_RE = re.compile(r"[+-]?\d+(?:[.,]\d+)*(?:/\d+)?")
+_HAN_RE = re.compile(r"[\u3400-\u9fff\uf900-\ufaff\U00020000-\U0003134f]+")
 _UNIT_ALIASES = {
     "kg": ("kg", "kilogram", "kilograms", "kilôgam", "公斤", "千克"),
     "g": ("g", "gram", "grams", "gam", "克"),
@@ -151,6 +152,7 @@ _UNIT_ALIASES = {
     "week": ("week", "weeks", "tuần", "星期"),
     "month": ("month", "months", "tháng", "个月", "個月"),
     "year": ("year", "years", "năm", "年"),
+    "age": ("tuổi", "years old", "year old", "岁", "歲", "歳"),
     "percent": ("%", "percent", "percentage", "phần trăm", "百分之"),
     "celsius": ("°c", "celsius", "độ c", "摄氏度"),
     "usd": ("usd", "$", "dollar", "dollars", "đô la", "美元"),
@@ -160,6 +162,7 @@ _UNIT_ALIASES = {
     "degree": ("°", "degree", "degrees", "độ", "度"),
     "fahrenheit": ("°f", "fahrenheit", "độ f", "华氏度"),
     "eur": ("eur", "€", "euro", "euros", "欧元"),
+    "cny": ("cny", "rmb", "yuan", "nhân dân tệ", "元", "块", "塊"),
     **{unit: (unit,) for unit in ("gb", "mb", "tb", "hz", "khz", "mhz")},
 }
 # Cross-language polarity checks for common operational claims in C6.
@@ -208,11 +211,41 @@ def _negations(text: str, language: str | None) -> int:
 
 
 def _numbers(text: str) -> Counter:
-    return Counter(_NUMBER_RE.findall(_normalize(text)))
+    return Counter(_NUMBER_RE.findall(_numeric_text(text)))
+
+
+def _numeric_text(text: str) -> str:
+    """Chinese written quantities become digits; a name such as 张三 does not.
+
+    C6 requests Arabic digits in the target. Only a following measurement or
+    age marker makes an unseparated Chinese numeral a quantity.
+    """
+    text = _normalize(text)
+    digits = {char: value for value, char in enumerate("零一二三四五六七八九")}
+    digits.update({"〇": 0, "两": 2, "兩": 2})
+    scales = {"十": 10, "百": 100, "千": 1000, "万": 10000, "萬": 10000}
+
+    def convert(match):
+        token = match.group()
+        if not any(char in scales for char in token):
+            return "".join(str(digits[char]) for char in token)
+        total = section = current = 0
+        for char in token:
+            if char in digits:
+                current = digits[char]
+            elif scales[char] == 10000:
+                total += (section + current) * 10000
+                section = current = 0
+            else:
+                section += (current or 1) * scales[char]
+                current = 0
+        return str(total + section + current)
+
+    return re.sub(r"(?<![\d零〇一二三四五六七八九两兩十百千万萬])[零〇一二三四五六七八九两兩十百千万萬]+?(?=\s*(?:岁|歲|歳|年|个|個|公斤|千克|克|公里|千米|米|升|秒|分钟|小時|小时|天|元|块|塊|%))", convert, text)
 
 
 def _unit_spans(text: str) -> list[tuple[int, int, str]]:
-    text = _normalize(text)
+    text = _numeric_text(text)
     spans = set()
     for unit, aliases in _UNIT_ALIASES.items():
         for alias in aliases:
@@ -224,6 +257,14 @@ def _unit_spans(text: str) -> list[tuple[int, int, str]]:
                 if len(alias) == 1:
                     continue
             for match in re.finditer(_phrase_pattern(alias), text):
+                # Names such as Ngô Tiểu Đồng / 马克 and ordinary words such
+                # as "năm" are not currency/grams/years without a quantity.
+                if _SCRIPT_RE.search(alias) or alias in {"đồng", "năm", "gam", "độ", "day"}:
+                    before = re.search(r"\d\s*$", text[:match.start()])
+                    after = re.match(r"\s*\d", text[match.end():]) if (
+                        unit in {"usd", "eur", "vnd", "cny", "percent"} and alias not in {"đồng", "元", "块", "塊"}) else None
+                    if not before and not after:
+                        continue
                 spans.add((*match.span(), unit))
     # 千克 contains 克 and °C contains °: use the complete unit, not both.
     return [(start, end, unit) for start, end, unit in spans
@@ -235,7 +276,7 @@ def _units(text: str) -> set[str]:
 
 
 def _measurements(text: str) -> Counter:
-    text = _normalize(text)
+    text = _numeric_text(text)
     measurements = Counter()
     for start, end, unit in _unit_spans(text):
         before = re.search(r"(" + _NUMBER_RE.pattern + r")\s*$", text[:start])
@@ -270,7 +311,21 @@ def _invariants(before: str, after: str, source_language: str | None,
         issues.append({"kind": "quantity_lost", "detail": "numeric values/counts changed"})
     if _units(before) != _units(after) or _measurements(before) != _measurements(after):
         issues.append({"kind": "unit_lost", "detail": "measurement units or numeric/unit bindings changed"})
+    # Punctuation carries the speaker's intent. A question or exclamation must
+    # not turn into a flat assertion during translation/compression.
+    for mark, kind in (("?", "question_changed"), ("!", "exclamation_changed")):
+        if bool(mark in _normalize(before)) != bool(mark in _normalize(after)):
+            issues.append({"kind": kind, "detail": "source speech act changed"})
     return issues
+
+
+def untranslated_han(text: str, target_language: str | None, *, allowed: Iterable[str] = ()) -> list[str]:
+    if _lexicon_for(target_language) != "vietnamese":
+        return []
+    for term in sorted(allowed, key=len, reverse=True):
+        if term:
+            text = text.replace(term, "")
+    return list(dict.fromkeys(_HAN_RE.findall(text)))
 
 
 def check_rewrite_meaning(before: str, after: str, target_language: str | None = None,
@@ -295,6 +350,9 @@ def check_translation_meaning(before: str, after: str, source_language: str | No
                               protected_terms: Iterable[str] = ()) -> list[dict]:
     """C6 cross-language checks; do not compare literal source/target wording."""
     issues = _invariants(before, after, source_language, target_language)
+    remaining = untranslated_han(after, target_language, allowed=[*protected_terms, *glossary.values()])
+    if remaining:
+        issues.append({"kind": "unlocalized_text", "tokens": remaining, "detail": "Vietnamese captions/speech still contain untranslated Han text"})
     for source, target in glossary.items():
         if _contains(before, source) and not _contains(after, target):
             issues.append({"kind": "term_lost", "token": target, "detail": "glossary translation missing"})

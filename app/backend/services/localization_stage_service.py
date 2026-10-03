@@ -447,7 +447,8 @@ class LocalizationRun:
             if name == "dubbing" and durable_audit.exists():
                 record["artifacts"]["rewrite_audit"] = str(durable_audit.resolve())
         if index <= STAGES.index("asr"):
-            self.invalidate_dubbing_state()
+            self.invalidate_dubbing_state(reset_source=True)
+            self.data["effective_profile"].update(speaker_voices={}, speaker_genders={}, speaker_reference_audio={})
         self._write()
         return invalidated
 
@@ -476,19 +477,20 @@ class LocalizationRun:
     def update_effective_profile(self, profile: dict) -> None:
         keys = ("tts_provider", "tts_connection_id", "tts_model", "tts_voice", "tts_base_url", "tts_region")
         if any(self.effective_profile.get(key) != profile.get(key) for key in keys):
-            if (self.root / "dubbing_state.json").exists():
-                self.invalidate_dubbing_state()
-                profile = {**profile, "speaker_voices": {}, "speaker_reference_audio": {}}
+            self.invalidate_dubbing_state()
+            profile = {**profile, "speaker_voices": {}, "speaker_reference_audio": {}, "voice_genders": {}}
         self.data["effective_profile"] = dict(profile)
         self._write()
 
-    def invalidate_dubbing_state(self) -> None:
+    def invalidate_dubbing_state(self, *, reset_source: bool = False) -> None:
         path = self.root / "dubbing_state.json"
         if path.exists():
             from backend.services.dubbing_job_state import write_json_atomic
             state = json.loads(path.read_text(encoding="utf-8"))
             state.update(binding=None, speaker_voices={}, measurements={}, available_voices=[],
-                         detected_speakers=[], shared_voice=False)
+                         voice_catalogue=[], voice_genders={}, accepted_text={}, shared_voice=False)
+            if reset_source:
+                state.update(detected_speakers=[], speaker_genders={})
             write_json_atomic(path, state)
 
     def update_request(self, request: dict) -> None:

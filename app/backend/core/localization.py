@@ -118,6 +118,10 @@ class LocalizationProfile(BaseModel):
     tts_base_url: str | None = None
     tts_region: str | None = None
     speaker_voices: dict[str, str] = Field(default_factory=dict)
+    # Source voice presentation is job-scoped; "unknown" never guesses gender.
+    speaker_genders: dict[str, Literal["male", "female", "unknown"]] = Field(default_factory=dict)
+    # For providers with opaque IDs, a reviewer can confirm the output voice.
+    voice_genders: dict[str, Literal["male", "female", "unknown"]] = Field(default_factory=dict)
     speaker_voice_mode: Literal["distinct", "shared"] = "distinct"
     speaker_reference_audio: dict[str, str] = Field(default_factory=dict)
     tts_reference_audio: str | None = None
@@ -274,7 +278,7 @@ class LocalizationProfileStore(BaseModel):
         self.profiles = [profile.model_copy(update={
             key: {speaker: value for speaker, value in getattr(profile, key).items()
                   if not re.fullmatch(r"SPEAKER_\d+", speaker, re.IGNORECASE)}
-            for key in ("speaker_voices", "speaker_reference_audio")
+            for key in ("speaker_voices", "speaker_genders", "speaker_reference_audio")
         }) for profile in self.profiles]
         return self
 

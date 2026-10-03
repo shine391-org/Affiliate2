@@ -1037,7 +1037,6 @@ async def run_tool_translate(
         caption_segments_from_localization,
         materialize_localization_profile,
         mix_dub_audio,
-        persist_dubbing_rewrites,
         prepare_semantic_transcript,
         resolve_localization_profile,
         synthesize_timed_dub,
@@ -1856,30 +1855,6 @@ async def run_tool_translate(
                             ),
                         },
                     )
-                    if dubbing_rewrite_count:
-                        translation_base = LocalizationTranscript.model_validate(
-                            run.load_json("translation", "transcript")
-                        )
-                        durable_translation = persist_dubbing_rewrites(
-                            translation_base,
-                            localized,
-                        )
-                        translation_path = run.save_json(
-                            "translation",
-                            "transcript.json",
-                            durable_translation.model_dump(),
-                        )
-                        translation_meta = dict(
-                            run.record("translation").get("metadata") or {}
-                        )
-                        translation_meta["duration_rewrite_count"] = (
-                            dubbing_rewrite_count
-                        )
-                        run.complete(
-                            "translation",
-                            artifacts={"transcript": translation_path},
-                            metadata=translation_meta,
-                        )
                     if regenerate_chunk_ids:
                         run.update_request({
                             **run.request,
@@ -2059,6 +2034,7 @@ async def run_tool_translate(
                     video_slowdown=video_slowdown if is_dub else 1.0,
                     timing_issues=timing_issues,
                     check_tts_quality=is_dub,
+                    target_language=target_language,
                 )
                 qc = qc_report.as_dict()
                 report_path = run.save_json("qc", "report.json", qc)
@@ -2260,9 +2236,13 @@ async def run_tool_translate(
             "requires reference audio", "requires a base url",
             "matches no streams", "no audio", "source media has changed",
             "source identity", "missing or inaccessible",
+            "unlocalized vietnamese text", "matching-gender", "invalid dubbing job state",
         )
         cancelled = "cancel" in error_name
         deterministic = any(marker in message for marker in deterministic_markers)
+        if stage == "dubbing":
+            from backend.services.tts_service import retryable_tts_error
+            deterministic = deterministic or not retryable_tts_error(e)
         attempt_count = int(attempts.get(stage, 0) or 0) if stage else 0
 
         if (
@@ -2283,8 +2263,10 @@ async def run_tool_translate(
                     "error": str(e)[:500],
                 },
             }
-            delete_artifacts = True
+            delete_artifacts = stage != "dubbing"
             preserve_files: set[str] = set()
+            if stage != "dubbing":
+                repair_request.pop("regenerate_chunk_ids", None)
             if stage == "translation":
                 preserve_files = {"checkpoint.json"}
             if stage == "dubbing" and hasattr(e, "issues"):

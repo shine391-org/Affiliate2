@@ -4,6 +4,8 @@ Date: 2026-10-03. Branch: `feat/localization-fast-mode`.
 Reviewed source HEAD: `8d79c40657acb2a9d076bf1f2d4dc405f0311a76`.
 Scope: corrective Phase C/Fast work on this branch; no merge to `master`.
 
+Follow-up: [QA_LOCALIZATION_VI_VOICES_WORKFLOW.md](QA_LOCALIZATION_VI_VOICES_WORKFLOW.md) supersedes the pronunciation-preparation and automatic male/female default behavior described below. Vietnamese names now belong to C6, and distinct voices must also match source gender; uncertain gender remains in review. This document retains the first review's historical test/media evidence.
+
 ## Contracts and evidence
 
 | Contract | Implementation and regression evidence |

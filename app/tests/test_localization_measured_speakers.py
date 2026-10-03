@@ -110,17 +110,17 @@ async def test_audit_survives_failure_after_an_accepted_rewrite(monkeypatch, tmp
 
 
 @pytest.mark.asyncio
-async def test_protected_name_remains_protected_after_spoken_form_preparation(monkeypatch, tmp_path):
+async def test_localized_name_remains_protected_without_c7_transliteration(monkeypatch, tmp_path):
     events = mock_dubbing(monkeypatch, durations=[1800])
     async def chat(*args, stage, **kwargs):
-        if stage == "pronunciation":
-            return '[{"id":"张三","text":"Trương Tam"}]'
         return '[{"id":"s0","text":"Xin chào"}]'
     monkeypatch.setattr(service, "_call_ai_chat_resilient", chat)
+    localized = transcript(("Xin chào tất cả mọi người, Trương Tam",), speakers=False)
+    localized.metadata["localized_terms"] = {"张三": "Trương Tam"}
     with pytest.raises(service.LocalizationTimingError) as failed:
-        await service.synthesize_timed_dub(transcript(("Xin chào tất cả mọi người, 张三",), speakers=False),
+        await service.synthesize_timed_dub(localized,
             source_media=tmp_path / "source.mp4", target_language="Vietnamese",
-            profile=fast_localization_profile().model_copy(update={"protected_terms": ["张三"]}),
+            profile=fast_localization_profile(),
             user_settings=None, work_dir=tmp_path / "dub")
     assert any(issue["reason"] == "rewrite_meaning_guard" for issue in failed.value.all_issues)
     assert len(events) == 1 and "Trương Tam" in events[0][1]
@@ -173,7 +173,8 @@ async def test_clone_reference_copies_cannot_fake_distinct_speaker_voices(monkey
     report = qc.evaluate_localization_qc(source_video=tmp_path / "s.mp4", final_video=tmp_path / "f.mp4",
         transcript=result.transcript, profile=profile)
     assert report.metrics["resolved_voice_count"] == (1 if same_reference else 2)
-    assert report.status == ("NEEDS_REVIEW" if same_reference else "READY")
+    assert report.status == "NEEDS_REVIEW"  # Clone gender has not been verified.
+    assert any(item["code"] == "speaker_voice_mismatch" for item in report.warnings) == same_reference
 
 
 def test_effective_voice_reference_and_connection_are_part_of_identity(tmp_path):
@@ -333,6 +334,10 @@ def test_qc_cannot_clean_unverified_multi_speaker_output(monkeypatch, tmp_path, 
     second = "a" if kind in {"one_voice", "shared"} else "b"
     tx.metadata["speakers"] = {"speaker_voices":{"SPEAKER_00":"a","SPEAKER_01":second},
         "speaker_voice_identities":{"SPEAKER_00":["a"],"SPEAKER_01":[second]}}
+    tx.metadata["speakers"].update(
+        speaker_genders={speaker: {"gender": "male", "confirmed": True, "source": "reviewer"}
+                         for speaker in ("SPEAKER_00", "SPEAKER_01")},
+        resolved_voice_genders={"SPEAKER_00": ["male"], "SPEAKER_01": ["male"]})
     if kind == "colliding_overrides":
         tx.metadata["speakers"]["speaker_voice_identities"]["SPEAKER_01"] = ["a", "b"]
     elif kind == "empty_identity":

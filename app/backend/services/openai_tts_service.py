@@ -35,7 +35,7 @@ async def generate_voice(
 
     def _generate():
         import openai
-        client = openai.OpenAI(api_key=api_key)
+        client = openai.OpenAI(api_key=api_key, max_retries=0)
 
         response = client.audio.speech.create(
             model=model,

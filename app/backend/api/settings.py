@@ -1383,6 +1383,7 @@ async def discover_tts_voices(body: TTSProbeRequest):
     try:
         voices = await tts_service.list_voices(
             provider, key, base_url=body.base_url or connection.get("base_url"),
+            **({"region": body.region or connection.get("region")} if provider == tts_service.TTSProvider.AZURE else {}),
         )
         models = []
         if provider == tts_service.TTSProvider.ELEVENLABS:
