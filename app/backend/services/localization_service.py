@@ -19,6 +19,7 @@ import logging
 import math
 import re
 import subprocess
+import time as _time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -34,6 +35,7 @@ from backend.services.dubbing_planner import (
     DubbingChunk,
     DubbingConfig,
     DubbingCue,
+    DubbingRateCalibrator,
     PlanItem,
     atempo_filter,
     allocate_silence,
@@ -45,6 +47,11 @@ from backend.services.dubbing_planner import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _utc_now_iso() -> str:
+    """ISO-8601 UTC timestamp for audit records."""
+    return _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime())
 
 _TRANSLATION_BATCH_SIZE = 12
 _CONTEXT_CHARS = 10_000
@@ -2311,6 +2318,41 @@ ITEMS:
         return False
 
     changed = False
+    # Meaning guard (Y3): validate EVERY proposed line against the approved
+    # text before mutating anything. Atomic by construction: violations reject
+    # the whole chunk, so a partially-validated rewrite can never half-apply.
+    from backend.services.dubbing_rewrite_guard import check_rewrite_meaning
+    meaning_violations: list[dict] = []
+    for idx in chunk.item_indexes:
+        item = plan[idx]
+        new_text = mapped[item.segment_id]
+        violations = check_rewrite_meaning(
+            item.spoken_text or segment_by_id[item.segment_id].translated_text,
+            new_text,
+            target_language,
+        )
+        for v in violations:
+            meaning_violations.append({
+                **v,
+                "segment_id": item.segment_id,
+                "chunk_id": chunk.id,
+                "before": item.spoken_text,
+                "after": new_text,
+            })
+    if meaning_violations:
+        if issues is not None:
+            issues.append({
+                "chunk_id": chunk.id,
+                "reason": "rewrite_meaning_guard",
+                "violations": meaning_violations,
+                "segment_ids": expected,
+            })
+        logger.warning(
+            "Dubbing rewrite for chunk %s rejected: meaning guard blocked %s",
+            chunk.id,
+            [v["kind"] for v in meaning_violations],
+        )
+        return False
     for idx in chunk.item_indexes:
         item = plan[idx]
         new_text = mapped[item.segment_id]
@@ -2603,6 +2645,8 @@ async def synthesize_timed_dub(
     targeted_regeneration = bool(regenerate_chunk_ids)
     issues: list[dict] = list(speech_issues)
     rewrite_count = 0
+    #: Y5: counts segments whose approved text actually changed.
+    rewrite_count_segments = 0
     rewrite_disabled = ai is None
     rewrite_unavailable_recorded = False
 
@@ -2624,6 +2668,14 @@ async def synthesize_timed_dub(
 
     rewrite_context: dict[int, tuple[int, dict]] = {}
     allocation_ids = regenerate_chunk_ids if targeted_regeneration else None
+    # Y2: learn this job's real speech rate from the durations we measure.
+    # The coefficient is job-scoped (one voice + one video) and is persisted so
+    # a rerun resumes with prior knowledge instead of relearning from scratch.
+    calibrator = DubbingRateCalibrator.from_dict(
+        (out.metadata or {}).get("dubbing", {}).get("rate_calibration")
+        if isinstance(out.metadata, dict) else None
+    )
+    rewrite_audit: list[dict] = []
     for chunk in chunks:
         speaker_id = _chunk_speaker(plan, chunk)
         explicit_voice = chunk.voice_id
@@ -2664,19 +2716,38 @@ async def synthesize_timed_dub(
                 f"because non-target chunk {chunk.id} has no valid reusable raw artifact."
             )
 
-        # OpenCreator-style estimator: try a bounded rewrite before spending on
-        # a clearly impossible TTS request. In targeted mode, non-target chunks
-        # are immutable even when their measured duration later exceeds speed_max.
+        # OpenCreator-style estimator: advisory only.
+        #
+        # Y1: the estimate may no longer DECIDE whether text is rewritten.
+        # Measured evidence on a real job showed actual/estimated spanning
+        # 0.77x-2.10x with the estimate wrong by up to 44% on exactly the
+        # chunks that then overflowed. Rewriting approved text on the basis of
+        # a miscalibrated constant damages meaning without fixing timing.
+        # The measured loop below (which uses required_speed on real TTS
+        # durations) is the only authority that may trigger a rewrite.
         estimated = sum(plan[i].estimated_duration_ms for i in chunk.item_indexes)
+        # Calibrated estimate: once the job has measured enough chunks, use the
+        # learned coefficient instead of the raw constant (Y2). Below the trust
+        # threshold this is exactly the old estimate, which is why the branch
+        # below stays gated on `calibrator.is_trustworthy`.
+        calibrated = (
+            calibrator.calibrated_ms(estimated)
+            if calibrator.is_trustworthy else estimated
+        )
+        estimated_overflow = calibrated > chunk.available_ms * config.speed_max
         attempts = 0
         rewrite_state: dict = {}
         can_optional_rewrite = is_target_chunk and not rewrite_disabled
         if (
             not reuse_raw
             and can_optional_rewrite
-            and estimated > chunk.available_ms * config.speed_max
+            and estimated_overflow
             and attempts < config.rewrite_max_attempts
+            and calibrator.is_trustworthy
         ):
+            # Spend a rewrite only when the estimate is backed by calibration
+            # for this voice/video, and even then only as a cost-saving
+            # pre-emptive attempt; the measured loop remains authoritative.
             changed = await adapt_with_budget(
                 plan=plan, chunk=chunk, segment_by_id=segment_by_id,
                 target_language=target_language, target_ms=chunk.available_ms,
@@ -2762,6 +2833,8 @@ async def synthesize_timed_dub(
             )
 
         chunk.actual_duration_ms = duration_ms
+        # Y2: this real measurement teaches the job its own speech rate.
+        calibrator.observe(estimated, duration_ms)
         rewrite_context[chunk.id] = (attempts, rewrite_state)
 
     # Measure all neighbours before reclaiming provisional estimated slack.
@@ -2780,6 +2853,8 @@ async def synthesize_timed_dub(
         path = raw_paths[chunk.id]
         ref_key = speaker_id or "__default__"
         ref = auto_references.get(ref_key) or auto_references.get("__default__") or {}
+        # Y4: only a MEASURED overflow may rewrite text. A chunk that already
+        # fits is never touched, and no estimate-derived branch can reach here.
         while (
             is_target_chunk
             and not rewrite_disabled
@@ -2787,6 +2862,11 @@ async def synthesize_timed_dub(
             and attempts < config.rewrite_max_attempts
         ):
             rewrite_state.update(measured_duration_ms=duration_ms, attempt=attempts + 1)
+            # Snapshot the approved text so the audit can prove what changed.
+            before_snapshot = {
+                plan[i].segment_id: plan[i].spoken_text for i in chunk.item_indexes
+            }
+            duration_before_ms = duration_ms
             changed = await adapt_with_budget(
                 plan=plan, chunk=chunk, segment_by_id=segment_by_id,
                 target_language=target_language, target_ms=chunk.available_ms,
@@ -2826,6 +2906,27 @@ async def synthesize_timed_dub(
                 reference_language=ref.get("language"),
             )
             chunk.actual_duration_ms = duration_ms
+            # Y5: record every segment whose text ACTUALLY changed, with both
+            # durations. rewrite_count counts these, not AI round-trips.
+            for i in chunk.item_indexes:
+                item = plan[i]
+                after_text = item.spoken_text
+                if after_text != before_snapshot.get(item.segment_id):
+                    rewrite_count_segments += 1
+                    rewrite_audit.append({
+                        "segment_id": item.segment_id,
+                        "chunk_id": chunk.id,
+                        "before": before_snapshot.get(item.segment_id),
+                        "after": after_text,
+                        "reason": "measured_overflow",
+                        "required_speed_before": round(
+                            required_speed(duration_before_ms, chunk.available_ms), 4
+                        ),
+                        "duration_before_ms": duration_before_ms,
+                        "duration_after_ms": duration_ms,
+                        "available_ms": chunk.available_ms,
+                        "timestamp": _utc_now_iso(),
+                    })
             allocate_silence(
                 plan, chunks, config, timeline_end_ms=source_duration_ms,
                 only_chunk_ids=allocation_ids,
@@ -2940,7 +3041,10 @@ async def synthesize_timed_dub(
         config,
         soft_overflow_chunk_ids={issue["chunk_id"] for issue in soft_overflow},
     )
-    report.rewrite_count = rewrite_count
+    # Y5: rewrite_count is the number of segments whose text actually changed,
+    # not the number of AI round-trips. The two differed before (AI could be
+    # called and change nothing), which made the metric unverifiable.
+    report.rewrite_count = rewrite_count_segments
 
     # Cue offsets inside a single synthesized chunk are heuristic, not forced
     # alignment. Do not let a chunk that merely fits its outer window silently
@@ -3107,12 +3211,28 @@ async def synthesize_timed_dub(
         total_duration_ms=total_duration_ms,
         output_path=dub_track,
     )
+    # Y5: standalone audit artifact. Without it, "what did the AI cut?" is
+    # unanswerable a few days later because no other record keeps before/after.
+    try:
+        audit_path = work_dir / "rewrite_audit.json"
+        audit_path.parent.mkdir(parents=True, exist_ok=True)
+        audit_path.write_text(json.dumps({
+            "rewrite_count": rewrite_count_segments,
+            "rewrite_calls": rewrite_count,
+            "rate_calibration": calibrator.as_dict(),
+            "entries": rewrite_audit,
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Could not persist rewrite audit: %s", exc)
     max_fitted_speed = max([1.0, *[c.speed_factor for c in fitted_chunks]])
     out.metadata["dubbing"] = {
         "chunk_count": len(fitted_chunks),
         "max_raw_required_speed": max_raw_required_speed,
         "max_fitted_speed": max_fitted_speed,
-        "rewrite_count": rewrite_count,
+        "rewrite_count": rewrite_count_segments,
+        # Y2/G7: persisted so a rerun resumes calibrated instead of relearning.
+        "rate_calibration": calibrator.as_dict(),
+        "rewrite_audit": rewrite_audit,
         "video_slowdown": video_slowdown,
         "cue_timing_basis": "source_word_anchors_with_estimated_chunk_internal_offsets",
         "cadence_split_before": sorted(forced_splits),

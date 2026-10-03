@@ -107,6 +107,96 @@ class DubbingReport:
     rewrite_count: int = 0
 
 
+# Calibration bounds. A coefficient belongs to ONE voice + ONE video, so it is
+# clamped hard: a wild value would do more damage than the raw estimate.
+_CALIBRATION_MIN_SAMPLES = 3
+_CALIBRATION_MIN_RATE = 0.60
+_CALIBRATION_MAX_RATE = 1.80
+
+
+@dataclass(slots=True)
+class DubbingRateCalibrator:
+    """Learns this job's real speech rate from measured TTS durations.
+
+    `estimate_spoken_ms` uses fixed per-language constants that know nothing
+    about the actual voice, provider or speaking style. Measured evidence on a
+    real job put actual/estimated between 0.77x and 2.10x. Rather than invent a
+    better constant, calibrate from the measurements the job already makes:
+    every synthesized chunk stores `actual_duration_ms`.
+
+        calibrated_rate = sum(actual) / sum(estimated)   # measured chunks only
+
+    The coefficient is deliberately NOT shared across jobs -- a slow narrator
+    must not silently re-rate a fast one.
+    """
+
+    samples: int = 0
+    total_estimated_ms: int = 0
+    total_actual_ms: int = 0
+    #: Persisted so a rerun resumes with prior knowledge instead of relearning.
+    persisted_rate: float | None = None
+
+    def observe(self, estimated_ms: int, actual_ms: int) -> None:
+        """Record one measured chunk. Non-positive measurements are ignored."""
+        if estimated_ms <= 0 or actual_ms <= 0:
+            return
+        self.samples += 1
+        self.total_estimated_ms += int(estimated_ms)
+        self.total_actual_ms += int(actual_ms)
+
+    @property
+    def rate(self) -> float:
+        """Calibrated actual/estimated ratio, clamped to safe bounds.
+
+        Uses total/total rather than mean-of-ratios so one pathological short
+        chunk cannot dominate the coefficient.
+        """
+        rate = 1.0
+        if self.samples >= _CALIBRATION_MIN_SAMPLES and self.total_estimated_ms > 0:
+            rate = self.total_actual_ms / self.total_estimated_ms
+        elif self.persisted_rate:
+            rate = float(self.persisted_rate)
+        return max(_CALIBRATION_MIN_RATE, min(_CALIBRATION_MAX_RATE, rate))
+
+    @property
+    def is_trustworthy(self) -> bool:
+        """True once enough real measurements back the coefficient.
+
+        Below this threshold the estimate stays a raw hint and must not be
+        allowed to trigger a rewrite of approved text (Y1).
+        """
+        return self.samples >= _CALIBRATION_MIN_SAMPLES or bool(self.persisted_rate)
+
+    def calibrated_ms(self, estimated_ms: int) -> int:
+        """Apply the learned rate to a fresh estimate."""
+        return int(round(estimated_ms * self.rate))
+
+    def as_dict(self) -> dict:
+        return {
+            "samples": self.samples,
+            "total_estimated_ms": self.total_estimated_ms,
+            "total_actual_ms": self.total_actual_ms,
+            "rate": round(self.rate, 4),
+            "is_trustworthy": self.is_trustworthy,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict | None) -> "DubbingRateCalibrator":
+        if not isinstance(data, dict):
+            return cls()
+        try:
+            return cls(
+                samples=int(data.get("samples") or 0),
+                total_estimated_ms=int(data.get("total_estimated_ms") or 0),
+                total_actual_ms=int(data.get("total_actual_ms") or 0),
+                persisted_rate=(
+                    float(data["rate"]) if data.get("rate") else None
+                ),
+            )
+        except (TypeError, ValueError):
+            return cls()
+
+
 _STRONG_END = re.compile(r"[.!?。！？…][\"'”’」』）】》)\]}»]*\s*$")
 
 # Semantic segmentation already treats gaps up to 350 ms as a continuous thought.
@@ -124,8 +214,12 @@ def clean_text_for_speech(text: str) -> str:
 def estimate_spoken_ms(text: str, language: str = "Vietnamese") -> int:
     """Statistical/heuristic pre-TTS estimate inspired by OpenCreator.
 
-    Actual synthesized duration remains authoritative; this estimate is only
-    used to decide whether a bounded rewrite is worth attempting before TTS.
+    KEEP as a budget hint only. Measured evidence on a real 29-chunk job showed
+    actual/estimated spanning 0.77x-2.10x (median 0.99x), and the estimate was
+    LOWER than reality on 15/29 chunks. It therefore must never decide whether
+    approved text is rewritten -- see DubbingRateCalibrator.
+
+    Actual synthesized duration always remains authoritative.
     """
     clean = clean_text_for_speech(text)
     if not clean:

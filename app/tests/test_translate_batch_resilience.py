@@ -921,7 +921,15 @@ async def test_c7_optional_rewrite_provider_failure_opens_job_circuit_breaker(
 
     ai = TimeoutAI()
     monkeypatch.setattr(ls.asyncio, "sleep", no_sleep)
-    calls = _patch_dub_io(monkeypatch, tmp_path, [400, 400, 400])
+    # Measured durations must exceed the ALLOCATED window (allocate_silence
+    # grows each 500 ms source window), otherwise nothing overflows and the
+    # measured loop -- the only rewrite authority since Y1 -- never calls AI.
+    # Measured durations are chosen so the measured loop -- the only rewrite
+    # authority since Y1 removed the estimate-driven branch -- actually calls
+    # the AI (720 ms overflows the allocated 500 ms source window), while the
+    # resulting fitted speed (1.319) stays under emergency_speed_max (1.35) so
+    # a total AI outage still renders for review instead of hard-failing.
+    calls = _patch_dub_io(monkeypatch, tmp_path, [720, 720, 720])
     monkeypatch.setattr(ls, "_profile_ai_client", lambda *_: ai)
 
     result = await ls.synthesize_timed_dub(
@@ -988,10 +996,15 @@ async def test_c7_targeted_regeneration_keeps_overlong_non_target_immutable(
         return True
 
     generated = []
+    synth_calls = []
+
     async def fake_generate(text, *, output_path, **kwargs):
         generated.append(output_path.name)
+        synth_calls.append(text)
         output_path.write_bytes(b"new")
-        return 500
+        # The regeneration target must be genuinely MEASURED-overlong before the
+        # rewrite is allowed; since Y1 the estimate cannot authorise it.
+        return 1500 if len(synth_calls) == 1 else 900
 
     fit_calls = []
     def fake_fit(source, destination, speed_factor):
@@ -1029,7 +1042,12 @@ async def test_c7_targeted_regeneration_keeps_overlong_non_target_immutable(
     )
 
     assert adapted == [2]
-    assert generated == ["chunk_0002.pending.wav"]
+    # Target chunk synthesized before and after its measured-overflow rewrite;
+    # the non-target chunk is reused and never synthesized.
+    assert generated == [
+        "chunk_0002.pending.wav",
+        "chunk_0002.pending.wav",
+    ]
     assert result.transcript.segments[0].translated_text == non_target_text
     assert (work / "chunk_0001.wav").read_bytes() == b"old"
     assert result.transcript.segments[1].translated_text == "ngắn"
@@ -1570,8 +1588,13 @@ async def test_c7_ai_rewrite_timeout_degrades_to_tts_instead_of_failing(
     async def fake_generate(text, *, output_path, **kwargs):
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(b"raw")
-        # Measured TTS happens to fit, proving rewrite timeout is not fatal.
-        return 450
+        # Measured TTS overflows its allocated window, so the measured loop --
+        # the only rewrite authority since Y1 removed the estimate-driven
+        # branch -- attempts a rewrite. Its timeout must degrade to plain TTS
+        # instead of failing the job. allocate_silence grows the 500 ms source
+        # window to ~1000 ms, so the measured value must exceed THAT, not the
+        # raw source window.
+        return 1400
 
     def fake_fit(source, destination, speed_factor):
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -1761,17 +1784,23 @@ async def test_c7_targeted_regeneration_never_rewrites_reused_chunk(
     ])
     work = tmp_path / "work"
     work.mkdir()
+    # Seeded durations make both chunks genuinely MEASURED-overlong (500 ms
+    # windows). Since Y1 the estimate no longer authorises a rewrite, so the
+    # measured duration is what must drive chunk 2's rewrite; chunk 1 must stay
+    # immutable because it is not a regeneration target.
     _seed_reusable_chunk(
         work,
         1,
         "đây là câu rất dài dùng để buộc estimator muốn rewrite nhưng chunk này phải được reuse nguyên trạng",
         "A",
+        duration_ms=670,
     )
     _seed_reusable_chunk(
         work,
         2,
         "đây cũng là câu dài để chunk mục tiêu được phép rewrite trước khi regenerate",
         "B",
+        duration_ms=1550,
     )
 
     monkeypatch.setattr(ls, "_profile_ai_client", lambda *_: object())
@@ -1781,10 +1810,18 @@ async def test_c7_targeted_regeneration_never_rewrites_reused_chunk(
         return 400
 
     generated = []
+    synth_calls = []
+
     async def fake_generate(text, *, output_path, **kwargs):
         generated.append(output_path.name)
+        synth_calls.append(text)
         output_path.write_bytes(b"new")
-        return 400
+        # Chunk 2 is the regeneration target, so its MEASURED duration is what
+        # authorises a rewrite; since Y1 the estimate no longer can. The first
+        # synthesis overflows chunk 2's ~1150 ms allocated window (>1.30x) but
+        # stays under emergency_speed_max. Once the rewrite has shortened the
+        # text the next synthesis fits, so the loop converges in one rewrite.
+        return 1500 if len(synth_calls) == 1 else 900
 
     adapted = []
     async def fake_adapt(ai, *, plan, chunk, segment_by_id, **kwargs):
@@ -1826,7 +1863,12 @@ async def test_c7_targeted_regeneration_never_rewrites_reused_chunk(
     )
 
     assert adapted == [2]
-    assert generated == ["chunk_0002.pending.wav"]
+    # Chunk 2 is synthesized once before the measured-overflow rewrite and once
+    # after it; chunk 1 is reused and never synthesized.
+    assert generated == [
+        "chunk_0002.pending.wav",
+        "chunk_0002.pending.wav",
+    ]
     assert (work / "chunk_0002.wav").read_bytes() == b"new"
     assert result.transcript.segments[0].translated_text.startswith("đây là câu rất dài")
     assert result.transcript.segments[1].translated_text == "ngắn"
