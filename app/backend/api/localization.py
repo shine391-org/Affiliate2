@@ -1191,6 +1191,7 @@ async def localization_expert_override(job_id: str, body: ExpertOverrideRequest)
 
                 seg.overrides = overrides
 
+            run.invalidate_rewrite_revision()
             if corrected_speaker:
                 state_path = run.root / "dubbing_state.json"
                 if state_path.exists():

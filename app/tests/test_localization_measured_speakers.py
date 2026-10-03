@@ -35,6 +35,10 @@ def transcript(texts=("Xin chào", "Cảm ơn"), *, speakers=True):
 
 def mock_dubbing(monkeypatch, *, durations=None, fail_after=None):
     events = []
+    async def catalogue(*_args, **_kwargs):
+        return [{"voice_id": "vi-VN-NamMinhNeural", "gender": "male"},
+                {"voice_id": "vi-VN-HoaiMyNeural", "gender": "female"}]
+    monkeypatch.setattr("backend.services.tts_service.list_voices", catalogue)
     async def generate(text, *, output_path, voice, **kwargs):
         events.append(("tts", text, voice))
         if fail_after is not None and len(events) > fail_after:
@@ -229,8 +233,8 @@ def test_legacy_audit_is_preserved_when_upgrading_job_state(tmp_path):
                {"segment_id": "s1", "before": "A sentence", "after": "Sentence"}]
     write_json_atomic(audit_path, {"rewrite_count": 2, "entries": entries})
     state = DubbingJobState(tmp_path / "dubbing_state.json", scope="one", binding={}, audit_path=audit_path)
-    assert state.data["rewrite_audit"] == entries
-    assert state.rewrite_count == 1
+    assert state.data["rewrite_audit"] == [{**entry, "acceptance_key": "legacy-unscoped"} for entry in entries]
+    assert state.rewrite_count == 0
     assert state.calibration() == {}
 
 

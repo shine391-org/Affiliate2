@@ -4,6 +4,8 @@ Ngày: 2026-10-03. Nhánh: `feat/localization-fast-mode`.
 Bản nền: `09bf5aa1a6e8086219bdd3d19db56cec0a7dff38` (sau lần sửa đầu từ `8d79c40657acb2a9d076bf1f2d4dc405f0311a76`).
 Không gộp vào `master`. Đây là báo cáo sửa kỹ thuật và kiểm tra tập trung; chưa phải nghiệm thu chất lượng video lồng tiếng.
 
+Bổ sung sau bản này: [QA_LOCALIZATION_FALLBACK_REVISIONS.md](QA_LOCALIZATION_FALLBACK_REVISIONS.md) thay thế hành vi dừng khi thiếu giọng và cách đếm nhật ký toàn lịch sử. Bảng dưới giữ lại bằng chứng của lần sửa trước.
+
 ## Hành vi đã sửa
 
 | Yêu cầu | Hành vi và bằng chứng |

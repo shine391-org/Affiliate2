@@ -59,7 +59,9 @@ async def test_same_gender_speakers_get_distinct_matching_advertised_voices(monk
     events = mock_dubbing(monkeypatch)
     monkeypatch.setattr(svc, "_tts_config", lambda *_: svc.TTSRuntimeConfig(provider, "vi-VN-HoaiMyNeural", "test-key", None, None, "eastasia"))
     async def catalogue(*_args, **_kwargs):
-        return [{"voice_id": extra, "category": gender, "locale": "en-US"},
+        return [{"voice_id": "vi-VN-NamMinhNeural", "gender": "male"},
+                {"voice_id": "vi-VN-HoaiMyNeural", "gender": "female"},
+                {"voice_id": extra, "category": gender, "locale": "en-US"},
                 {"voice_id": "en-US-UnrelatedNeural", "category": gender, "locale": "en-US"}]
     monkeypatch.setattr("backend.services.tts_service.list_voices", catalogue)
     profile = fast_localization_profile().model_copy(update={"speaker_genders": {"SPEAKER_00": gender, "SPEAKER_01": gender}})
@@ -71,15 +73,21 @@ async def test_same_gender_speakers_get_distinct_matching_advertised_voices(monk
 
 
 @pytest.mark.asyncio
-async def test_insufficient_matching_gender_voices_fail_before_paid_synthesis(monkeypatch, tmp_path):
+async def test_insufficient_matching_gender_voices_reuse_and_render_with_warning(monkeypatch, tmp_path):
     events = mock_dubbing(monkeypatch)
-    async def catalogue(*_args, **_kwargs): return []
+    async def catalogue(*_args, **_kwargs):
+        return [{"voice_id": "vi-VN-NamMinhNeural", "gender": "male"}]
     monkeypatch.setattr("backend.services.tts_service.list_voices", catalogue)
     tx = source_voices(transcript(), ["male", "male"])
-    with pytest.raises(ValueError, match="matching-gender"):
-        await svc.synthesize_timed_dub(tx, source_media=tmp_path / "s.mp4", target_language="Vietnamese",
-            profile=fast_localization_profile(), user_settings=None, work_dir=tmp_path / "dub")
-    assert events == []
+    profile = fast_localization_profile().model_copy(update={"speaker_genders": {"SPEAKER_00": "male", "SPEAKER_01": "male"}})
+    result = await svc.synthesize_timed_dub(tx, source_media=tmp_path / "s.mp4", target_language="Vietnamese",
+        profile=profile, user_settings=None, work_dir=tmp_path / "dub")
+    assert [event[2] for event in events] == ["vi-VN-NamMinhNeural"] * 2
+    warnings = result.transcript.metadata["speakers"]["voice_warnings"]
+    assert len(warnings) == 1 and warnings[0] == {
+        "code": "speaker_voice_reused", "speaker_id": "SPEAKER_01", "source_gender": "male",
+        "selected_voice": "vi-VN-NamMinhNeural", "selected_voice_gender": "male", "provider": "edge_tts",
+        "reason": "no_second_compatible_voice_selected", "requires_human_review": True}
 
 
 @pytest.mark.parametrize("source,confirmed,outputs,code", [

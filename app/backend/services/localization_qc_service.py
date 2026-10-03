@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from backend.core.localization import LocalizationProfile, LocalizationTranscript
+from backend.services.dubbing_job_state import speaker_gender_warnings
 
 
 @dataclass
@@ -191,23 +192,24 @@ def evaluate_localization_qc(
                          "resolved_voice_count": len(resolved_identities),
                          "unresolved_speakers": unresolved_speakers,
                          "shared_voice_identities": shared_identities,
-                         "message": "Different speakers require distinct resolved voices or explicit shared-voice selection."})
+                         "message": "Shared or unresolved speaker voices require human review."})
     source_genders = {**(alignment.get("speaker_genders") or {}), **(speaker_state.get("speaker_genders") or {})}
     source_genders.update({speaker: {"gender": gender, "confirmed": gender != "unknown", "source": "reviewer"}
                            for speaker, gender in profile.speaker_genders.items()})
     output_genders = speaker_state.get("resolved_voice_genders") or {}
     if check_tts_quality:
+        warnings.extend(warning for warning in speaker_state.get("voice_warnings", [])
+                        if warning.get("code") not in {"speaker_gender_mismatch", "speaker_gender_unverified"})
         for speaker in sorted(speakers):
             fact = source_genders.get(speaker) or {}
-            wanted = fact.get("gender", "unknown")
-            actual = set(output_genders.get(speaker) or [])
-            if wanted == "unknown" or not fact.get("confirmed") or not actual or "unknown" in actual:
-                warnings.append({"code": "speaker_gender_unverified", "speaker_id": speaker,
-                                 "source_gender": wanted, "resolved_genders": sorted(actual),
-                                 "message": "Confirm source/output voice gender by listening; pitch is only a hint."})
-            if wanted != "unknown" and any(gender not in {"unknown", wanted} for gender in actual):
-                warnings.append({"code": "speaker_gender_mismatch", "speaker_id": speaker,
-                                 "source_gender": wanted, "resolved_genders": sorted(actual)})
+            voices = (speaker_state.get("resolved_voices") or {}).get(speaker)
+            # Older artifacts have only the gender set; retain that evidence.
+            pairs = list(voices.items()) if voices else [
+                (voice_map.get(speaker) or profile.tts_voice or "", gender)
+                for gender in (output_genders.get(speaker) or ["unknown"])]
+            for voice, gender in pairs:
+                warnings.extend(speaker_gender_warnings(speaker, fact, voice, gender,
+                    speaker_state.get("provider") or profile.tts_provider))
     overlaps = alignment.get("overlap_intervals") or []
     if not overlaps:
         overlaps = [{"segment_id": seg.id, "start": word.get("start"), "end": word.get("end"),

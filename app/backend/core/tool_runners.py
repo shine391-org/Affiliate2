@@ -2236,7 +2236,7 @@ async def run_tool_translate(
             "requires reference audio", "requires a base url",
             "matches no streams", "no audio", "source media has changed",
             "source identity", "missing or inaccessible",
-            "unlocalized vietnamese text", "matching-gender", "invalid dubbing job state",
+            "unlocalized vietnamese text", "invalid dubbing job state",
         )
         cancelled = "cancel" in error_name
         deterministic = any(marker in message for marker in deterministic_markers)

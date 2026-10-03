@@ -148,6 +148,8 @@ The same canonical transcript/timeline becomes reusable by intelligence, Smart C
 
 The follow-up review moves all Vietnamese name localization into C6, preserves approved C6 bytes across C7 retries, adds job-local source/output gender confirmation and same-gender distinct voice selection, and makes expert overrides atomic. Canonical chunk retries own provider attempts; deterministic errors stop, transient retries retain compatible chunks and accepted measured rewrites. No stage, engine or dependency was added. See [QA_LOCALIZATION_VI_VOICES_WORKFLOW.md](QA_LOCALIZATION_VI_VOICES_WORKFLOW.md) for regression and real-audio evidence, including unproven perceptual cases.
 
+The remaining-edge correction allows compatible voice reuse/default fallback with durable structured QC warnings, scopes rewrite counts to the current acceptance revision, and separates start/end locks while retaining valid ASR anchors. No pipeline redesign. Evidence: [QA_LOCALIZATION_FALLBACK_REVISIONS.md](QA_LOCALIZATION_FALLBACK_REVISIONS.md).
+
 ### C8 — audio separation/mixing
 
 - preserve useful background/music/ambience

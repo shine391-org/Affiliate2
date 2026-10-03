@@ -192,11 +192,11 @@ QC profile
 ```
 
 Profiles are used by single and batch jobs.
-Detected diarizer labels belong to one job, not reusable profiles. The job owns `dubbing_state.json`: its effective TTS binding, speaker voice map, exact-text duration observations grouped by acoustic identity, and rewrite ledger. Same-binding resumes/reruns retain this state; incompatible TTS bindings clear voice mappings/calibration. The declared `dubbing/rewrite_audit.json` survives stage cache invalidation and records each accepted before/after before another provider call.
+Detected diarizer labels belong to one job, not reusable profiles. The job owns `dubbing_state.json`: its effective TTS binding, speaker voice map, exact-text duration observations grouped by acoustic identity, and revision-scoped rewrite ledger. Every entry carries an acceptance key; counts include only current accepted changed segments, while history remains durable. Same-binding resumes/reruns retain this state; incompatible TTS bindings clear voice mappings/calibration. The declared `dubbing/rewrite_audit.json` survives stage cache invalidation and records each accepted before/after before another provider call.
 
 C6 owns Vietnamese names/terms in both reviewed captions and speech, with a job-local term dictionary revalidated on checkpoint resume. C7 never rewrites the approved C6 artifact: accepted measured-overflow text is persisted separately and replayed only for the same input, policy and TTS/reference binding. Rejected cadence trials remain auditable and do not inflate the changed-segment count. Expert profile/segment changes use the existing manifest transaction, including root speaker state, so partial failures roll back together.
 
-Source voice gender hints belong to the job's diarization evidence; pitch is unconfirmed evidence, never a verified gender classifier. Reviewer confirmation and provider voice metadata guide distinct matching voice selection. Same-gender speakers need distinct matching voices advertised by the bound provider, rather than alternating male/female defaults. Insufficient voices fail visibly; unknown, unconfirmed or mismatched gender keeps QC in review. Rebinding resets incompatible output mapping/catalogue/calibration even before first C7, while ASR invalidation also clears source speaker facts.
+Source voice gender hints belong to the job's diarization evidence; pitch is unconfirmed evidence, never a verified gender classifier. Reviewer confirmation and provider voice metadata guide distinct matching voice selection. Prefer distinct matching voices advertised by the bound provider. When none remain unused, reuse a compatible voice; when none match, use the configured/default voice. Catalogue failures also fall back. These conditions never fail C7: persist structured per-speaker warnings and keep QC in review. Unknown, unconfirmed or mismatched gender also keeps QC in review. Rebinding resets incompatible output mapping/catalogue/calibration even before first C7, while ASR invalidation also clears source speaker facts.
 
 ## One localization pipeline
 
@@ -259,8 +259,10 @@ Important rules:
 - C6/C7 validate numeric values and units, negation and explicit protected terms before accepting AI text
 - C6 localizes names before review; C6/C7 preserve explicit question/exclamation markers and localized protected names
 - HQ and Fast attempt diarization; Fast's diarization-only path preserves ASR word anchors
-- distinct detected speakers require distinct acoustic voices by default; failed diarization, unresolved voice mismatch and overlap keep QC in review
+- prefer distinct matching acoustic voices; voice reuse/default fallback continues dubbing with explicit QC review warnings; failed diarization and overlap also keep QC in review
 - source/output gender requires confirmation; uncertain pitch hints do not produce clean READY
+- independent start/end locks preserve the selected edge; malformed ASR words are skipped individually when choosing valid source onset anchors
+- chunk-internal cue offsets remain estimated; measured chunk duration never certifies forced alignment
 - captions follow final resolved timing
 - preserve useful background/music/ambience
 - automatic QC surfaces exceptions instead of forcing manual inspection of every segment

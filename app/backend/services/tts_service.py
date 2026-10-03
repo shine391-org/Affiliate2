@@ -60,7 +60,7 @@ def retryable_tts_error(exc: Exception) -> bool:
         if any(token in message for token in (
             "api key", "permission", "not configured", "unsupported", "requires reference",
             "requires a base url", "invalid voice", "invalid model", "resource not found",
-            "matching-gender", "unlocalized vietnamese", "invalid accepted rewrite",
+            "unlocalized vietnamese", "invalid accepted rewrite",
         )):
             return False
         current = current.__cause__

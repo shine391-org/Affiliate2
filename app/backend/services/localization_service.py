@@ -47,6 +47,7 @@ from backend.services.dubbing_planner import (
 
 from backend.services.dubbing_job_state import (
     DubbingJobState, reference_identity, resolve_speaker_voices, tts_binding, write_json_atomic,
+    speaker_gender_warnings,
 )
 
 logger = logging.getLogger(__name__)
@@ -2551,17 +2552,17 @@ def _speech_onset_ms(seg: LocalizationSegment) -> int:
 
     for word in words:
         if not isinstance(word, dict) or not str(word.get("word") or "").strip():
-            return seg.source_start_ms
+            continue
         try:
             start, end = float(word["start"]), float(word["end"])
         except (KeyError, TypeError, ValueError):
-            return seg.source_start_ms
+            continue
         if not (math.isfinite(start) and math.isfinite(end)) or end <= start:
-            return seg.source_start_ms
+            continue
         # A word's tail can cross an ASR cue boundary (overlapping turns).
         # Only its START determines onset; never extend the cue's end from it.
         if not seg.source_start_ms <= start * 1000 < seg.source_end_ms:
-            return seg.source_start_ms
+            continue
         # ASR may return overlapping turns/words out of list order. The minimum
         # is still a safe source onset; sorting or assuming words[0] is earliest
         # would hide a real pause or discard an otherwise usable word envelope.
@@ -2624,30 +2625,24 @@ async def synthesize_timed_dub(
     audit_path = work_dir / "rewrite_audit.json"
     job_state = DubbingJobState(state_path, scope=job_scope, binding=tts_binding(runtime, target_language),
                                audit_path=audit_path)
+    previous_voice_warnings = job_state.data.get("voice_warnings", [])
     speaker_voices = await resolve_speaker_voices(
         out, profile=profile, runtime=runtime, state=job_state,
         language_voice=_default_speech_voice(target_language),
     )
+    if _cadence_retry:
+        job_state.data["voice_warnings"] = [warning for warning in previous_voice_warnings
+            if warning["code"] not in {"speaker_gender_mismatch", "speaker_gender_unverified"}]
     profile = profile.model_copy(update={"speaker_voices": speaker_voices})
-    # Never knowingly synthesize a different gender to fill an unavailable slot.
-    if profile.speaker_voice_mode != "shared" and getattr(runtime.provider, "value", str(runtime.provider)) != "gpt_sovits":
-        missing_gender_voices = [speaker for speaker, fact in job_state.data.get("speaker_genders", {}).items()
-                                 if fact.get("gender") in {"male", "female"} and speaker not in speaker_voices]
-        if missing_gender_voices:
-            raise ValueError(f"No distinct matching-gender TTS voice for {missing_gender_voices}; select speaker voices or change TTS binding")
     def save_audit():
         job_state.save()
         write_json_atomic(audit_path, job_state.audit_payload())
     save_audit()
 
-    speech_issues = await _prepare_dubbing_speech(
-        out, profile=profile, runtime=runtime, ai=ai, fallback_ai=fallback_ai,
-        route_state=route_state, work_dir=work_dir, progress_cb=progress_cb,
-    )
     # Resume accepted C7 text independently of the immutable, reviewed C6
     # artifact. Changed input, voice, reference, or policy invalidates replay.
     approved_text = {seg.id: seg.translated_text for seg in out.segments}
-    acceptance_key = hashlib.sha256(json.dumps({
+    acceptance_input_key = hashlib.sha256(json.dumps({
         "binding": tts_binding(runtime, target_language), "profile": profile.model_dump(),
         "source": str(source_media.resolve()),
         "segments": [{"id": seg.id, "text": seg.translated_text, "source_text": seg.source_text,
@@ -2657,18 +2652,22 @@ async def synthesize_timed_dub(
         "references": [reference_identity(path) for path in
                        [profile.tts_reference_audio, *profile.speaker_reference_audio.values()] if path],
     }, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-    if job_state.data.get("acceptance_key") != acceptance_key:
-        job_state.data.update(acceptance_key=acceptance_key, accepted_text={})
-    else:
-        from backend.services.dubbing_rewrite_guard import check_rewrite_meaning
-        for seg in out.segments:
-            accepted = job_state.data.get("accepted_text", {}).get(seg.id)
-            if accepted:
-                if check_rewrite_meaning(seg.translated_text or "", accepted, target_language,
-                        protected_terms=[*profile.protected_terms, *profile.glossary.values()]):
-                    raise ValueError(f"Invalid accepted rewrite for {seg.id}")
-                seg.translated_text = accepted
-    job_state.save()
+    acceptance_key = (job_state.data["acceptance_key"] if _cadence_retry and job_state.data.get("acceptance_key")
+                      else job_state.activate_revision(acceptance_input_key))
+    save_audit()
+    speech_issues = await _prepare_dubbing_speech(
+        out, profile=profile, runtime=runtime, ai=ai, fallback_ai=fallback_ai,
+        route_state=route_state, work_dir=work_dir, progress_cb=progress_cb,
+    )
+    from backend.services.dubbing_rewrite_guard import check_rewrite_meaning
+    for seg in out.segments:
+        accepted = job_state.data.get("accepted_text", {}).get(seg.id)
+        if accepted:
+            if check_rewrite_meaning(seg.translated_text or "", accepted, target_language,
+                    protected_terms=[*profile.protected_terms, *profile.glossary.values()]):
+                raise ValueError(f"Invalid accepted rewrite for {seg.id}")
+            seg.translated_text = accepted
+    save_audit()
     rewrite_budget = _rewrite_budget if _rewrite_budget is not None else [float(profile.rewrite_total_timeout_s)]
 
     async def adapt_with_budget(**kwargs):
@@ -2704,8 +2703,10 @@ async def synthesize_timed_dub(
     cues = []
     for i, seg in enumerate(valid_segments):
         override = seg.overrides or {}
-        timing_locked = any(key in override for key in ("target_start_ms", "target_end_ms"))
-        onset_ms = seg.source_start_ms if timing_locked else _speech_onset_ms(seg)
+        start_locked = "target_start_ms" in override
+        end_locked = "target_end_ms" in override
+        timing_locked = start_locked or end_locked
+        onset_ms = seg.source_start_ms if start_locked else _speech_onset_ms(seg)
         start_ms = int(override.get("target_start_ms", onset_ms))
         end_ms = int(override.get("target_end_ms", seg.source_end_ms))
         if end_ms <= start_ms:
@@ -2720,7 +2721,7 @@ async def synthesize_timed_dub(
             speaker_id=seg.speaker_id,
             voice_id=(str(override.get("voice_id")).strip() or None)
                 if override.get("voice_id") is not None else speaker_voices.get(seg.speaker_id),
-            timing_locked=timing_locked,
+            timing_locked=timing_locked, start_locked=start_locked, end_locked=end_locked,
         ))
     segment_by_id = {seg.id: seg for seg in out.segments}
 
@@ -2797,6 +2798,7 @@ async def synthesize_timed_dub(
     allocation_ids = regenerate_chunk_ids if targeted_regeneration else None
     speaker_resolutions: dict[str, set[str]] = {}
     resolved_voice_genders: dict[str, set[str]] = {}
+    resolved_voices: dict[str, dict[str, str]] = {}
 
     def effective_reference(speaker_id):
         ref = auto_references.get(speaker_id or "__default__") or auto_references.get("__default__") or {}
@@ -2825,6 +2827,7 @@ async def synthesize_timed_dub(
             speaker_resolutions.setdefault(speaker_id, set()).add(acoustic_identity)
             gender = job_state.data.get("voice_genders", {}).get(voice, "unknown") if provider_value != "gpt_sovits" else "unknown"
             resolved_voice_genders.setdefault(speaker_id, set()).add(gender)
+            resolved_voices.setdefault(speaker_id, {})[voice] = gender
         job_state.observe(synthesis_identity, voice_key, speech_text,
                           estimate_spoken_ms(speech_text, target_language), duration_ms)
 
@@ -2994,7 +2997,7 @@ async def synthesize_timed_dub(
                     "duration_after_ms": None, "available_ms": chunk.available_ms,
                     "required_speed_before": required_speed(duration_before_ms, chunk.available_ms),
                     "dub_speed_max": config.speed_max, "timestamp": _utc_now_iso(),
-                    "status": "accepted",
+                    "status": "accepted", "acceptance_key": acceptance_key,
                 }
                 accepted_entries.append(entry)
                 job_state.data["rewrite_audit"].append(entry)
@@ -3249,7 +3252,7 @@ async def synthesize_timed_dub(
                         destination.parent.mkdir(parents=True, exist_ok=True)
                         path.replace(destination)
                     job_state.data = json.loads((work_dir / "dubbing_state.json").read_text(encoding="utf-8"))
-                    job_state.data.update(acceptance_key=acceptance_key, accepted_text={
+                    job_state.data.update(acceptance_key=acceptance_key, acceptance_input_key=acceptance_input_key, accepted_text={
                         seg.id: seg.translated_text for seg in repaired.transcript.segments
                         if seg.translated_text != approved_text.get(seg.id)})
                     save_audit()
@@ -3327,6 +3330,15 @@ async def synthesize_timed_dub(
         total_duration_ms=total_duration_ms,
         output_path=dub_track,
     )
+    # Persist the actual per-chunk voices too, including expert overrides.
+    voice_warnings = [warning for warning in job_state.data.get("voice_warnings", [])
+                      if warning["code"] not in {"speaker_gender_mismatch", "speaker_gender_unverified"}
+                      and warning["selected_voice"] in resolved_voices.get(warning["speaker_id"], {})]
+    for speaker, voices in resolved_voices.items():
+        for voice, gender in voices.items():
+            voice_warnings.extend(speaker_gender_warnings(speaker, job_state.data.get("speaker_genders", {}).get(speaker, {}),
+                                                          voice, gender, provider_value))
+    job_state.data["voice_warnings"] = voice_warnings
     save_audit()
     out.metadata["speakers"] = {
         "detected_speakers": job_state.data.get("detected_speakers", []),
@@ -3336,6 +3348,7 @@ async def synthesize_timed_dub(
         "available_voices": job_state.data.get("available_voices", []),
         "voice_catalogue": job_state.data.get("voice_catalogue", []),
         "speaker_genders": job_state.data.get("speaker_genders", {}),
+        "voice_warnings": voice_warnings, "provider": provider_value, "resolved_voices": resolved_voices,
         "resolved_voice_genders": {speaker: sorted(values) for speaker, values in resolved_voice_genders.items()},
     }
     max_fitted_speed = max([1.0, *[c.speed_factor for c in fitted_chunks]])
@@ -3346,7 +3359,7 @@ async def synthesize_timed_dub(
         "rewrite_count": job_state.rewrite_count,
         "rewrite_calls": rewrite_calls,
         "rate_calibration": job_state.calibration(),
-        "rewrite_audit": job_state.data["rewrite_audit"],
+        "rewrite_audit": job_state.data["rewrite_audit"], "acceptance_key": acceptance_key,
         "video_slowdown": video_slowdown,
         "cue_timing_basis": "source_word_anchors_with_estimated_chunk_internal_offsets",
         "cadence_split_before": sorted(forced_splits),

@@ -446,6 +446,8 @@ class LocalizationRun:
             )
             if name == "dubbing" and durable_audit.exists():
                 record["artifacts"]["rewrite_audit"] = str(durable_audit.resolve())
+        if index <= STAGES.index("translation"):
+            self.invalidate_rewrite_revision()
         if index <= STAGES.index("asr"):
             self.invalidate_dubbing_state(reset_source=True)
             self.data["effective_profile"].update(speaker_voices={}, speaker_genders={}, speaker_reference_audio={})
@@ -479,16 +481,39 @@ class LocalizationRun:
         if any(self.effective_profile.get(key) != profile.get(key) for key in keys):
             self.invalidate_dubbing_state()
             profile = {**profile, "speaker_voices": {}, "speaker_reference_audio": {}, "voice_genders": {}}
+        revision_keys = {key for key in {*self.effective_profile, *profile}
+                         if key.startswith(("tts_", "speaker_", "voice_", "dub_", "rewrite_", "video_retime"))
+                         or key in {"glossary", "protected_terms"}}
+        if any(self.effective_profile.get(key) != profile.get(key) for key in revision_keys):
+            self.invalidate_rewrite_revision()
         self.data["effective_profile"] = dict(profile)
         self._write()
 
+    def invalidate_rewrite_revision(self) -> None:
+        # Invalidate the public count immediately, before a new C7 attempt.
+        # A fresh acceptance token prevents A -> B -> A from reviving old edits.
+        from backend.services.dubbing_job_state import write_json_atomic
+        self.record("dubbing").setdefault("metadata", {})["rewrite_count"] = 0
+        for path in (self.root / "dubbing_state.json", self.root / "dubbing" / "rewrite_audit.json"):
+            if not path.exists():
+                continue
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            entries = payload.get("rewrite_audit", payload.get("entries", []))
+            for entry in entries:
+                entry.setdefault("acceptance_key", "legacy-unscoped")
+            payload.update(acceptance_key=None, acceptance_input_key=None, rewrite_count=0)
+            if path.name == "dubbing_state.json":
+                payload["accepted_text"] = {}
+            write_json_atomic(path, payload)
+
     def invalidate_dubbing_state(self, *, reset_source: bool = False) -> None:
+        self.invalidate_rewrite_revision()
         path = self.root / "dubbing_state.json"
         if path.exists():
             from backend.services.dubbing_job_state import write_json_atomic
             state = json.loads(path.read_text(encoding="utf-8"))
             state.update(binding=None, speaker_voices={}, measurements={}, available_voices=[],
-                         voice_catalogue=[], voice_genders={}, accepted_text={}, shared_voice=False)
+                         voice_catalogue=[], voice_genders={}, accepted_text={}, voice_warnings=[], voice_catalog_error=None, voice_catalogue_loaded=False, shared_voice=False)
             if reset_source:
                 state.update(detected_speakers=[], speaker_genders={})
             write_json_atomic(path, state)

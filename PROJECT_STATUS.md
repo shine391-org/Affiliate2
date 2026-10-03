@@ -29,6 +29,8 @@ Fixes on `feat/localization-fast-mode` enforce measured-first C7 rewrites, exact
 
 The second corrective review localizes names in reviewed C6 text, guards ages and question/exclamation markers, selects distinct voices matching confirmed source gender, and surfaces unverified gender in Studio/QC. Approved C6 remains immutable during C7; accepted measured rewrites, safe chunk reuse, atomic overrides and pre-C7 provider rebind invalidation are covered by focused regressions. Full dubbed-video/intonation acceptance remains pending: the accessible real audio preserved ASR timestamps but speaker inference lacked a token and live Edge access failed certificate verification. See [docs/QA_LOCALIZATION_VI_VOICES_WORKFLOW.md](docs/QA_LOCALIZATION_VI_VOICES_WORKFLOW.md).
 
+Remaining-edge correction on the same feature branch: unavailable matching voices now degrade to reuse/default with QC review instead of stopping C7. Rewrite counts exclude previous acceptance revisions, including after translation/provider/voice changes. Independent timing locks retain valid word onsets. Focused regressions pass; full real-media acceptance remains pending. See [docs/QA_LOCALIZATION_FALLBACK_REVISIONS.md](docs/QA_LOCALIZATION_FALLBACK_REVISIONS.md).
+
 ### Real-media failure that triggered donor-first rebuild
 The first 65.7s sample exposed the old C7 prototype:
 - 21 usable translated speech units

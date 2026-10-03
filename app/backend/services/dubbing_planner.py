@@ -55,7 +55,12 @@ class DubbingCue:
     speaker_id: str | None = None
     voice_id: str | None = None
     source_text: str = ""
-    timing_locked: bool = False
+    timing_locked: bool = False  # Legacy callers lock both edges.
+    start_locked: bool = False
+    end_locked: bool = False
+
+    def __post_init__(self):
+        self.timing_locked = self.timing_locked or self.start_locked or self.end_locked
 
     @property
     def duration_ms(self) -> int:
@@ -80,7 +85,12 @@ class PlanItem:
     chunk_id: int = 0
     rewrite_attempts: int = 0
     warning: str = ""
-    timing_locked: bool = False
+    timing_locked: bool = False  # Legacy callers lock both edges.
+    start_locked: bool = False
+    end_locked: bool = False
+
+    def __post_init__(self):
+        self.timing_locked = self.timing_locked or self.start_locked or self.end_locked
 
 
 @dataclass(slots=True)
@@ -273,7 +283,7 @@ def build_plan(
             speaker_id=cue.speaker_id,
             voice_id=cue.voice_id,
             estimated_duration_ms=estimate_spoken_ms(cue.text, language),
-            timing_locked=cue.timing_locked,
+            timing_locked=cue.timing_locked, start_locked=cue.start_locked, end_locked=cue.end_locked,
         )
         for cue in ordered
     ]
@@ -433,14 +443,18 @@ def allocate_silence(
          max(plan[idx].original_end_ms for idx in c.item_indexes))
         for c in chunks
     ]
-    locked = [any(plan[idx].timing_locked for idx in c.item_indexes) for c in chunks]
-    immutable = [
-        locked[pos] or (only_chunk_ids is not None and c.id not in only_chunk_ids)
-        for pos, c in enumerate(chunks)
-    ]
+    def edge_locked(item, edge):
+        return getattr(item, edge + "_locked") or (item.timing_locked and not (item.start_locked or item.end_locked))
+    start_locked = [any(edge_locked(plan[idx], "start") for idx in c.item_indexes) for c in chunks]
+    end_locked = [any(edge_locked(plan[idx], "end") for idx in c.item_indexes) for c in chunks]
+    untouched = [only_chunk_ids is not None and c.id not in only_chunk_ids for c in chunks]
+    fixed_start = [start_locked[pos] or untouched[pos] for pos in range(len(chunks))]
+    fixed_end = [end_locked[pos] or untouched[pos] for pos in range(len(chunks))]
     for pos, chunk in enumerate(chunks):
-        if not immutable[pos]:
-            chunk.start_ms, chunk.end_ms = original[pos]
+        if not fixed_start[pos]:
+            chunk.start_ms = original[pos][0]
+        if not fixed_end[pos]:
+            chunk.end_ms = original[pos][1]
 
     # Alignment may overlap by <=120ms even when a hard boundary forces split.
     # Keep the later onset and cap the earlier flexible slot; if the earlier
@@ -451,15 +465,15 @@ def allocate_silence(
         overlap = previous.end_ms - chunk.start_ms
         if overlap <= 0:
             continue
-        if immutable[pos - 1] and immutable[pos]:
-            reason = "expert timing conflict" if locked[pos - 1] and locked[pos] else "immutable timing conflict"
+        if fixed_end[pos - 1] and fixed_start[pos]:
+            reason = "expert timing conflict" if end_locked[pos - 1] and start_locked[pos] else "immutable timing conflict"
             raise ValueError(f"{reason}: chunks {previous.id} and {chunk.id} overlap by {overlap}ms")
         if overlap > _MAX_NATURAL_CUE_OVERLAP_MS:
             raise ValueError(
                 f"chunk timestamp overlap {overlap}ms exceeds "
                 f"{_MAX_NATURAL_CUE_OVERLAP_MS}ms tolerance: chunks {previous.id} and {chunk.id}"
             )
-        if not immutable[pos - 1]:
+        if not fixed_end[pos - 1]:
             if chunk.start_ms <= previous.start_ms:
                 raise ValueError(f"timing conflict: chunk {previous.id} has no positive window after overlap normalization")
             previous.end_ms = chunk.start_ms
@@ -473,7 +487,7 @@ def allocate_silence(
         chunk = chunks[pos]
         if only_chunk_ids is not None and chunk.id not in only_chunk_ids:
             continue
-        if any(plan[idx].timing_locked for idx in chunk.item_indexes):
+        if fixed_start[pos] and fixed_end[pos]:
             continue
         start, end = original[pos]
         duration = chunk.actual_duration_ms or sum(
@@ -494,11 +508,12 @@ def allocate_silence(
             end + config.gap_tolerance_ms - chunk.end_ms,
             span_limit - chunk.available_ms,
         ))
-        chunk.end_ms += extension
+        if not fixed_end[pos]:
+            chunk.end_ms += extension
         # Prefer a mild speed-up to moving onset unnecessarily. Following
         # silence, when sufficient, has already provided the full natural slot.
         needed = max(0, math.ceil(duration / config.speed_accept) - chunk.available_ms)
-        if not needed:
+        if not needed or fixed_start[pos]:
             continue
         if pos:
             source_gap = max(0, start - original[pos - 1][1])

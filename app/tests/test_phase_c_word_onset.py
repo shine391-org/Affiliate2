@@ -20,7 +20,7 @@ from backend.services.tts_service import TTSProvider
     ({}, [{"word": "hello", "start": 0.5, "end": 0.7}], 1080),
     ({}, [{"word": "hello", "start": 2.3598, "end": 2.3599}], 1080),
     ({"target_start_ms": 1200}, [{"word": "hello", "start": 2.14, "end": 2.30}], 1200),
-    ({"target_end_ms": 2300}, [{"word": "hello", "start": 2.14, "end": 2.30}], 1080),
+    ({"target_end_ms": 2300}, [{"word": "hello", "start": 2.14, "end": 2.30}], 2140),
 ])
 def test_real_speech_anchor_preserves_fallback_and_expert_locks(tmp_path, monkeypatch, overrides, words, expected):
     tx = LocalizationTranscript(segments=[LocalizationSegment(
@@ -41,8 +41,8 @@ def test_real_speech_anchor_preserves_fallback_and_expert_locks(tmp_path, monkey
     async def generate(text, *, output_path, **kwargs):
         with wave.open(str(output_path), "wb") as wav:
             wav.setnchannels(1); wav.setsampwidth(2); wav.setframerate(16000)
-            wav.writeframes(b"\x01\x00" * 3200)
-        return 200
+            wav.writeframes(b"\x01\x00" * 1600)
+        return 100
     monkeypatch.setattr(svc, "_generate_tts_chunk", generate)
     result = asyncio.run(svc.synthesize_timed_dub(
         tx, source_media=tmp_path / "source.mp4", target_language="Vietnamese",
@@ -88,15 +88,15 @@ def test_padded_dialogue_is_not_one_front_loaded_synthesis(tmp_path, monkeypatch
     assert [p.target_start_ms for p in result.plan] == [180, 2140, 3740, 4940]
 
 
-@pytest.mark.parametrize("words", [
-    [{"word": "hello", "start": 2.14, "end": 2.3}, {"word": "there", "start": 2.3, "end": float("inf")}],
-    [{"word": "hello", "start": 2.14, "end": 2.3}, {"word": "there", "start": 9.0, "end": 9.1}],
-    [{"word": "", "start": 2.14, "end": 2.3}],
+@pytest.mark.parametrize("words,expected", [
+    ([{"word": "hello", "start": 2.14, "end": 2.3}, {"word": "there", "start": 2.3, "end": float("inf")}], 2140),
+    ([{"word": "hello", "start": 2.14, "end": 2.3}, {"word": "there", "start": 9.0, "end": 9.1}], 2140),
+    ([{"word": "", "start": 2.14, "end": 2.3}], 1080),
 ])
-def test_partial_or_invalid_word_alignment_does_not_move_onset(words):
+def test_partial_or_invalid_word_alignment_keeps_valid_anchors(words, expected):
     seg = LocalizationSegment(id="bad", source_text="hello there", source_start_ms=1080,
                               source_end_ms=2360, source_words=words)
-    assert svc._speech_onset_ms(seg) == 1080
+    assert svc._speech_onset_ms(seg) == expected
 
 
 def test_overlapping_turn_words_anchor_to_earliest_time_not_list_order():
@@ -157,6 +157,14 @@ def test_front_loaded_merged_audio_is_reviewed_not_called_aligned(tmp_path, monk
     assert drift[0]["segment_ids"] == ["s1"]
     assert drift[0]["drift_ms"] == -2800
     assert drift[0]["timing_basis"] == "estimated_chunk_weights"
+    assert result.transcript.metadata["dubbing"]["cue_timing_basis"] == "source_word_anchors_with_estimated_chunk_internal_offsets"
+    from backend.services import localization_qc_service as qc
+    monkeypatch.setattr(qc, "probe_media", lambda *_: dict(width=1080, height=1920, duration=7., has_audio=True, has_video=True))
+    monkeypatch.setattr(qc, "audio_max_volume_db", lambda *_: -1.)
+    report = qc.evaluate_localization_qc(source_video=tmp_path / "source.mp4", final_video=result.dub_track,
+        transcript=result.transcript, profile=LocalizationProfile(id="qc", name="QC"), timing_issues=result.issues)
+    warning = next(w for w in report.warnings if w["code"] == "dubbing_onset_drift")
+    assert warning["issues"][0]["timing_basis"] == "estimated_chunk_weights"
     assert result.transcript.segments[1].qc_status == "review"
 
 
