@@ -2077,7 +2077,10 @@ async def _adapt_chunk_items(
         items.append({
             "id": item.segment_id,
             "source": seg.source_text,
-            "current": seg.translated_text or item.spoken_text,
+            # The model must shorten what will actually be spoken. Feeding it the
+            # approved caption text (still in the source script) makes it echo
+            # Han back, which is then rejected as unreadable Vietnamese.
+            "current": item.spoken_text or seg.translated_text,
         })
     current_words = sum(len(item["current"].split()) for item in items)
     duration_ms = int((state or {}).get("measured_duration_ms") or sum(
@@ -2286,6 +2289,10 @@ ITEMS:
 
     current_text = chunk_text(plan, chunk)
     candidate_text = " ".join(mapped[item["id"]] for item in items)
+    from backend.services.dubbing_speech import HAN_SPAN
+    if ((target_language or "").lower() in {"vietnamese", "vi", "vi-vn"}
+            and not HAN_SPAN.search(current_text) and HAN_SPAN.search(candidate_text)):
+        return record_invalid("rewrite_reintroduced_foreign_script")
     # A paraphrase that grows cannot solve a duration overflow. Reject it
     # atomically so neither the plan nor the caption transcript drifts.
     if len(candidate_text) >= len(current_text) or (
@@ -2370,6 +2377,72 @@ def _compose_chunk_track_sync(
     return output_path
 
 
+async def _prepare_dubbing_speech(transcript, **kwargs):
+    from backend.services.dubbing_speech import prepare_speech
+    return await prepare_speech(
+        transcript, **kwargs, voice_for_chunk=_voice_for_chunk,
+        call_ai=_call_ai_chat_resilient, strip_fence=_strip_json_fence,
+    )
+
+
+async def _dubbing_spoken_pairs(transcript, *, profile, runtime) -> dict[str, list[tuple[str, str]]]:
+    from backend.services.dubbing_speech import spoken_pairs
+    return spoken_pairs(transcript, profile=profile, runtime=runtime, voice_for_chunk=_voice_for_chunk)
+
+
+def _apply_spoken_forms(
+    plan: list[PlanItem],
+    segment_by_id: dict[str, LocalizationSegment],
+    pairs: dict[str, list[tuple[str, str]]],
+    language: str,
+) -> None:
+    """Keep TTS input readable while caption/stored text stays as approved."""
+    if not pairs:
+        return
+    from backend.services.dubbing_speech import restore_script, to_spoken
+    for item in plan:
+        item_pairs = pairs.get(item.segment_id)
+        if not item_pairs:
+            continue
+        item.spoken_text = to_spoken(item.spoken_text, item_pairs)
+        item.estimated_duration_ms = estimate_spoken_ms(item.spoken_text, language)
+        seg = segment_by_id.get(item.segment_id)
+        if seg is not None and (seg.translated_text or "").strip():
+            seg.translated_text = restore_script(seg.translated_text or "", item_pairs)
+
+
+def _speech_onset_ms(seg: LocalizationSegment) -> int:
+    """Anchor speech to the earliest valid word, not padded ASR silence.
+
+    Keep the original end as the budget so short replies can borrow silence.
+    These are source word anchors, NOT forced alignment of synthesized audio.
+    """
+    words = seg.source_words or []
+    if not words:
+        return seg.source_start_ms
+    onset = None
+
+    for word in words:
+        if not isinstance(word, dict) or not str(word.get("word") or "").strip():
+            return seg.source_start_ms
+        try:
+            start, end = float(word["start"]), float(word["end"])
+        except (KeyError, TypeError, ValueError):
+            return seg.source_start_ms
+        if not (math.isfinite(start) and math.isfinite(end)) or end <= start:
+            return seg.source_start_ms
+        # A word's tail can cross an ASR cue boundary (overlapping turns).
+        # Only its START determines onset; never extend the cue's end from it.
+        if not seg.source_start_ms <= start * 1000 < seg.source_end_ms:
+            return seg.source_start_ms
+        # ASR may return overlapping turns/words out of list order. The minimum
+        # is still a safe source onset; sorting or assuming words[0] is earliest
+        # would hide a real pause or discard an otherwise usable word envelope.
+        onset = min(onset, round(start * 1000)) if onset is not None else round(start * 1000)
+    # Integer rounding must not turn a valid sub-ms word into a zero window.
+    return onset if onset is not None and onset < seg.source_end_ms else seg.source_start_ms
+
+
 def _scale_chunks_for_video_slowdown(
     chunks: list[DubbingChunk],
     factor: float,
@@ -2392,6 +2465,8 @@ async def synthesize_timed_dub(
     reuse_existing_chunks: bool = False,
     reference_media: Path | None = None,
     progress_cb=None,
+    _cadence_retry: bool = False,
+    _rewrite_budget: list[float] | None = None,
 ) -> TimedDubResult:
     """C7 donor-derived chunk planner with measured TTS and bounded retiming."""
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -2411,12 +2486,30 @@ async def synthesize_timed_dub(
         rewrite_ai_error = exc
         logger.warning("Duration rewrite AI routes unavailable: %s", exc)
 
-    rewrite_deadline_at = (
-        asyncio.get_running_loop().time() + float(profile.rewrite_total_timeout_s)
-        if ai is not None else None
-    )
     runtime = _tts_config(user_settings, profile, target_language)
 
+    speech_issues = await _prepare_dubbing_speech(
+        out, profile=profile, runtime=runtime, ai=ai, fallback_ai=fallback_ai,
+        route_state=route_state, work_dir=work_dir, progress_cb=progress_cb,
+    )
+    rewrite_budget = _rewrite_budget if _rewrite_budget is not None else [float(profile.rewrite_total_timeout_s)]
+
+    async def adapt_with_budget(**kwargs):
+        # Only AI time spends the shared budget, not TTS/FFmpeg wall time.
+        started = asyncio.get_running_loop().time()
+        try:
+            changed = await _adapt_chunk_items(
+                ai, fallback_ai=fallback_ai, route_state=route_state,
+                deadline_at=started + max(0.0, rewrite_budget[0]),
+                progress_cb=progress_cb, **kwargs,
+            )
+            if changed:
+                # A rewrite speaks in readable Latin but must not leak that form
+                # into approved caption/stored translation text.
+                _apply_spoken_forms(kwargs['plan'], segment_by_id, spoken_pairs, target_language)
+            return changed
+        finally:
+            rewrite_budget[0] = max(0.0, rewrite_budget[0] - (asyncio.get_running_loop().time() - started))
     valid_segments = [
         seg for seg in out.segments
         if seg.translation_status == "success" and (seg.translated_text or "").strip()
@@ -2438,7 +2531,9 @@ async def synthesize_timed_dub(
     cues = []
     for i, seg in enumerate(valid_segments):
         override = seg.overrides or {}
-        start_ms = int(override.get("target_start_ms", seg.source_start_ms))
+        timing_locked = any(key in override for key in ("target_start_ms", "target_end_ms"))
+        onset_ms = seg.source_start_ms if timing_locked else _speech_onset_ms(seg)
+        start_ms = int(override.get("target_start_ms", onset_ms))
         end_ms = int(override.get("target_end_ms", seg.source_end_ms))
         if end_ms <= start_ms:
             raise ValueError(f"Invalid expert timing override for {seg.id}")
@@ -2452,7 +2547,7 @@ async def synthesize_timed_dub(
             speaker_id=seg.speaker_id,
             voice_id=(str(override.get("voice_id")).strip() or None)
                 if override.get("voice_id") is not None else None,
-            timing_locked=any(key in override for key in ("target_start_ms", "target_end_ms")),
+            timing_locked=timing_locked,
         ))
     segment_by_id = {seg.id: seg for seg in out.segments}
 
@@ -2465,9 +2560,32 @@ async def synthesize_timed_dub(
         if source_duration_s > 0
         else None
     )
+    # Persist adaptive boundaries independently of raw-audio identities. Text
+    # edits may reuse grouping, but timing/voice/semantic changes may not.
+    layout_key = hashlib.sha256(json.dumps({
+        "rules": 1, "config": asdict(config),
+        "cues": [(c.segment_id, c.start_ms, c.end_ms, c.speaker_id, c.voice_id, c.timing_locked) for c in cues],
+    }, sort_keys=True).encode()).hexdigest()
+    layout_path = work_dir / "cadence_layout.json"
+    forced_splits: set[str] = set()
+    try:
+        layout = json.loads(layout_path.read_text(encoding="utf-8"))
+        ids = layout.get("split_before", [])
+        if (layout.get("key") == layout_key and isinstance(ids, list)
+                and all(isinstance(s, str) for s in ids)
+                and set(ids) <= {c.segment_id for c in cues}):
+            forced_splits = set(ids)
+        elif regenerate_chunk_ids:
+            raise RuntimeError("Cadence layout changed; rerun the full dubbing stage before targeted regeneration")
+    except (OSError, ValueError, AttributeError):
+        if regenerate_chunk_ids and layout_path.exists():
+            raise RuntimeError("Invalid cadence layout; rerun the full dubbing stage")
     plan, chunks = build_plan(
         cues, config, language=target_language, timeline_end_ms=source_duration_ms,
+        split_before_segment_ids=forced_splits,
     )
+    spoken_pairs = await _dubbing_spoken_pairs(out, profile=profile, runtime=runtime)
+    _apply_spoken_forms(plan, segment_by_id, spoken_pairs, target_language)
 
     auto_references: dict[str, dict] = {}
     provider_value = getattr(runtime.provider, "value", str(runtime.provider))
@@ -2483,7 +2601,7 @@ async def synthesize_timed_dub(
     block_paths: list[Path] = []
     regenerate_chunk_ids = set(regenerate_chunk_ids or set())
     targeted_regeneration = bool(regenerate_chunk_ids)
-    issues: list[dict] = []
+    issues: list[dict] = list(speech_issues)
     rewrite_count = 0
     rewrite_disabled = ai is None
     rewrite_unavailable_recorded = False
@@ -2559,9 +2677,7 @@ async def synthesize_timed_dub(
             and estimated > chunk.available_ms * config.speed_max
             and attempts < config.rewrite_max_attempts
         ):
-            changed = await _adapt_chunk_items(
-                ai, fallback_ai=fallback_ai, route_state=route_state,
-                deadline_at=rewrite_deadline_at, progress_cb=progress_cb,
+            changed = await adapt_with_budget(
                 plan=plan, chunk=chunk, segment_by_id=segment_by_id,
                 target_language=target_language, target_ms=chunk.available_ms,
                 profile=profile, issues=issues, state=rewrite_state,
@@ -2671,9 +2787,7 @@ async def synthesize_timed_dub(
             and attempts < config.rewrite_max_attempts
         ):
             rewrite_state.update(measured_duration_ms=duration_ms, attempt=attempts + 1)
-            changed = await _adapt_chunk_items(
-                ai, fallback_ai=fallback_ai, route_state=route_state,
-                deadline_at=rewrite_deadline_at, progress_cb=progress_cb,
+            changed = await adapt_with_budget(
                 plan=plan, chunk=chunk, segment_by_id=segment_by_id,
                 target_language=target_language, target_ms=chunk.available_ms,
                 profile=profile, issues=issues, state=rewrite_state,
@@ -2828,6 +2942,109 @@ async def synthesize_timed_dub(
     )
     report.rewrite_count = rewrite_count
 
+    # Cue offsets inside a single synthesized chunk are heuristic, not forced
+    # alignment. Do not let a chunk that merely fits its outer window silently
+    # certify a cue emitted seconds before/after its source speech anchor.
+    cadence_review_segments: set[str] = set()
+    for chunk in fitted_chunks:
+        for idx in chunk.item_indexes:
+            item = fitted_plan[idx]
+            source_onset_ms = round(item.original_start_ms * video_slowdown)
+            drift_ms = item.target_start_ms - source_onset_ms
+            if abs(drift_ms) > 750:
+                cadence_review_segments.add(item.segment_id)
+                issues.append({
+                    "chunk_id": chunk.id,
+                    "reason": "estimated_onset_drift",
+                    "segment_ids": [item.segment_id],
+                    "source_onset_ms": source_onset_ms,
+                    "target_onset_ms": item.target_start_ms,
+                    "drift_ms": drift_ms,
+                    "tolerance_ms": 750,
+                    "timing_basis": (
+                        "estimated_chunk_weights" if len(chunk.item_indexes) > 1
+                        else "measured_chunk_placement"
+                    ),
+                    "requires_human_review": True,
+                })
+
+    # One measured repair pass, never an unbounded synth/rewrite loop. Do not
+    # change numeric chunk ownership during a targeted retry. Only split units
+    # with source-word anchors and viable individual windows, never micro-cues.
+    if cadence_review_segments and not targeted_regeneration and not _cadence_retry:
+        new_splits: set[str] = set()
+        for chunk in fitted_chunks:
+            items = [fitted_plan[i] for i in chunk.item_indexes]
+            if len(items) < 2 or not any(p.segment_id in cadence_review_segments for p in items):
+                continue
+            # Judge each boundary on its own viability. A short leading cue must
+            # not veto splitting the substantial cues that follow it.
+            for previous, item in zip(items, items[1:]):
+                if (not item.timing_locked and not previous.timing_locked
+                        and segment_by_id[item.segment_id].source_words
+                        and segment_by_id[previous.segment_id].source_words
+                        and item.original_end_ms - item.original_start_ms >= 700
+                        and previous.original_end_ms - previous.original_start_ms >= 700):
+                    new_splits.add(item.segment_id)
+        if new_splits - forced_splits:
+            import shutil
+            import tempfile
+            # Speculate in an owned directory: a provider failure or newly
+            # impossible cue must not destroy the renderable original layout.
+            with tempfile.TemporaryDirectory(prefix="cadence-", dir=work_dir) as temp:
+                trial = Path(temp)
+                for path in work_dir.glob("chunk_*.wav*"):
+                    if path.is_file():
+                        shutil.copy2(path, trial / path.name)
+                (trial / layout_path.name).write_text(json.dumps({
+                    "key": layout_key, "split_before": sorted(forced_splits | new_splits),
+                }, indent=2), encoding="utf-8")
+                try:
+                    repaired: TimedDubResult | None = None
+                    repaired = await synthesize_timed_dub(
+                        out, source_media=source_media, target_language=target_language,
+                        profile=profile, user_settings=user_settings, work_dir=trial,
+                        fail_on_overflow=True, reuse_existing_chunks=True,
+                        reference_media=reference_media, progress_cb=progress_cb, _cadence_retry=True,
+                        _rewrite_budget=rewrite_budget,
+                    )
+                except LocalizationTimingError as exc:
+                    # Splitting traded a cadence warning for a hard overflow.
+                    # Keep the original layout; the cadence warning still stands.
+                    issues.append({"reason": "cadence_repair_rejected_overflow",
+                                   "segment_ids": sorted(cadence_review_segments),
+                                   "message": str(exc)[:300], "requires_human_review": True})
+                except Exception as exc:
+                    # Optional repair also tolerates provider/network-specific
+                    # exceptions; cancellation (BaseException) still propagates.
+                    issues.append({"reason": "cadence_repair_unavailable", "message": str(exc)[:300],
+                                   "segment_ids": sorted(cadence_review_segments), "requires_human_review": True})
+                else:
+                    overflowed = [issue for issue in repaired.issues
+                                  if issue.get("reason") == "timing_overflow"]
+                    if overflowed:
+                        issues.append({"reason": "cadence_repair_rejected_overflow",
+                                       "segment_ids": sorted(cadence_review_segments),
+                                       "chunks": sorted({issue["chunk_id"] for issue in overflowed
+                                                         if issue.get("chunk_id") is not None}),
+                                       "requires_human_review": True})
+                        repaired = None
+                if repaired is not None:
+                    repaired.dub_track = work_dir / repaired.dub_track.relative_to(trial)
+                    repaired.block_paths = [work_dir / path.relative_to(trial) for path in repaired.block_paths]
+                    # Publish layout last; sidecars still reject partial/stale
+                    # audio if an I/O interruption occurs during promotion.
+                    files = sorted((p for p in trial.rglob("*") if p.is_file()),
+                                   key=lambda p: p.name == layout_path.name)
+                    for path in files:
+                        destination = work_dir / path.relative_to(trial)
+                        destination.parent.mkdir(parents=True, exist_ok=True)
+                        path.replace(destination)
+                    repaired.rewrite_count += rewrite_count
+                    repaired.transcript.metadata["dubbing"]["rewrite_count"] = repaired.rewrite_count
+                    repaired.transcript.metadata["dubbing"]["cadence_repair"] = "measured_split"
+                    return repaired
+
     timed_chunks: list[tuple[int, Path]] = []
     fitted_dir = work_dir / "fitted"
     for chunk in fitted_chunks:
@@ -2872,6 +3089,8 @@ async def synthesize_timed_dub(
             item.speed_factor > 1.001 or video_slowdown > 1.001
         ) else "fit"
         seg.qc_status = "review" if item.speed_factor > config.speed_accept else "pass"
+        if seg.id in cadence_review_segments or any(seg.id in issue["segment_ids"] for issue in speech_issues):
+            seg.qc_status = "review"
         if seg.id in soft_overflow_segments:
             # A soft-overflow segment may never look clean to QC.
             seg.qc_status = "review"
@@ -2895,6 +3114,8 @@ async def synthesize_timed_dub(
         "max_fitted_speed": max_fitted_speed,
         "rewrite_count": rewrite_count,
         "video_slowdown": video_slowdown,
+        "cue_timing_basis": "source_word_anchors_with_estimated_chunk_internal_offsets",
+        "cadence_split_before": sorted(forced_splits),
         "issues": issues,
         "rewrite_ai": {
             "selected_connection_id": _selected_ai_connection_id(route_state),

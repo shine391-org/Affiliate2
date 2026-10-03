@@ -240,6 +240,31 @@ def evaluate_localization_qc(
             "issues": speed_warnings[:30],
         })
 
+    pronunciation_warnings = [
+        issue for issue in (timing_issues or [])
+        if issue.get("reason") == "speech_pronunciation_normalized"
+    ]
+    if pronunciation_warnings:
+        warnings.append({"code": "dubbing_pronunciation_review",
+                         "count": len(pronunciation_warnings), "issues": pronunciation_warnings[:50],
+                         "message": "Foreign-script spoken forms were normalized; confirm names/pronunciation before publish."})
+
+    onset_warnings = [
+        issue for issue in (timing_issues or [])
+        if issue.get("reason") == "estimated_onset_drift"
+    ]
+    if onset_warnings:
+        warnings.append({
+            "code": "dubbing_onset_drift",
+            "count": len(onset_warnings),
+            "issues": onset_warnings[:50],
+            "message": (
+                "Planned cue onset differs from the source speech anchor. "
+                "Chunk-internal offsets are estimates, not forced alignment; "
+                "human cadence review is required."
+            ),
+        })
+
     coverage = _speech_coverage(transcript)
     if coverage < 0.72:
         failures.append({"code": "low_target_speech_coverage", "ratio": round(coverage, 4)})

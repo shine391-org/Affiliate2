@@ -37,6 +37,22 @@ def _media(width=1080, height=1920, duration=10.0):
     }
 
 
+def test_qc_estimated_onset_drift_requires_review_even_when_duration_fits(monkeypatch, tmp_path):
+    monkeypatch.setattr(qc, "probe_media", lambda _: _media())
+    monkeypatch.setattr(qc, "audio_max_volume_db", lambda _: -1.0)
+    issue = {"reason": "estimated_onset_drift", "chunk_id": 1,
+             "segment_ids": ["s1"], "drift_ms": -2800,
+             "timing_basis": "estimated_chunk_weights", "requires_human_review": True}
+    report = qc.evaluate_localization_qc(
+        source_video=tmp_path / "s.mp4", final_video=tmp_path / "f.mp4",
+        transcript=_tx(), profile=LocalizationProfile(id="x", name="X"),
+        timing_issues=[issue], check_tts_quality=False,
+    )
+    assert report.status == "NEEDS_REVIEW"
+    row = next(w for w in report.warnings if w["code"] == "dubbing_onset_drift")
+    assert row["issues"] == [issue]
+
+
 def test_qc_ready_when_media_timing_and_translation_are_clean(monkeypatch, tmp_path):
     source = tmp_path / "s.mp4"
     final = tmp_path / "f.mp4"

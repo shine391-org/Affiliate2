@@ -161,6 +161,7 @@ def build_plan(
     *,
     language: str = "Vietnamese",
     timeline_end_ms: int | None = None,
+    split_before_segment_ids: set[str] | None = None,
 ) -> tuple[list[PlanItem], list[DubbingChunk]]:
     config.validate()
     ordered = sorted(cues, key=lambda x: (x.start_ms, x.index))
@@ -225,7 +226,8 @@ def build_plan(
         # hard boundary as well.
         voice_change = prev.voice_id != cue.voice_id
         must_split = (
-            len(current.item_indexes) >= config.max_chunk_size
+            cue.segment_id in (split_before_segment_ids or set())
+            or len(current.item_indexes) >= config.max_chunk_size
             or continuation_span_ms > _NATURAL_CONTINUATION_MAX_SPAN_MS
             or not should_merge_continuation
             or prev.timing_locked or cue.timing_locked
@@ -268,7 +270,8 @@ def build_plan(
         orphan_cue = ordered[orphan_idx]
         orphan_gap = orphan_cue.start_ms - previous_last.end_ms
         if (
-            previous_last.speaker_id != orphan_cue.speaker_id
+            orphan_cue.segment_id in (split_before_segment_ids or set())
+            or previous_last.speaker_id != orphan_cue.speaker_id
             or previous_last.voice_id != orphan_cue.voice_id
             or orphan_gap < -_MAX_NATURAL_CUE_OVERLAP_MS
             or orphan_gap > min(config.gap_tolerance_ms, _NATURAL_CONTINUATION_GAP_MS)
