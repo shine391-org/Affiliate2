@@ -99,7 +99,10 @@ def _provider_scoped_tts_resets(
     connection_changed = bool(
         previous_connection and next_connection and previous_connection != next_connection
     )
-    if not provider_changed and not connection_changed:
+    model_changed = effective_profile.get("tts_model") != binding.get("tts_model")
+    endpoint_changed = any(effective_profile.get(key) != binding.get(key)
+                           for key in ("tts_base_url", "tts_region") if key in binding)
+    if not provider_changed and not connection_changed and not model_changed and not endpoint_changed:
         return {}
 
     resets: dict[str, Any] = {
@@ -141,7 +144,7 @@ _SEMANTIC_KEYS = {
 _TRANSLATION_KEYS = {
     *_AI_TRANSLATION_ROUTE_KEYS,
     "translation_retry_attempts", "translation_attempt_timeout_s", "translation_total_timeout_s",
-    "translation_preset", "translation_instructions", "translation_guardrails", "glossary",
+    "translation_preset", "translation_instructions", "translation_guardrails", "glossary", "protected_terms",
 }
 _DUBBING_KEYS = {
     "rewrite_routes",
@@ -150,7 +153,7 @@ _DUBBING_KEYS = {
     "rewrite_retry_attempts", "rewrite_attempt_timeout_s", "rewrite_total_timeout_s",
     "rewrite_guardrails", "rewrite_instructions",
     "tts_connection_id", "tts_provider", "tts_model", "tts_voice", "tts_base_url", "tts_region",
-    "speaker_voices", "speaker_reference_audio", "tts_reference_audio",
+    "speaker_voices", "speaker_voice_mode", "speaker_reference_audio", "tts_reference_audio",
     "tts_reference_text", "tts_reference_language", "voice_clone_reference_mode",
     "dub_min_cue_duration_ms",
     "dub_max_chunk_size", "dub_gap_tolerance_ms", "dub_speed_accept",
@@ -308,9 +311,30 @@ def _job_detail(run: LocalizationRun) -> dict:
     chunks = _optional_json(run, "dubbing", "chunks")
     qc = _optional_json(run, "qc", "report")
     request = run.request
+    transcript = dubbing_tx or translation or _optional_json(run, "semantic", "transcript") or _optional_json(run, "asr", "transcript") or {}
+    state_path = run.root / "dubbing_state.json"
+    speaker_state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
+    detected = set()
+    for segment in transcript.get("segments") or []:
+        if segment.get("speaker_id"):
+            detected.add(segment["speaker_id"])
+        for word in segment.get("source_words") or []:
+            detected.update(word.get("speaker_ids") or [])
+            if word.get("speaker_id"):
+                detected.add(word["speaker_id"])
+    if not transcript.get("segments"):
+        detected.update(speaker_state.get("detected_speakers") or [])
     return {
         "manifest": run.snapshot(),
-        "transcript": dubbing_tx or translation,
+        "transcript": transcript or None,
+        "speaker_state": {
+            "detected_speakers": sorted(detected),
+            "speaker_voices": {**(speaker_state.get("speaker_voices") or {}),
+                               **(run.effective_profile.get("speaker_voices") or {})},
+            "available_voices": speaker_state.get("available_voices") or [],
+            "shared_voice": run.effective_profile.get("speaker_voice_mode") == "shared",
+            "diarization": transcript.get("metadata", {}).get("alignment", {}),
+        },
         "plan": plan or [],
         "chunks": chunks or [],
         "qc": qc,
@@ -1046,6 +1070,10 @@ async def localization_expert_override(job_id: str, body: ExpertOverrideRequest)
         invalidations: list[str] = []
 
         if body.profile_updates:
+            if {"speaker_voices", "speaker_voice_mode"} & set(body.profile_updates):
+                revision = _review_revision(run, "translation", "transcript")
+                if not revision or revision != body.revision:
+                    raise HTTPException(status_code=409, detail="Bản dịch đã thay đổi. Hãy tải lại trước khi sửa giọng.")
             merged = {**run.effective_profile, **body.profile_updates}
             try:
                 profile = LocalizationProfile.model_validate(merged)
@@ -1109,6 +1137,13 @@ async def localization_expert_override(job_id: str, body: ExpertOverrideRequest)
 
                 if change.speaker_id is not None:
                     seg.speaker_id = change.speaker_id.strip() or None
+                    for word in seg.source_words:
+                        previous = word.get("speaker_id")
+                        secondary = [speaker for speaker in (word.get("speaker_ids") or [])
+                                     if speaker != previous]
+                        word["speaker_id"] = seg.speaker_id
+                        if "speaker_ids" in word:
+                            word["speaker_ids"] = sorted(set(secondary + ([seg.speaker_id] if seg.speaker_id else [])))
 
                 overrides = dict(seg.overrides or {})
                 if change.clear_timing:
@@ -1432,7 +1467,10 @@ async def rebind_localization_providers(job_id: str, body: ProviderRebindRequest
         run.invalidate_from(from_stage, delete_artifacts=True)
         # invalidate_from is intentionally best-effort for ordinary reruns.
         # Rebinding must not let old provider chunk caches survive silently.
-        if any((run.root / stage).exists() for stage in transaction.stage_names):
+        if any((run.root / stage).exists() and (
+            stage != "dubbing" or any(item.name != "rewrite_audit.json" or not item.is_file()
+                                       for item in (run.root / stage).iterdir())
+        ) for stage in transaction.stage_names):
             raise OSError("Provider artifacts could not be removed completely")
 
         review_pending = bool(

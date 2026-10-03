@@ -67,7 +67,7 @@ def test_qc_ready_when_media_timing_and_translation_are_clean(monkeypatch, tmp_p
         source_video=source,
         final_video=final,
         transcript=_tx(),
-        profile=LocalizationProfile(id="x", name="X", target_aspect="9:16"),
+        profile=LocalizationProfile(id="x", name="X", target_aspect="9:16", diarization_mode="off"),
     )
     assert report.status == "READY"
     assert report.failures == []
@@ -94,7 +94,7 @@ def test_qc_coverage_uses_aligned_speech_not_silence_inside_semantic_cue(
                 {"word": "好", "start": 19.5, "end": 20.0, "score": 0.9},
             ],
         ),
-        profile=LocalizationProfile(id="x", name="X", target_aspect="9:16"),
+        profile=LocalizationProfile(id="x", name="X", target_aspect="9:16", diarization_mode="off"),
     )
 
     assert report.status == "READY"
@@ -122,7 +122,7 @@ def test_qc_fails_untranslated_and_low_target_coverage(monkeypatch, tmp_path):
             timing_status="pending",
             qc_status="review",
         ),
-        profile=LocalizationProfile(id="x", name="X", target_aspect="9:16"),
+        profile=LocalizationProfile(id="x", name="X", target_aspect="9:16", diarization_mode="off"),
     )
     codes = {row["code"] for row in report.failures}
     assert report.status == "FAILED"
@@ -141,7 +141,7 @@ def test_qc_keeps_speed_warning_as_review_not_fake_pass(monkeypatch, tmp_path):
         source_video=source,
         final_video=final,
         transcript=_tx(qc_status="review"),
-        profile=LocalizationProfile(id="x", name="X", target_aspect="9:16"),
+        profile=LocalizationProfile(id="x", name="X", target_aspect="9:16", diarization_mode="off"),
         timing_issues=[{"reason": "speed_warning", "chunk_id": 1}],
     )
     assert report.status == "NEEDS_REVIEW"
@@ -167,7 +167,7 @@ def test_qc_requires_review_when_global_video_retime_was_used(monkeypatch, tmp_p
         source_video=source,
         final_video=final,
         transcript=_tx(),
-        profile=LocalizationProfile(id="x", name="X", target_aspect="9:16"),
+        profile=LocalizationProfile(id="x", name="X", target_aspect="9:16", diarization_mode="off"),
         video_slowdown=1.08,
     )
     assert report.status == "NEEDS_REVIEW"

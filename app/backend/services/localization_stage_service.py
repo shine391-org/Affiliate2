@@ -417,12 +417,13 @@ class LocalizationRun:
 
         for name in invalidated:
             record = self.record(name)
+            durable_audit = self.root / "dubbing" / "rewrite_audit.json"
             if delete_artifacts:
                 directory = self.root / name
                 if directory.exists():
-                    if name == "translation" and "checkpoint.json" in preserved_names:
+                    if name == "dubbing" or (name == "translation" and "checkpoint.json" in preserved_names):
                         for item in list(directory.iterdir()):
-                            if item.name in preserved_names:
+                            if item.name in preserved_names or (name == "dubbing" and item.name == "rewrite_audit.json"):
                                 continue
                             if item.is_dir():
                                 shutil.rmtree(item, ignore_errors=True)
@@ -431,6 +432,8 @@ class LocalizationRun:
                                     item.unlink(missing_ok=True)
                                 except Exception:
                                     pass
+                        if not any(directory.iterdir()):
+                            directory.rmdir()
                     else:
                         shutil.rmtree(directory, ignore_errors=True)
             record.update(
@@ -441,6 +444,10 @@ class LocalizationRun:
                 artifacts={},
                 metadata={},
             )
+            if name == "dubbing" and durable_audit.exists():
+                record["artifacts"]["rewrite_audit"] = str(durable_audit.resolve())
+        if index <= STAGES.index("asr"):
+            self.invalidate_dubbing_state()
         self._write()
         return invalidated
 
@@ -467,8 +474,22 @@ class LocalizationRun:
         return json.loads(path.read_text(encoding="utf-8"))
 
     def update_effective_profile(self, profile: dict) -> None:
+        keys = ("tts_provider", "tts_connection_id", "tts_model", "tts_voice", "tts_base_url", "tts_region")
+        if any(self.effective_profile.get(key) != profile.get(key) for key in keys):
+            if (self.root / "dubbing_state.json").exists():
+                self.invalidate_dubbing_state()
+                profile = {**profile, "speaker_voices": {}, "speaker_reference_audio": {}}
         self.data["effective_profile"] = dict(profile)
         self._write()
+
+    def invalidate_dubbing_state(self) -> None:
+        path = self.root / "dubbing_state.json"
+        if path.exists():
+            from backend.services.dubbing_job_state import write_json_atomic
+            state = json.loads(path.read_text(encoding="utf-8"))
+            state.update(binding=None, speaker_voices={}, measurements={}, available_voices=[],
+                         detected_speakers=[], shared_voice=False)
+            write_json_atomic(path, state)
 
     def update_request(self, request: dict) -> None:
         self.data["request"] = dict(request)
@@ -514,6 +535,9 @@ class ManifestTransaction:
             stages_root.mkdir(parents=True, exist_ok=True)
             manifest_bytes = self.run.manifest_path.read_bytes()
             (self.backup_root / "manifest.json").write_bytes(manifest_bytes)
+            state = self.run.root / "dubbing_state.json"
+            if state.exists():
+                shutil.copy2(state, self.backup_root / state.name)
             for name in self.stage_names:
                 source = self.run.root / name
                 if source.is_dir():
@@ -539,6 +563,12 @@ class ManifestTransaction:
             if backup.is_dir():
                 shutil.copytree(backup, current)
         manifest_bytes = (self.backup_root / "manifest.json").read_bytes()
+        state = self.run.root / "dubbing_state.json"
+        backup_state = self.backup_root / state.name
+        if backup_state.exists():
+            shutil.copy2(backup_state, state)
+        else:
+            state.unlink(missing_ok=True)
         tmp = self.run.manifest_path.with_suffix(".json.rollback")
         tmp.write_bytes(manifest_bytes)
         tmp.replace(self.run.manifest_path)

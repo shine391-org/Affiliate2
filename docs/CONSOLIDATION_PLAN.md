@@ -137,10 +137,14 @@ The same canonical transcript/timeline becomes reusable by intelligence, Smart C
 
 - TTS per semantic/timed block, not one joined whole-video text
 - measure actual generated duration
-- timing policy: duration-aware rewrite/adaptation → safe rate adjustment → bounded silence borrowing → exception
+- timing policy: natural TTS measurement + bounded silence allocation → measured over-max rewrite/adaptation → safe rate adjustment → bounded video retime → exception
+- calibration is per job and effective voice/reference binding, using the exact synthesized text; estimates never authorize rewrites
+- persist job-scoped distinct speaker voices and unique changed-segment rewrite audit across resume/rerun; incompatible TTS bindings invalidate voice/calibration state
 - compose blocks at timeline positions
 - final captions derive from resolved timed blocks
 - canonical TTS abstraction must be used
+
+2026-10-03 regression hardening also enables Fast diarization-only without losing word anchors, applies C6/C7 invariant guards, exposes speaker correction/voice selection in Studio, and blocks clean QC for unverified speaker/voice output. Focused engineering evidence and pending real-media acceptance: [QA_LOCALIZATION_MEASURED_SPEAKERS.md](QA_LOCALIZATION_MEASURED_SPEAKERS.md).
 
 ### C8 — audio separation/mixing
 

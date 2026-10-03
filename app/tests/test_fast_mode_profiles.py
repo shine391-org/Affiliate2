@@ -57,9 +57,10 @@ class TestFastLocalizationProfile:
         profile = fast_localization_profile()
         assert profile.alignment_mode == "off"
 
-    def test_fast_profile_diarization_off(self):
+    def test_fast_profile_diarization_only(self):
         profile = fast_localization_profile()
-        assert profile.diarization_mode == "off"
+        assert profile.diarization_mode == "auto"
+        assert profile.alignment_mode == "off"
 
     def test_fast_profile_audio_fast_duck(self):
         profile = fast_localization_profile()

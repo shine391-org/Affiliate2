@@ -23,6 +23,10 @@ Branch:
 - C2 AI/local provider controls: QA PASS
 - C3 Localization Profiles: QA PASS
 
+### Localization Fast / speaker review — 2026-10-03
+
+Fixes on `feat/localization-fast-mode` enforce measured-first C7 rewrites, exact-text per-job/per-acoustic-binding calibration, durable unique changed-segment audits, C6/C7 deterministic meaning invariants, safe Fast diarization-only, persisted distinct speaker voices and Studio controls. QC keeps diarization failure, unresolved multi-speaker voice collisions and overlap in review. Focused backend/frontend verification passes; this is not full real-media or perceptual acceptance. See [docs/QA_LOCALIZATION_MEASURED_SPEAKERS.md](docs/QA_LOCALIZATION_MEASURED_SPEAKERS.md) for exact tests, media attempts and remaining gaps. No merge to `master` is part of this review.
+
 ### Real-media failure that triggered donor-first rebuild
 The first 65.7s sample exposed the old C7 prototype:
 - 21 usable translated speech units

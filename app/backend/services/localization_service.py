@@ -35,7 +35,6 @@ from backend.services.dubbing_planner import (
     DubbingChunk,
     DubbingConfig,
     DubbingCue,
-    DubbingRateCalibrator,
     PlanItem,
     atempo_filter,
     allocate_silence,
@@ -44,6 +43,10 @@ from backend.services.dubbing_planner import (
     estimate_spoken_ms,
     fit_timeline,
     required_speed,
+)
+
+from backend.services.dubbing_job_state import (
+    DubbingJobState, reference_identity, resolve_speaker_voices, tts_binding, write_json_atomic,
 )
 
 logger = logging.getLogger(__name__)
@@ -816,6 +819,9 @@ CUSTOM INSTRUCTIONS:
 GLOSSARY:
 {glossary}
 
+PROTECTED TERMS (preserve literally when present):
+{json.dumps(profile.protected_terms, ensure_ascii=False)}
+
 FULL SOURCE CONTEXT:
 {transcript_context}
 
@@ -1065,6 +1071,7 @@ async def _translate_batch_resilient(
     fallback_ai=None,
     progress_cb=None,
     deadline_at: float | None = None,
+    source_language: str | None = None,
 ) -> tuple[list[str], set[int]]:
     if deadline_at is None:
         deadline_at = asyncio.get_running_loop().time() + float(
@@ -1091,7 +1098,16 @@ async def _translate_batch_resilient(
         deadline_at=deadline_at,
     )
     try:
-        return _validate_translation_payload(raw, batch), set()
+        texts = _validate_translation_payload(raw, batch)
+        from backend.services.dubbing_rewrite_guard import check_translation_meaning
+        for segment, text in zip(batch, texts):
+            violations = check_translation_meaning(
+                segment.source_text, text, source_language, target_language,
+                glossary=profile.glossary, protected_terms=profile.protected_terms,
+            )
+            if violations:
+                raise ValueError(f"translation meaning guard for {segment.id}: {violations}")
+        return texts, set()
     except (json.JSONDecodeError, ValueError) as exc:
         # A transport-level 200 with unusable structured output is still a
         # route failure for this structured stage. Advance to the next route
@@ -1122,7 +1138,7 @@ async def _translate_batch_resilient(
                     ai, batch, route_state=route_state,
                     target_language=target_language, context=context,
                     profile=profile, for_dub=for_dub, fallback_ai=fallback_ai,
-                    progress_cb=progress_cb, deadline_at=deadline_at,
+                    progress_cb=progress_cb, deadline_at=deadline_at, source_language=source_language,
                 )
 
         if len(batch) == 1:
@@ -1139,13 +1155,13 @@ async def _translate_batch_resilient(
             ai, batch[:mid], route_state=route_state,
             target_language=target_language, context=context,
             profile=profile, for_dub=for_dub, fallback_ai=fallback_ai,
-            progress_cb=progress_cb, deadline_at=deadline_at,
+            progress_cb=progress_cb, deadline_at=deadline_at, source_language=source_language,
         )
         right, rf = await _translate_batch_resilient(
             ai, batch[mid:], route_state=route_state,
             target_language=target_language, context=context,
             profile=profile, for_dub=for_dub, fallback_ai=fallback_ai,
-            progress_cb=progress_cb, deadline_at=deadline_at,
+            progress_cb=progress_cb, deadline_at=deadline_at, source_language=source_language,
         )
         return left + right, lf | {mid + i for i in rf}
 
@@ -1191,6 +1207,9 @@ async def translate_transcript(
         for index, client in enumerate(route_clients)
     ]
     checkpoint_meta = {
+        "meaning_guard_version": 2,
+        "source_language": transcript.language,
+        "protected_terms": profile.protected_terms,
         "semantic_hash": semantic_sig,
         "target_language": target_language,
         "routes": route_fingerprint,
@@ -1252,6 +1271,7 @@ async def translate_transcript(
                 ai, batch, route_state=route_state,
                 target_language=target_language,
                 context=context,
+                source_language=transcript.language,
                 profile=profile,
                 for_dub=for_dub,
                 fallback_ai=fallback_ai,
@@ -1953,10 +1973,12 @@ def _chunk_synthesis_identity(
         "language": target_language,
         "speaker_id": speaker_id,
         "text": text,
-        "reference_audio": reference_audio,
+        "reference_audio": reference_identity(reference_audio),
         "reference_text": reference_text,
         "reference_language": reference_language,
     }
+    if runtime.connection_id:
+        payload["connection_id"] = runtime.connection_id
     # Only Edge TTS changed its synthesis/post-processing contract. Include
     # that rule in Edge identities so cached chunks made with injected pause
     # punctuation regenerate once, without touching paid/clone providers.
@@ -2077,6 +2099,10 @@ async def _adapt_chunk_items(
     state: dict | None = None,
     setup_error: Exception | None = None,
 ) -> bool:
+    # Retries and every other caller must prove a real over-max measurement.
+    measured_ms = int((state or {}).get("measured_duration_ms") or 0)
+    if measured_ms <= 0 or required_speed(measured_ms, chunk.available_ms) <= profile.dub_speed_max:
+        return False
     items = []
     for idx in chunk.item_indexes:
         item = plan[idx]
@@ -2090,9 +2116,7 @@ async def _adapt_chunk_items(
             "current": item.spoken_text or seg.translated_text,
         })
     current_words = sum(len(item["current"].split()) for item in items)
-    duration_ms = int((state or {}).get("measured_duration_ms") or sum(
-        plan[idx].estimated_duration_ms for idx in chunk.item_indexes
-    ))
+    duration_ms = measured_ms
     # Feed the actual natural-rate measurement back into the next attempt,
     # rather than asking the same vague question again. Leave modest headroom
     # for TTS pauses; this budget is guidance, never permission to drop facts.
@@ -2117,6 +2141,8 @@ ITEMS:
         prompt += "\nGlossary: " + "; ".join(
             f"{k} => {v}" for k, v in profile.glossary.items()
         )[:1800]
+    if profile.protected_terms:
+        prompt += "\nProtected terms (preserve literally): " + json.dumps(profile.protected_terms, ensure_ascii=False)
     if profile.rewrite_instructions:
         prompt += (
             "\nPROFILE REWRITE INSTRUCTIONS (supplemental; semantic guardrails and locked protocol above remain active): "
@@ -2330,6 +2356,7 @@ ITEMS:
             item.spoken_text or segment_by_id[item.segment_id].translated_text,
             new_text,
             target_language,
+            protected_terms=[*profile.protected_terms, *profile.glossary.values()],
         )
         for v in violations:
             meaning_violations.append({
@@ -2509,6 +2536,8 @@ async def synthesize_timed_dub(
     progress_cb=None,
     _cadence_retry: bool = False,
     _rewrite_budget: list[float] | None = None,
+    job_state_path: Path | None = None,
+    _job_scope: str | None = None,
 ) -> TimedDubResult:
     """C7 donor-derived chunk planner with measured TTS and bounded retiming."""
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -2529,11 +2558,31 @@ async def synthesize_timed_dub(
         logger.warning("Duration rewrite AI routes unavailable: %s", exc)
 
     runtime = _tts_config(user_settings, profile, target_language)
+    state_path = Path(job_state_path or work_dir / "dubbing_state.json")
+    job_scope = _job_scope or str(state_path.resolve())
+    audit_path = work_dir / "rewrite_audit.json"
+    job_state = DubbingJobState(state_path, scope=job_scope, binding=tts_binding(runtime, target_language),
+                               audit_path=audit_path)
+    speaker_voices = await resolve_speaker_voices(
+        out, profile=profile, runtime=runtime, state=job_state,
+        language_voice=_default_speech_voice(target_language),
+    )
+    profile = profile.model_copy(update={"speaker_voices": speaker_voices})
+    def save_audit():
+        job_state.save()
+        write_json_atomic(audit_path, job_state.audit_payload())
+    save_audit()
 
     speech_issues = await _prepare_dubbing_speech(
         out, profile=profile, runtime=runtime, ai=ai, fallback_ai=fallback_ai,
         route_state=route_state, work_dir=work_dir, progress_cb=progress_cb,
     )
+    forms = (out.metadata.get("speech_preparation") or {}).get("forms") or {}
+    if forms:
+        from backend.services.dubbing_speech import to_spoken
+        pairs = sorted(forms.items(), key=lambda pair: -len(pair[0]))
+        spoken_terms = [to_spoken(term, pairs) for term in [*profile.protected_terms, *profile.glossary.values()]]
+        profile = profile.model_copy(update={"protected_terms": list(dict.fromkeys([*profile.protected_terms, *spoken_terms]))})
     rewrite_budget = _rewrite_budget if _rewrite_budget is not None else [float(profile.rewrite_total_timeout_s)]
 
     async def adapt_with_budget(**kwargs):
@@ -2588,7 +2637,7 @@ async def synthesize_timed_dub(
             source_text=seg.source_text or "",
             speaker_id=seg.speaker_id,
             voice_id=(str(override.get("voice_id")).strip() or None)
-                if override.get("voice_id") is not None else None,
+                if override.get("voice_id") is not None else speaker_voices.get(seg.speaker_id),
             timing_locked=timing_locked,
         ))
     segment_by_id = {seg.id: seg for seg in out.segments}
@@ -2644,9 +2693,7 @@ async def synthesize_timed_dub(
     regenerate_chunk_ids = set(regenerate_chunk_ids or set())
     targeted_regeneration = bool(regenerate_chunk_ids)
     issues: list[dict] = list(speech_issues)
-    rewrite_count = 0
-    #: Y5: counts segments whose approved text actually changed.
-    rewrite_count_segments = 0
+    rewrite_calls = 0
     rewrite_disabled = ai is None
     rewrite_unavailable_recorded = False
 
@@ -2668,14 +2715,36 @@ async def synthesize_timed_dub(
 
     rewrite_context: dict[int, tuple[int, dict]] = {}
     allocation_ids = regenerate_chunk_ids if targeted_regeneration else None
-    # Y2: learn this job's real speech rate from the durations we measure.
-    # The coefficient is job-scoped (one voice + one video) and is persisted so
-    # a rerun resumes with prior knowledge instead of relearning from scratch.
-    calibrator = DubbingRateCalibrator.from_dict(
-        (out.metadata or {}).get("dubbing", {}).get("rate_calibration")
-        if isinstance(out.metadata, dict) else None
-    )
-    rewrite_audit: list[dict] = []
+    speaker_resolutions: dict[str, set[str]] = {}
+
+    def effective_reference(speaker_id):
+        ref = auto_references.get(speaker_id or "__default__") or auto_references.get("__default__") or {}
+        return {
+            "audio": ref.get("audio") or _reference_for_chunk(profile, speaker_id),
+            "text": ref.get("text") or profile.tts_reference_text,
+            "language": ref.get("language") or profile.tts_reference_language,
+        }
+
+    def observe_chunk(voice, speaker_id, ref, speech_text, synthesis_identity, duration_ms):
+        voice_key = _chunk_synthesis_identity(
+            text="", runtime=runtime,
+            voice="" if provider_value == "gpt_sovits" else voice,
+            target_language=target_language, speaker_id=None,
+            reference_audio=ref.get("audio") if provider_value == "gpt_sovits" else None,
+            reference_text=ref.get("text") if provider_value == "gpt_sovits" else None,
+            reference_language=ref.get("language") if provider_value == "gpt_sovits" else None,
+        )
+        acoustic_identity = voice_key
+        if provider_value == "gpt_sovits":
+            reference = reference_identity(ref.get("audio")) or {}
+            # Identical reference audio at two paths or with different prompt
+            # text does not create two voices, even though calibration is split.
+            acoustic_identity = "reference:" + reference["sha256"] if reference.get("sha256") else None
+        if speaker_id and acoustic_identity:
+            speaker_resolutions.setdefault(speaker_id, set()).add(acoustic_identity)
+        job_state.observe(synthesis_identity, voice_key, speech_text,
+                          estimate_spoken_ms(speech_text, target_language), duration_ms)
+
     for chunk in chunks:
         speaker_id = _chunk_speaker(plan, chunk)
         explicit_voice = chunk.voice_id
@@ -2684,8 +2753,7 @@ async def synthesize_timed_dub(
         raw_paths[chunk.id] = path
         block_paths.append(path)
 
-        ref_key = speaker_id or "__default__"
-        ref = auto_references.get(ref_key) or auto_references.get("__default__") or {}
+        ref = effective_reference(speaker_id)
         initial_text = chunk_text(plan, chunk)
         initial_identity = _chunk_synthesis_identity(
             text=initial_text,
@@ -2716,59 +2784,8 @@ async def synthesize_timed_dub(
                 f"because non-target chunk {chunk.id} has no valid reusable raw artifact."
             )
 
-        # OpenCreator-style estimator: advisory only.
-        #
-        # Y1: the estimate may no longer DECIDE whether text is rewritten.
-        # Measured evidence on a real job showed actual/estimated spanning
-        # 0.77x-2.10x with the estimate wrong by up to 44% on exactly the
-        # chunks that then overflowed. Rewriting approved text on the basis of
-        # a miscalibrated constant damages meaning without fixing timing.
-        # The measured loop below (which uses required_speed on real TTS
-        # durations) is the only authority that may trigger a rewrite.
-        estimated = sum(plan[i].estimated_duration_ms for i in chunk.item_indexes)
-        # Calibrated estimate: once the job has measured enough chunks, use the
-        # learned coefficient instead of the raw constant (Y2). Below the trust
-        # threshold this is exactly the old estimate, which is why the branch
-        # below stays gated on `calibrator.is_trustworthy`.
-        calibrated = (
-            calibrator.calibrated_ms(estimated)
-            if calibrator.is_trustworthy else estimated
-        )
-        estimated_overflow = calibrated > chunk.available_ms * config.speed_max
         attempts = 0
         rewrite_state: dict = {}
-        can_optional_rewrite = is_target_chunk and not rewrite_disabled
-        if (
-            not reuse_raw
-            and can_optional_rewrite
-            and estimated_overflow
-            and attempts < config.rewrite_max_attempts
-            and calibrator.is_trustworthy
-        ):
-            # Spend a rewrite only when the estimate is backed by calibration
-            # for this voice/video, and even then only as a cost-saving
-            # pre-emptive attempt; the measured loop remains authoritative.
-            changed = await adapt_with_budget(
-                plan=plan, chunk=chunk, segment_by_id=segment_by_id,
-                target_language=target_language, target_ms=chunk.available_ms,
-                profile=profile, issues=issues, state=rewrite_state,
-                setup_error=rewrite_ai_error,
-            )
-            attempts += 1
-            if rewrite_state.get("unavailable"):
-                rewrite_disabled = True
-                rewrite_unavailable_recorded = True
-                attempts = config.rewrite_max_attempts
-            if changed:
-                rewrite_count += 1
-        elif (
-            not reuse_raw
-            and is_target_chunk
-            and rewrite_disabled
-            and estimated > chunk.available_ms * config.speed_max
-            and config.rewrite_max_attempts > 0
-        ):
-            record_rewrite_setup_unavailable(chunk)
 
         speech_text = chunk_text(plan, chunk)
         synthesis_identity = _chunk_synthesis_identity(
@@ -2781,9 +2798,6 @@ async def synthesize_timed_dub(
             reference_text=ref.get("text"),
             reference_language=ref.get("language"),
         )
-        # If a rewrite occurred, reuse_raw was already false. Recomputing the
-        # identity here makes the newly generated artifact authoritative for the
-        # exact post-rewrite speech text.
         reuse_raw = reuse_raw and synthesis_identity == initial_identity
 
         duration_ms = 0
@@ -2833,8 +2847,7 @@ async def synthesize_timed_dub(
             )
 
         chunk.actual_duration_ms = duration_ms
-        # Y2: this real measurement teaches the job its own speech rate.
-        calibrator.observe(estimated, duration_ms)
+        observe_chunk(voice, speaker_id, ref, speech_text, synthesis_identity, duration_ms)
         rewrite_context[chunk.id] = (attempts, rewrite_state)
 
     # Measure all neighbours before reclaiming provisional estimated slack.
@@ -2851,8 +2864,7 @@ async def synthesize_timed_dub(
         speaker_id = _chunk_speaker(plan, chunk)
         voice = _voice_for_chunk(profile, runtime, speaker_id, chunk.voice_id)
         path = raw_paths[chunk.id]
-        ref_key = speaker_id or "__default__"
-        ref = auto_references.get(ref_key) or auto_references.get("__default__") or {}
+        ref = effective_reference(speaker_id)
         # Y4: only a MEASURED overflow may rewrite text. A chunk that already
         # fits is never touched, and no estimate-derived branch can reach here.
         while (
@@ -2866,6 +2878,8 @@ async def synthesize_timed_dub(
             before_snapshot = {
                 plan[i].segment_id: plan[i].spoken_text for i in chunk.item_indexes
             }
+            caption_before = {plan[i].segment_id: segment_by_id[plan[i].segment_id].translated_text
+                              for i in chunk.item_indexes}
             duration_before_ms = duration_ms
             changed = await adapt_with_budget(
                 plan=plan, chunk=chunk, segment_by_id=segment_by_id,
@@ -2880,7 +2894,27 @@ async def synthesize_timed_dub(
                 attempts = config.rewrite_max_attempts
             if not changed:
                 continue
-            rewrite_count += 1
+            rewrite_calls += 1
+            accepted_entries = []
+            # Persist accepted changes before another provider call can fail.
+            for i in chunk.item_indexes:
+                item = plan[i]
+                if (item.spoken_text == before_snapshot[item.segment_id]
+                        and segment_by_id[item.segment_id].translated_text == caption_before[item.segment_id]):
+                    continue
+                entry = {
+                    "segment_id": item.segment_id, "chunk_id": chunk.id,
+                    "before": before_snapshot[item.segment_id], "after": item.spoken_text,
+                    "caption_before": caption_before[item.segment_id],
+                    "caption_after": segment_by_id[item.segment_id].translated_text,
+                    "reason": "measured_overflow", "duration_before_ms": duration_before_ms,
+                    "duration_after_ms": None, "available_ms": chunk.available_ms,
+                    "required_speed_before": required_speed(duration_before_ms, chunk.available_ms),
+                    "dub_speed_max": config.speed_max, "timestamp": _utc_now_iso(),
+                }
+                accepted_entries.append(entry)
+                job_state.data["rewrite_audit"].append(entry)
+            save_audit()
             speech_text = chunk_text(plan, chunk)
             synthesis_identity = _chunk_synthesis_identity(
                 text=speech_text,
@@ -2906,27 +2940,10 @@ async def synthesize_timed_dub(
                 reference_language=ref.get("language"),
             )
             chunk.actual_duration_ms = duration_ms
-            # Y5: record every segment whose text ACTUALLY changed, with both
-            # durations. rewrite_count counts these, not AI round-trips.
-            for i in chunk.item_indexes:
-                item = plan[i]
-                after_text = item.spoken_text
-                if after_text != before_snapshot.get(item.segment_id):
-                    rewrite_count_segments += 1
-                    rewrite_audit.append({
-                        "segment_id": item.segment_id,
-                        "chunk_id": chunk.id,
-                        "before": before_snapshot.get(item.segment_id),
-                        "after": after_text,
-                        "reason": "measured_overflow",
-                        "required_speed_before": round(
-                            required_speed(duration_before_ms, chunk.available_ms), 4
-                        ),
-                        "duration_before_ms": duration_before_ms,
-                        "duration_after_ms": duration_ms,
-                        "available_ms": chunk.available_ms,
-                        "timestamp": _utc_now_iso(),
-                    })
+            observe_chunk(voice, speaker_id, ref, speech_text, synthesis_identity, duration_ms)
+            for entry in accepted_entries:
+                entry["duration_after_ms"] = duration_ms
+            save_audit()
             allocate_silence(
                 plan, chunks, config, timeline_end_ms=source_duration_ms,
                 only_chunk_ids=allocation_ids,
@@ -3010,7 +3027,7 @@ async def synthesize_timed_dub(
     if unresolved and fail_on_overflow:
         raise LocalizationTimingError(
             unresolved,
-            rewrite_count=rewrite_count,
+            rewrite_count=job_state.rewrite_count,
             all_issues=[*issues, *unresolved],
             rewrite_ai={
                 "selected_connection_id": _selected_ai_connection_id(route_state),
@@ -3044,7 +3061,7 @@ async def synthesize_timed_dub(
     # Y5: rewrite_count is the number of segments whose text actually changed,
     # not the number of AI round-trips. The two differed before (AI could be
     # called and change nothing), which made the metric unverifiable.
-    report.rewrite_count = rewrite_count_segments
+    report.rewrite_count = job_state.rewrite_count
 
     # Cue offsets inside a single synthesized chunk are heuristic, not forced
     # alignment. Do not let a chunk that merely fits its outer window silently
@@ -3100,6 +3117,7 @@ async def synthesize_timed_dub(
                 for path in work_dir.glob("chunk_*.wav*"):
                     if path.is_file():
                         shutil.copy2(path, trial / path.name)
+                write_json_atomic(trial / "dubbing_state.json", job_state.data)
                 (trial / layout_path.name).write_text(json.dumps({
                     "key": layout_key, "split_before": sorted(forced_splits | new_splits),
                 }, indent=2), encoding="utf-8")
@@ -3110,7 +3128,7 @@ async def synthesize_timed_dub(
                         profile=profile, user_settings=user_settings, work_dir=trial,
                         fail_on_overflow=True, reuse_existing_chunks=True,
                         reference_media=reference_media, progress_cb=progress_cb, _cadence_retry=True,
-                        _rewrite_budget=rewrite_budget,
+                        _rewrite_budget=rewrite_budget, _job_scope=job_scope,
                     )
                 except LocalizationTimingError as exc:
                     # Splitting traded a cadence warning for a hard overflow.
@@ -3144,7 +3162,9 @@ async def synthesize_timed_dub(
                         destination = work_dir / path.relative_to(trial)
                         destination.parent.mkdir(parents=True, exist_ok=True)
                         path.replace(destination)
-                    repaired.rewrite_count += rewrite_count
+                    job_state.data = json.loads((work_dir / "dubbing_state.json").read_text(encoding="utf-8"))
+                    job_state.save()
+                    repaired.rewrite_count = job_state.rewrite_count
                     repaired.transcript.metadata["dubbing"]["rewrite_count"] = repaired.rewrite_count
                     repaired.transcript.metadata["dubbing"]["cadence_repair"] = "measured_split"
                     return repaired
@@ -3211,28 +3231,23 @@ async def synthesize_timed_dub(
         total_duration_ms=total_duration_ms,
         output_path=dub_track,
     )
-    # Y5: standalone audit artifact. Without it, "what did the AI cut?" is
-    # unanswerable a few days later because no other record keeps before/after.
-    try:
-        audit_path = work_dir / "rewrite_audit.json"
-        audit_path.parent.mkdir(parents=True, exist_ok=True)
-        audit_path.write_text(json.dumps({
-            "rewrite_count": rewrite_count_segments,
-            "rewrite_calls": rewrite_count,
-            "rate_calibration": calibrator.as_dict(),
-            "entries": rewrite_audit,
-        }, ensure_ascii=False, indent=2), encoding="utf-8")
-    except OSError as exc:
-        logger.warning("Could not persist rewrite audit: %s", exc)
+    save_audit()
+    out.metadata["speakers"] = {
+        "detected_speakers": job_state.data.get("detected_speakers", []),
+        "speaker_voices": speaker_voices,
+        "speaker_voice_identities": {speaker: sorted(keys) for speaker, keys in speaker_resolutions.items()},
+        "shared_voice": profile.speaker_voice_mode == "shared",
+        "available_voices": job_state.data.get("available_voices", []),
+    }
     max_fitted_speed = max([1.0, *[c.speed_factor for c in fitted_chunks]])
     out.metadata["dubbing"] = {
         "chunk_count": len(fitted_chunks),
         "max_raw_required_speed": max_raw_required_speed,
         "max_fitted_speed": max_fitted_speed,
-        "rewrite_count": rewrite_count_segments,
-        # Y2/G7: persisted so a rerun resumes calibrated instead of relearning.
-        "rate_calibration": calibrator.as_dict(),
-        "rewrite_audit": rewrite_audit,
+        "rewrite_count": job_state.rewrite_count,
+        "rewrite_calls": rewrite_calls,
+        "rate_calibration": job_state.calibration(),
+        "rewrite_audit": job_state.data["rewrite_audit"],
         "video_slowdown": video_slowdown,
         "cue_timing_basis": "source_word_anchors_with_estimated_chunk_internal_offsets",
         "cadence_split_before": sorted(forced_splits),
@@ -3265,7 +3280,7 @@ async def synthesize_timed_dub(
         chunk_count=len(fitted_chunks),
         max_speed_factor=max_raw_required_speed,
         max_fitted_speed_factor=max_fitted_speed,
-        rewrite_count=rewrite_count,
+        rewrite_count=job_state.rewrite_count,
         video_slowdown=video_slowdown,
         plan=fitted_plan,
         chunks=fitted_chunks,

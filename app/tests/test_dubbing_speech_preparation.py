@@ -142,7 +142,8 @@ async def test_duration_rewrite_cannot_reintroduce_unreadable_names(monkeypatch)
     monkeypatch.setattr(svc,'_call_ai_chat_resilient',chat)
     issues=[]
     changed=await svc._adapt_chunk_items(object(),plan=plan,chunk=chunks[0],segment_by_id=segments,
-        target_language='Vietnamese',target_ms=1000,profile=LocalizationProfile(id='p',name='p'),issues=issues)
+        target_language='Vietnamese',target_ms=1000,profile=LocalizationProfile(id='p',name='p'),issues=issues,
+        state={'measured_duration_ms':5000})
     assert changed is False
     assert plan[0].spoken_text=='Chị Wu Xiaotong đến đây với em'
 
@@ -196,7 +197,7 @@ async def test_rewrite_is_asked_to_shorten_the_spoken_form_not_the_han_text(monk
         return '[{"id":"a","text":"Tên là Da Ben Xiao Fa"}]'
     monkeypatch.setattr(svc,'_call_ai_chat_resilient',chat)
     changed=await svc._adapt_chunk_items(object(),plan=plan,chunk=chunks[0],segment_by_id=segments,
-        target_language='Vietnamese',target_ms=1000,profile=LocalizationProfile(id='p',name='p'),issues=[])
+        target_language='Vietnamese',target_ms=1000,profile=LocalizationProfile(id='p',name='p'),issues=[], state={'measured_duration_ms':5000})
     assert changed is True
     assert '大奔小发' not in seen['prompt']
     assert 'Da Ben Xiao Fa' in seen['prompt']

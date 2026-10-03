@@ -89,6 +89,7 @@ class LocalizationProfile(BaseModel):
     # parsing depends on it.
     translation_guardrails: str = DEFAULT_TRANSLATION_GUARDRAILS
     glossary: dict[str, str] = Field(default_factory=dict)
+    protected_terms: list[str] = Field(default_factory=list, max_length=100)
 
     # C6 translation and C7 duration rewrite are different jobs. Translation
     # may pin a larger/high-quality model while rewrite can inherit a smaller
@@ -117,6 +118,7 @@ class LocalizationProfile(BaseModel):
     tts_base_url: str | None = None
     tts_region: str | None = None
     speaker_voices: dict[str, str] = Field(default_factory=dict)
+    speaker_voice_mode: Literal["distinct", "shared"] = "distinct"
     speaker_reference_audio: dict[str, str] = Field(default_factory=dict)
     tts_reference_audio: str | None = None
     tts_reference_text: str | None = None
@@ -253,10 +255,28 @@ class LocalizationProfile(BaseModel):
             out[src] = dst
         return out
 
+    @field_validator("protected_terms")
+    @classmethod
+    def validate_protected_terms(cls, value: list[str]) -> list[str]:
+        terms = list(dict.fromkeys(term.strip() for term in value if term.strip()))
+        if any(len(term) > 240 for term in terms):
+            raise ValueError("Protected terms are limited to 240 characters each")
+        return terms
+
 
 class LocalizationProfileStore(BaseModel):
     default_profile_id: str
     profiles: list[LocalizationProfile]
+
+    @model_validator(mode="after")
+    def keep_detected_speakers_job_local(self):
+        # Diarizer labels identify turns in ONE recording, never reusable roles.
+        self.profiles = [profile.model_copy(update={
+            key: {speaker: value for speaker, value in getattr(profile, key).items()
+                  if not re.fullmatch(r"SPEAKER_\d+", speaker, re.IGNORECASE)}
+            for key in ("speaker_voices", "speaker_reference_audio")
+        }) for profile in self.profiles]
+        return self
 
 
 def default_localization_profile() -> LocalizationProfile:
@@ -274,7 +294,7 @@ def fast_localization_profile() -> LocalizationProfile:
         asr_model="small",
         asr_quality="balanced",
         alignment_mode="off",
-        diarization_mode="off",
+        diarization_mode="auto",
         audio_mode="fast_duck",
         preserve_background=False,
         background_gain_db=-18.0,

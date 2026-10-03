@@ -3,7 +3,8 @@
 
 The dubbing rewriter is allowed to remove filler. It is never allowed to drop
 the facts that make a sentence mean what a human approved: negation, numbers,
-units, defined terms, and antonym flips.
+units, explicit protected terms, and antonym flips. C6 also checks cross-language
+invariants before accepting a translation.
 
 This module is deliberately language-scoped. `target_language` has ~20 values,
 so hardcoding Vietnamese would silently disable the guard for 19 of them. Each
@@ -18,14 +19,15 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections import Counter
 from typing import Iterable
 
 # ── Language-scoped lexicons ──────────────────────────────────────────────
 # Negation markers: dropping one of these removes a distinction.
 _NEGATION: dict[str, tuple[str, ...]] = {
     "vietnamese": (
-        "không", "chưa", "chẳng", "chả", "đừng", "chưa từng", "hề", "gì cả",
-        "chả", "chẳng hề", "nào", "chẳng phải", "đâu có", "chưa bao giờ",
+        "không", "chưa", "chẳng", "chả", "đừng", "chưa từng", "không hề", "không có gì cả",
+        "chả", "chẳng hề", "chẳng phải", "đâu có", "chưa bao giờ",
     ),
     "english": (
         "not", "no", "never", "none", "nothing", "neither", "nor", "without",
@@ -65,9 +67,9 @@ _NEGATION: dict[str, tuple[str, ...]] = {
         "لا", "لم", "لن", "ليس", "غير", "بدون", "ما", "مستحيل", "لا",
     ),
     "hindi": (
-        "नहीं", "नहि", "कभी", "कुछ", "नहीं", "बिना", "ना", "मत",
+        "नहीं", "नहि", "कभी नहीं", "कुछ नहीं", "बिना", "ना", "मत",
     ),
-    "turkish": ("değil", "yok", "asla", "hiç", "bir şey", "olmaz", "edemez"),
+    "turkish": ("değil", "yok", "asla", "hiç", "olmaz", "edemez"),
     "swedish": ("inte", "ingen", "aldrig", "inget", "ingen", "utan", "nej"),
     "danish": ("ikke", "ingen", "aldrig", "intet", "uden", "nej"),
     "norwegian": ("ikke", "ingen", "aldri", "ingenting", "uten", "nei"),
@@ -79,7 +81,7 @@ _NEGATION: dict[str, tuple[str, ...]] = {
     # Korean negation is agglutinative: 않습니다 / 않습니다 / 않는 are the same
     # root written differently, so several inflected forms must be listed.
     "korean": (
-        "아니", "안", "없", "못", "않", "닙", "ㅂ니다",
+        "아니", "아닙", "안", "없", "못", "않",
         "지 않다", "안 되", "없다", "안은",
     ),
     "chinese": (
@@ -87,15 +89,6 @@ _NEGATION: dict[str, tuple[str, ...]] = {
         "不能", "不要", "没什么",
     ),
 }
-
-# Units / measure words. Language-neutral where possible so an unmapped
-# language still catches "5kg" -> "nặng".
-_UNITS: tuple[str, ...] = (
-    "kg", "km", "cm", "mm", "mg", "ml", "gb", "tb", "mb", "hz", "khz", "mhz",
-    "%", "°", "kg", "lít", "lít", "mét", "gram", "tấn", "xu", "đồng", "vnd",
-    "usd", "đô la", "phút", "giây", "giờ", "ngày", "tuần", "tháng", "năm",
-    "lần", "phần", "người", "cách", "hàng", " mét",
-)
 
 # Antonym pairs per language: (a, b) where swapping one for the other
 # reverses the claim.
@@ -106,12 +99,7 @@ _ANTONYMS: dict[str, tuple[tuple[str, str], ...]] = {
         ("bật", "tắt"), ("có", "không"), ("đúng", "sai"),
         ("cao", "thấp"), ("trên", "dưới"), ("trong", "ngoài"),
         ("muốn", "không muốn"), ("luôn", "không bao giờ"),
-        # Deliberately absent: dài<->ngắn, nhanh<->chậm, nhiều<->ít as LENGTH
-        # adjectives. A rewrite exists to compress filler, and dropping a
-        # descriptive "a very long sentence" is the intended behaviour, not a
-        # meaning flip. Length pairs are only meaningful as a comparison claim,
-        # which this guard cannot distinguish reliably; keeping them blocked
-        # would reject every legitimate compression.
+        ("dài", "ngắn"), ("nhanh", "chậm"), ("nhiều", "ít"),
     ),
     "english": (
         ("before", "after"), ("more", "less"), ("increase", "decrease"),
@@ -139,182 +127,186 @@ _ANTONYMS: dict[str, tuple[tuple[str, str], ...]] = {
     "chinese": (("前", "后"), ("多", "少"), ("总是", "从不")),
 }
 
-# Tokens that carry no meaning on their own; losing them is legitimate.
-_STOPWORDS: frozenset[str] = frozenset({
-    # Vietnamese function words (kept short so content words are never dropped)
-    "a", "an", "the", "of", "to", "in", "on", "for", "and", "or", "is", "are",
-    "was", "were", "be", "it", "this", "that", "these", "those", "as", "at",
-    "by", "with", "from", "và", "hoặc", "là", "của", "có", "được", "trong",
-    "này", "đó", "khi", "để", "mà", "thì", "nhưng", "rất", "quá", "thật",
-    "ra", "là", "đây", "ấy", "thế", "vậy", "một", "những", "các", "cho",
-    # other languages
-    "un", "une", "le", "la", "les", "des", "eine", "der", "die", "das",
-    "un", "una", "el", "lo", "os", "as", "не", "и", "в", "на", "с",
-})
-
-_CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
-# Hangul is included for the substring/containment path only: Korean negation is
-# agglutinative, so the lexicon entry never survives whitespace tokenisation.
-# Korean is NOT split into individual characters, because Korean particles bind
-# to the preceding syllable and per-character matching would be noise.
-_HANGUL_RE = re.compile(r"[\uac00-\ud7af]")
-_SCRIPT_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]")
-_NUMBER_RE = re.compile(r"\d")
-
-
-def _norm_lang(target_language: str | None) -> str:
-    return (target_language or "").strip().lower()
-
-
-def _lexicon_for(lang: str) -> str:
-    """Map a profile language name / code onto a lexicon key.
-
-    Accepts both 'Vietnamese' and 'vi' so the guard works no matter which
-    representation the caller holds.
-    """
-    if lang in _NEGATION:
-        return lang
-    from backend.core.tool_runners import _LANG_NAME_MAP
-    for code, name in _LANG_NAME_MAP.items():
-        if lang == code:
-            key = name.lower()
-            if key in _NEGATION:
-                return key
-    for key in _NEGATION:
-        if key in lang:
-            return key
-    return ""
-
-
-def _tokens(text: str) -> list[str]:
-    """Lowercase word tokens; CJK runs are emitted as individual characters.
-
-    CJK languages do not delimit words with spaces, so a whitespace tokeniser
-    would see one giant token and silently match nothing.
-    """
-    text = unicodedata.normalize("NFKC", text or "").lower()
-    out: list[str] = []
-    for raw in re.findall(r"[^\W_]+", text, flags=re.UNICODE):
-        if _CJK_RE.search(raw):
-            out.extend(raw)
-        else:
-            out.append(raw)
-    return out
+# Only explicit user terms are protected. Ordinary adjacent words are not a glossary.
+_SCRIPT_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]")
+_LANGUAGE_CODES = dict(zip(
+    "vi en es fr de it pt nl pl ru ar hi tr sv da no nb fi ja ko zh".split(),
+    "vietnamese english spanish french german italian portuguese dutch polish russian arabic hindi turkish swedish danish norwegian norwegian finnish japanese korean chinese".split(),
+))
+_NUMBER_RE = re.compile(r"[+-]?\d+(?:[.,]\d+)*(?:/\d+)?")
+_UNIT_ALIASES = {
+    "kg": ("kg", "kilogram", "kilograms", "kilôgam", "公斤", "千克"),
+    "g": ("g", "gram", "grams", "gam", "克"),
+    "mg": ("mg", "milligram", "milligrams", "毫克"),
+    "km": ("km", "kilometer", "kilometers", "kilometre", "公里", "千米"),
+    "m": ("m", "meter", "meters", "metre", "mét", "米"),
+    "cm": ("cm", "centimeter", "centimeters", "centimetre", "厘米"),
+    "mm": ("mm", "millimeter", "millimeters", "millimetre", "毫米"),
+    "ml": ("ml", "milliliter", "milliliters", "毫升"),
+    "l": ("l", "liter", "liters", "litre", "lít", "升"),
+    "second": ("s", "second", "seconds", "giây", "秒"),
+    "minute": ("minute", "minutes", "phút", "分钟", "分鐘"),
+    "hour": ("hour", "hours", "giờ", "小时", "小時"),
+    "day": ("day", "days", "ngày", "天"),
+    "week": ("week", "weeks", "tuần", "星期"),
+    "month": ("month", "months", "tháng", "个月", "個月"),
+    "year": ("year", "years", "năm", "年"),
+    "percent": ("%", "percent", "percentage", "phần trăm", "百分之"),
+    "celsius": ("°c", "celsius", "độ c", "摄氏度"),
+    "usd": ("usd", "$", "dollar", "dollars", "đô la", "美元"),
+    "vnd": ("vnd", "đồng", "越南盾"),
+    "lb": ("lb", "lbs", "pound", "pounds", "磅"),
+    "oz": ("oz", "ounce", "ounces", "盎司"),
+    "degree": ("°", "degree", "degrees", "độ", "度"),
+    "fahrenheit": ("°f", "fahrenheit", "độ f", "华氏度"),
+    "eur": ("eur", "€", "euro", "euros", "欧元"),
+    **{unit: (unit,) for unit in ("gb", "mb", "tb", "hz", "khz", "mhz")},
+}
+# Cross-language polarity checks for common operational claims in C6.
+_TRANSLATION_POLARITY = (
+    ({"en": "increase", "vi": "tăng", "zh": "增加"},
+     {"en": "decrease", "vi": "giảm", "zh": "减少"}),
+    ({"en": "before", "vi": "trước", "zh": "之前"},
+     {"en": "after", "vi": "sau", "zh": "之后"}),
+    ({"en": "turn on", "vi": "bật", "zh": "打开"},
+     {"en": "turn off", "vi": "tắt", "zh": "关闭"}),
+)
 
 
-def _content_tokens(tokens: Iterable[str]) -> set[str]:
-    return {t for t in tokens if t not in _STOPWORDS and len(t) > 1}
+def _normalize(text: str) -> str:
+    return " ".join(unicodedata.normalize("NFKC", text or "").casefold().split())
 
 
-def _negation_hits(tokens: Iterable[str], lang_key: str, raw_text: str = "") -> set[str]:
-    """Negation markers present in the text.
+def _lexicon_for(language: str | None) -> str:
+    key = (language or "").strip().lower().split("-")[0]
+    return _LANGUAGE_CODES.get(key, key if key in _NEGATION else "")
 
-    CJK markers like 'ではありません' are multi-character and survive
-    tokenisation only as single characters, so equality against the lexicon
-    would never match. For those scripts we additionally test substring
-    containment on the normalised raw text.
-    """
-    marks = _NEGATION.get(lang_key, ())
-    hits = {t for t in tokens if t in marks}
-    if raw_text and _SCRIPT_RE.search(raw_text):
-        norm = unicodedata.normalize("NFKC", raw_text).lower()
-        for mark in marks:
-            if mark in norm:
-                hits.add(mark)
+
+def _phrase_pattern(phrase: str) -> str:
+    phrase = _normalize(phrase)
+    pattern = r"\s+".join(re.escape(part) for part in phrase.split())
+    if phrase and not _SCRIPT_RE.search(phrase):
+        if phrase[0].isalnum():
+            pattern = r"(?<![^\W_])" + pattern
+        if phrase[-1].isalnum():
+            pattern += r"(?![^\W_])"
+    return pattern
+
+
+def _contains(text: str, phrase: str) -> bool:
+    return bool(phrase and re.search(_phrase_pattern(phrase), _normalize(text)))
+
+
+def _negations(text: str, language: str | None) -> int:
+    spans = set()
+    text = _normalize(text)
+    for term in _NEGATION.get(_lexicon_for(language), ()):
+        spans.update(match.span() for match in re.finditer(_phrase_pattern(term), text))
+    # A phrase and its constituent marker count as one negation.
+    return sum(not any(a <= start and end <= b and (a, b) != (start, end)
+                       for a, b in spans) for start, end in spans)
+
+
+def _numbers(text: str) -> Counter:
+    return Counter(_NUMBER_RE.findall(_normalize(text)))
+
+
+def _unit_spans(text: str) -> list[tuple[int, int, str]]:
+    text = _normalize(text)
+    spans = set()
+    for unit, aliases in _UNIT_ALIASES.items():
+        for alias in aliases:
+            # SI suffixes can be attached to a number (5kg); single letters
+            # are units only in an explicit numeric measurement.
+            if re.fullmatch(r"[a-z]+", alias):
+                for match in re.finditer(r"\d\s*(" + re.escape(alias) + r")(?![a-z])", text):
+                    spans.add((*match.span(1), unit))
+                if len(alias) == 1:
+                    continue
+            for match in re.finditer(_phrase_pattern(alias), text):
+                spans.add((*match.span(), unit))
+    # 千克 contains 克 and °C contains °: use the complete unit, not both.
+    return [(start, end, unit) for start, end, unit in spans
+            if not any(a <= start and end <= b and (a, b) != (start, end) for a, b, _ in spans)]
+
+
+def _units(text: str) -> set[str]:
+    return {unit for _, _, unit in _unit_spans(text)}
+
+
+def _measurements(text: str) -> Counter:
+    text = _normalize(text)
+    measurements = Counter()
+    for start, end, unit in _unit_spans(text):
+        before = re.search(r"(" + _NUMBER_RE.pattern + r")\s*$", text[:start])
+        if before:
+            measurements[(before.group(1), unit)] += 1
+        elif unit in {"percent", "usd", "eur", "vnd"}:
+            # Currency/percentage markers can precede or follow the value.
+            after = re.match(r"\s*(" + _NUMBER_RE.pattern + r")", text[end:])
+            if after:
+                measurements[(after.group(1), unit)] += 1
+    return measurements
+
+
+def _polarity_hits(text: str, first: str, second: str) -> set[str]:
+    hits = set()
+    for term, other in ((first, second), (second, first)):
+        # 'muốn' inside 'không muốn' is not an affirmative assertion.
+        scrubbed = re.sub(_phrase_pattern(other), " ", _normalize(text)) if term in other else text
+        if _contains(scrubbed, term):
+            hits.add(term)
     return hits
 
 
-def check_rewrite_meaning(
-    before: str,
-    after: str,
-    target_language: str | None = None,
-) -> list[dict]:
-    """Return violations for an AI rewrite. Empty list means safe to apply.
+def _invariants(before: str, after: str, source_language: str | None,
+                target_language: str | None) -> list[dict]:
+    issues = []
+    old_neg, new_neg = _negations(before, source_language), _negations(after, target_language)
+    if old_neg != new_neg:
+        issues.append({"kind": "negation_lost" if old_neg > new_neg else "negation_added",
+                       "detail": f"negation count changed: {old_neg} -> {new_neg}"})
+    if _numbers(before) != _numbers(after):
+        issues.append({"kind": "quantity_lost", "detail": "numeric values/counts changed"})
+    if _units(before) != _units(after) or _measurements(before) != _measurements(after):
+        issues.append({"kind": "unit_lost", "detail": "measurement units or numeric/unit bindings changed"})
+    return issues
 
-    `before` is the human-approved text, `after` is the model's proposal.
-    The caller must keep `before` unchanged and refuse `after` when this
-    returns a non-empty list.
-    """
-    before = (before or "").strip()
-    after = (after or "").strip()
-    if not before or not after:
+
+def check_rewrite_meaning(before: str, after: str, target_language: str | None = None,
+                          *, protected_terms: Iterable[str] = ()) -> list[dict]:
+    """Reject deterministic invariant violations before accepting any C7 text."""
+    if not before.strip() or not after.strip():
         return []
+    issues = _invariants(before, after, target_language, target_language)
+    for term in protected_terms:
+        if _contains(before, term) and not _contains(after, term):
+            issues.append({"kind": "term_lost", "token": term, "detail": "explicit protected term lost"})
+    for first, second in _ANTONYMS.get(_lexicon_for(target_language), ()):
+        old = _polarity_hits(before, first, second)
+        new = _polarity_hits(after, first, second)
+        if (first in old and second in new and second not in old) or (second in old and first in new and first not in old):
+            issues.append({"kind": "antonym_flip", "detail": f"polarity changed: {first} / {second}"})
+    return issues
 
-    lang_key = _lexicon_for(_norm_lang(target_language))
-    old_tokens = _tokens(before)
-    new_tokens = _tokens(after)
-    violations: list[dict] = []
 
-    # 1. Negation must survive.
-    old_neg = _negation_hits(old_tokens, lang_key, before)
-    new_neg = _negation_hits(new_tokens, lang_key, after)
-    for mark in sorted(old_neg - new_neg):
-        violations.append({
-            "kind": "negation_lost",
-            "token": mark,
-            "detail": f"negation {mark!r} present in approved text, absent from rewrite",
-        })
-
-    # 2. Numbers must survive. Counts carry facts a paraphrase cannot keep.
-    old_nums = [t for t in old_tokens if _NUMBER_RE.search(t)]
-    new_nums = [t for t in new_tokens if _NUMBER_RE.search(t)]
-    for num in sorted(set(old_nums) - set(new_nums)):
-        violations.append({
-            "kind": "quantity_lost",
-            "token": num,
-            "detail": f"number {num!r} dropped by rewrite",
-        })
-
-    # 3. Units must survive.
-    old_units = {t for t in old_tokens if t in _UNITS}
-    new_units = {t for t in new_tokens if t in _UNITS}
-    for unit in sorted(old_units - new_units):
-        violations.append({
-            "kind": "unit_lost",
-            "token": unit,
-            "detail": f"unit {unit!r} dropped by rewrite",
-        })
-
-    # 4. Defined terms: content bigrams present before and gone after.
-    # Single dropped words are legitimate compression; a specific two-word
-    # term vanishing is a term being replaced by a generic word.
-    def bigrams(toks: list[str]) -> set[str]:
-        content = _content_tokens(toks)
-        return {" ".join(p) for p in zip(toks, toks[1:]) if p[0] in content and p[1] in content}
-
-    lost_terms = sorted(bigrams(old_tokens) - bigrams(new_tokens))
-    # Only flag a lost bigram when BOTH of its words were otherwise retained
-    # somewhere in the sentence. Otherwise it is ordinary compression, not a
-    # term being swapped for a generic synonym.
-    new_content = _content_tokens(new_tokens)
-    for term in lost_terms:
-        words = term.split()
-        if all(w in new_content for w in words):
-            violations.append({
-                "kind": "term_lost",
-                "token": term,
-                "detail": f"defined term {term!r} dropped by rewrite",
-            })
-            break
-
-    # 5. Antonym flips: an approved word replaced by its opposite.
-    # A flip is `a` present before, `b` (its opposite) introduced after.
-    old_content = _content_tokens(old_tokens)
-    for a, b in _ANTONYMS.get(lang_key, ()):
-        if a in old_content and b in new_content and b not in old_content:
-            violations.append({
-                "kind": "antonym_flip",
-                "token": b,
-                "detail": f"rewrite replaced {a!r} with its opposite {b!r}",
-            })
-            break
-
-    # De-duplicate by kind so one defect is reported once.
-    seen: set[str] = set()
-    unique: list[dict] = []
-    for v in violations:
-        if v["kind"] in seen:
-            continue
-        seen.add(v["kind"])
-        unique.append(v)
-    return unique
+def check_translation_meaning(before: str, after: str, source_language: str | None,
+                              target_language: str | None, *, glossary: dict[str, str],
+                              protected_terms: Iterable[str] = ()) -> list[dict]:
+    """C6 cross-language checks; do not compare literal source/target wording."""
+    issues = _invariants(before, after, source_language, target_language)
+    for source, target in glossary.items():
+        if _contains(before, source) and not _contains(after, target):
+            issues.append({"kind": "term_lost", "token": target, "detail": "glossary translation missing"})
+    for term in protected_terms:
+        if _contains(before, term) and not _contains(after, term):
+            issues.append({"kind": "term_lost", "token": term, "detail": "explicit protected term lost"})
+    source_code = next((code for code, name in _LANGUAGE_CODES.items() if name == _lexicon_for(source_language)), "")
+    target_code = next((code for code, name in _LANGUAGE_CODES.items() if name == _lexicon_for(target_language)), "")
+    for positive, negative in _TRANSLATION_POLARITY:
+        old_a, old_b = positive.get(source_code, ""), negative.get(source_code, "")
+        new_a, new_b = positive.get(target_code, ""), negative.get(target_code, "")
+        if ((_contains(before, old_a) and not _contains(before, old_b) and _contains(after, new_b))
+                or (_contains(before, old_b) and not _contains(before, old_a) and _contains(after, new_a))):
+            issues.append({"kind": "antonym_flip", "detail": "translated polarity reversed"})
+    return issues

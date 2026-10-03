@@ -1706,7 +1706,7 @@ async def run_tool_translate(
         # ── C7 smart dubbing ────────────────────────────────────────────
         current_stage = "dubbing"
         if is_dub:
-            if run.is_complete("dubbing", ("transcript", "dub_track", "plan", "chunks")):
+            if run.is_complete("dubbing", ("transcript", "dub_track", "plan", "chunks", "rewrite_audit")):
                 localized = LocalizationTranscript.model_validate(
                     run.load_json("dubbing", "transcript")
                 )
@@ -1719,12 +1719,21 @@ async def run_tool_translate(
                 max_fitted_dubbing_speed = float(meta.get("max_fitted_speed_factor") or 1.0)
                 dubbing_rewrite_count = int(meta.get("rewrite_count") or 0)
             else:
+                # Rebuilding an older/incomplete dub also rebuilds its consumers;
+                # a completed mix/QC cannot continue to describe the previous audio.
+                if any(run.record(stage).get("status") == "complete"
+                       for stage in ("audio_mix", "final_render", "qc")):
+                    run.invalidate_from("dubbing", delete_artifacts=False)
                 await _tool_progress(
                     job_id, 52,
                     "Planning chunks, synthesizing and fitting HQ dubbing...",
                     user_id,
                 )
                 run.start("dubbing")
+                run.record("dubbing").setdefault("artifacts", {})["rewrite_audit"] = str(
+                    (run.stage_dir("dubbing") / "rewrite_audit.json").resolve()
+                )
+                run._write()
                 try:
                     async def _rewrite_progress(event: dict):
                         name = event.get("event")
@@ -1783,6 +1792,7 @@ async def run_tool_translate(
                         reuse_existing_chunks=True,
                         reference_media=asr_input,
                         progress_cb=_rewrite_progress,
+                        job_state_path=run.root / "dubbing_state.json",
                     )
                     localized = dub.transcript
                     dub_track = dub.dub_track
@@ -1803,6 +1813,11 @@ async def run_tool_translate(
                         "dubbing", "chunks.json",
                         [asdict(x) for x in (dub.chunks or [])],
                     )
+                    audit_path = run.save_json("dubbing", "rewrite_audit.json", {
+                        "rewrite_count": dubbing_rewrite_count,
+                        "entries": localized.metadata.get("dubbing", {}).get("rewrite_audit") or [],
+                        "rate_calibration": localized.metadata.get("dubbing", {}).get("rate_calibration") or {},
+                    })
                     run.complete(
                         "dubbing",
                         artifacts={
@@ -1810,6 +1825,7 @@ async def run_tool_translate(
                             "dub_track": dub_track,
                             "plan": plan_path,
                             "chunks": chunks_path,
+                            "rewrite_audit": audit_path,
                         },
                         metadata={
                             "issues": timing_issues,
@@ -1857,8 +1873,7 @@ async def run_tool_translate(
                             run.record("translation").get("metadata") or {}
                         )
                         translation_meta["duration_rewrite_count"] = (
-                            int(translation_meta.get("duration_rewrite_count") or 0)
-                            + dubbing_rewrite_count
+                            dubbing_rewrite_count
                         )
                         run.complete(
                             "translation",
@@ -1871,6 +1886,13 @@ async def run_tool_translate(
                             "regenerate_chunk_ids": [],
                         })
                 except Exception as exc:
+                    audit_path = run.stage_dir("dubbing") / "rewrite_audit.json"
+                    if audit_path.exists():
+                        run.record("dubbing").setdefault("artifacts", {})["rewrite_audit"] = str(audit_path.resolve())
+                        import json as _audit_json
+                        run.record("dubbing").setdefault("metadata", {})["rewrite_count"] = int(
+                            _audit_json.loads(audit_path.read_text(encoding="utf-8")).get("rewrite_count") or 0
+                        )
                     # Timing failures happen after C7 may already have attempted
                     # one or more rewrites. Persist that audit evidence before
                     # marking the stage failed so the UI can prove whether C7

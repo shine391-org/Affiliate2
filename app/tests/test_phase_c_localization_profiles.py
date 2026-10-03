@@ -107,7 +107,8 @@ def test_profile_upsert_replaces_by_id_without_duplicates():
     store = upsert_profile(store, edited)
     assert len(store.profiles) == 1
     assert store.profiles[0].name == "HQ Custom"
-    assert store.profiles[0].speaker_voices == {"SPEAKER_00": "voice-a"}
+    assert store.profiles[0].speaker_voices == {}  # Detected labels belong to a job.
+    assert edited.speaker_voices == {"SPEAKER_00": "voice-a"}
 
 
 def test_delete_default_moves_default_to_remaining_profile():

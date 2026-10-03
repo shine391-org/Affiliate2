@@ -1014,7 +1014,7 @@ async def test_canonical_rerender_resume_never_calls_upstream_processors(monkeyp
         def artifact(self, stage, key):
             if key == "transcript" and stage in {"asr", "semantic", "translation", "dubbing"}:
                 return tmp_path / f"{stage}-transcript.json"
-            if key in {"plan", "chunks"} and stage == "dubbing":
+            if key in {"plan", "chunks", "rewrite_audit"} and stage == "dubbing":
                 return tmp_path / f"{key}.json"
             return artifacts.get((stage, key))
 
@@ -1484,4 +1484,3 @@ def test_qc_review_revision_changes_when_final_video_bytes_change(tmp_path):
     assert before
     assert after
     assert before != after
-

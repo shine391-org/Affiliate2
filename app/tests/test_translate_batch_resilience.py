@@ -98,7 +98,7 @@ class _EchoAI:
         if self.bad_first and self.calls == 1:
             return json.dumps([{"id": "wrong", "text": "bad"}])
         return json.dumps(
-            [{"id": x["id"], "text": f"vi:{x['text']}"} for x in items],
+            [{"id": x["id"], "text": {"第一句": "Câu đầu tiên", "品牌很好": "Thương hiệu rất tốt"}[x["text"]]} for x in items],
             ensure_ascii=False,
         )
 
@@ -235,7 +235,7 @@ async def test_c6_prompt_carries_context_glossary_style_and_duration(monkeypatch
     assert "品牌 => thương hiệu" in prompt
     assert "Giọng nói tự nhiên." in prompt
     assert '"source_duration_ms": 1000' in prompt
-    assert [s.translated_text for s in tx.segments] == ["vi:第一句", "vi:品牌很好"]
+    assert [s.translated_text for s in tx.segments] == ["Câu đầu tiên", "Thương hiệu rất tốt"]
 
 
 @pytest.mark.asyncio
@@ -250,7 +250,7 @@ async def test_c6_shape_error_splits_instead_of_sliding_ids(monkeypatch):
         for_dub=False,
     )
     assert ai.calls == 3
-    assert [s.translated_text for s in tx.segments] == ["vi:第一句", "vi:品牌很好"]
+    assert [s.translated_text for s in tx.segments] == ["Câu đầu tiên", "Thương hiệu rất tốt"]
 
 
 def _patch_dub_io(monkeypatch, tmp_path, durations, generated=None):
@@ -293,7 +293,7 @@ async def test_c7_rewrite_prompt_keeps_locked_core_and_uses_its_own_profile_inst
 
         async def chat(self, messages, **kwargs):
             self.prompt = messages[0]["content"]
-            return json.dumps([{"id": "s1", "text": "ngắn"}], ensure_ascii=False)
+            return json.dumps([{"id": "s1", "text": "câu rất dài"}], ensure_ascii=False)
 
     ai = CaptureAI()
     plan = [
@@ -347,7 +347,7 @@ async def test_c7_rewrite_prompt_keeps_locked_core_and_uses_its_own_profile_inst
     assert "Return every input ID exactly once and no extra IDs." in ai.prompt
     assert "this protocol wins" in ai.prompt
     assert "semantic guardrails and locked protocol above remain active" in ai.prompt
-    assert segment.translated_text == "ngắn"
+    assert segment.translated_text == "câu rất dài"
 
 
 @pytest.mark.asyncio
@@ -785,7 +785,7 @@ async def test_c7_rewrite_retries_transient_provider_failure_before_disabling(
             self.calls += 1
             if self.calls == 1:
                 raise Transient503("provider overloaded")
-            return json.dumps([{"id": "s1", "text": "ngắn"}], ensure_ascii=False)
+            return json.dumps([{"id": "s1", "text": "câu rất dài"}], ensure_ascii=False)
 
     async def no_sleep(_delay):
         return None
@@ -812,7 +812,7 @@ async def test_c7_rewrite_retries_transient_provider_failure_before_disabling(
     assert ai.max_retries == 0
     assert state.get("unavailable") is not True
     assert issues == []
-    assert segment.translated_text == "ngắn"
+    assert segment.translated_text == "câu rất dài"
 
 
 @pytest.mark.asyncio
@@ -1669,7 +1669,7 @@ async def test_adapt_chunk_timeout_is_best_effort_and_records_issue():
             raise TimeoutError("slow local model")
 
     issues = []
-    state = {}
+    state = {"measured_duration_ms": 1800, "attempt": 1}
     changed = await ls._adapt_chunk_items(
         TimeoutAI(),
         plan=plan,
@@ -1694,7 +1694,7 @@ async def test_c7_rewrite_client_setup_failure_is_non_fatal(monkeypatch, tmp_pat
             source_text="source",
             translated_text=(
                 "Đây là một câu tiếng Việt cố ý rất dài để kích hoạt bước "
-                "rút gọn trước khi tổng hợp giọng nói."
+                "rút gọn sau khi đo giọng nói."
             ),
             source_start_ms=0,
             source_end_ms=500,
@@ -1711,7 +1711,7 @@ async def test_c7_rewrite_client_setup_failure_is_non_fatal(monkeypatch, tmp_pat
     async def fake_generate(text, *, output_path, **kwargs):
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(b"raw")
-        return 450
+        return 1400
 
     def fake_fit(source, destination, speed_factor):
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -2075,6 +2075,7 @@ async def test_adapt_chunk_invalid_shape_records_qc_warning():
         target_ms=1000,
         profile=_profile(),
         issues=issues,
+        state={"measured_duration_ms": 1800, "attempt": 1},
     )
     assert changed is False
     assert issues[0]["reason"] == "rewrite_invalid_response"

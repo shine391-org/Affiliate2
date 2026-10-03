@@ -86,6 +86,54 @@ async def test_fast_profile_override_real_artifact_invalidation(storage, updates
         assert not fresh.request.get("regenerate_chunk_ids")
 
 
+@pytest.mark.asyncio
+async def test_speaker_voice_override_is_job_local_revision_bound_and_keeps_translation(storage):
+    await _seed_settings(profile_payload=_profile_payload(pinned=True))
+    await _seed_job("speaker-voice-edit")
+    run = await _create_run("speaker-voice-edit", storage=storage, review=True)
+    _complete_translation_and_dubbing(run)
+    translation_before = _snapshot_tree(run, "translation")
+    settings_before = (await _load_settings_row()).localization_profiles_json
+    run.root.joinpath("dubbing_state.json").write_text(json.dumps({
+        "speaker_voices": {"SPEAKER_00": "old-voice"}, "detected_speakers": ["SPEAKER_00"],
+    }), encoding="utf-8")
+    revision = api._review_revision(run, "translation", "transcript")
+    updates = {"speaker_voices": {"SPEAKER_00": "voice-a", "SPEAKER_01": "voice-b"}}
+    with pytest.raises(api.HTTPException) as rejected:
+        await api.localization_expert_override(run.job_id, api.ExpertOverrideRequest(revision="stale", profile_updates=updates))
+    assert rejected.value.status_code == 409
+    result = await api.localization_expert_override(run.job_id, api.ExpertOverrideRequest(revision=revision, profile_updates=updates))
+    fresh = stages.LocalizationRun.load(run.job_id)
+    assert result["invalidated_from"] == "dubbing"
+    assert fresh.effective_profile["speaker_voices"] == updates["speaker_voices"]
+    assert api._job_detail(fresh)["speaker_state"]["speaker_voices"] == updates["speaker_voices"]
+    assert _snapshot_tree(fresh, "translation") == translation_before
+    assert (await _load_settings_row()).localization_profiles_json == settings_before
+
+
+@pytest.mark.asyncio
+async def test_speaker_correction_preserves_word_times_and_secondary_overlap(storage):
+    await _seed_settings(profile_payload=_profile_payload(pinned=True))
+    await _seed_job("speaker-correction")
+    run = await _create_run("speaker-correction", storage=storage)
+    tx = {"text": "Hello", "language": "en", "segments": [{"id": "s1", "source_text": "Hello", "translated_text": "Xin chào",
+        "source_start_ms": 0, "source_end_ms": 1000, "speaker_id": "SPEAKER_00", "translation_status": "success",
+        "source_words": [{"word": "Hello", "start": 0.2, "end": 0.8, "speaker_id": "SPEAKER_00",
+                          "speaker_ids": ["SPEAKER_00", "SPEAKER_01"]}]}]}
+    path = run.save_json("translation", "transcript.json", tx)
+    run.complete("translation", artifacts={"transcript": path})
+    revision = api._review_revision(run, "translation", "transcript")
+    await api.localization_expert_override(run.job_id, api.ExpertOverrideRequest(revision=revision,
+        segments=[api.SegmentOverride(id="s1", speaker_id="corrected")]))
+    fresh = stages.LocalizationRun.load(run.job_id)
+    segment = fresh.load_json("translation", "transcript")["segments"][0]
+    word = segment["source_words"][0]
+    assert segment["speaker_id"] == word["speaker_id"] == "corrected"
+    assert (word["start"], word["end"]) == (0.2, 0.8)
+    assert word["speaker_ids"] == ["SPEAKER_01", "corrected"]
+    assert api._job_detail(fresh)["speaker_state"]["detected_speakers"] == ["SPEAKER_01", "corrected"]
+
+
 # ── schema / storage isolation ──────────────────────────────────────────────
 
 async def _create_schema():

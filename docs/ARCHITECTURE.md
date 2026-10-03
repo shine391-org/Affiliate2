@@ -192,6 +192,7 @@ QC profile
 ```
 
 Profiles are used by single and batch jobs.
+Detected diarizer labels belong to one job, not reusable profiles. The job owns `dubbing_state.json`: its effective TTS binding, speaker voice map, exact-text duration observations grouped by acoustic identity, and rewrite ledger. Same-binding resumes/reruns retain this state; incompatible TTS bindings clear voice mappings/calibration. The declared `dubbing/rewrite_audit.json` survives stage cache invalidation and records each accepted before/after before another provider call.
 
 ## One localization pipeline
 
@@ -250,6 +251,10 @@ Important rules:
 - no hidden ASR/model downgrade
 - avoid repeated lossy encodes; combine visual operations into the final encode when practical
 - TTS is timing-aware and block-based
+- duration rewrite requires an actual TTS measurement above the configured speed ceiling; calibration cannot authorize a text change
+- C6/C7 validate numeric values and units, negation and explicit protected terms before accepting AI text
+- HQ and Fast attempt diarization; Fast's diarization-only path preserves ASR word anchors
+- distinct detected speakers require distinct acoustic voices by default; failed diarization, unresolved voice mismatch and overlap keep QC in review
 - captions follow final resolved timing
 - preserve useful background/music/ambience
 - automatic QC surfaces exceptions instead of forcing manual inspection of every segment

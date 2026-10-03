@@ -155,6 +155,50 @@ def evaluate_localization_qc(
     warnings: list[dict] = []
     source_meta = probe_media(source_video)
     final_meta = probe_media(final_video)
+    alignment = transcript.metadata.get("alignment") or {}
+    speaker_state = transcript.metadata.get("speakers") or {}
+    speakers = {seg.speaker_id for seg in transcript.segments if seg.speaker_id}
+    speakers.update(speaker_state.get("detected_speakers") or [])
+    for seg in transcript.segments:
+        for word in seg.source_words:
+            speakers.update(word.get("speaker_ids") or [])
+            if word.get("speaker_id"):
+                speakers.add(word["speaker_id"])
+    speaker_count = max(len(speakers), int(alignment.get("speaker_count") or 0))
+    voice_map = speaker_state.get("speaker_voices") or profile.speaker_voices
+    identities = speaker_state.get("speaker_voice_identities") or {}
+    if not identities:
+        identities = {speaker: [voice] for speaker, voice in voice_map.items() if voice}
+    resolved_identities = {identity for values in identities.values() for identity in values}
+    shared_voice = profile.speaker_voice_mode == "shared"
+    unassigned = [seg.id for seg in transcript.segments if seg.source_text.strip() and seg.speaker_id is None]
+    if profile.diarization_mode != "off" and not alignment.get("diarization_applied"):
+        warnings.append({"code": "diarization_unavailable",
+                         "reason": alignment.get("diarization_reason") or "not_run",
+                         "message": "Speaker detection was not verified; review speaker assignments."})
+    if profile.diarization_mode != "off" and unassigned:
+        warnings.append({"code": "unassigned_speakers", "segment_ids": unassigned[:50]})
+    unresolved_speakers = sorted(speaker for speaker in speakers if not identities.get(speaker))
+    voice_owners: dict[str, set[str]] = {}
+    for speaker, values in identities.items():
+        for identity in values:
+            voice_owners.setdefault(identity, set()).add(speaker)
+    shared_identities = {identity: sorted(owners) for identity, owners in voice_owners.items() if len(owners) > 1}
+    if check_tts_quality and speaker_count > 1 and not shared_voice and (
+            len(resolved_identities) < speaker_count or unresolved_speakers or shared_identities):
+        warnings.append({"code": "speaker_voice_mismatch", "speaker_count": speaker_count,
+                         "resolved_voice_count": len(resolved_identities),
+                         "unresolved_speakers": unresolved_speakers,
+                         "shared_voice_identities": shared_identities,
+                         "message": "Different speakers require distinct resolved voices or explicit shared-voice selection."})
+    overlaps = alignment.get("overlap_intervals") or []
+    if not overlaps:
+        overlaps = [{"segment_id": seg.id, "start": word.get("start"), "end": word.get("end"),
+                     "speaker_ids": word["speaker_ids"]}
+                    for seg in transcript.segments for word in seg.source_words
+                    if len(set(word.get("speaker_ids") or [])) > 1]
+    if overlaps:
+        warnings.append({"code": "unresolved_speaker_overlap", "count": len(overlaps), "intervals": overlaps[:50]})
 
     if not final_meta["has_video"]:
         failures.append({"code": "missing_video_stream"})
@@ -337,5 +381,12 @@ def evaluate_localization_qc(
             "audio_max_volume_db": max_volume,
             "translated_segments": len(transcript.segments) - len(untranslated),
             "segment_count": len(transcript.segments),
+            "diarization": alignment,
+            "speaker_count": speaker_count,
+            "speaker_voices": voice_map,
+            "resolved_voice_count": len(resolved_identities),
+            "shared_voice": shared_voice,
+            "unassigned_speaker_count": len(unassigned),
+            "unresolved_overlap_count": len(overlaps),
         },
     )

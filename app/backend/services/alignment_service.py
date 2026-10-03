@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from backend.config import settings
@@ -28,6 +28,9 @@ class AlignmentReport:
     diarization_reason: str | None = None
     speaker_count: int = 0
     device: str = "cpu"
+    diarization_requested: bool = False
+    unassigned_segment_count: int = 0
+    overlap_intervals: list[dict] = field(default_factory=list)
 
 
 def _ensure_torch_checkpoint_compat():
@@ -161,14 +164,16 @@ def _aligned_to_transcript(
                 word["speaker_ids"] = w_speakers
             words.append(word)
 
-        out.append(LocalizationSegment(
-            id=f"align-{index + 1:04d}",
-            speaker_id=primary,
-            source_text=text,
-            source_start_ms=round(start * 1000),
-            source_end_ms=round(end * 1000),
-            source_words=words,
-        ))
+        # Diarization-only rows retain the original ID and every ASR field.
+        original_by_id = {item.id: item for item in original.segments}
+        source = original_by_id.get(seg.get("id"))
+        item = source.model_copy(deep=True) if source else LocalizationSegment(
+            id=f"align-{index + 1:04d}", source_text=text,
+            source_start_ms=round(start * 1000), source_end_ms=round(end * 1000),
+        )
+        item.speaker_id = primary
+        item.source_words = words
+        out.append(item)
 
     if not out:
         return original.model_copy(deep=True)
@@ -188,16 +193,27 @@ def _align_sync(
     if profile.alignment_mode == "off" and profile.diarization_mode == "off":
         return transcript.model_copy(deep=True), AlignmentReport()
 
+    token = (huggingface_token or settings.HUGGINGFACE_TOKEN or "").strip()
+    report = AlignmentReport(diarization_requested=profile.diarization_mode != "off")
+    if profile.alignment_mode == "off" and not token and profile.diarization_mode == "auto":
+        report.diarization_reason = "missing_huggingface_token"
+        report.unassigned_segment_count = len(transcript.segments)
+        return transcript.model_copy(deep=True), report
+
     try:
         torch = _ensure_torch_checkpoint_compat()
         import whisperx
     except ImportError as exc:
+        if profile.alignment_mode == "off" and profile.diarization_mode == "auto":
+            report.diarization_reason = "missing_whisperx_dependencies"
+            report.unassigned_segment_count = len(transcript.segments)
+            return transcript.model_copy(deep=True), report
         raise RuntimeError(
             "HQ alignment requires WhisperX dependencies. Install app requirements."
         ) from exc
 
     device = _device()
-    report = AlignmentReport(device=device)
+    report.device = device
     audio = whisperx.load_audio(str(media_path))
 
     aligned_segments = [
@@ -205,6 +221,8 @@ def _align_sync(
             "start": seg.source_start_ms / 1000.0,
             "end": seg.source_end_ms / 1000.0,
             "text": seg.source_text,
+            "id": seg.id,
+            "words": [dict(word) for word in seg.source_words],
         }
         for seg in transcript.segments
     ]
@@ -233,7 +251,6 @@ def _align_sync(
 
     diar_segments: list[dict] = []
     if profile.diarization_mode != "off":
-        token = (huggingface_token or settings.HUGGINGFACE_TOKEN or "").strip()
         if not token:
             if profile.diarization_mode == "whisperx":
                 raise RuntimeError(
@@ -271,6 +288,19 @@ def _align_sync(
                 report.diarization_reason = f"inference_failed:{type(exc).__name__}"
 
     result = _aligned_to_transcript(transcript, aligned_segments, diar_segments)
+    if not report.alignment_applied:
+        result.source = transcript.source
+    report.unassigned_segment_count = sum(seg.speaker_id is None for seg in result.segments)
+    for index, first in enumerate(diar_segments):
+        for second in diar_segments[index + 1:]:
+            if second["start"] >= first["end"]:
+                break
+            start, end = max(first["start"], second["start"]), min(first["end"], second["end"])
+            if first["speaker"] != second["speaker"] and end > start:
+                report.overlap_intervals.append({
+                    "start_ms": round(start * 1000), "end_ms": round(end * 1000),
+                    "speaker_ids": sorted({first["speaker"], second["speaker"]}),
+                })
     return result, report
 
 

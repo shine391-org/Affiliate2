@@ -160,11 +160,7 @@ class DubbingRateCalibrator:
 
     @property
     def is_trustworthy(self) -> bool:
-        """True once enough real measurements back the coefficient.
-
-        Below this threshold the estimate stays a raw hint and must not be
-        allowed to trigger a rewrite of approved text (Y1).
-        """
+        """Enough measurements for telemetry; never authority to rewrite text."""
         return self.samples >= _CALIBRATION_MIN_SAMPLES or bool(self.persisted_rate)
 
     def calibrated_ms(self, estimated_ms: int) -> int:

@@ -58,6 +58,7 @@ def test_blocks_defined_term_loss():
         "Ví dụ bố cục hai phần ba của bạn",
         "Ví dụ như bố cục này của bạn",
         "Vietnamese",
+        protected_terms=["bố cục hai phần ba"],
     )
     assert violations
     assert any(v["kind"] == "term_lost" for v in violations)
