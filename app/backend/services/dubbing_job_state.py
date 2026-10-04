@@ -66,7 +66,8 @@ class DubbingJobState:
             self.data = {"version": 1, "scope": scope, "rewrite_audit": []}
         if self.data.get("binding") != binding:
             self.data.update(binding=binding, speaker_voices={}, measurements={}, available_voices=[], voice_catalogue=[], accepted_text={},
-                             acceptance_key=None, acceptance_input_key=None, voice_warnings=[], voice_catalog_error=None, voice_catalogue_loaded=False)
+                             acceptance_key=None, acceptance_input_key=None, measured_allocation=None,
+                             voice_warnings=[], voice_catalog_error=None, voice_catalogue_loaded=False)
         for entry in self.data["rewrite_audit"]:
             entry.setdefault("acceptance_key", "legacy-unscoped")
         self.save()

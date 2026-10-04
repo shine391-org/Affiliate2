@@ -76,6 +76,12 @@ def test_profile_invalidation_uses_earliest_quality_stage():
     assert api._profile_invalidation({"asr_model", "render_profile"}) == "asr"
 
 
+def test_emergency_ceiling_invalidates_dubbing_even_when_changed_alone():
+    assert api._profile_invalidation({"dub_emergency_speed_max"}) == "dubbing"
+    assert api._profile_invalidation({"dub_emergency_speed_max", "render_profile"}) == "dubbing"
+    assert api._profile_invalidation({"dub_emergency_speed_max", "translation_guardrails"}) == "translation"
+
+
 @pytest.mark.asyncio
 async def test_translate_source_reuses_downloaded_media_without_upload(monkeypatch, tmp_path):
     source = tmp_path / "source.mp4"

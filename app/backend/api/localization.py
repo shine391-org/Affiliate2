@@ -158,7 +158,7 @@ _DUBBING_KEYS = {
     "tts_reference_text", "tts_reference_language", "voice_clone_reference_mode",
     "dub_min_cue_duration_ms",
     "dub_max_chunk_size", "dub_gap_tolerance_ms", "dub_speed_accept",
-    "dub_speed_max", "dub_rewrite_attempts", "video_retime_mode",
+    "dub_speed_max", "dub_emergency_speed_max", "dub_rewrite_attempts", "video_retime_mode",
     "video_retime_max_slowdown",
 }
 _AUDIO_KEYS = {"preserve_background", "background_gain_db", "dub_gain_db"}
