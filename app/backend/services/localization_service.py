@@ -426,6 +426,8 @@ def _saved_ai_connection_config(user_settings, connection_id: str) -> dict:
             "model": getattr(user_settings, "ai_model", None),
             "base_url": getattr(user_settings, "ai_base_url", None),
             "api_key_encrypted": getattr(user_settings, "ai_api_key_encrypted", None),
+            "traffic_policy": (_load_json_map(getattr(user_settings, "ai_connections_json", None))
+                               .get(connection_id) or {}).get("traffic_policy"),
         }
 
     registry = _load_json_map(
@@ -476,6 +478,7 @@ def _ai_client_for_connection(
             api_key=key or "",
             model=(model or saved.get("model")),
             base_url=(base_url or saved.get("base_url")),
+            traffic_policy=saved.get("traffic_policy"),
         )
         ai.max_retries = 0
         ai.connection_name = requested
@@ -854,8 +857,10 @@ def _validate_translation_payload(raw: str, batch: list[LocalizationSegment]) ->
     for item in payload:
         if not isinstance(item, dict):
             raise ValueError("translation item must be an object")
-        seg_id = str(item.get("id") or "")
-        text = str(item.get("text") or "").strip()
+        if not isinstance(item.get("id"), str) or not isinstance(item.get("text"), str):
+            raise ValueError("translation id/text must be strings")
+        seg_id = item["id"]
+        text = item["text"].strip()
         if not seg_id or not text or seg_id in seen:
             raise ValueError("translation item has missing/duplicate id or empty text")
         seen[seg_id] = text
@@ -894,6 +899,79 @@ def _validate_localized_terms(raw, batch, texts, known, profile, target_language
         if any(item["kind"] in {"term_lost", "unlocalized_text"} for item in violations):
             raise ValueError(f"Localized dictionary missing from {segment.id}: {violations}")
     return terms
+
+
+def _translation_candidates(raw, batch, known, profile, source_language, target_language):
+    """Separate shape failures from item-level semantics; commit only safe terms.
+
+    A conflicting proposed name invalidates ALL dependent items, not whichever
+    dictionary happened to be visited last. Independent accepted items survive.
+    """
+    from backend.services.dubbing_rewrite_guard import check_translation_meaning
+
+    texts = _validate_translation_payload(raw, batch)
+    by_id = {item["id"]: item for item in json.loads(_strip_json_fence(raw))}
+    accepted = {}
+    rejected = {}
+    choices = {}
+    for segment, text in zip(batch, texts):
+        item = by_id[segment.id]
+        try:
+            terms = _validate_localized_terms(json.dumps([item], ensure_ascii=False),
+                [segment], [text], known, profile, target_language)
+            for source, target in item.get("localized_terms", {}).items():
+                choices.setdefault(source, set()).add(target)
+            violations = check_translation_meaning(segment.source_text, text,
+                source_language, target_language, glossary={**terms, **profile.glossary},
+                protected_terms=profile.protected_terms)
+            if violations:
+                rejected[segment.id] = violations
+            else:
+                accepted[segment.id] = {**item, "text": text}
+        except ValueError as exc:
+            rejected[segment.id] = [{"kind": "localized_terms_invalid", "detail": str(exc)[:180]}]
+
+    conflicts = {source for source, targets in choices.items() if len(targets) > 1}
+    for segment in batch:
+        if any(source in segment.source_text for source in conflicts):
+            accepted.pop(segment.id, None)
+            rejected[segment.id] = [{"kind": "term_conflict", "detail": "conflicting localized name"}]
+
+    # A dictionary introduced by one accepted item must also be honoured by its
+    # siblings, including siblings omitting localized_terms. Recompute after a
+    # rejection so a rejected proposal can never leak into the job dictionary.
+    while True:
+        terms = dict(known or {})
+        for item in accepted.values():
+            terms.update(item.get("localized_terms", {}))
+        invalid = []
+        for segment in batch:
+            if segment.id not in accepted:
+                continue
+            violations = check_translation_meaning(segment.source_text,
+                accepted[segment.id]["text"], source_language, target_language,
+                glossary={**terms, **profile.glossary}, protected_terms=profile.protected_terms)
+            if violations:
+                invalid.append(segment.id)
+                rejected[segment.id] = violations
+        if not invalid:
+            return accepted, rejected, terms
+        for seg_id in invalid:
+            accepted.pop(seg_id)
+
+
+class _TranslationDispatchBudget:
+    """One original-batch budget, shared by transport/repair/routes/split."""
+
+    def __init__(self, limit=4):
+        self.limit = limit
+        self.count = 0
+
+    def consume(self):
+        if self.count >= self.limit:
+            from backend.core.ai_provider import AIRequestBudgetError
+            raise AIRequestBudgetError(f"translation HTTP dispatch budget exhausted ({self.limit})")
+        self.count += 1
 
 
 async def _emit_ai_progress(progress_cb, payload: dict) -> None:
@@ -947,6 +1025,7 @@ async def _call_ai_chat_resilient(
     stage: str = "translation",
     route_state: _AIStageRouteState | None = None,
     deadline_at: float | None = None,
+    dispatch_budget: _TranslationDispatchBudget | None = None,
 ) -> str:
     """One owner for AI retry/fallback with hard wall-clock budgets.
 
@@ -955,7 +1034,10 @@ async def _call_ai_chat_resilient(
     stuck forever. A saved fallback provider/model is tried after the primary.
     """
     import random
-    from backend.core.ai_provider import is_transient_ai_error
+    from backend.core.ai_provider import (
+        AIClient, AIRequestContext, AIProviderCooldownError, AIRequestBudgetError,
+        is_transient_ai_error,
+    )
 
     loop = asyncio.get_running_loop()
     local_deadline = loop.time() + float(total_timeout_s)
@@ -994,7 +1076,9 @@ async def _call_ai_chat_resilient(
             loop.time() + max(0.0, (deadline - loop.time()) / max(providers_left, 1)),
         )
 
-        for attempt in range(1, max_attempts + 1):
+        policy = getattr(client, "traffic_policy", None) or {}
+        client_attempts = min(max_attempts, 2) if policy.get("enabled") else max_attempts
+        for attempt in range(1, client_attempts + 1):
             global_remaining = deadline - loop.time()
             provider_remaining = provider_deadline - loop.time()
             if global_remaining <= 0:
@@ -1023,9 +1107,22 @@ async def _call_ai_chat_resilient(
             try:
                 if route_state is not None:
                     route_state.attempt_count += 1
+                chat_kwargs = {"messages": messages, "max_tokens": max_tokens}
+                if isinstance(client, AIClient):
+                    # Per-request state: independent jobs cannot overwrite a
+                    # shared client's deadline/progress/budget during admission.
+                    chat_kwargs["request_context"] = AIRequestContext(
+                        deadline_at=min(deadline, provider_deadline),
+                        request_timeout_s=timeout_s, progress_cb=progress_cb,
+                        dispatch_budget=dispatch_budget,
+                    )
+                elif dispatch_budget is not None:
+                    # Compatibility test doubles represent exactly one wire
+                    # attempt. Canonical clients count AFTER admission instead.
+                    dispatch_budget.consume()
                 result = await asyncio.wait_for(
-                    client.chat(messages=messages, max_tokens=max_tokens),
-                    timeout=timeout_s,
+                    client.chat(**chat_kwargs),
+                    timeout=provider_remaining if policy.get("enabled") else timeout_s,
                 )
                 if route_state is not None:
                     route_state.sticky_index = route_index
@@ -1053,13 +1150,17 @@ async def _call_ai_chat_resilient(
                     "model": getattr(client, "model", None),
                     "error": _safe_ai_error_text(exc, client),
                 })
+                if isinstance(exc, (AIProviderCooldownError, AIRequestBudgetError)):
+                    # Waiting/budget exhaustion is a resumable stop, not a new
+                    # transport error to multiply through retries/fallbacks.
+                    raise _attach_ai_failure_context(exc, stage, route_state)
                 transient = is_transient_ai_error(exc)
                 # Non-transient errors do not deserve repeated attempts on the
                 # same provider, but a separately configured fallback may still
                 # be healthy (e.g. bad/deprecated primary model).
                 if not transient:
                     break
-                if attempt < max_attempts:
+                if attempt < client_attempts:
                     remaining = min(
                         deadline - loop.time(),
                         provider_deadline - loop.time(),
@@ -1115,106 +1216,97 @@ async def _translate_batch_resilient(
     deadline_at: float | None = None,
     source_language: str | None = None,
     localized_terms: dict[str, str] | None = None,
+    accepted_cb=None,
+    dispatch_budget: _TranslationDispatchBudget | None = None,
+    _split_depth: int = 0,
+    _semantic_repair: bool = True,
+    _repair_issues: dict | None = None,
 ) -> tuple[list[str], set[int]]:
+    if not batch:
+        return [], set()
+    if dispatch_budget is None:
+        dispatch_budget = _TranslationDispatchBudget()
     if deadline_at is None:
-        deadline_at = asyncio.get_running_loop().time() + float(
-            profile.translation_total_timeout_s
-        )
-    prompt = _translation_prompt(
-        target_language=target_language,
-        batch=batch,
-        transcript_context=context,
-        profile=profile,
-        for_dub=for_dub,
-        localized_terms=localized_terms,
-    )
-    raw = await _call_ai_chat_resilient(
-        ai,
-        fallback_ai,
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=3000,
+        deadline_at = asyncio.get_running_loop().time() + float(profile.translation_total_timeout_s)
+    prompt = _translation_prompt(target_language=target_language, batch=batch,
+        transcript_context=context, profile=profile, for_dub=for_dub, localized_terms=localized_terms)
+    if _repair_issues:
+        prompt += "\n\nTARGETED REPAIR: Only the supplied rejected IDs. Preserve meaning; fix these invariants:\n" + json.dumps(_repair_issues, ensure_ascii=False)
+    raw = await _call_ai_chat_resilient(ai, fallback_ai,
+        messages=[{"role": "user", "content": prompt}], max_tokens=3000,
         max_attempts=profile.translation_retry_attempts,
         attempt_timeout_s=profile.translation_attempt_timeout_s,
-        total_timeout_s=profile.translation_total_timeout_s,
-        progress_cb=progress_cb,
-        stage="translation",
-        route_state=route_state,
-        deadline_at=deadline_at,
-    )
+        total_timeout_s=profile.translation_total_timeout_s, progress_cb=progress_cb,
+        stage="translation", route_state=route_state, deadline_at=deadline_at,
+        dispatch_budget=dispatch_budget)
     try:
-        texts = _validate_translation_payload(raw, batch)
-        accepted_terms = _validate_localized_terms(raw, batch, texts, localized_terms, profile, target_language)
-        from backend.services.dubbing_rewrite_guard import check_translation_meaning
-        for segment, text in zip(batch, texts):
-            violations = check_translation_meaning(
-                segment.source_text, text, source_language, target_language,
-                glossary={**accepted_terms, **profile.glossary}, protected_terms=profile.protected_terms,
-            )
-            if violations:
-                raise ValueError(f"translation meaning guard for {segment.id}: {violations}")
-        if localized_terms is not None:
-            localized_terms.update(accepted_terms)
-        return texts, set()
+        accepted, rejected, terms = _translation_candidates(raw, batch, localized_terms,
+            profile, source_language, target_language)
     except (json.JSONDecodeError, ValueError) as exc:
-        # A transport-level 200 with unusable structured output is still a
-        # route failure for this structured stage. Advance to the next route
-        # before recursively shrinking the batch; otherwise one unhealthy model
-        # can silently degrade every singleton back to source text while a
-        # configured fallback is never tried.
+        # Only malformed STRUCTURE advances routes or permits one split level.
+        # Semantic rejection below never resends accepted siblings.
         if route_state is not None:
             current = route_state.current
             _append_ai_failure(route_state, {
                 "connection_id": getattr(current, "connection_name", None),
                 "provider": getattr(getattr(current, "provider", None), "value", str(getattr(current, "provider", ""))),
-                "model": getattr(current, "model", None),
-                "attempt": 1,
-                "error_type": "InvalidStructuredOutput",
-                "error": str(exc)[:240],
+                "model": getattr(current, "model", None), "attempt": 1,
+                "error_type": "InvalidStructuredOutput", "error": str(exc)[:240],
             })
-            if route_state.sticky_index + 1 < len(route_state.clients):
+            if not _repair_issues and route_state.sticky_index + 1 < len(route_state.clients):
                 route_state.sticky_index += 1
                 next_client = route_state.current
-                await _emit_ai_progress(progress_cb, {
-                    "event": "switch_fallback",
-                    "stage": "translation",
+                await _emit_ai_progress(progress_cb, {"event": "switch_fallback", "stage": "translation",
                     "reason": "invalid_structured_output",
-                    "provider": getattr(next_client, "connection_name", None) or getattr(getattr(next_client, "provider", None), "value", str(getattr(next_client, "provider", ""))),
-                    "model": getattr(next_client, "model", None),
-                })
-                return await _translate_batch_resilient(
-                    ai, batch, route_state=route_state,
-                    target_language=target_language, context=context,
-                    profile=profile, for_dub=for_dub, fallback_ai=fallback_ai,
-                    progress_cb=progress_cb, deadline_at=deadline_at, source_language=source_language,
-                    localized_terms=localized_terms,
-                )
-
-        if len(batch) == 1:
-            logger.warning("Translation shape failed for %s: %s", batch[0].id, exc)
-            return [batch[0].source_text], {0}
-        await _emit_ai_progress(progress_cb, {
-            "event": "shape_split",
-            "stage": "translation",
-            "batch_size": len(batch),
-            "error": str(exc)[:180],
-        })
+                    "provider": getattr(next_client, "connection_name", None),
+                    "model": getattr(next_client, "model", None)})
+                return await _translate_batch_resilient(ai, batch, route_state=route_state,
+                    target_language=target_language, context=context, profile=profile, for_dub=for_dub,
+                    fallback_ai=fallback_ai, progress_cb=progress_cb, deadline_at=deadline_at,
+                    source_language=source_language, localized_terms=localized_terms,
+                    accepted_cb=accepted_cb, dispatch_budget=dispatch_budget,
+                    _split_depth=_split_depth, _semantic_repair=_semantic_repair)
+        if len(batch) == 1 or _split_depth >= 1 or _repair_issues:
+            logger.warning("Translation structure failed for %d item(s): %s", len(batch), exc)
+            return [segment.source_text for segment in batch], set(range(len(batch)))
+        await _emit_ai_progress(progress_cb, {"event": "shape_split", "stage": "translation",
+            "batch_size": len(batch), "error": str(exc)[:180]})
         mid = len(batch) // 2
-        left, lf = await _translate_batch_resilient(
-            ai, batch[:mid], route_state=route_state,
-            target_language=target_language, context=context,
-            profile=profile, for_dub=for_dub, fallback_ai=fallback_ai,
-            progress_cb=progress_cb, deadline_at=deadline_at, source_language=source_language,
-            localized_terms=localized_terms,
-        )
-        right, rf = await _translate_batch_resilient(
-            ai, batch[mid:], route_state=route_state,
-            target_language=target_language, context=context,
-            profile=profile, for_dub=for_dub, fallback_ai=fallback_ai,
-            progress_cb=progress_cb, deadline_at=deadline_at, source_language=source_language,
-            localized_terms=localized_terms,
-        )
+        left, lf = await _translate_batch_resilient(ai, batch[:mid], route_state=route_state,
+            target_language=target_language, context=context, profile=profile, for_dub=for_dub,
+            fallback_ai=fallback_ai, progress_cb=progress_cb, deadline_at=deadline_at,
+            source_language=source_language, localized_terms=localized_terms,
+            accepted_cb=accepted_cb, dispatch_budget=dispatch_budget,
+            _split_depth=_split_depth + 1, _semantic_repair=_semantic_repair)
+        right, rf = await _translate_batch_resilient(ai, batch[mid:], route_state=route_state,
+            target_language=target_language, context=context, profile=profile, for_dub=for_dub,
+            fallback_ai=fallback_ai, progress_cb=progress_cb, deadline_at=deadline_at,
+            source_language=source_language, localized_terms=localized_terms,
+            accepted_cb=accepted_cb, dispatch_budget=dispatch_budget,
+            _split_depth=_split_depth + 1, _semantic_repair=_semantic_repair)
         return left + right, lf | {mid + i for i in rf}
 
+    if localized_terms is not None:
+        localized_terms.update(terms)
+    if accepted_cb is not None and accepted:
+        # Durable BEFORE repair: failure/cancel cannot discard accepted text.
+        await _emit_ai_progress(accepted_cb, accepted)
+    if rejected and _semantic_repair:
+        pending = [segment for segment in batch if segment.id in rejected]
+        await _emit_ai_progress(progress_cb, {"event": "semantic_repair", "stage": "translation",
+            "pending_ids": [segment.id for segment in pending], "accepted_count": len(accepted)})
+        fixed, failed = await _translate_batch_resilient(ai, pending, route_state=route_state,
+            target_language=target_language, context=context, profile=profile, for_dub=for_dub,
+            fallback_ai=fallback_ai, progress_cb=progress_cb, deadline_at=deadline_at,
+            source_language=source_language, localized_terms=localized_terms, accepted_cb=accepted_cb,
+            dispatch_budget=dispatch_budget, _split_depth=_split_depth, _semantic_repair=False,
+            _repair_issues=rejected)
+        for index, (segment, text) in enumerate(zip(pending, fixed)):
+            if index not in failed:
+                accepted[segment.id] = {"id": segment.id, "text": text}
+    return ([accepted[segment.id]["text"] if segment.id in accepted else segment.source_text
+             for segment in batch], {index for index, segment in enumerate(batch)
+                                    if segment.id not in accepted})
 
 async def translate_transcript(
     transcript: LocalizationTranscript,
@@ -1260,7 +1352,7 @@ async def translate_transcript(
         for index, client in enumerate(route_clients)
     ]
     checkpoint_meta = {
-        "meaning_guard_version": 3,
+        "meaning_guard_version": 5,
         "source_language": transcript.language,
         "protected_terms": profile.protected_terms,
         "semantic_hash": semantic_sig,
@@ -1306,29 +1398,58 @@ async def translate_transcript(
         except Exception as cp_err:
             logger.warning("Could not read translation checkpoint: %s", cp_err)
 
+    def save_checkpoint():
+        if checkpoint_file is None:
+            return
+        checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
+        tmp_cp = checkpoint_file.with_suffix(".tmp")
+        tmp_cp.write_text(json.dumps({**checkpoint_meta, "batches": completed_batches,
+            "route_state": {"sticky_index": route_state.sticky_index,
+                "failure_chain": list(route_state.failure_chain),
+                "attempt_count": route_state.attempt_count,
+                "success_count": route_state.success_count}}, ensure_ascii=False) + "\n", encoding="utf-8")
+        tmp_cp.replace(checkpoint_file)
+
     for start in range(0, len(out.segments), _TRANSLATION_BATCH_SIZE):
         batch = out.segments[start:start + _TRANSLATION_BATCH_SIZE]
         batch_key = str(start)
         cached = completed_batches.get(batch_key)
-        valid_cache = False
+        accepted_items = {}
         if isinstance(cached, dict) and not cached.get("failed"):
             try:
-                payload = json.dumps(cached.get("items"), ensure_ascii=False)
-                texts = _validate_translation_payload(payload, batch)
-                accepted = _validate_localized_terms(payload, batch, texts, localized_terms, profile, target_language)
-                from backend.services.dubbing_rewrite_guard import check_translation_meaning
-                if any(check_translation_meaning(seg.source_text, text, transcript.language, target_language,
-                           glossary={**accepted, **profile.glossary}, protected_terms=profile.protected_terms)
-                       for seg, text in zip(batch, texts)):
-                    raise ValueError("Invalid checkpoint semantics")
-                localized_terms.update(accepted)
-                valid_cache = True
+                items = cached.get("items")
+                if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
+                    raise ValueError("Invalid checkpoint items")
+                ids = [item.get("id") for item in items]
+                if any(not isinstance(seg_id, str) for seg_id in ids) or len(set(ids)) != len(ids):
+                    raise ValueError("Invalid checkpoint IDs")
+                subset = [segment for segment in batch if segment.id in ids]
+                if len(subset) != len(ids):
+                    raise ValueError("Unknown checkpoint IDs")
+                if cached.get("version") != 2 and len(subset) != len(batch):
+                    raise ValueError("Legacy checkpoint must be complete")
+                accepted_items, _rejected, accepted_terms = _translation_candidates(
+                    json.dumps(items, ensure_ascii=False), subset, localized_terms,
+                    profile, transcript.language, target_language)
+                localized_terms.update(accepted_terms)
             except (TypeError, KeyError, ValueError):
                 completed_batches.pop(batch_key, None)
                 logger.warning("Discarding invalid translation checkpoint batch %s", batch_key)
-        if valid_cache:
-            failed = set()
-        else:
+
+        async def keep_accepted(additions):
+            accepted_items.update(additions)
+            # Store explicit IDs, never positional partial texts. Names are
+            # saved only alongside accepted translations that actually use them.
+            items = [{"id": segment.id, "text": accepted_items[segment.id]["text"],
+                "localized_terms": {source: target for source, target in localized_terms.items()
+                    if source in segment.source_text and target in accepted_items[segment.id]["text"]}}
+                for segment in batch if segment.id in accepted_items]
+            completed_batches[batch_key] = {"version": 2, "items": items, "failed": [],
+                "pending_ids": [segment.id for segment in batch if segment.id not in accepted_items]}
+            save_checkpoint()
+
+        pending = [segment for segment in batch if segment.id not in accepted_items]
+        if pending:
             total_batches = max(
                 1,
                 (len(out.segments) + _TRANSLATION_BATCH_SIZE - 1) // _TRANSLATION_BATCH_SIZE,
@@ -1340,45 +1461,27 @@ async def translate_transcript(
                 "batch": batch_number,
                 "total_batches": total_batches,
             })
-            texts, failed = await _translate_batch_resilient(
-                ai, batch, route_state=route_state,
-                target_language=target_language,
-                context=context,
-                source_language=transcript.language,
-                profile=profile,
-                for_dub=for_dub,
-                fallback_ai=fallback_ai,
-                progress_cb=progress_cb,
-                localized_terms=localized_terms,
-            )
-            if failed:
-                completed_batches.pop(batch_key, None)
-            else:
-                completed_batches[batch_key] = {"items": [
-                    {"id": seg.id, "text": text, "localized_terms": {
-                        source: target for source, target in localized_terms.items()
-                        if source in seg.source_text and target in text}}
-                    for seg, text in zip(batch, texts)], "texts": texts, "failed": []}
-            if checkpoint_file:
-                try:
-                    checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
-                    tmp_cp = checkpoint_file.with_suffix(".tmp")
-                    tmp_cp.write_text(
-                        json.dumps({
-                            **checkpoint_meta,
-                            "batches": completed_batches,
-                            "route_state": {
-                                "sticky_index": route_state.sticky_index,
-                                "failure_chain": list(route_state.failure_chain),
-                                "attempt_count": route_state.attempt_count,
-                                "success_count": route_state.success_count,
-                            },
-                        }, ensure_ascii=False) + "\n",
-                        encoding="utf-8",
-                    )
-                    tmp_cp.replace(checkpoint_file)
-                except Exception as cp_save_err:
-                    logger.warning("Could not persist translation batch checkpoint: %s", cp_save_err)
+            try:
+                await _translate_batch_resilient(
+                    ai, pending, route_state=route_state,
+                    target_language=target_language,
+                    context=context,
+                    source_language=transcript.language,
+                    profile=profile,
+                    for_dub=for_dub,
+                    fallback_ai=fallback_ai,
+                    progress_cb=progress_cb,
+                    localized_terms=localized_terms,
+                    accepted_cb=keep_accepted,
+                )
+            finally:
+                # Also persist pending IDs and route audit on transport failure
+                # or cancellation, after the last durable accepted response.
+                await keep_accepted({})
+
+        texts = [accepted_items[segment.id]["text"] if segment.id in accepted_items
+                 else segment.source_text for segment in batch]
+        failed = {index for index, segment in enumerate(batch) if segment.id not in accepted_items}
 
         failed_total += len(failed)
         for idx, (seg, text) in enumerate(zip(batch, texts)):
@@ -2258,6 +2361,8 @@ ITEMS:
                 "chunk_id": chunk.id,
                 "reason": "rewrite_invalid_response",
                 "detail": detail,
+                "response_chars": len(raw),
+                "response_sha256": hashlib.sha256(raw.encode("utf-8")).hexdigest(),
                 "segment_ids": [plan[i].segment_id for i in chunk.item_indexes],
             })
         return False
@@ -2317,7 +2422,10 @@ ITEMS:
             ai,
             fallback_ai,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=1000,
+            # Completion caps also include hidden reasoning on compatible
+            # models. LIVE 1000-token runs ended before emitting any JSON.
+            # Keep headroom bounded; stage/request deadlines still apply.
+            max_tokens=4096,
             max_attempts=profile.rewrite_retry_attempts,
             attempt_timeout_s=profile.rewrite_attempt_timeout_s,
             total_timeout_s=profile.rewrite_total_timeout_s,
@@ -2394,8 +2502,11 @@ ITEMS:
         if not isinstance(item, dict):
             retried = await retry_on_invalid("item_not_object")
             return retried if retried is not None else record_invalid("item_not_object")
-        seg_id = str(item.get("id") or "")
-        text = str(item.get("text") or "").strip()
+        if not isinstance(item.get("id"), str) or not isinstance(item.get("text"), str):
+            retried = await retry_on_invalid("item_types")
+            return retried if retried is not None else record_invalid("item_types")
+        seg_id = item["id"]
+        text = item["text"].strip()
         if not seg_id or not text or seg_id in mapped:
             retried = await retry_on_invalid("invalid_or_duplicate_item")
             return retried if retried is not None else record_invalid("invalid_or_duplicate_item")
@@ -2796,6 +2907,9 @@ async def synthesize_timed_dub(
 
     rewrite_context: dict[int, tuple[int, dict]] = {}
     allocation_ids = regenerate_chunk_ids if targeted_regeneration else None
+    previous_durations: dict[int, int] = {}
+    synthesis_identities: dict[int, str] = {}
+    previous_allocation = job_state.data.get("measured_allocation")
     speaker_resolutions: dict[str, set[str]] = {}
     resolved_voice_genders: dict[str, set[str]] = {}
     resolved_voices: dict[str, dict[str, str]] = {}
@@ -2851,6 +2965,13 @@ async def synthesize_timed_dub(
             reference_text=ref.get("text"),
             reference_language=ref.get("language"),
         )
+
+        # Capture old measurements BEFORE a target's atomic regeneration
+        # replaces its sidecar. Legacy jobs have no saved measured windows.
+        if targeted_regeneration and path.exists() and _chunk_identity_matches(path, initial_identity):
+            previous_ms = _chunk_persisted_duration_ms(path, initial_identity)
+            if previous_ms:
+                previous_durations[chunk.id] = previous_ms
 
         # Targeted/resumed reuse is permitted only when the raw artifact's
         # synthesis identity proves it still matches current speech inputs.
@@ -2933,12 +3054,36 @@ async def synthesize_timed_dub(
             )
 
         chunk.actual_duration_ms = duration_ms
+        synthesis_identities[chunk.id] = synthesis_identity
         observe_chunk(voice, speaker_id, ref, speech_text, synthesis_identity, duration_ms)
         rewrite_context[chunk.id] = (attempts, rewrite_state)
 
     # Measure all neighbours before reclaiming provisional estimated slack.
     # A shared gap must not be reserved by a later cue's outdated estimate and
     # force an unnecessary measured rewrite of the current cue.
+    if targeted_regeneration:
+        if previous_allocation and previous_allocation.get("key") == layout_key:
+            windows = previous_allocation.get("windows", {})
+            for chunk in chunks:
+                if chunk.id in regenerate_chunk_ids:
+                    continue
+                saved = windows.get(str(chunk.id), {})
+                start, end = saved.get("start_ms"), saved.get("end_ms")
+                if (saved.get("identity") != synthesis_identities[chunk.id]
+                        or type(start) is not int or type(end) is not int
+                        or start < 0 or end <= start):
+                    raise RuntimeError("Invalid measured allocation; rerun the full dubbing stage")
+                chunk.start_ms, chunk.end_ms = start, end
+        else:
+            # Upgrade legacy/partial jobs using ALL available real measurements,
+            # not build_plan's estimate-derived slots. Freeze only after this
+            # reconstruction, so a retry cannot manufacture a neighbour overflow.
+            measured = {c.id: c.actual_duration_ms for c in chunks}
+            for chunk in chunks:
+                chunk.actual_duration_ms = previous_durations.get(chunk.id, measured[chunk.id])
+            allocate_silence(plan, chunks, config, timeline_end_ms=source_duration_ms)
+            for chunk in chunks:
+                chunk.actual_duration_ms = measured[chunk.id]
     allocate_silence(
         plan, chunks, config, timeline_end_ms=source_duration_ms,
         only_chunk_ids=allocation_ids,
@@ -3028,6 +3173,7 @@ async def synthesize_timed_dub(
                 reference_language=ref.get("language"),
             )
             chunk.actual_duration_ms = duration_ms
+            synthesis_identities[chunk.id] = synthesis_identity
             observe_chunk(voice, speaker_id, ref, speech_text, synthesis_identity, duration_ms)
             for entry in accepted_entries:
                 entry["duration_after_ms"] = duration_ms
@@ -3045,6 +3191,15 @@ async def synthesize_timed_dub(
         ):
             record_rewrite_setup_unavailable(chunk)
         chunk.actual_duration_ms = duration_ms
+
+    # Save SOURCE-coordinate windows even when the downstream hard gate fails.
+    # Output-coordinate retime must never be restored and scaled a second time.
+    job_state.data["measured_allocation"] = {
+        "key": layout_key,
+        "windows": {str(c.id): {"start_ms": c.start_ms, "end_ms": c.end_ms,
+                                "identity": synthesis_identities[c.id]} for c in chunks},
+    }
+    save_audit()
 
     # Last resort from the pyVideoTrans family of strategies: if the donor
     # planner still requires over-max speech, enlarge ALL source windows by one

@@ -2462,6 +2462,7 @@ async def test_translation_recursive_shape_split_shares_one_batch_deadline(monke
         stage="translation",
         route_state=None,
         deadline_at=None,
+        dispatch_budget=None,
     ):
         seen_deadlines.append(deadline_at)
         return "[]"
@@ -2805,3 +2806,196 @@ async def test_all_malformed_translation_routes_attach_terminal_route_audit(monk
     assert exc.value.ai_selected_connection == "lmstudio-qwen"
     assert exc.value.ai_attempt_count == 2
     assert exc.value.ai_success_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first_ms", [1000, 1150, 1250])
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_targeted_retry_preserves_measured_non_target_windows(
+    monkeypatch, tmp_path, first_ms, legacy,
+):
+    tx = LocalizationTranscript(segments=[
+        LocalizationSegment(id="a", speaker_id="A", source_text="first",
+            translated_text="Giữ lời đầu.", source_start_ms=0, source_end_ms=800,
+            translation_status="success"),
+        LocalizationSegment(id="b", speaker_id="B", source_text="second",
+            translated_text="Câu thứ hai dài hơn nhiều.", source_start_ms=1400,
+            source_end_ms=1800, translation_status="success"),
+    ])
+    original = tx.model_dump()
+    calls = _patch_dub_io(monkeypatch, tmp_path, [first_ms, 300, 200, 500])
+    profile = _profile(dub_rewrite_attempts=0)
+    work = tmp_path / "work"
+    async def run_dub(targets=None):
+        return await ls.synthesize_timed_dub(
+            tx, source_media=tmp_path / "source.mp4", target_language="Vietnamese",
+            profile=profile, user_settings=object(), work_dir=work,
+            regenerate_chunk_ids=targets, reuse_existing_chunks=bool(targets),
+        )
+
+    full = await run_dub()
+    assert full.chunks
+    frozen = (full.chunks[0].start_ms, full.chunks[0].end_ms)
+    assert frozen[1] > 800, "fixture must reclaim actual, not estimated, slack"
+    raw = work / "chunk_0001.wav"
+    before = (raw.read_bytes(), raw.stat().st_mtime_ns)
+    if legacy:
+        state_path = work / "dubbing_state.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state.pop("measured_allocation", None)
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+    for _ in range(2):
+        retry = await run_dub({2})
+        assert retry.chunks
+        assert (retry.chunks[0].start_ms, retry.chunks[0].end_ms) == frozen
+        assert retry.chunks[0].end_ms <= retry.chunks[1].start_ms
+        assert (raw.read_bytes(), raw.stat().st_mtime_ns) == before
+        assert tx.model_dump() == original
+    assert calls["n"] == 4, "only the requested chunk may regenerate"
+
+
+def _pressure_transcript(count=12):
+    return LocalizationTranscript(language="en", segments=[LocalizationSegment(
+        id=f"p{i}", source_text="Do not move." if i == 7 else "Hello.",
+        source_start_ms=i * 1000, source_end_ms=(i + 1) * 1000,
+    ) for i in range(count)])
+
+
+class _PartialTranslationAI:
+    connection_name = "qa-partial"
+    provider = SimpleNamespace(value="compatible")
+    model = "qa-model"
+    base_url = "http://localhost:9655/v1"
+    max_retries = 0
+
+    def __init__(self, *, repair=False, crash=False):
+        self.repair = repair
+        self.crash = crash
+        self.ids = []
+
+    async def chat(self, messages, **kwargs):
+        prompt = messages[0]["content"]
+        items = json.loads(prompt.split("SEGMENTS:\n", 1)[1].split("\n\nReturn ONLY", 1)[0])
+        self.ids.append([x["id"] for x in items])
+        if self.crash and len(self.ids) == 2:
+            raise RuntimeError("provider unavailable during repair")
+        return json.dumps([{"id": x["id"], "text": (
+            "Đừng di chuyển." if self.repair and x["id"] == "p7"
+            else "Di chuyển." if x["id"] == "p7" else "Xin chào."
+        )} for x in items], ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_semantic_repair_only_sends_rejected_id(monkeypatch):
+    ai = _PartialTranslationAI(repair=True)
+    original = ai.chat
+
+    async def first_bad_then_good(*args, **kwargs):
+        ai.repair = bool(ai.ids)
+        return await original(*args, **kwargs)
+
+    ai.chat = first_bad_then_good
+    monkeypatch.setattr(ls, "_profile_ai_client", lambda *_: ai)
+    result = await ls.translate_transcript(_pressure_transcript(), target_language="vi",
+        profile=_profile(glossary={}, qc_profile="strict"), user_settings=object(), for_dub=True)
+    assert ai.ids == [[f"p{i}" for i in range(12)], ["p7"]]
+    assert all(x.translation_status == "success" for x in result.segments)
+    assert result.segments[7].translated_text == "Đừng di chuyển."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("crash", [False, True])
+async def test_partial_checkpoint_survives_semantic_or_transport_failure(monkeypatch, tmp_path, crash):
+    ai = _PartialTranslationAI(crash=crash)
+    monkeypatch.setattr(ls, "_profile_ai_client", lambda *_: ai)
+    profile = _profile(glossary={}, qc_profile="strict", translation_retry_attempts=1)
+    kwargs = dict(target_language="vi", profile=profile, user_settings=object(),
+                  for_dub=True, checkpoint_dir=tmp_path)
+    with pytest.raises(RuntimeError):
+        await ls.translate_transcript(_pressure_transcript(), **kwargs)
+    checkpoint = json.loads((tmp_path / "checkpoint.json").read_text(encoding="utf-8"))
+    saved = checkpoint["batches"]["0"]
+    assert [x["id"] for x in saved["items"]] == [f"p{i}" for i in range(12) if i != 7]
+    assert saved["pending_ids"] == ["p7"]
+    assert ai.ids == [[f"p{i}" for i in range(12)], ["p7"]]
+    accepted_before = saved["items"]
+    repaired = _PartialTranslationAI(repair=True)
+    monkeypatch.setattr(ls, "_profile_ai_client", lambda *_: repaired)
+    result = await ls.translate_transcript(_pressure_transcript(), **kwargs)
+    assert repaired.ids == [["p7"]]
+    assert all(x.translation_status == "success" for x in result.segments)
+    after = json.loads((tmp_path / "checkpoint.json").read_text(encoding="utf-8"))["batches"]["0"]
+    assert [x for x in after["items"] if x["id"] != "p7"] == accepted_before
+    assert after["pending_ids"] == []
+
+
+@pytest.mark.asyncio
+async def test_malformed_batches_split_once_inside_original_budget():
+    class Malformed:
+        calls = 0
+
+        async def chat(self, **kwargs):
+            self.calls += 1
+            return "not JSON"
+
+    ai = Malformed()
+    texts, failed = await ls._translate_batch_resilient(ai, _pressure_transcript().segments,
+        target_language="vi", source_language="en", context="context",
+        profile=_profile(glossary={}), for_dub=True)
+    assert ai.calls == 3  # initial + two halves, no singleton fan-out
+    assert failed == set(range(12))
+    assert len(texts) == 12
+
+
+@pytest.mark.asyncio
+async def test_transport_and_shape_retries_share_four_dispatch_budget(monkeypatch):
+    class Transient(RuntimeError):
+        status_code = 503
+
+    class Failing:
+        calls = 0
+
+        async def chat(self, **kwargs):
+            self.calls += 1
+            if self.calls % 2:
+                raise Transient("transport unavailable")
+            return "not JSON"
+
+    async def no_sleep(_):
+        pass
+
+    monkeypatch.setattr(ls.asyncio, "sleep", no_sleep)
+    ai = Failing()
+    with pytest.raises(RuntimeError, match="dispatch budget"):
+        await ls._translate_batch_resilient(ai, _pressure_transcript().segments,
+            target_language="vi", context="context", profile=_profile(glossary={},
+                translation_retry_attempts=3), for_dub=True)
+    assert ai.calls == 4
+
+
+@pytest.mark.asyncio
+async def test_name_conflict_repairs_all_dependent_items_but_keeps_independent():
+    batch = [LocalizationSegment(id=f"n{i}", source_text=source,
+        source_start_ms=i * 1000, source_end_ms=(i + 1) * 1000)
+        for i, source in enumerate(["张三来了", "张三走了", "你好"])]
+
+    class Names:
+        ids = []
+
+        async def chat(self, messages, **kwargs):
+            items = json.loads(messages[0]["content"].split("SEGMENTS:\n", 1)[1].split("\n\nReturn ONLY", 1)[0])
+            self.ids.append([x["id"] for x in items])
+            return json.dumps([{"id": x["id"], "text": (
+                "Trương Tam đến." if x["id"] == "n0" else "Trương Ba đi." if x["id"] == "n1" else "Xin chào."
+            ), "localized_terms": {"张三": "Trương Tam" if x["id"] == "n0" else "Trương Ba"}
+                if x["id"] != "n2" else {}} for x in items], ensure_ascii=False)
+
+    ai = Names()
+    terms = {}
+    texts, failed = await ls._translate_batch_resilient(ai, batch,
+        source_language="zh", target_language="vi", context="context",
+        profile=_profile(glossary={}), for_dub=True, localized_terms=terms)
+    assert ai.ids == [["n0", "n1", "n2"], ["n0", "n1"]]
+    assert failed == {0, 1}
+    assert texts[2] == "Xin chào."
+    assert terms == {}  # conflicting names must never be committed arbitrarily

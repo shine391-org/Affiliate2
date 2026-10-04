@@ -1500,6 +1500,7 @@ async def run_tool_translate(
                 "attempts": 0,
                 "errors": 0,
                 "fallback_provider_used": False,
+                "http_dispatch_count": 0,
             }
             translation_batch = {"current": 1, "total": 1}
 
@@ -1514,6 +1515,12 @@ async def run_tool_translate(
                 role = str(event.get("role") or "primary")
                 provider = str(event.get("provider") or "")
                 model = str(event.get("model") or "")
+                if name == "http_dispatch":
+                    translation_runtime["http_dispatch_count"] += 1
+                if name == "provider_wait":
+                    await _tool_progress(job_id, pct,
+                        f"Đang chờ provider · {event.get('reason')} · còn {event.get('wait_s')}s",
+                        user_id)
                 if name == "attempt":
                     translation_runtime["attempts"] += 1
                     if role.startswith("fallback"):
@@ -1739,6 +1746,10 @@ async def run_tool_translate(
                         provider = str(event.get("provider") or "")
                         model = str(event.get("model") or "")
                         role = str(event.get("role") or "primary")
+                        if name == "provider_wait":
+                            await _tool_progress(job_id, 54,
+                                f"C7 đang chờ provider · {event.get('reason')} · còn {event.get('wait_s')}s",
+                                user_id)
                         if name == "attempt":
                             await _tool_progress(
                                 job_id,
