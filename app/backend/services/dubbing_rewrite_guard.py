@@ -214,13 +214,86 @@ def _numbers(text: str) -> Counter:
     return Counter(_NUMBER_RE.findall(_numeric_text(text)))
 
 
-def _numeric_text(text: str) -> str:
-    """Chinese written quantities become digits; a name such as 张三 does not.
+def _vi_number(words: list[str]) -> int | None:
+    """Parse grammatical Vietnamese integers, not arbitrary adjacent digits."""
+    digits = dict(zip("không một hai ba bốn năm sáu bảy tám chín".split(), range(10)))
+    variants = {"mốt": 1, "tư": 4, "lăm": 5}
+    for names, scale in (({"tỷ", "tỉ"}, 10**9), ({"triệu"}, 10**6),
+                         ({"nghìn", "ngàn"}, 1000)):
+        positions = [i for i, word in enumerate(words) if word in names]
+        if positions:
+            if len(positions) != 1:
+                return None
+            index = positions[0]
+            head = _vi_number(words[:index])
+            tail = _vi_number(words[index + 1:]) if words[index + 1:] else 0
+            if head is None or not 0 < head < scale or tail is None or tail >= scale:
+                return None
+            return head * scale + tail
+    words = list(words)
+    total = 0
+    if len(words) >= 2 and words[0] in digits and words[1] == "trăm":
+        total = digits[words[0]] * 100
+        words = words[2:]
+        if words and words[0] in {"linh", "lẻ"}:
+            words = words[1:]
+            if len(words) != 1 or words[0] not in digits:
+                return None
+    if not words:
+        return total
+    if words[0] == "mười":
+        # 'mười năm' is ten years; fifteen is 'mười lăm'.
+        if len(words) == 1:
+            return total + 10
+        if len(words) == 2 and words[1] in {**digits, **variants} and words[1] != "năm":
+            return total + 10 + {**digits, **variants}[words[1]]
+    elif len(words) >= 2 and words[0] in digits and digits[words[0]] >= 2 and words[1] == "mươi":
+        if len(words) == 2:
+            return total + digits[words[0]] * 10
+        if len(words) == 3 and words[2] in {**digits, **variants} and words[2] != "năm":
+            return total + digits[words[0]] * 10 + {**digits, **variants}[words[2]]
+    elif len(words) == 1 and words[0] in digits:
+        return total + digits[words[0]]
+    return None
 
-    C6 requests Arabic digits in the target. Only a following measurement or
-    age marker makes an unseparated Chinese numeral a quantity.
+
+def _vi_numeric_text(text: str, *, indefinite: bool = False) -> str:
+    words = "không một mốt hai ba bốn tư năm lăm sáu bảy tám chín mười mươi trăm linh lẻ nghìn ngàn triệu tỷ tỉ"
+    token = "(?:" + "|".join(words.split()) + ")"
+    # Measurement aliases and count classifiers distinguish quantities from
+    # homographs ('chín chắn', 'tám chuyện') and names ('Anh Hai').
+    contexts = {alias for aliases in _UNIT_ALIASES.values() for alias in aliases}
+    contexts.update("cái chiếc con người lần phần bộ cuốn quyển tấm máy chai quả ly cốc hộp bức".split())
+    context = "(?:" + "|".join(_phrase_pattern(alias) for alias in sorted(contexts, key=len, reverse=True)) + ")"
+
+    def convert(match):
+        tokens = match.group().split()
+        for length in range(len(tokens), 0, -1):
+            prefix = " ".join(tokens[:length])
+            value = _vi_number(tokens[:length])
+            following = text[match.start() + len(prefix):]
+            measured = bool(re.match(r"\s+" + context, following))
+            article = (indefinite and tokens[0] == "một" and bool(
+                re.match(r"\s+(?!số\b)[^\W\d_]", following)))
+            unambiguous = length > 1 or article
+            if value is not None and (measured or (length == len(tokens) and unambiguous)):
+                return str(value) + match.group()[len(prefix):]
+        # A negation next to a quantity ('không một...') is not one integer.
+        if len(tokens) > 1:
+            return tokens[0] + " " + _vi_numeric_text(" ".join(tokens[1:]), indefinite=indefinite)
+        return match.group()
+
+    return re.sub(r"(?<!\w)" + token + r"(?:\s+" + token + r")*(?!\w)", convert, text)
+
+
+def _numeric_text(text: str) -> str:
+    """Comparison-only quantity normalization; never modify approved text.
+
+    Chinese quantities need a following measurement/classifier, and ambiguous
+    Vietnamese ba/năm need a quantity context. Names such as 张三 stay intact.
     """
     text = _normalize(text)
+    text = re.sub(r"([\d零〇一二三四五六七八九两兩十百千万萬]+)[点點][钟鐘]", r"\1小时", text)
     digits = {char: value for value, char in enumerate("零一二三四五六七八九")}
     digits.update({"〇": 0, "两": 2, "兩": 2})
     scales = {"十": 10, "百": 100, "千": 1000, "万": 10000, "萬": 10000}
@@ -241,7 +314,8 @@ def _numeric_text(text: str) -> str:
                 current = 0
         return str(total + section + current)
 
-    return re.sub(r"(?<![\d零〇一二三四五六七八九两兩十百千万萬])[零〇一二三四五六七八九两兩十百千万萬]+?(?=\s*(?:岁|歲|歳|年|个|個|公斤|千克|克|公里|千米|米|升|秒|分钟|小時|小时|天|元|块|塊|%))", convert, text)
+    text = re.sub(r"(?<![\d零〇一二三四五六七八九两兩十百千万萬])[零〇一二三四五六七八九两兩十百千万萬]+?(?=\s*(?:岁|歲|歳|年|个|個|台|只|瓶|本|支|件|位|名|条|條|张|張|次|份|杯|碗|套|座|架|盒|枚|颗|顆|棵|辆|輛|公斤|千克|克|公里|千米|米|升|秒|分钟|小時|小时|天|元|块|塊|%))", convert, text)
+    return _vi_numeric_text(text)
 
 
 def _unit_spans(text: str) -> list[tuple[int, int, str]]:
@@ -252,7 +326,7 @@ def _unit_spans(text: str) -> list[tuple[int, int, str]]:
             # SI suffixes can be attached to a number (5kg); single letters
             # are units only in an explicit numeric measurement.
             if re.fullmatch(r"[a-z]+", alias):
-                for match in re.finditer(r"\d\s*(" + re.escape(alias) + r")(?![a-z])", text):
+                for match in re.finditer(r"\d\s*(" + re.escape(alias) + r")(?![^\W\d_])", text):
                     spans.add((*match.span(1), unit))
                 if len(alias) == 1:
                     continue
@@ -300,21 +374,86 @@ def _polarity_hits(text: str, first: str, second: str) -> set[str]:
     return hits
 
 
+def _translation_question(text: str, language: str | None) -> bool:
+    text = _normalize(text)
+    return "?" in text or (_lexicon_for(language) == "chinese" and bool(
+        re.search(r"[吗嗎](?=\s*(?:[。.!?！]|[嗯啊呃]|$))", text)))
+
+
 def _invariants(before: str, after: str, source_language: str | None,
-                target_language: str | None) -> list[dict]:
+                target_language: str | None, *, translation: bool = False) -> list[dict]:
     issues = []
-    old_neg, new_neg = _negations(before, source_language), _negations(after, target_language)
+    old_question = "?" in _normalize(before)
+    new_question = "?" in _normalize(after)
+    negation_after = after
+    negation_before = before
+    numeric_before, numeric_after = before, after
+    if translation:
+        old_question = _translation_question(before, source_language)
+        new_question = _translation_question(after, target_language)
+        if old_question and _lexicon_for(target_language) == "vietnamese":
+            # Strip ONLY clause-final interrogative particles. Interior 'không'
+            # remains a real negation, including inside negative questions.
+            # Standalone 'Không.' and reported answers are NOT particles.
+            particles = 0
+
+            def strip_particle(match):
+                nonlocal particles
+                prefix = match.group("prefix")
+                if not re.search(r"[^\W\d_]", prefix) or re.search(r"(?:là|trả lời|đáp án)\s*$", prefix):
+                    return match.group()
+                particles += 1
+                return prefix + " "
+
+            particle_pattern = r"(?P<prefix>[^?.!;]+?)\s+không(?:\s+(?:ạ|nhỉ|vậy))?(?=\s*(?:[?.!;]|$))"
+            if _lexicon_for(source_language) == "vietnamese":
+                # Same-language C6 needs symmetric comparison. Otherwise an
+                # interrogative 'không' on the source is counted as a negation
+                # while the identical target particle is removed.
+                negation_before = re.sub(particle_pattern, strip_particle, _normalize(before))
+                particles = 0
+            negation_after = re.sub(particle_pattern, strip_particle, _normalize(after))
+            new_question = new_question or bool(particles)
+        if _lexicon_for(source_language) == "chinese":
+            # 每一个 means each/every, not a cardinal quantity of one.
+            numeric_before, distributive = re.subn(r"每\s*一\s*([个個])", r"每\1", _normalize(before))
+            # 一个一个地 is 'one by one', not two counted objects.
+            numeric_before, sequential = re.subn(r"一\s*[个個]\s*一\s*[个個](?:地)?", " ", numeric_before)
+            if distributive and _lexicon_for(target_language) == "vietnamese":
+                if not any(_contains(after, word) for word in ("mỗi", "từng", "mọi")):
+                    issues.append({"kind": "quantity_lost", "detail": "each/every quantifier lost"})
+                numeric_after = re.sub(r"(?<!\w)((?:mỗi|từng)\s+)một(?!\w)", r"\1", _normalize(after))
+            if sequential and _lexicon_for(target_language) == "vietnamese":
+                if not any(_contains(after, word) for word in ("từng", "mỗi", "lần lượt", "một một")):
+                    issues.append({"kind": "quantity_lost", "detail": "one-by-one quantifier lost"})
+                # The post-noun 'một' in 'từng cái một' is distributive, even
+                # without punctuation before the next clause. Strip only this
+                # grammatical slot, not other cardinals/measurements in the cue.
+                numeric_after = re.sub(
+                    r"(?<!\w)((?:từng|mỗi)\s+(?:(?!(?:không|một|hai|ba|bốn|năm|sáu|bảy|tám|chín|mười)\b)[^\W\d_]+\s+){1,4})một(?!\w)",
+                    r"\1", _normalize(numeric_after),
+                )
+        # C6 compares explicit source classifiers with an indefinite article
+        # ('一个博主' -> 'một blogger'). C7 may still drop a non-quantitative
+        # article such as 'một câu rất dài'; actual count/measurement contexts
+        # remain guarded by the common normalizer.
+        if _lexicon_for(source_language) == "vietnamese":
+            numeric_before = _vi_numeric_text(_normalize(numeric_before), indefinite=True)
+        if _lexicon_for(target_language) == "vietnamese":
+            numeric_after = _vi_numeric_text(_normalize(numeric_after), indefinite=True)
+    old_neg, new_neg = _negations(negation_before, source_language), _negations(negation_after, target_language)
     if old_neg != new_neg:
         issues.append({"kind": "negation_lost" if old_neg > new_neg else "negation_added",
                        "detail": f"negation count changed: {old_neg} -> {new_neg}"})
-    if _numbers(before) != _numbers(after):
+    if _numbers(numeric_before) != _numbers(numeric_after):
         issues.append({"kind": "quantity_lost", "detail": "numeric values/counts changed"})
-    if _units(before) != _units(after) or _measurements(before) != _measurements(after):
+    if _units(numeric_before) != _units(numeric_after) or _measurements(numeric_before) != _measurements(numeric_after):
         issues.append({"kind": "unit_lost", "detail": "measurement units or numeric/unit bindings changed"})
     # Punctuation carries the speaker's intent. A question or exclamation must
     # not turn into a flat assertion during translation/compression.
-    for mark, kind in (("?", "question_changed"), ("!", "exclamation_changed")):
-        if bool(mark in _normalize(before)) != bool(mark in _normalize(after)):
+    for old, new, kind in ((old_question, new_question, "question_changed"),
+                          ("!" in _normalize(before), "!" in _normalize(after), "exclamation_changed")):
+        if old != new:
             issues.append({"kind": kind, "detail": "source speech act changed"})
     return issues
 
@@ -349,7 +488,7 @@ def check_translation_meaning(before: str, after: str, source_language: str | No
                               target_language: str | None, *, glossary: dict[str, str],
                               protected_terms: Iterable[str] = ()) -> list[dict]:
     """C6 cross-language checks; do not compare literal source/target wording."""
-    issues = _invariants(before, after, source_language, target_language)
+    issues = _invariants(before, after, source_language, target_language, translation=True)
     remaining = untranslated_han(after, target_language, allowed=[*protected_terms, *glossary.values()])
     if remaining:
         issues.append({"kind": "unlocalized_text", "tokens": remaining, "detail": "Vietnamese captions/speech still contain untranslated Han text"})
