@@ -84,3 +84,31 @@ def test_model_added_question_is_still_rejected():
         )
     }
     assert "question_changed" in kinds
+
+
+@pytest.mark.parametrize(
+    "source,target",
+    [
+        ("你現在就自拍", "Bây giờ bạn hãy tự chụp 1 tấm ảnh"),
+        ("你是個月亮下巴 都下巴", "Bạn là 1 cái cằm mặt trăng, cằm dài"),
+        ("其實是最正的一個和面", "thì thật ra là 1 khuôn mặt hài hòa nhất"),
+    ],
+)
+def test_added_article_count_is_still_rejected(source, target):
+    # The reply invents a numeral the source cue does not carry; the source
+    # side is an indefinite article, so this must remain a quantity change.
+    kinds = {issue["kind"] for issue in check_translation_meaning(source, target, "zh", "vi", glossary={})}
+    assert "quantity_lost" in kinds, (source, target, kinds)
+
+
+@pytest.mark.parametrize(
+    "source,target",
+    [
+        ("持续3个月", "Kéo dài 3 tháng"),
+        ("买了5个苹果", "Mua 5 quả táo"),
+        ("距离是3公里", "Khoảng cách là 3 km"),
+        ("等了两个星期", "Đợi 2 tuần"),
+    ],
+)
+def test_real_counts_and_measurements_still_pass(source, target):
+    assert check_translation_meaning(source, target, "zh", "vi", glossary={}) == []

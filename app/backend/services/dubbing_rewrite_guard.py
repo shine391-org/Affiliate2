@@ -150,7 +150,7 @@ _UNIT_ALIASES = {
     "minute": ("minute", "minutes", "phút", "分钟", "分鐘"),
     "hour": ("hour", "hours", "giờ", "小时", "小時"),
     "day": ("day", "days", "ngày", "天"),
-    "week": ("week", "weeks", "tuần", "星期", "周", "週"),
+    "week": ("week", "weeks", "tuần", "星期", "个星期", "個星期", "周", "週"),
     "month": ("month", "months", "tháng", "个月", "個月", "月"),
     "year": ("year", "years", "năm", "年"),
     "age": ("tuổi", "years old", "year old", "岁", "歲", "歳"),
@@ -304,7 +304,7 @@ def _vi_numeric_text(text: str, *, indefinite: bool = False) -> str:
             value = _vi_number(tokens[:length])
             following = text[match.start() + len(prefix):]
             measured = bool(re.match(r"\s+" + context, following))
-            article = (indefinite and tokens[0] == "một" and bool(
+            article = (indefinite and tokens[0] in {"một", "1"} and bool(
                 re.match(r"\s+(?!số\b)[^\W\d_]", following)))
             unambiguous = length > 1 or article
             if value is not None and (measured or (length == len(tokens) and unambiguous)):
@@ -351,7 +351,10 @@ def _numeric_text(text: str) -> str:
     # A bare classifier with no numeral ('a girl', 'a root of finger') is an
     # indefinite article, which Vietnamese renders as 'một'. Count it so both
     # sides agree instead of reporting the target's article as a lost number.
-    text = re.sub(r"(?<![\d零〇一二三四五六七八九两兩十百千万萬])(?<![各每這这那哪兒那個这个這個幾几數数好])([个個隻根首])", r"1\1", text)
+    # 个 that already belongs to a duration alias (個月/個星期) is a unit, not
+    # an article, so it must not be turned into a count.
+    text = re.sub(r"(?<![\d零〇一二三四五六七八九两兩十百千万萬])(?<![各每這这那哪兒那個这个這個幾几數数好])(个|個)(?![月周週天年秒分刻小時时])", r"1\1", text)
+    text = re.sub(r"(?<![\d零〇一二三四五六七八九两兩十百千万萬])(?<![各每這这那哪兒那個这个這個幾几數数好])([隻根首])", r"1\1", text)
     # A numeral standing alone in a spoken clause is a counted value even
     # without a classifier (人中一 下巴二). Lexicalised compounds such as
     # 一起/一下 are not followed by a clause boundary and stay untouched.
@@ -463,6 +466,9 @@ def _unit_spans(text: str) -> list[tuple[int, int, str]]:
                     before = re.search(r"\d\s*$", text[:match.start()])
                     if alias == "đồng" and re.match(r"\s*tử", text[match.end():]):
                         # đồng tử is the pupil, not currency.
+                        continue
+                    if alias == "月" and re.match(r"亮", text[match.end():]):
+                        # 月亮 is the moon, not a month count.
                         continue
                     ordinal_unit = unit in {"day", "week", "month", "year"} and (
                         re.search(_ORDINAL_MARKER + r"\s*$", text[:match.start()])
