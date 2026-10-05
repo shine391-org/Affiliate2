@@ -303,6 +303,9 @@ def _vi_numeric_text(text: str, *, indefinite: bool = False) -> str:
     # is the indefinite article ('một câu rất dài'), not a counted object.
     plain_count = "(?:" + "|".join(_phrase_pattern(alias) for alias in sorted(
         "bài câu chữ từ đoạn điểm ví dụ cách việc hình".split(), key=len, reverse=True)) + ")"
+    # The model also writes that article with a digit ('1 bài hát'); digits are
+    # not number tokens, so strip the digit form here too.
+    text = re.sub(r"(?<!\w)1(?=\s+" + plain_count + r")", " ", text)
 
     def convert(match):
         tokens = match.group().split()
@@ -315,8 +318,10 @@ def _vi_numeric_text(text: str, *, indefinite: bool = False) -> str:
                     and tokens[0] in {"một", "1"}
                     and re.match(r"\s+" + plain_count, following)):
                 # 'một câu rất dài' is 'a very long sentence' in both C6 and
-                # C7; only 'ba câu' and above are counted objects.
-                return match.group()
+                # C7, and the model writes that article as '1 câu' too, so
+                # both spellings drop the numeral. Only 'ba câu' and above
+                # are counted objects.
+                return " " + match.group()[len(tokens[0]):].lstrip()
             article = (indefinite and tokens[0] in {"một", "1"} and bool(
                 re.match(r"\s+(?!số\b)[^\W\d_]", following)))
             unambiguous = length > 1 or article

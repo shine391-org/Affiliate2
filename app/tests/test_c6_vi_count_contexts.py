@@ -42,7 +42,8 @@ def test_degree_quantifier_is_not_a_cardinal(source, target):
     "source,target,expected_kind",
     [
         ("三件事", "hai việc", "quantity_lost"),
-        ("三个例子", "ba cách và 1 ví dụ", "quantity_lost"),
+        ("三个例子", "hai ví dụ", "quantity_lost"),
+        ("每个视频有三个步骤", "mỗi video có 4 bước", "quantity_lost"),
         ("持续3个月", "Kéo dài 1 số tháng", "quantity_lost"),
         ("三张照片", "hai tấm ảnh", "quantity_lost"),
     ],
