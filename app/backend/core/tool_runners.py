@@ -2251,6 +2251,28 @@ async def run_tool_translate(
         )
         cancelled = "cancel" in error_name
         deterministic = any(marker in message for marker in deterministic_markers)
+        if stage in {"semantic", "translation"}:
+            # C6 wraps exhausted routes in RuntimeError. Inspect the original
+            # provider status too; retrying cannot repair credentials/config.
+            ai_config_markers = (
+                "invalid model", "model does not exist", "model_not_found",
+                "unknown ai connection", "unsupported ai provider",
+                "not logged in", "login expired", "token expired",
+            )
+            cause = e
+            seen_causes = set()
+            while cause is not None and id(cause) not in seen_causes:
+                seen_causes.add(id(cause))
+                status = getattr(cause, "status_code", None) or getattr(cause, "code", None)
+                if str(status) in {"400", "401", "403", "404", "422"} or any(
+                    marker in str(cause).lower()
+                    for marker in (*deterministic_markers, *ai_config_markers)
+                ):
+                    deterministic = True
+                    break
+                cause = cause.__cause__ or (
+                    None if cause.__suppress_context__ else cause.__context__
+                )
         if stage == "dubbing":
             from backend.services.tts_service import retryable_tts_error
             deterministic = deterministic or not retryable_tts_error(e)
