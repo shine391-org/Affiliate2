@@ -288,14 +288,21 @@ def _vi_number(words: list[str]) -> int | None:
 def _vi_numeric_text(text: str, *, indefinite: bool = False) -> str:
     # Degree/indefinite expressions have no cardinal value. Do not erase
     # 'một' before arbitrary nouns or a following real measurement.
-    text = re.sub(r"(?<!\w)một\s+(?:chút|tí|ít)(?!\w)", " ", text)
+    text = re.sub(r"(?<!\w)(?:một|1)\s+(?:chút|tí|ít|số)(?!\w)", " ", text)
     words = "không một mốt hai ba bốn tư năm lăm sáu bảy tám chín mười mươi trăm linh lẻ nghìn ngàn triệu tỷ tỉ"
     token = "(?:" + "|".join(words.split()) + ")"
     # Measurement aliases and count classifiers distinguish quantities from
     # homographs ('chín chắn', 'tám chuyện') and names ('Anh Hai').
     contexts = {alias for aliases in _UNIT_ALIASES.values() for alias in aliases}
-    contexts.update("cái chiếc con người lần phần bộ cuốn quyển tấm máy chai quả ly cốc hộp bức bước chương mục tập kỳ trang vòng loạt".split())
+    contexts.update("cái chiếc con người lần phần bộ cuốn quyển tấm máy chai quả ly cốc hộp"
+                    " bức bước chương mục tập kỳ trang vòng loạt"
+                    # Counted nouns whose classifier Vietnamese spells out.
+                    " bài câu chữ từ đoạn điểm ví dụ cách việc hình con số".split())
     context = "(?:" + "|".join(_phrase_pattern(alias) for alias in sorted(contexts, key=len, reverse=True)) + ")"
+    # Nouns that take a plain count ('ba câu hỏi'). A leading 'một'/'1' here
+    # is the indefinite article ('một câu rất dài'), not a counted object.
+    plain_count = "(?:" + "|".join(_phrase_pattern(alias) for alias in sorted(
+        "bài câu chữ từ đoạn điểm ví dụ cách việc hình".split(), key=len, reverse=True)) + ")"
 
     def convert(match):
         tokens = match.group().split()
@@ -304,6 +311,12 @@ def _vi_numeric_text(text: str, *, indefinite: bool = False) -> str:
             value = _vi_number(tokens[:length])
             following = text[match.start() + len(prefix):]
             measured = bool(re.match(r"\s+" + context, following))
+            if (length == 1 and length == len(tokens)
+                    and tokens[0] in {"một", "1"}
+                    and re.match(r"\s+" + plain_count, following)):
+                # 'một câu rất dài' is 'a very long sentence' in both C6 and
+                # C7; only 'ba câu' and above are counted objects.
+                return match.group()
             article = (indefinite and tokens[0] in {"một", "1"} and bool(
                 re.match(r"\s+(?!số\b)[^\W\d_]", following)))
             unambiguous = length > 1 or article
@@ -347,14 +360,22 @@ def _numeric_text(text: str) -> str:
     # A superlative numeral ('最正的一個') is an article, not a counted object,
     # so it is removed before any classifier rule can turn it into a number.
     text = re.sub(r"(?<=[最很极極])[^，。！？；\s]{0,4}一[个個]?", " ", text)
-    text = re.sub(r"(?<![\d零〇一二三四五六七八九两兩十百千万萬])" + _ZH_NUMBER + r"?(?=\s*(?:岁|歲|歳|系列|期|章|节|節|集|步|页|頁|轮|輪|年|月|周|週|个|個|台|只|瓶|本|支|件|位|名|条|條|张|張|次|份|杯|碗|套|座|架|盒|枚|颗|顆|棵|辆|輛|根|隻|只|指|首|度|公斤|千克|克|公里|千米|米|升|秒|分钟|分鐘|小時|小时|天|元|块|塊|%))", lambda m: _integer_text(m.group()), text)
+    # 一首/一篇/一首歌 is 'a song/article', the indefinite article Vietnamese
+    # renders as 'một bài'. Only 二手 and above are counted objects, and an
+    # explicit 'only/exactly' marker forces the counted reading.
+    text = re.sub(r"(?<!只有)(?<!一共)(?<!恰好)(?<!正好)(?<!零)(?<![零〇二两兩三四五六七八九十百千万萬])"
+                  r"一(?:首|篇|首歌|篇兒|本首)", " ", text)
+    text = re.sub(r"(?<![\d零〇一二三四五六七八九两兩十百千万萬])" + _ZH_NUMBER + r"?(?=\s*(?:岁|歲|歳|系列|期|章|节|節|集|步|页|頁|轮|輪|年|月|周|週|个|個|台|只|瓶|本|支|件|位|名|条|條|张|張|次|份|杯|碗|套|座|架|盒|枚|颗|顆|棵|辆|輛|篇|根|隻|只|指|首|度|公斤|千克|克|公里|千米|米|升|秒|分钟|分鐘|小時|小时|天|元|块|塊|%))", lambda m: _integer_text(m.group()), text)
     # A bare classifier with no numeral ('a girl', 'a root of finger') is an
     # indefinite article, which Vietnamese renders as 'một'. Count it so both
     # sides agree instead of reporting the target's article as a lost number.
     # 个 that already belongs to a duration alias (個月/個星期) is a unit, not
     # an article, so it must not be turned into a count.
     text = re.sub(r"(?<![\d零〇一二三四五六七八九两兩十百千万萬])(?<![各每這这那哪兒那個这个這個幾几數数好])(个|個)(?![月周週天年秒分刻小時时])", r"1\1", text)
-    text = re.sub(r"(?<![\d零〇一二三四五六七八九两兩十百千万萬])(?<![各每這这那哪兒那個这个這個幾几數数好])([隻根首])", r"1\1", text)
+    # 首 in 首歌/詩歌 is a lexical compound, not a bare classifier.
+    text = re.sub(r"(?<![\d零〇一二三四五六七八九两兩十百千万萬])(?<![各每這这那哪兒那個这个這個幾几數数好])(?<![歌詩诗詞词樂乐])"
+                  r"([隻根])", r"1\1", text)
+    text = re.sub(r"(?<![\d零〇一二三四五六七八九两兩十百千万萬])(?<![各每這这那哪兒那個这个這個幾几數数好])(?<![歌詩诗詞词樂乐])首", "1首", text)
     # A numeral standing alone in a spoken clause is a counted value even
     # without a classifier (人中一 下巴二). Lexicalised compounds such as
     # 一起/一下 are not followed by a clause boundary and stay untouched.
@@ -369,7 +390,7 @@ _ZH_NUMBER = r"[零〇一二三四五六七八九两兩十百千万萬]+"
 # unit when a quantity is actually present.
 _AMBIGUOUS_UNITS = frozenset({"đồng", "năm", "gam", "độ", "day", "giờ", "tuổi"})
 _VI_NUMBER_WORDS = "không|một|mốt|hai|ba|bốn|tư|năm|lăm|sáu|bảy|tám|chín|mười|mươi|trăm|linh|lẻ|nghìn|ngàn|triệu|tỷ|tỉ"
-_ZH_CLASSIFIER = r"(?:个|個|次|期|章|节|節|集|步|页|頁|轮|輪|年|月|天|周|週|台|只|瓶|本|支|件|位|名|条|條|张|張|份|杯|碗|套|座|架|盒|枚|颗|顆|棵|辆|輛)"
+_ZH_CLASSIFIER = r"(?:个|個|次|期|章|节|節|集|步|页|頁|轮|輪|年|月|天|周|週|台|只|瓶|本|支|件|位|名|条|條|张|張|份|杯|碗|套|座|架|盒|枚|颗|顆|棵|辆|輛|篇)"
 _ORDINAL_MARKER = "\ue000"
 
 
