@@ -72,3 +72,15 @@ def test_recorded_pairs_still_reject_when_a_real_invariant_breaks():
     broken = row["target"].replace("Tôi không biết", "Tôi biết")
     kinds = {issue["kind"] for issue in check_translation_meaning(row["source"], broken, "zh", "vi", glossary={})}
     assert "negation_lost" in kinds
+
+
+def test_model_added_question_is_still_rejected():
+    # The reply appends a question the source cue does not contain, so the
+    # speech act really did change and the guard must keep rejecting it.
+    kinds = {
+        issue["kind"]
+        for issue in check_translation_meaning(
+            "你的兩個瞳孔的內側", "phía trong 2 đồng tử của bạn không", "zh", "vi", glossary={}
+        )
+    }
+    assert "question_changed" in kinds

@@ -344,14 +344,18 @@ def _numeric_text(text: str) -> str:
     text, _ = _ordinal_text(text, "chinese")
     text, _ = _ordinal_text(text, "vietnamese")
     text, _ = _ordinal_text(text, "english")
+    # A superlative numeral ('最正的一個') is an article, not a counted object,
+    # so it is removed before any classifier rule can turn it into a number.
+    text = re.sub(r"(?<=[最很极極])[^，。！？；\s]{0,4}一[个個]?", " ", text)
     text = re.sub(r"(?<![\d零〇一二三四五六七八九两兩十百千万萬])" + _ZH_NUMBER + r"?(?=\s*(?:岁|歲|歳|系列|期|章|节|節|集|步|页|頁|轮|輪|年|月|周|週|个|個|台|只|瓶|本|支|件|位|名|条|條|张|張|次|份|杯|碗|套|座|架|盒|枚|颗|顆|棵|辆|輛|根|隻|只|指|首|度|公斤|千克|克|公里|千米|米|升|秒|分钟|分鐘|小時|小时|天|元|块|塊|%))", lambda m: _integer_text(m.group()), text)
     # A bare classifier with no numeral ('a girl', 'a root of finger') is an
     # indefinite article, which Vietnamese renders as 'một'. Count it so both
     # sides agree instead of reporting the target's article as a lost number.
-    text = re.sub(r"(?<![\d零〇一二三四五六七八九两兩十百千万萬])(?<![各每這这那哪哪兒那個这个這個])([个個隻根首])", r"1\1", text)
-    # In a superlative the numeral is an article ('the most upright face'),
-    # which Vietnamese normally omits; it is not a countable object.
-    text = re.sub(r"(?<=[最很极極])[^，。！？；\s]{0,4}一([个個])", r" \1", text)
+    text = re.sub(r"(?<![\d零〇一二三四五六七八九两兩十百千万萬])(?<![各每這这那哪兒那個这个這個幾几數数好])([个個隻根首])", r"1\1", text)
+    # A numeral standing alone in a spoken clause is a counted value even
+    # without a classifier (人中一 下巴二). Lexicalised compounds such as
+    # 一起/一下 are not followed by a clause boundary and stay untouched.
+    text = re.sub(r"(?<![第每])(?<=[\u3400-\u9fff])(" + _ZH_NUMBER + r")(?=\s|$)", lambda m: _integer_text(m.group()), text)
     return _vi_numeric_text(text)
 
 
@@ -520,6 +524,9 @@ def _translation_question(text: str, language: str | None) -> bool:
                     r"|会不会|會不會|要不要|行不行|对不对|對不對", text)
        # Tag questions are anchored at the end of the cue.
        or re.search(r"(?:对吧|對吧|好吧|是吗|对吗|對嗎|行吧|可以吧|对不对|對不對)(?=$|[\s，,。.!?！])", text)
+       # A clause-final interrogative word is a question in itself. Spoken ASR
+       # drops the closing punctuation the 吗 rule would otherwise need.
+       or re.search(r"(?:哪里|哪裡|哪儿|哪兒|哪|怎么|怎麼|为什么|為什麼|多少|几点|幾點|谁|誰|何时|何時)(?=$|[\s，,。.!?！])", text)
         # ASR often omits the comma after a leading discourse question.
         # Require a question verb and a following subject, not any internal
         # 吗 (for example 吗啡, morphine).
