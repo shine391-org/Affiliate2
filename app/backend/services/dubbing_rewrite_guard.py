@@ -289,7 +289,7 @@ def _vi_numeric_text(text: str, *, indefinite: bool = False) -> str:
     # Measurement aliases and count classifiers distinguish quantities from
     # homographs ('chín chắn', 'tám chuyện') and names ('Anh Hai').
     contexts = {alias for aliases in _UNIT_ALIASES.values() for alias in aliases}
-    contexts.update("cái chiếc con người lần phần bộ cuốn quyển tấm máy chai quả ly cốc hộp bức".split())
+    contexts.update("cái chiếc con người lần phần bộ cuốn quyển tấm máy chai quả ly cốc hộp bức bước chương mục tập kỳ trang vòng loạt".split())
     context = "(?:" + "|".join(_phrase_pattern(alias) for alias in sorted(contexts, key=len, reverse=True)) + ")"
 
     def convert(match):
@@ -339,7 +339,7 @@ def _numeric_text(text: str) -> str:
     text, _ = _ordinal_text(text, "chinese")
     text, _ = _ordinal_text(text, "vietnamese")
     text, _ = _ordinal_text(text, "english")
-    text = re.sub(r"(?<![\d零〇一二三四五六七八九两兩十百千万萬])" + _ZH_NUMBER + r"?(?=\s*(?:岁|歲|歳|年|月|周|週|个|個|台|只|瓶|本|支|件|位|名|条|條|张|張|次|份|杯|碗|套|座|架|盒|枚|颗|顆|棵|辆|輛|公斤|千克|克|公里|千米|米|升|秒|分钟|小時|小时|天|元|块|塊|%))", lambda m: _integer_text(m.group()), text)
+    text = re.sub(r"(?<![\d零〇一二三四五六七八九两兩十百千万萬])" + _ZH_NUMBER + r"?(?=\s*(?:岁|歲|歳|系列|期|章|节|節|集|步|页|頁|轮|輪|年|月|周|週|个|個|台|只|瓶|本|支|件|位|名|条|條|张|張|次|份|杯|碗|套|座|架|盒|枚|颗|顆|棵|辆|輛|公斤|千克|克|公里|千米|米|升|秒|分钟|小時|小时|天|元|块|塊|%))", lambda m: _integer_text(m.group()), text)
     return _vi_numeric_text(text)
 
 
@@ -488,7 +488,11 @@ def _translation_question(text: str, language: str | None) -> bool:
         _, interrogative = _vi_question_text(text)
         return "?" in text or interrogative
     return "?" in text or (_lexicon_for(language) == "chinese" and bool(
-        re.search(r"[吗嗎](?=\s*(?:[。，,;；。.!?！]|[嗯啊呃]|$))", text)))
+        re.search(r"[吗嗎](?=\s*(?:[。，,;；。.!?！]|[嗯啊呃]|$))", text)
+        # ASR often omits the comma after a leading discourse question.
+        # Require a question verb and a following subject, not any internal
+        # 吗 (for example 吗啡, morphine).
+        or re.search(r"(?:^|[。，,;；.!?！])(?:你(?:们|們)?不?|不)?(?:知道|明白|懂)[吗嗎](?=\s*[我你他她它这這那])", text)))
 
 
 def _vi_question_text(text: str) -> tuple[str, bool]:
@@ -547,10 +551,18 @@ def _invariants(before: str, after: str, source_language: str | None,
                 negation_after = re.sub(
                     r"(?<!\w)(?:lúc nào\s+(?:không|chẳng)\s+hay|(?:không(?:\s+hề)?|chẳng)\s+hay biết)(?!\w)",
                     " ", _normalize(negation_after), count=1)
+            pervasive_count = len(re.findall(r"[无無]孔不入", before))
+            if pervasive_count:
+                # 'No place where it cannot enter' is the positive idiom,
+                # not two extra proposition-level negatives. Remove only
+                # that complete universal construction; outer negatives stay.
+                negation_after = re.sub(
+                    r"(?<!\w)(?:không|chẳng)\s+(?:(?:chỗ|nơi)\s+nào|đâu)\s+(?:mà\s+)?(?:không|chẳng)(?!\w)",
+                    " ", _normalize(negation_after), count=pervasive_count)
         if _lexicon_for(source_language) == "chinese":
             # 每一个 means each/every, not a cardinal quantity of one.
             numeric_before, distributive = re.subn(r"每\s*一\s*([个個])", r"每\1", _normalize(before))
-            if re.search(r"一[劳勞]永逸", numeric_before) and re.search(r"dứt điểm|triệt để|mãi mãi|cho xong", _normalize(after)):
+            if re.search(r"一[劳勞]永逸", numeric_before) and re.search(r"dứt điểm|triệt để|mãi mãi|cho xong|một lần (?:là )?xong", _normalize(after)):
                 # The idiom is once-for-all, not one counted object. Only its
                 # Vietnamese lexical 'một lần' slot is removed, not other counts.
                 numeric_after = re.sub(r"(?<!\w)một\s+lần(?!\w)", " ", _normalize(after), count=1)
