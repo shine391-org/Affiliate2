@@ -318,8 +318,11 @@ async def test_dubbing_hard_overflow_auto_repair_off_fails_without_retry(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("message", [
+    "invalid voice: selected voice is not configured", "invalid API key", "invalid model",
+])
 async def test_dubbing_deterministic_error_does_not_spend_the_auto_repair(
-    storage, monkeypatch, tmp_path,
+    storage, monkeypatch, tmp_path, message,
 ):
     """A non-retryable dubbing error fails immediately, leaving 0 attempts spent."""
     run = _make_run("dub-deterministic", storage,
@@ -332,7 +335,7 @@ async def test_dubbing_deterministic_error_does_not_spend_the_auto_repair(
     async def synth(localized, **kwargs):
         synth_calls.append(True)
         # Non-retryable TTS configuration error (retryable_tts_error -> False).
-        raise RuntimeError("invalid voice: selected voice is not configured")
+        raise RuntimeError(message)
 
     _patch_leaves(monkeypatch, tmp_path, synth=synth)
     await _run(run.job_id, run)
