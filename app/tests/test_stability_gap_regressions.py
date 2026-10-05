@@ -446,301 +446,135 @@ async def test_fallback_provider_missing_credentials_fails_closed(tmp_path):
             )
 
 
+class _CheckpointAI:
+    provider = AIProvider.COMPATIBLE
+    connection_name = "compatible"
+    model = "gemini-2.5-flash"
+    base_url = None
+    max_retries = 0
+
+    def __init__(self):
+        self.calls = []
+        self.prefix = "Dịch"
+        self.invalid_ids = set()
+        self.cancel_on = None
+
+    async def chat(self, messages, **kwargs):
+        raw = messages[0]["content"].split("SEGMENTS:\n", 1)[1].split("\n\nReturn ONLY", 1)[0]
+        items = json.loads(raw)
+        self.calls.append(items[0]["id"])
+        if self.cancel_on and len(self.calls) == self.cancel_on:
+            raise asyncio.CancelledError()
+        return json.dumps([
+            {"id": item["id"], "text": "Broken" if item["id"] in self.invalid_ids
+             else f"{self.prefix} {item['id'][1:]}"}
+            for item in items
+        ], ensure_ascii=False)
+
+
+def _checkpoint_transcript(count):
+    return LocalizationTranscript(language="en", segments=[
+        LocalizationSegment(id=f"s{i}", source_text=f"Sentence {i}",
+                            source_start_ms=i * 1000, source_end_ms=(i + 1) * 1000)
+        for i in range(count)
+    ])
+
+
 @pytest.mark.asyncio
 async def test_checkpoint_invalidated_on_config_change(tmp_path, monkeypatch):
-    trans_dir = tmp_path / "translation"
-    trans_dir.mkdir(parents=True)
-    segments = [LocalizationSegment(id="s0", source_text="Sentence 0", source_start_ms=0, source_end_ms=1000)]
-    transcript = LocalizationTranscript(text="Sentence 0", language="en", segments=segments)
-    profile = LocalizationProfile(id="p1", name="Profile 1", translation_preset="natural_vietnamese")
-
-    checkpoint_file = trans_dir / "checkpoint.json"
-    checkpoint_data = {
-        "semantic_hash": "different-hash",
-        "target_language": "vi",
-        "routes": [{
-            "connection_id": "compatible",
-            "provider": "compatible",
-            "model": "gemini-2.5-flash",
-            "base_url_override": "",
-        }],
-        "preset": "natural_vietnamese",
-        "instructions": "",
-        "guardrails": profile.translation_guardrails.strip(),
-        "glossary_hash": ls.hashlib.sha256(b"{}").hexdigest()[:16],
-        "batches": {
-            "0": {
-                "texts": ["Stale translation"],
-                "failed": [],
-            }
-        },
-        "route_state": {
-            "sticky_index": 0,
-            "failure_chain": [],
-            "attempt_count": 1,
-            "success_count": 1,
-        },
-    }
-    checkpoint_file.write_text(json.dumps(checkpoint_data, ensure_ascii=False), encoding="utf-8")
-
-    called_batches = []
-    async def mock_batch_translate(ai, batch, **kwargs):
-        called_batches.append(batch[0].id)
-        return ["Fresh translation"], set()
-
-    with patch.object(ls, "_translate_batch_resilient", side_effect=mock_batch_translate):
-        mock_ai = SimpleNamespace(
-            connection_name="compatible",
-            provider=AIProvider.COMPATIBLE,
-            model="gemini-2.5-flash",
-            base_url=None,
-        )
-        with patch.object(ls, "_profile_ai_route_clients_compat", return_value=[mock_ai]):
-            out = await ls.translate_transcript(
-                transcript,
-                target_language="vi",
-                profile=profile,
-                user_settings=SimpleNamespace(ai_provider="compatible"),
-                for_dub=False,
-                checkpoint_dir=trans_dir,
-            )
-
-    assert "s0" in called_batches, "Incompatible checkpoint must be discarded and retranslated!"
-    assert out.segments[0].translated_text == "Fresh translation"
+    ai = _CheckpointAI()
+    monkeypatch.setattr(ls, "_profile_ai_route_clients_compat", lambda *args: [ai])
+    transcript = _checkpoint_transcript(1)
+    profile = LocalizationProfile(id="p1", name="Profile 1")
+    args = dict(target_language="vi", user_settings=None, for_dub=False, checkpoint_dir=tmp_path)
+    await ls.translate_transcript(transcript, profile=profile, **args)
+    ai.prefix = "Fresh translation"
+    profile = profile.model_copy(update={"translation_instructions": "New instructions"})
+    out = await ls.translate_transcript(transcript, profile=profile, **args)
+    assert ai.calls == ["s0", "s0"]
+    assert out.segments[0].translated_text == "Fresh translation 0"
 
 
 @pytest.mark.asyncio
 async def test_checkpoint_records_only_successful_batches_and_retries_failed_batch(tmp_path, monkeypatch):
-    trans_dir = tmp_path / "translation"
-    transcript = LocalizationTranscript(
-        text="Sentence 0 Sentence 1",
-        language="en",
-        segments=[
-            LocalizationSegment(id="s0", source_text="Sentence 0", source_start_ms=0, source_end_ms=1000),
-            LocalizationSegment(id="s1", source_text="Sentence 1", source_start_ms=1000, source_end_ms=2000),
-        ],
-    )
-    profile = LocalizationProfile(id="p1", name="Profile 1", qc_profile="standard")
-    mock_ai = SimpleNamespace(
-        provider=AIProvider.COMPATIBLE,
-        model="gemini-2.5-flash",
-        base_url="https://primary.example/v1",
-    )
+    ai = _CheckpointAI()
+    ai.invalid_ids = {"s1"}
     monkeypatch.setattr(ls, "_TRANSLATION_BATCH_SIZE", 1)
-    monkeypatch.setattr(ls, "_profile_ai_client", lambda *args: mock_ai)
-
-    first_calls = []
-
-    async def first_attempt(ai, batch, **kwargs):
-        first_calls.append(batch[0].id)
-        if batch[0].id == "s1":
-            return [batch[0].source_text], {0}
-        return ["Dịch 0"], set()
-
-    monkeypatch.setattr(ls, "_translate_batch_resilient", first_attempt)
-    await ls.translate_transcript(
-        transcript,
-        target_language="vi",
-        profile=profile,
-        user_settings=SimpleNamespace(ai_provider="compatible"),
-        for_dub=False,
-        checkpoint_dir=trans_dir,
-    )
-
-    checkpoint = json.loads((trans_dir / "checkpoint.json").read_text(encoding="utf-8"))
-    assert first_calls == ["s0", "s1"]
-    assert set(checkpoint["batches"]) == {"0"}
-
-    retry_calls = []
-
-    async def retry_attempt(ai, batch, **kwargs):
-        retry_calls.append(batch[0].id)
-        return ["Dịch 1"], set()
-
-    monkeypatch.setattr(ls, "_translate_batch_resilient", retry_attempt)
-    retried = await ls.translate_transcript(
-        transcript,
-        target_language="vi",
-        profile=profile,
-        user_settings=SimpleNamespace(ai_provider="compatible"),
-        for_dub=False,
-        checkpoint_dir=trans_dir,
-    )
-
-    assert retry_calls == ["s1"]
-    assert retried.segments[0].translated_text == "Dịch 0"
-    assert retried.segments[1].translated_text == "Dịch 1"
+    monkeypatch.setattr(ls, "_profile_ai_route_clients_compat", lambda *args: [ai])
+    transcript = _checkpoint_transcript(2)
+    profile = LocalizationProfile(id="p1", name="Profile 1", qc_profile="standard")
+    args = dict(target_language="vi", profile=profile, user_settings=None,
+                for_dub=False, checkpoint_dir=tmp_path)
+    first = await ls.translate_transcript(transcript, **args)
+    checkpoint = json.loads((tmp_path / "checkpoint.json").read_text(encoding="utf-8"))
+    assert ai.calls == ["s0", "s1", "s1"]  # One bounded semantic repair.
+    assert first.segments[1].translation_status == "untranslated"
+    assert [item["id"] for item in checkpoint["batches"]["0"]["items"]] == ["s0"]
+    assert checkpoint["batches"]["1"]["items"] == []
+    assert checkpoint["batches"]["1"]["pending_ids"] == ["s1"]
+    ai.calls.clear()
+    ai.invalid_ids.clear()
+    retried = await ls.translate_transcript(transcript, **args)
+    assert ai.calls == ["s1"]
+    assert [seg.translated_text for seg in retried.segments] == ["Dịch 0", "Dịch 1"]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("changed_config", ["profile_base_url_override", "fallback_model"])
 async def test_checkpoint_identity_binds_endpoint_and_fallback_config(tmp_path, monkeypatch, changed_config):
-    trans_dir = tmp_path / "translation"
-    transcript = LocalizationTranscript(
-        text="Sentence 0",
-        language="en",
-        segments=[LocalizationSegment(id="s0", source_text="Sentence 0", source_start_ms=0, source_end_ms=1000)],
-    )
-    profile = LocalizationProfile(
-        id="p1",
-        name="Profile 1",
-        qc_profile="standard",
-        translation_fallback_provider="lmstudio",
-        translation_fallback_model="fallback-a",
-    )
+    ai = _CheckpointAI()
+    profile = LocalizationProfile(id="p1", name="Profile 1", qc_profile="standard",
+                                  translation_fallback_provider="lmstudio",
+                                  translation_fallback_model="fallback-a")
+
     def route_clients(_settings, current_profile, _purpose="translation"):
-        return [
-            SimpleNamespace(
-                connection_name="compatible",
-                provider=AIProvider.COMPATIBLE,
-                model="primary-model",
-                base_url="https://primary-live.example/v1",
-            ),
-            SimpleNamespace(
-                connection_name="lmstudio",
-                provider=AIProvider.COMPATIBLE,
-                model=current_profile.translation_fallback_model,
-                base_url="http://127.0.0.1:1234/v1",
-            ),
-        ]
+        ai.base_url = current_profile.translation_base_url or "https://primary-live.example/v1"
+        return [ai, SimpleNamespace(connection_name="lmstudio", provider=AIProvider.COMPATIBLE,
+                                   model=current_profile.translation_fallback_model,
+                                   base_url="http://127.0.0.1:1234/v1")]
 
     monkeypatch.setattr(ls, "_profile_ai_route_clients_compat", route_clients)
-
-    calls = []
-
-    async def translate(ai, batch, **kwargs):
-        calls.append(batch[0].id)
-        return [f"Dịch {len(calls)}"], set()
-
-    monkeypatch.setattr(ls, "_translate_batch_resilient", translate)
-    await ls.translate_transcript(
-        transcript,
-        target_language="vi",
-        profile=profile,
-        user_settings=SimpleNamespace(ai_provider="compatible"),
-        for_dub=False,
-        checkpoint_dir=trans_dir,
-    )
-    assert calls == ["s0"]
-
+    transcript = _checkpoint_transcript(1)
+    args = dict(target_language="vi", user_settings=None, for_dub=False, checkpoint_dir=tmp_path)
+    await ls.translate_transcript(transcript, profile=profile, **args)
     if changed_config == "profile_base_url_override":
-        profile = profile.model_copy(update={
-            "translation_base_url": "https://profile-pinned-b.example/v1",
-        })
+        profile = profile.model_copy(update={"translation_base_url": "https://profile-pinned-b.example/v1"})
     else:
         profile = profile.model_copy(update={"translation_fallback_model": "fallback-b"})
-
-    await ls.translate_transcript(
-        transcript,
-        target_language="vi",
-        profile=profile,
-        user_settings=SimpleNamespace(ai_provider="compatible"),
-        for_dub=False,
-        checkpoint_dir=trans_dir,
-    )
-
-    assert calls == ["s0", "s0"]
+    await ls.translate_transcript(transcript, profile=profile, **args)
+    assert ai.calls == ["s0", "s0"]
 
 
 @pytest.mark.asyncio
 async def test_rerun_preserves_translation_checkpoint_and_skips_finished_batches(tmp_path, monkeypatch):
     storage_root = tmp_path / "storage"
     monkeypatch.setattr(Settings, "STORAGE_ROOT", property(lambda self: storage_root))
-
-    job_dir = storage_root / "localization_jobs" / "job-resilience"
-    trans_dir = job_dir / "translation"
-    trans_dir.mkdir(parents=True)
-
-    # 26 segments with _TRANSLATION_BATCH_SIZE=12 gives:
-    # Batch 0: indices 0..11 (12 items)
-    # Batch 1: indices 12..23 (12 items)
-    # Batch 2: indices 24..25 (2 items)
-    segments = [
-        LocalizationSegment(id=f"s{i}", source_text=f"Sentence {i}", source_start_ms=i*1000, source_end_ms=(i+1)*1000)
-        for i in range(26)
-    ]
-    transcript = LocalizationTranscript(text="All sentences", language="en", segments=segments)
-    profile = LocalizationProfile(id="p1", name="Profile 1", translation_preset="natural_vietnamese")
-
-    # Seed partial checkpoint where batch 0 is completed
-    semantic_sig = ls.hashlib.sha256(
-        json.dumps([{"id": s.id, "text": s.source_text, "start": s.source_start_ms,
-                     "end": s.source_end_ms, "speaker": s.speaker_id, "words": s.source_words}
-                    for s in transcript.segments], sort_keys=True, ensure_ascii=False).encode("utf-8")
-    ).hexdigest()[:16]
+    trans_dir = storage_root / "localization_jobs" / "job-resilience" / "translation"
+    ai = _CheckpointAI()
+    ai.cancel_on = 2
+    monkeypatch.setattr(ls, "_profile_ai_route_clients_compat", lambda *args: [ai])
+    transcript = _checkpoint_transcript(26)
+    profile = LocalizationProfile(id="p1", name="Profile 1")
+    args = dict(target_language="vi", profile=profile, user_settings=None,
+                for_dub=False, checkpoint_dir=trans_dir)
+    with pytest.raises(asyncio.CancelledError):
+        await ls.translate_transcript(transcript, **args)
+    assert ai.calls == ["s0", "s12"]
     checkpoint_file = trans_dir / "checkpoint.json"
-    checkpoint_data = {
-        "meaning_guard_version": 3, "source_language": "en", "protected_terms": [],
-        "speaker_genders": {}, "for_dub": False,
-        "semantic_hash": semantic_sig,
-        "target_language": "vi",
-        "routes": [{
-            "connection_id": "compatible",
-            "provider": "compatible",
-            "model": "gemini-2.5-flash",
-            "base_url_override": "",
-        }],
-        "preset": "natural_vietnamese",
-        "instructions": "",
-        "guardrails": profile.translation_guardrails.strip(),
-        "glossary_hash": ls.hashlib.sha256(b"{}").hexdigest()[:16],
-        "batches": {
-            "0": {
-                "items": [{"id": f"s{i}", "text": f"Dịch {i}", "localized_terms": {}} for i in range(12)],
-                "texts": [f"Dịch {i}" for i in range(12)],
-                "failed": [],
-            }
-        },
-        "route_state": {
-            "sticky_index": 0,
-            "failure_chain": [],
-            "attempt_count": 1,
-            "success_count": 1,
-        },
-    }
-    checkpoint_file.write_text(json.dumps(checkpoint_data, ensure_ascii=False), encoding="utf-8")
+    checkpoint = json.loads(checkpoint_file.read_text(encoding="utf-8"))
+    assert len(checkpoint["batches"]["0"]["items"]) == 12
+    assert checkpoint["batches"]["12"]["pending_ids"] == [f"s{i}" for i in range(12, 24)]
     final_tr = trans_dir / "transcript.json"
     final_tr.write_text("{}", encoding="utf-8")
-
     run = lss.LocalizationRun("job-resilience", source_path=str(tmp_path / "src.mp4"))
-    run.invalidate_from(
-        "translation",
-        delete_artifacts=True,
-        preserve_files={"checkpoint.json"},
-    )
-
-    # Verification: final transcript.json deleted, but checkpoint.json preserved!
-    assert not final_tr.exists(), "Final transcript.json should have been deleted!"
-    assert checkpoint_file.exists(), "translation/checkpoint.json must be preserved!"
-
-    # Now run translate_transcript: batch 0 must NOT call AI, batches 1 and 2 should call AI
-    called_batches = []
-    async def mock_batch_translate(ai, batch, **kwargs):
-        called_batches.append(batch[0].id)
-        return [f"Dịch {s.id}" for s in batch], set()
-
-    with patch.object(ls, "_translate_batch_resilient", side_effect=mock_batch_translate):
-        mock_ai = SimpleNamespace(
-            connection_name="compatible",
-            provider=AIProvider.COMPATIBLE,
-            model="gemini-2.5-flash",
-            base_url=None,
-        )
-        with patch.object(ls, "_profile_ai_route_clients_compat", return_value=[mock_ai]):
-            out = await ls.translate_transcript(
-                transcript,
-                target_language="vi",
-                profile=profile,
-                user_settings=SimpleNamespace(ai_provider="compatible"),
-                for_dub=False,
-                checkpoint_dir=trans_dir,
-            )
-
-    assert "s0" not in called_batches, "Batch 0 was in checkpoint and should not be translated again!"
-    assert "s12" in called_batches, "Batch 1 should have been translated"
-    assert "s24" in called_batches, "Batch 2 should have been translated"
-    assert out.segments[0].translated_text == "Dịch 0"
-    assert out.segments[12].translated_text == "Dịch s12"
+    run.invalidate_from("translation", delete_artifacts=True, preserve_files={"checkpoint.json"})
+    assert not final_tr.exists()
+    assert checkpoint_file.exists()
+    ai.calls.clear()
+    ai.cancel_on = None
+    out = await ls.translate_transcript(transcript, **args)
+    assert ai.calls == ["s12", "s24"]
+    assert [seg.translated_text for seg in out.segments] == [f"Dịch {i}" for i in range(26)]
 
 
 # ==============================================================================

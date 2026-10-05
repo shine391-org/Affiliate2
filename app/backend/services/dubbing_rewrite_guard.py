@@ -20,6 +20,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from collections import Counter
+from fractions import Fraction
 from typing import Iterable
 
 # ── Language-scoped lexicons ──────────────────────────────────────────────
@@ -27,7 +28,7 @@ from typing import Iterable
 _NEGATION: dict[str, tuple[str, ...]] = {
     "vietnamese": (
         "không", "chưa", "chẳng", "chả", "đừng", "chưa từng", "không hề", "không có gì cả",
-        "chả", "chẳng hề", "chẳng phải", "đâu có", "chưa bao giờ",
+        "chả", "chẳng hề", "chẳng phải", "đâu có", "chưa bao giờ", "cấm",
     ),
     "english": (
         "not", "no", "never", "none", "nothing", "neither", "nor", "without",
@@ -86,7 +87,7 @@ _NEGATION: dict[str, tuple[str, ...]] = {
     ),
     "chinese": (
         "不", "没", "没有", "无", "非", "未", "别", "莫", "勿", "不是", "不会",
-        "不能", "不要", "没什么",
+        "不能", "不要", "没什么", "禁止", "严禁", "嚴禁", "不许", "不許",
     ),
 }
 
@@ -149,8 +150,8 @@ _UNIT_ALIASES = {
     "minute": ("minute", "minutes", "phút", "分钟", "分鐘"),
     "hour": ("hour", "hours", "giờ", "小时", "小時"),
     "day": ("day", "days", "ngày", "天"),
-    "week": ("week", "weeks", "tuần", "星期"),
-    "month": ("month", "months", "tháng", "个月", "個月"),
+    "week": ("week", "weeks", "tuần", "星期", "周", "週"),
+    "month": ("month", "months", "tháng", "个月", "個月", "月"),
     "year": ("year", "years", "năm", "年"),
     "age": ("tuổi", "years old", "year old", "岁", "歲", "歳"),
     "percent": ("%", "percent", "percentage", "phần trăm", "百分之"),
@@ -203,6 +204,16 @@ def _contains(text: str, phrase: str) -> bool:
 def _negations(text: str, language: str | None) -> int:
     spans = set()
     text = _normalize(text)
+    if _lexicon_for(language) == "chinese":
+        # These lexical words are not clause negators. Mask only their internal
+        # morphemes; a preceding 不是/不要 must remain visible. 不准 is NOT
+        # masked: it is a prohibition, also expressed by Vietnamese 'cấm'.
+        text = re.sub(r"无孔不入|無孔不入|不约而同|不約而同|不知不觉|不知不覺", " ", text)
+    elif _lexicon_for(language) == "french":
+        # ne ... pas/jamais/rien is one grammatical negation. Mask only
+        # the paired prefix within its clause, retaining the negative head.
+        text = re.sub(r"(?<!\w)ne(?!\w)(?=[^.!?;:\n]{0,120}(?<!\w)"
+                      r"(?:pas|jamais|rien|aucun|aucune|personne|ni)(?!\w))", " ", text)
     for term in _NEGATION.get(_lexicon_for(language), ()):
         spans.update(match.span() for match in re.finditer(_phrase_pattern(term), text))
     # A phrase and its constituent marker count as one negation.
@@ -211,7 +222,19 @@ def _negations(text: str, language: str | None) -> int:
 
 
 def _numbers(text: str) -> Counter:
-    return Counter(_NUMBER_RE.findall(_numeric_text(text)))
+    return Counter(_number_value(value) for value in _NUMBER_RE.findall(_numeric_text(text)))
+
+
+def _number_value(value: str) -> str:
+    """Compare exact values, including unreduced fractions and decimals."""
+    # Commas remain literal: without locale context they may be separators
+    # or decimal marks. Never guess their interpretation.
+    if "," in value:
+        return value
+    try:
+        return str(Fraction(value))
+    except (ValueError, ZeroDivisionError):
+        return value
 
 
 def _vi_number(words: list[str]) -> int | None:
@@ -258,6 +281,9 @@ def _vi_number(words: list[str]) -> int | None:
 
 
 def _vi_numeric_text(text: str, *, indefinite: bool = False) -> str:
+    # Degree/indefinite expressions have no cardinal value. Do not erase
+    # 'một' before arbitrary nouns or a following real measurement.
+    text = re.sub(r"(?<!\w)một\s+(?:chút|tí|ít)(?!\w)", " ", text)
     words = "không một mốt hai ba bốn tư năm lăm sáu bảy tám chín mười mươi trăm linh lẻ nghìn ngàn triệu tỷ tỉ"
     token = "(?:" + "|".join(words.split()) + ")"
     # Measurement aliases and count classifiers distinguish quantities from
@@ -294,28 +320,107 @@ def _numeric_text(text: str) -> str:
     """
     text = _normalize(text)
     text = re.sub(r"([\d零〇一二三四五六七八九两兩十百千万萬]+)[点點][钟鐘]", r"\1小时", text)
+    # 一点点 is a degree expression; 一点五 is the decimal 1.5. Only
+    # digit-valued characters after 点 permit decimal normalization.
+    text = re.sub(r"(" + _ZH_NUMBER + r")[点點]([零〇一二三四五六七八九]+)",
+                  lambda m: _integer_text(m.group(1)) + "." + _integer_text(m.group(2)), text)
+    # Chinese puts the denominator first; Vietnamese and slash notation put
+    # the numerator first. Normalize the complete fraction before cardinals.
+    text = re.sub(r"(?<![\d零〇一二三四五六七八九两兩十百千万萬])百分之\s*(" + _ZH_NUMBER + r"|\d+(?:\.\d+)?)",
+                  lambda m: _integer_text(m.group(1)) + "%", text)
+    text = re.sub(r"(" + _ZH_NUMBER + r"|\d+)\s*分之\s*(" + _ZH_NUMBER + r"|\d+)",
+                  lambda m: _integer_text(m.group(2)) + "/" + _integer_text(m.group(1)), text)
+    vi_number = r"(?:\d+|(?:" + _VI_NUMBER_WORDS + r")(?:\s+(?:" + _VI_NUMBER_WORDS + r"))*)"
+    text = re.sub(r"(?<!\w)(" + vi_number + r")\s+phần\s+trăm(?!\w)",
+                  lambda m: _integer_text(m.group(1)) + "%", text)
+    text = re.sub(r"(?<!\w)(" + vi_number + r")\s+phần\s+(" + vi_number + r")(?!\w)",
+                  lambda m: _integer_text(m.group(1)) + "/" + _integer_text(m.group(2)), text)
+    # Ordinal slots must not also masquerade as cardinal quantities.
+    text, _ = _ordinal_text(text, "chinese")
+    text, _ = _ordinal_text(text, "vietnamese")
+    text, _ = _ordinal_text(text, "english")
+    text = re.sub(r"(?<![\d零〇一二三四五六七八九两兩十百千万萬])" + _ZH_NUMBER + r"?(?=\s*(?:岁|歲|歳|年|月|周|週|个|個|台|只|瓶|本|支|件|位|名|条|條|张|張|次|份|杯|碗|套|座|架|盒|枚|颗|顆|棵|辆|輛|公斤|千克|克|公里|千米|米|升|秒|分钟|小時|小时|天|元|块|塊|%))", lambda m: _integer_text(m.group()), text)
+    return _vi_numeric_text(text)
+
+
+_ZH_NUMBER = r"[零〇一二三四五六七八九两兩十百千万萬]+"
+_VI_NUMBER_WORDS = "không|một|mốt|hai|ba|bốn|tư|năm|lăm|sáu|bảy|tám|chín|mười|mươi|trăm|linh|lẻ|nghìn|ngàn|triệu|tỷ|tỉ"
+_ZH_CLASSIFIER = r"(?:个|個|次|期|章|节|節|集|步|页|頁|轮|輪|年|月|天|周|週|台|只|瓶|本|支|件|位|名|条|條|张|張|份|杯|碗|套|座|架|盒|枚|颗|顆|棵|辆|輛)"
+_ORDINAL_MARKER = "\ue000"
+
+
+def _integer_text(token: str) -> str:
+    if re.fullmatch(r"\d+(?:\.\d+)?", token):
+        return token
+    if not re.fullmatch(_ZH_NUMBER, token):
+        if token in {"tư", "mốt", "lăm", "nhất", "đầu tiên"}:
+            return str({"tư": 4, "mốt": 1, "lăm": 5, "nhất": 1, "đầu tiên": 1}[token])
+        value = _vi_number(token.split())
+        return str(value) if value is not None else token
     digits = {char: value for value, char in enumerate("零一二三四五六七八九")}
     digits.update({"〇": 0, "两": 2, "兩": 2})
     scales = {"十": 10, "百": 100, "千": 1000, "万": 10000, "萬": 10000}
+    if not any(char in scales for char in token):
+        return "".join(str(digits[char]) for char in token)
+    total = section = current = 0
+    for char in token:
+        if char in digits:
+            current = digits[char]
+        elif scales[char] == 10000:
+            total += (section + current) * 10000
+            section = current = 0
+        else:
+            section += (current or 1) * scales[char]
+            current = 0
+    return str(total + section + current)
 
-    def convert(match):
-        token = match.group()
-        if not any(char in scales for char in token):
-            return "".join(str(digits[char]) for char in token)
-        total = section = current = 0
-        for char in token:
-            if char in digits:
-                current = digits[char]
-            elif scales[char] == 10000:
-                total += (section + current) * 10000
-                section = current = 0
-            else:
-                section += (current or 1) * scales[char]
-                current = 0
-        return str(total + section + current)
 
-    text = re.sub(r"(?<![\d零〇一二三四五六七八九两兩十百千万萬])[零〇一二三四五六七八九两兩十百千万萬]+?(?=\s*(?:岁|歲|歳|年|个|個|台|只|瓶|本|支|件|位|名|条|條|张|張|次|份|杯|碗|套|座|架|盒|枚|颗|顆|棵|辆|輛|公斤|千克|克|公里|千米|米|升|秒|分钟|小時|小时|天|元|块|塊|%))", convert, text)
-    return _vi_numeric_text(text)
+def _ordinal_text(text: str, language: str | None, *, standalone: bool = True) -> tuple[str, list[str]]:
+    """Extract ordinal slots separately from cardinal values, for comparison."""
+    text = _normalize(text)
+    ordinals = []
+
+    def slot(match):
+        token = match.group(1)
+        english = {"first": "1", "second": "2", "third": "3", "fourth": "4",
+                   "fifth": "5", "sixth": "6", "seventh": "7", "eighth": "8",
+                   "ninth": "9", "tenth": "10"}
+        value = (english.get(token, re.sub(r"(?<=\d)(?:st|nd|rd|th)$", "", _integer_text(token)))
+                 if token else "1" if match.group().endswith("đầu tiên") else "next")
+        # Keep the unit's ordinal context, without counting the rank as a
+        # quantity. Vietnamese 'ngày sau' includes the unit in the match.
+        time_unit = re.match(r"(?:năm|tháng|ngày|tuần)\b", match.group())
+        for unit in ("day", "week", "month", "year"):
+            if any(re.match(r"\s*" + _phrase_pattern(alias), text[match.end():])
+                   or re.search(_phrase_pattern(alias) + r"\s*$", text[:match.start()])
+                   or (time_unit and time_unit.group() == alias)
+                   for alias in _UNIT_ALIASES[unit]):
+                value += ":" + unit
+                break
+        ordinals.append(value)
+        return " " + (time_unit.group() + " " if time_unit else "") + _ORDINAL_MARKER + " "
+
+    if _lexicon_for(language) == "chinese":
+        pattern = (r"第\s*(" + _ZH_NUMBER + r"|\d+)(?=\s*" + _ZH_CLASSIFIER + r")"
+                   r"|下\s*(?:一\s*(?=" + _ZH_CLASSIFIER + r")|(?=[个個次期章节節集步页頁轮輪年月天周週]))|接下[来來]")
+    elif _lexicon_for(language) == "vietnamese":
+        number = r"(?:nhất|\d+|(?:" + _VI_NUMBER_WORDS + r")(?:\s+(?:" + _VI_NUMBER_WORDS + r"))*)"
+        # A standalone 'thứ hai' can be Monday. Require rank context unless
+        # the source already has an ordinal slot; never guess a calendar rank.
+        context = "" if standalone else r"(?:video|lần|kỳ|chương|tập|bước|trang|vòng|mục|phần|đoạn|bài|người|chiếc|cái)\s+"
+        pattern = (r"(?<!\w)" + context + r"(?:thứ\s+(" + number + r")|đầu tiên)(?!\w)"
+                   r"|(?<!\w)" + context + r"(?:tiếp theo|kế tiếp|kế đó|tiếp đến|sau đó)(?!\w)"
+                   r"|(?<!\w)(?:lần|kỳ|chương|tập|bước|trang|vòng|năm|tháng|ngày|tuần)\s+sau(?!\w)")
+    elif _lexicon_for(language) == "english":
+        # 'second' alone can be a unit; 'first aid' is lexical. Require a
+        # ranked/sequential noun rather than suppressing these words globally.
+        noun = r"(?:steps?|chapters?|sections?|episodes?|pages?|rounds?|times?|days?|weeks?|months?|years?|videos?|items?|parts?|stages?|attempts?)"
+        pattern = (r"(?<!\w)(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|\d+(?:st|nd|rd|th))"
+                   r"(?=\s+" + noun + r"\b)|(?<!\w)next(?=\s+" + noun + r"\b)")
+    else:
+        return text, ordinals
+    # A list preserves ordinal order: swapping chapter 2/section 3 must fail.
+    return re.sub(pattern, slot, text), ordinals
 
 
 def _unit_spans(text: str) -> list[tuple[int, int, str]]:
@@ -335,9 +440,12 @@ def _unit_spans(text: str) -> list[tuple[int, int, str]]:
                 # as "năm" are not currency/grams/years without a quantity.
                 if _SCRIPT_RE.search(alias) or alias in {"đồng", "năm", "gam", "độ", "day"}:
                     before = re.search(r"\d\s*$", text[:match.start()])
+                    ordinal_unit = unit in {"day", "week", "month", "year"} and (
+                        re.search(_ORDINAL_MARKER + r"\s*$", text[:match.start()])
+                        or re.match(r"\s*" + _ORDINAL_MARKER, text[match.end():]))
                     after = re.match(r"\s*\d", text[match.end():]) if (
                         unit in {"usd", "eur", "vnd", "cny", "percent"} and alias not in {"đồng", "元", "块", "塊"}) else None
-                    if not before and not after:
+                    if not before and not after and not ordinal_unit:
                         continue
                 spans.add((*match.span(), unit))
     # 千克 contains 克 and °C contains °: use the complete unit, not both.
@@ -355,12 +463,12 @@ def _measurements(text: str) -> Counter:
     for start, end, unit in _unit_spans(text):
         before = re.search(r"(" + _NUMBER_RE.pattern + r")\s*$", text[:start])
         if before:
-            measurements[(before.group(1), unit)] += 1
+            measurements[(_number_value(before.group(1)), unit)] += 1
         elif unit in {"percent", "usd", "eur", "vnd"}:
             # Currency/percentage markers can precede or follow the value.
             after = re.match(r"\s*(" + _NUMBER_RE.pattern + r")", text[end:])
             if after:
-                measurements[(after.group(1), unit)] += 1
+                measurements[(_number_value(after.group(1)), unit)] += 1
     return measurements
 
 
@@ -376,8 +484,32 @@ def _polarity_hits(text: str, first: str, second: str) -> set[str]:
 
 def _translation_question(text: str, language: str | None) -> bool:
     text = _normalize(text)
+    if _lexicon_for(language) == "vietnamese":
+        _, interrogative = _vi_question_text(text)
+        return "?" in text or interrogative
     return "?" in text or (_lexicon_for(language) == "chinese" and bool(
-        re.search(r"[吗嗎](?=\s*(?:[。.!?！]|[嗯啊呃]|$))", text)))
+        re.search(r"[吗嗎](?=\s*(?:[。，,;；。.!?！]|[嗯啊呃]|$))", text)))
+
+
+def _vi_question_text(text: str) -> tuple[str, bool]:
+    """Remove only grammatical final particles, independently of source intent."""
+    particles = 0
+
+    def strip_particle(match):
+        nonlocal particles
+        prefix = match.group("prefix")
+        # Bare answers and reported negatives are not interrogative particles.
+        reported = re.search(r"(?:là|trả lời|đáp án|nói|đáp|bảo)\s*$", prefix)
+        modal = re.search(r"(?<!\w)có(?:\s+thể)?\s+", prefix)
+        if not re.search(r"[^\W\d_]", prefix) or (reported and not modal):
+            return match.group()
+        particles += 1
+        return prefix + " "
+
+    pattern = (r"(?P<prefix>[^?.!,;]+?)\s+(?:không|chưa|chứ|hả|hở|nhỉ|ư|à)"
+               r"(?:\s+(?:ạ|nhỉ|vậy))?(?=\s*(?:[?.,!;]|$))")
+    text = re.sub(pattern, strip_particle, _normalize(text))
+    return text, bool(particles)
 
 
 def _invariants(before: str, after: str, source_language: str | None,
@@ -391,32 +523,37 @@ def _invariants(before: str, after: str, source_language: str | None,
     if translation:
         old_question = _translation_question(before, source_language)
         new_question = _translation_question(after, target_language)
-        if old_question and _lexicon_for(target_language) == "vietnamese":
-            # Strip ONLY clause-final interrogative particles. Interior 'không'
-            # remains a real negation, including inside negative questions.
-            # Standalone 'Không.' and reported answers are NOT particles.
-            particles = 0
-
-            def strip_particle(match):
-                nonlocal particles
-                prefix = match.group("prefix")
-                if not re.search(r"[^\W\d_]", prefix) or re.search(r"(?:là|trả lời|đáp án)\s*$", prefix):
-                    return match.group()
-                particles += 1
-                return prefix + " "
-
-            particle_pattern = r"(?P<prefix>[^?.!;]+?)\s+không(?:\s+(?:ạ|nhỉ|vậy))?(?=\s*(?:[?.!;]|$))"
-            if _lexicon_for(source_language) == "vietnamese":
-                # Same-language C6 needs symmetric comparison. Otherwise an
-                # interrogative 'không' on the source is counted as a negation
-                # while the identical target particle is removed.
-                negation_before = re.sub(particle_pattern, strip_particle, _normalize(before))
-                particles = 0
-            negation_after = re.sub(particle_pattern, strip_particle, _normalize(after))
-            new_question = new_question or bool(particles)
+        if _lexicon_for(source_language) == "vietnamese":
+            negation_before, _ = _vi_question_text(before)
+        if _lexicon_for(target_language) == "vietnamese":
+            negation_after, _ = _vi_question_text(after)
+        if _lexicon_for(source_language) == "chinese" and _lexicon_for(target_language) == "vietnamese":
+            # 准 can mean permission or accuracy. Only explicit adjectival /
+            # measurement contexts use the 'inaccurate' reading; bare 不准
+            # stays a prohibition. Vietnamese may express it lexically as sai.
+            inaccurate = (r"不[准準][确確]|(?:测|測|算|猜|预测|預測|估计|估計|判断|判斷)"
+                          r"(?:得)?不[准準]|(?:手表|手錶|时钟|時鐘|钟表|鐘錶|表|錶|温度|溫度|读数|讀數)"
+                          r"(?:很|太|有点|有點)?不[准準](?=$|[\s，,。.!?！？；;了啊呀呢吧])")
+            negation_before, inaccuracies = re.subn(inaccurate, " ", negation_before)
+            if inaccuracies:
+                negation_after, equivalents = re.subn(
+                    r"(?<!\w)(?:không\s+(?:chính xác|chuẩn)|thiếu\s+chính xác|sai)(?!\w)",
+                    " ", _normalize(negation_after), count=inaccuracies)
+                if equivalents != inaccuracies:
+                    issues.append({"kind": "negation_lost", "detail": "inaccuracy predicate lost"})
+            if re.search(r"不知不[觉覺]", before):
+                # 'Unconsciously' also has a natural negative lexical form.
+                # Remove that complete expression, not an unrelated không.
+                negation_after = re.sub(
+                    r"(?<!\w)(?:lúc nào\s+(?:không|chẳng)\s+hay|(?:không(?:\s+hề)?|chẳng)\s+hay biết)(?!\w)",
+                    " ", _normalize(negation_after), count=1)
         if _lexicon_for(source_language) == "chinese":
             # 每一个 means each/every, not a cardinal quantity of one.
             numeric_before, distributive = re.subn(r"每\s*一\s*([个個])", r"每\1", _normalize(before))
+            if re.search(r"一[劳勞]永逸", numeric_before) and re.search(r"dứt điểm|triệt để|mãi mãi|cho xong", _normalize(after)):
+                # The idiom is once-for-all, not one counted object. Only its
+                # Vietnamese lexical 'một lần' slot is removed, not other counts.
+                numeric_after = re.sub(r"(?<!\w)một\s+lần(?!\w)", " ", _normalize(after), count=1)
             # 一个一个地 is 'one by one', not two counted objects.
             numeric_before, sequential = re.subn(r"一\s*[个個]\s*一\s*[个個](?:地)?", " ", numeric_before)
             if distributive and _lexicon_for(target_language) == "vietnamese":
@@ -445,9 +582,14 @@ def _invariants(before: str, after: str, source_language: str | None,
     if old_neg != new_neg:
         issues.append({"kind": "negation_lost" if old_neg > new_neg else "negation_added",
                        "detail": f"negation count changed: {old_neg} -> {new_neg}"})
-    if _numbers(numeric_before) != _numbers(numeric_after):
+    ordinal_before, old_ordinals = _ordinal_text(numeric_before, source_language)
+    standalone = not translation or _lexicon_for(source_language) != "chinese" or bool(old_ordinals)
+    ordinal_after, new_ordinals = _ordinal_text(numeric_after, target_language, standalone=standalone)
+    if old_ordinals != new_ordinals:
+        issues.append({"kind": "ordinal_changed", "detail": "ordinal/sequential slots changed"})
+    if _numbers(ordinal_before) != _numbers(ordinal_after):
         issues.append({"kind": "quantity_lost", "detail": "numeric values/counts changed"})
-    if _units(numeric_before) != _units(numeric_after) or _measurements(numeric_before) != _measurements(numeric_after):
+    if _units(ordinal_before) != _units(ordinal_after) or _measurements(ordinal_before) != _measurements(ordinal_after):
         issues.append({"kind": "unit_lost", "detail": "measurement units or numeric/unit bindings changed"})
     # Punctuation carries the speaker's intent. A question or exclamation must
     # not turn into a flat assertion during translation/compression.

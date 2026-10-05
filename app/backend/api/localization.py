@@ -1151,7 +1151,8 @@ async def localization_expert_override(job_id: str, body: ExpertOverrideRequest)
                     seg.translation_status = "success"
                     seg.qc_status = "pending"
 
-                if change.speaker_id is not None:
+                if (change.speaker_id is not None
+                        and (change.speaker_id.strip() or None) != seg.speaker_id):
                     # Existing pitch hints refer to the old diarizer ownership.
                     (transcript.metadata.get("alignment") or {}).pop("speaker_genders", None)
                     corrected_speaker = True

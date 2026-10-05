@@ -40,6 +40,7 @@ from backend.services.dubbing_planner import (
     allocate_silence,
     build_plan,
     chunk_text,
+    clean_text_for_speech,
     estimate_spoken_ms,
     fit_timeline,
     required_speed,
@@ -1352,7 +1353,7 @@ async def translate_transcript(
         for index, client in enumerate(route_clients)
     ]
     checkpoint_meta = {
-        "meaning_guard_version": 5,
+        "meaning_guard_version": 7,
         "source_language": transcript.language,
         "protected_terms": profile.protected_terms,
         "semantic_hash": semantic_sig,
@@ -1397,6 +1398,35 @@ async def translate_transcript(
                 logger.info("Translation configuration changed; invalidating incompatible checkpoint")
         except Exception as cp_err:
             logger.warning("Could not read translation checkpoint: %s", cp_err)
+
+    # A late dictionary entry applies to the entire job, including earlier
+    # batches. Revalidate cached items together before deciding which IDs to
+    # resume; dictionary order must not change their meaning.
+    cached_items = []
+    for start in range(0, len(out.segments), _TRANSLATION_BATCH_SIZE):
+        key = str(start)
+        cached = completed_batches.get(key)
+        if not isinstance(cached, dict) or cached.get("failed"):
+            completed_batches.pop(key, None)
+            continue
+        batch = out.segments[start:start + _TRANSLATION_BATCH_SIZE]
+        items = cached.get("items")
+        try:
+            ids = {item["id"] for item in items}
+            subset = [seg for seg in batch if seg.id in ids]
+            _validate_translation_payload(json.dumps(items, ensure_ascii=False), subset)
+            cached_items.extend(items)
+        except (TypeError, KeyError, ValueError):
+            completed_batches.pop(key, None)
+    if cached_items:
+        ids = {item["id"] for item in cached_items}
+        cached_accepted, _, localized_terms = _translation_candidates(
+            json.dumps(cached_items, ensure_ascii=False),
+            [seg for seg in out.segments if seg.id in ids], {},
+            profile, transcript.language, target_language)
+        for cached in completed_batches.values():
+            cached["items"] = [item for item in cached.get("items", [])
+                               if item["id"] in cached_accepted]
 
     def save_checkpoint():
         if checkpoint_file is None:
@@ -1492,6 +1522,27 @@ async def translate_transcript(
                 seg.target_end_ms = seg.source_end_ms
                 seg.timing_status = "fit"
                 seg.qc_status = "review" if idx in failed else "pass"
+
+    # Terms introduced later cannot leave an earlier, inconsistent spelling
+    # marked successful. Keep only genuinely accepted IDs in the checkpoint;
+    # a resume repairs these IDs using the final dictionary.
+    from backend.services.dubbing_rewrite_guard import check_translation_meaning
+    for index, seg in enumerate(out.segments):
+        if seg.translation_status != "success":
+            continue
+        violations = check_translation_meaning(seg.source_text, seg.translated_text,
+            transcript.language, target_language,
+            glossary={**localized_terms, **profile.glossary}, protected_terms=profile.protected_terms)
+        if violations:
+            seg.translated_text = seg.source_text
+            seg.translation_status = "untranslated"
+            seg.qc_status = "review"
+            failed_total += 1
+            cached = completed_batches[str(index // _TRANSLATION_BATCH_SIZE * _TRANSLATION_BATCH_SIZE)]
+            cached["items"] = [item for item in cached["items"] if item["id"] != seg.id]
+            if seg.id not in cached["pending_ids"]:
+                cached["pending_ids"].append(seg.id)
+    save_checkpoint()
 
     if failed_total == len(out.segments):
         exc = RuntimeError("Translation failed for every segment.")
@@ -2708,6 +2759,7 @@ async def synthesize_timed_dub(
     _rewrite_budget: list[float] | None = None,
     job_state_path: Path | None = None,
     _job_scope: str | None = None,
+    _planning_text: dict[str, str] | None = None,
 ) -> TimedDubResult:
     """C7 donor-derived chunk planner with measured TTS and bounded retiming."""
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -2753,6 +2805,7 @@ async def synthesize_timed_dub(
     # Resume accepted C7 text independently of the immutable, reviewed C6
     # artifact. Changed input, voice, reference, or policy invalidates replay.
     approved_text = {seg.id: seg.translated_text for seg in out.segments}
+    planning_text = _planning_text if _planning_text is not None else approved_text
     acceptance_input_key = hashlib.sha256(json.dumps({
         "binding": tts_binding(runtime, target_language), "profile": profile.model_dump(),
         "source": str(source_media.resolve()),
@@ -2771,14 +2824,6 @@ async def synthesize_timed_dub(
         route_state=route_state, work_dir=work_dir, progress_cb=progress_cb,
     )
     from backend.services.dubbing_rewrite_guard import check_rewrite_meaning
-    for seg in out.segments:
-        accepted = job_state.data.get("accepted_text", {}).get(seg.id)
-        if accepted:
-            if check_rewrite_meaning(seg.translated_text or "", accepted, target_language,
-                    protected_terms=[*profile.protected_terms, *profile.glossary.values()]):
-                raise ValueError(f"Invalid accepted rewrite for {seg.id}")
-            seg.translated_text = accepted
-    save_audit()
     rewrite_budget = _rewrite_budget if _rewrite_budget is not None else [float(profile.rewrite_total_timeout_s)]
 
     async def adapt_with_budget(**kwargs):
@@ -2827,7 +2872,7 @@ async def synthesize_timed_dub(
             segment_id=seg.id,
             start_ms=start_ms,
             end_ms=end_ms,
-            text=seg.translated_text or "",
+            text=planning_text.get(seg.id) or "",
             source_text=seg.source_text or "",
             speaker_id=seg.speaker_id,
             voice_id=(str(override.get("voice_id")).strip() or None)
@@ -2869,6 +2914,20 @@ async def synthesize_timed_dub(
         cues, config, language=target_language, timeline_end_ms=source_duration_ms,
         split_before_segment_ids=forced_splits,
     )
+
+    # Group the immutable C6 script first. Replayed C7 punctuation/length must
+    # not renumber chunks or change which audio a targeted retry owns.
+    for item in plan:
+        seg = segment_by_id[item.segment_id]
+        accepted = job_state.data.get("accepted_text", {}).get(seg.id)
+        if accepted:
+            if check_rewrite_meaning(seg.translated_text or "", accepted, target_language,
+                    protected_terms=[*profile.protected_terms, *profile.glossary.values()]):
+                raise ValueError(f"Invalid accepted rewrite for {seg.id}")
+            seg.translated_text = accepted
+        item.spoken_text = clean_text_for_speech(seg.translated_text or "")
+        item.estimated_duration_ms = estimate_spoken_ms(seg.translated_text or "", target_language)
+    save_audit()
 
     auto_references: dict[str, dict] = {}
     provider_value = getattr(runtime.provider, "value", str(runtime.provider))
@@ -3373,6 +3432,7 @@ async def synthesize_timed_dub(
                         fail_on_overflow=True, reuse_existing_chunks=True,
                         reference_media=reference_media, progress_cb=progress_cb, _cadence_retry=True,
                         _rewrite_budget=rewrite_budget, _job_scope=job_scope,
+                        _planning_text=planning_text,
                     )
                 except LocalizationTimingError as exc:
                     # Splitting traded a cadence warning for a hard overflow.
