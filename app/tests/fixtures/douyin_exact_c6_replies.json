@@ -1,0 +1,227 @@
+[
+  {
+    "source_id": "7690901218818440955",
+    "job_id": "3dc64d54-39f5-4f8d-b0b0-b029c354e158",
+    "segment_id": "seg-0011",
+    "source": "你是毕竟你 对吧",
+    "target": "Bạn là dù sao thì bạn, đúng không",
+    "recorded_issues": [
+      "question_changed"
+    ]
+  },
+  {
+    "source_id": "7690901218818440955",
+    "job_id": "3dc64d54-39f5-4f8d-b0b0-b029c354e158",
+    "segment_id": "seg-0017",
+    "source": "我们去那边 好吧",
+    "target": "Chúng ta ra kia nhé, được không",
+    "recorded_issues": [
+      "question_changed"
+    ]
+  },
+  {
+    "source_id": "7690901218818440955",
+    "job_id": "3dc64d54-39f5-4f8d-b0b0-b029c354e158",
+    "segment_id": "seg-0019",
+    "source": "有点紧张 没有被拍过",
+    "target": "Hơi căng thẳng, chưa từng bị chụp bao giờ",
+    "recorded_issues": [
+      "unit_lost"
+    ]
+  },
+  {
+    "source_id": "7690901218818440955",
+    "job_id": "3dc64d54-39f5-4f8d-b0b0-b029c354e158",
+    "segment_id": "seg-0028",
+    "source": "看到你让我想起来一首歌",
+    "target": "Nhìn thấy bạn khiến tôi nhớ đến một bài hát",
+    "recorded_issues": [
+      "quantity_lost"
+    ]
+  },
+  {
+    "source_id": "7690901218818440955",
+    "job_id": "3dc64d54-39f5-4f8d-b0b0-b029c354e158",
+    "segment_id": "seg-0031",
+    "source": "我不知道你喜不喜欢这首歌",
+    "target": "Tôi không biết bạn có thích bài hát này không",
+    "recorded_issues": [
+      "negation_lost",
+      "question_changed"
+    ]
+  },
+  {
+    "source_id": "7690901218818440955",
+    "job_id": "3dc64d54-39f5-4f8d-b0b0-b029c354e158",
+    "segment_id": "seg-0035",
+    "source": "但前面又有个女生很漂亮",
+    "target": "nhưng phía trước lại có một cô gái rất xinh",
+    "recorded_issues": [
+      "quantity_lost"
+    ]
+  },
+  {
+    "source_id": "7690901218818440955",
+    "job_id": "3dc64d54-39f5-4f8d-b0b0-b029c354e158",
+    "segment_id": "seg-0045",
+    "source": "喜欢吗 喜欢啊",
+    "target": "Thích không? Thích ạ",
+    "recorded_issues": [
+      "question_changed"
+    ]
+  },
+  {
+    "source_id": "7690901218818440955",
+    "job_id": "3dc64d54-39f5-4f8d-b0b0-b029c354e158",
+    "segment_id": "seg-0066",
+    "source": "你这手机看得不错呀 我新买的",
+    "target": "Điện thoại của bạn trông được đấy, tôi mới mua",
+    "recorded_issues": [
+      "negation_lost"
+    ]
+  },
+  {
+    "source_id": "7690901218818440955",
+    "job_id": "3dc64d54-39f5-4f8d-b0b0-b029c354e158",
+    "segment_id": "seg-0085",
+    "source": "怎么会小呀 你多大",
+    "target": "Sao lại nhỏ thế, bạn bao nhiêu tuổi",
+    "recorded_issues": [
+      "unit_lost"
+    ]
+  },
+  {
+    "source_id": "7692334515935196032",
+    "job_id": "ba878da3-eb23-41db-ae62-dc22cab24368",
+    "segment_id": "seg-0005",
+    "source": "如果超過四指",
+    "target": "nếu vượt quá 4 ngón",
+    "recorded_issues": [
+      "quantity_lost"
+    ]
+  },
+  {
+    "source_id": "7692334515935196032",
+    "job_id": "ba878da3-eb23-41db-ae62-dc22cab24368",
+    "segment_id": "seg-0008",
+    "source": "你現在就自拍",
+    "target": "Bây giờ bạn hãy tự chụp ảnh",
+    "recorded_issues": [
+      "unit_lost"
+    ]
+  },
+  {
+    "source_id": "7692334515935196032",
+    "job_id": "ba878da3-eb23-41db-ae62-dc22cab24368",
+    "segment_id": "seg-0010",
+    "source": "能不能再塞下一隻眼睛",
+    "target": "có thể đặt thêm một con mắt nữa không",
+    "recorded_issues": [
+      "negation_lost",
+      "quantity_lost",
+      "question_changed"
+    ]
+  },
+  {
+    "source_id": "7692334515935196032",
+    "job_id": "ba878da3-eb23-41db-ae62-dc22cab24368",
+    "segment_id": "seg-0011",
+    "source": "如果剛好塞下一隻眼睛就眼睛剛好",
+    "target": "nếu vừa đặt vừa một con mắt thì mắt vừa đẹp",
+    "recorded_issues": [
+      "quantity_lost"
+    ]
+  },
+  {
+    "source_id": "7692334515935196032",
+    "job_id": "ba878da3-eb23-41db-ae62-dc22cab24368",
+    "segment_id": "seg-0012",
+    "source": "如果塞下一隻眼睛",
+    "target": "nếu đặt được một con mắt",
+    "recorded_issues": [
+      "quantity_lost"
+    ]
+  },
+  {
+    "source_id": "7692334515935196032",
+    "job_id": "ba878da3-eb23-41db-ae62-dc22cab24368",
+    "segment_id": "seg-0026",
+    "source": "你的兩個瞳孔的內側",
+    "target": "phía trong 2 đồng tử của bạn không",
+    "recorded_issues": [
+      "unit_lost",
+      "question_changed"
+    ]
+  },
+  {
+    "source_id": "7692334515935196032",
+    "job_id": "ba878da3-eb23-41db-ae62-dc22cab24368",
+    "segment_id": "seg-0027",
+    "source": "壞條垂直線有沒有超過這個距離",
+    "target": "đường thẳng đứng có vượt quá khoảng cách này không",
+    "recorded_issues": [
+      "question_changed"
+    ]
+  },
+  {
+    "source_id": "7692334515935196032",
+    "job_id": "ba878da3-eb23-41db-ae62-dc22cab24368",
+    "segment_id": "seg-0038",
+    "source": "人中一 下巴二",
+    "target": "nhân trung 1, cằm 2",
+    "recorded_issues": [
+      "quantity_lost"
+    ]
+  },
+  {
+    "source_id": "7692334515935196032",
+    "job_id": "ba878da3-eb23-41db-ae62-dc22cab24368",
+    "segment_id": "seg-0052",
+    "source": "如果不套一根中指這麼長",
+    "target": "nếu không dài bằng 1 ngón giữa",
+    "recorded_issues": [
+      "quantity_lost"
+    ]
+  },
+  {
+    "source_id": "7692334515935196032",
+    "job_id": "ba878da3-eb23-41db-ae62-dc22cab24368",
+    "segment_id": "seg-0055",
+    "source": "如果超過了一根中指的話",
+    "target": "Nếu vượt quá 1 ngón giữa",
+    "recorded_issues": [
+      "quantity_lost"
+    ]
+  },
+  {
+    "source_id": "7692334515935196032",
+    "job_id": "ba878da3-eb23-41db-ae62-dc22cab24368",
+    "segment_id": "seg-0056",
+    "source": "你那個脖子非常的先長",
+    "target": "thì cổ bạn rất thon dài",
+    "recorded_issues": [
+      "negation_lost"
+    ]
+  },
+  {
+    "source_id": "7692334515935196032",
+    "job_id": "ba878da3-eb23-41db-ae62-dc22cab24368",
+    "segment_id": "seg-0057",
+    "source": "愛穿啥穿啥啥啥 啥都好看 第九 最後 側臉 九十度",
+    "target": "Thích mặc gì thì mặc, mặc gì cũng đẹp, thứ chín, cuối cùng, mặt nghiêng 90 độ",
+    "recorded_issues": [
+      "quantity_lost",
+      "unit_lost"
+    ]
+  },
+  {
+    "source_id": "7692334515935196032",
+    "job_id": "ba878da3-eb23-41db-ae62-dc22cab24368",
+    "segment_id": "seg-0066",
+    "source": "其實是最正的一個和面",
+    "target": "thì thật ra là khuôn mặt hài hòa nhất",
+    "recorded_issues": [
+      "quantity_lost"
+    ]
+  }
+]

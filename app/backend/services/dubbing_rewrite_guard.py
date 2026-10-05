@@ -209,6 +209,11 @@ def _negations(text: str, language: str | None) -> int:
         # morphemes; a preceding 不是/不要 must remain visible. 不准 is NOT
         # masked: it is a prohibition, also expressed by Vietnamese 'cấm'.
         text = re.sub(r"无孔不入|無孔不入|不约而同|不約而同|不知不觉|不知不覺", " ", text)
+        # 非常 is an intensifier ('very'), not a clause negator. A-not-A
+        # alternations (喜不喜欢) are one question, not a second negation;
+        # the interrogative meaning is checked by _translation_question.
+        text = re.sub(r"非常|不错|不錯|喜不喜欢|喜不喜歡|好不好|有没有|有沒有|是不是|"
+                      r"能不能|可不可以|会不会|會不會|要不要|行不行|对不对|對不對", " ", text)
     elif _lexicon_for(language) == "french":
         # ne ... pas/jamais/rien is one grammatical negation. Mask only
         # the paired prefix within its clause, retaining the negative head.
@@ -339,11 +344,23 @@ def _numeric_text(text: str) -> str:
     text, _ = _ordinal_text(text, "chinese")
     text, _ = _ordinal_text(text, "vietnamese")
     text, _ = _ordinal_text(text, "english")
-    text = re.sub(r"(?<![\d零〇一二三四五六七八九两兩十百千万萬])" + _ZH_NUMBER + r"?(?=\s*(?:岁|歲|歳|系列|期|章|节|節|集|步|页|頁|轮|輪|年|月|周|週|个|個|台|只|瓶|本|支|件|位|名|条|條|张|張|次|份|杯|碗|套|座|架|盒|枚|颗|顆|棵|辆|輛|公斤|千克|克|公里|千米|米|升|秒|分钟|小時|小时|天|元|块|塊|%))", lambda m: _integer_text(m.group()), text)
+    text = re.sub(r"(?<![\d零〇一二三四五六七八九两兩十百千万萬])" + _ZH_NUMBER + r"?(?=\s*(?:岁|歲|歳|系列|期|章|节|節|集|步|页|頁|轮|輪|年|月|周|週|个|個|台|只|瓶|本|支|件|位|名|条|條|张|張|次|份|杯|碗|套|座|架|盒|枚|颗|顆|棵|辆|輛|根|隻|只|指|首|度|公斤|千克|克|公里|千米|米|升|秒|分钟|分鐘|小時|小时|天|元|块|塊|%))", lambda m: _integer_text(m.group()), text)
+    # A bare classifier with no numeral ('a girl', 'a root of finger') is an
+    # indefinite article, which Vietnamese renders as 'một'. Count it so both
+    # sides agree instead of reporting the target's article as a lost number.
+    text = re.sub(r"(?<![\d零〇一二三四五六七八九两兩十百千万萬])(?<![各每這这那哪哪兒那個这个這個])([个個隻根首])", r"1\1", text)
+    # In a superlative the numeral is an article ('the most upright face'),
+    # which Vietnamese normally omits; it is not a countable object.
+    text = re.sub(r"(?<=[最很极極])[^，。！？；\s]{0,4}一([个個])", r" \1", text)
     return _vi_numeric_text(text)
 
 
 _ZH_NUMBER = r"[零〇一二三四五六七八九两兩十百千万萬]+"
+# Vietnamese unit words that are ordinary words in ordinary sentences:
+# 'bao giờ' (never) is not an hour count, 'bao nhiêu tuổi' (how old) is not
+# an age measurement and 'đồng tử' (pupil) is not currency. They only name a
+# unit when a quantity is actually present.
+_AMBIGUOUS_UNITS = frozenset({"đồng", "năm", "gam", "độ", "day", "giờ", "tuổi"})
 _VI_NUMBER_WORDS = "không|một|mốt|hai|ba|bốn|tư|năm|lăm|sáu|bảy|tám|chín|mười|mươi|trăm|linh|lẻ|nghìn|ngàn|triệu|tỷ|tỉ"
 _ZH_CLASSIFIER = r"(?:个|個|次|期|章|节|節|集|步|页|頁|轮|輪|年|月|天|周|週|台|只|瓶|本|支|件|位|名|条|條|张|張|份|杯|碗|套|座|架|盒|枚|颗|顆|棵|辆|輛)"
 _ORDINAL_MARKER = "\ue000"
@@ -438,8 +455,11 @@ def _unit_spans(text: str) -> list[tuple[int, int, str]]:
             for match in re.finditer(_phrase_pattern(alias), text):
                 # Names such as Ngô Tiểu Đồng / 马克 and ordinary words such
                 # as "năm" are not currency/grams/years without a quantity.
-                if _SCRIPT_RE.search(alias) or alias in {"đồng", "năm", "gam", "độ", "day"}:
+                if _SCRIPT_RE.search(alias) or alias in _AMBIGUOUS_UNITS:
                     before = re.search(r"\d\s*$", text[:match.start()])
+                    if alias == "đồng" and re.match(r"\s*tử", text[match.end():]):
+                        # đồng tử is the pupil, not currency.
+                        continue
                     ordinal_unit = unit in {"day", "week", "month", "year"} and (
                         re.search(_ORDINAL_MARKER + r"\s*$", text[:match.start()])
                         or re.match(r"\s*" + _ORDINAL_MARKER, text[match.end():]))
@@ -488,7 +508,18 @@ def _translation_question(text: str, language: str | None) -> bool:
         _, interrogative = _vi_question_text(text)
         return "?" in text or interrogative
     return "?" in text or (_lexicon_for(language) == "chinese" and bool(
-        re.search(r"[吗嗎](?=\s*(?:[。，,;；。.!?！]|[嗯啊呃]|$))", text)
+       re.search(r"[吗嗎](?=\s*(?:[。，,;；。.!?！]|[嗯啊呃]|$))", text)
+       # Spoken ASR often separates a cue at the clause boundary instead of
+       # punctuation: 喜欢吗 喜欢啊. A 吗 closing any spoken clause is
+       # interrogative; 吗啡 (morphine) is not, because 啡 is not a boundary.
+       or re.search(r"[吗嗎](?=\s|[。，,;；。.!?！]|$)", text)
+       # A-not-A alternation (有没有 / 喜不喜欢) and the tag/discourse
+       # particles 吧 / 对吧 / 好不好 are questions without an 吗. Spoken ASR
+       # rarely keeps the closing punctuation the 吗 rule depends on.
+       or re.search(r"有没有|有沒有|喜不喜欢|喜不喜歡|好不好|是不是|能不能|可不可以"
+                    r"|会不会|會不會|要不要|行不行|对不对|對不對", text)
+       # Tag questions are anchored at the end of the cue.
+       or re.search(r"(?:对吧|對吧|好吧|是吗|对吗|對嗎|行吧|可以吧|对不对|對不對)(?=$|[\s，,。.!?！])", text)
         # ASR often omits the comma after a leading discourse question.
         # Require a question verb and a following subject, not any internal
         # 吗 (for example 吗啡, morphine).

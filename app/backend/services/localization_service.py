@@ -1353,7 +1353,7 @@ async def translate_transcript(
         for index, client in enumerate(route_clients)
     ]
     checkpoint_meta = {
-        "meaning_guard_version": 8,
+        "meaning_guard_version": 9,
         "source_language": transcript.language,
         "protected_terms": profile.protected_terms,
         "semantic_hash": semantic_sig,

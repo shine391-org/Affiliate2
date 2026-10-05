@@ -98,14 +98,14 @@ async def test_canonical_c6_persists_equivalent_replies_without_repair(monkeypat
     checkpoint = json.loads((tmp_path / "checkpoint.json").read_text())
     assert sum(len(batch["items"]) for batch in checkpoint["batches"].values()) == len(EQUIVALENT)
     assert all(not batch["pending_ids"] for batch in checkpoint["batches"].values())
-    assert checkpoint["meaning_guard_version"] == 8
+    assert checkpoint["meaning_guard_version"] == 9
     # Current valid checkpoints are reused, but previous guards cannot carry
     # old acceptances across the changed semantic contract.
     await service.translate_transcript(tx, target_language="vi",
         profile=fast_localization_profile().model_copy(update={"qc_profile": qc}),
         user_settings=None, for_dub=True, checkpoint_dir=tmp_path)
     assert ai.calls == 2
-    for old_version, expected_calls in ((5, 4), (7, 6)):
+    for old_version, expected_calls in ((5, 4), (7, 6), (8, 8)):
         checkpoint["meaning_guard_version"] = old_version
         (tmp_path / "checkpoint.json").write_text(json.dumps(checkpoint))
         await service.translate_transcript(tx, target_language="vi",
@@ -113,4 +113,4 @@ async def test_canonical_c6_persists_equivalent_replies_without_repair(monkeypat
             user_settings=None, for_dub=True, checkpoint_dir=tmp_path)
         assert ai.calls == expected_calls
         checkpoint = json.loads((tmp_path / "checkpoint.json").read_text())
-        assert checkpoint["meaning_guard_version"] == 8
+        assert checkpoint["meaning_guard_version"] == 9
