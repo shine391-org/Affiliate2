@@ -675,8 +675,12 @@ async def test_translation_transient_wrapped_cause_still_retries(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("auto_repair", [False, True])
+@pytest.mark.parametrize("rewrite_case", [
+    "accepted", "timeout", "429_status", "429_code", "503", "connection",
+    "fallback", "invalid_json", "wrong_ids", "not_shorter", "han", "meaning_change",
+])
 async def test_measured_c7_runner_hard_overflow_preserves_accepted_rewrite_and_ownership(
-    storage, monkeypatch, tmp_path, auto_repair,
+    storage, monkeypatch, tmp_path, auto_repair, rewrite_case,
 ):
     """LOCAL media integration: real C7/FFprobe/fit, leaf AI/TTS are doubles.
 
@@ -702,11 +706,12 @@ async def test_measured_c7_runner_hard_overflow_preserves_accepted_rewrite_and_o
         "-c:a", "aac", "-shortest", str(source),
     ], check=True, capture_output=True)
     monkeypatch.setattr(sys.modules[__name__], "SOURCE_BYTES", source.read_bytes())
-    run = _make_run(f"measured-hard-{auto_repair}", storage,
+    run = _make_run(f"measured-hard-{auto_repair}-{rewrite_case}", storage,
                     request_extra={"auto_repair": auto_repair})
     await _seed_job(run.job_id)
     profile = _profile(dub_min_cue_duration_ms=250, dub_max_chunk_size=1,
-                       dub_gap_tolerance_ms=0, dub_rewrite_attempts=1)
+                       dub_gap_tolerance_ms=0, dub_rewrite_attempts=1,
+                       rewrite_retry_attempts=1)
     run.data["effective_profile"] = profile.model_dump(mode="json")
     tx = _transcript()
     tx.segments[0].speaker_id = "speaker-A"
@@ -727,6 +732,8 @@ async def test_measured_c7_runner_hard_overflow_preserves_accepted_rewrite_and_o
     measured = []
     attempts = []
     snapshots = []
+    ai_calls = []
+    accepted = rewrite_case in {"accepted", "fallback"}
 
     def observe_plan(*args, **kwargs):
         result = real_plan(*args, **kwargs)
@@ -753,7 +760,31 @@ async def test_measured_c7_runner_hard_overflow_preserves_accepted_rewrite_and_o
         connection_name = "recorded"
         max_retries = 0
 
+        def __init__(self, fallback=False):
+            self.fallback = fallback
+
         async def chat(self, **kwargs):
+            ai_calls.append("fallback" if self.fallback else "primary")
+            if not self.fallback:
+                if rewrite_case == "timeout":
+                    raise TimeoutError("Rewrite timed out")
+                if rewrite_case in {"429_status", "429_code", "503", "fallback"}:
+                    error = RuntimeError("Rewrite unavailable")
+                    setattr(error, "code" if rewrite_case == "429_code" else "status_code",
+                            429 if rewrite_case.startswith("429") else 503)
+                    raise error
+                if rewrite_case == "connection":
+                    raise ConnectionError("Rewrite connection unavailable")
+                if rewrite_case == "invalid_json":
+                    return "not valid JSON"
+                if rewrite_case == "wrong_ids":
+                    return json.dumps([{"id": "unrelated-id", "text": "Cảm ơn"}], ensure_ascii=False)
+                if rewrite_case == "not_shorter":
+                    return json.dumps([{"id": "s1", "text": original}], ensure_ascii=False)
+                if rewrite_case == "han":
+                    return json.dumps([{"id": "s1", "text": "谢谢"}], ensure_ascii=False)
+                if rewrite_case == "meaning_change":
+                    return json.dumps([{"id": "s1", "text": "Không cảm ơn"}], ensure_ascii=False)
             return json.dumps([{"id": "s1", "text": "Cảm ơn"}], ensure_ascii=False)
 
     def raw_snapshot(work):
@@ -781,7 +812,10 @@ async def test_measured_c7_runner_hard_overflow_preserves_accepted_rewrite_and_o
     monkeypatch.setattr(svc, "build_plan", observe_plan)
     monkeypatch.setattr(tts_service, "list_voices", voices)
     monkeypatch.setattr(tts_service, "generate_tts", tone)
-    monkeypatch.setattr(svc, "_profile_ai_route_clients_compat", lambda *args: [RewriteAI()])
+    routes = [RewriteAI()]
+    if rewrite_case == "fallback":
+        routes.append(RewriteAI(fallback=True))
+    monkeypatch.setattr(svc, "_profile_ai_route_clients_compat", lambda *args: routes)
     await _run(run.job_id, run)
     fresh = LocalizationRun.load(run.job_id)
     assert attempts == ([set(), {2}] if auto_repair else [set()])
@@ -790,7 +824,11 @@ async def test_measured_c7_runner_hard_overflow_preserves_accepted_rewrite_and_o
     assert raw_snapshot(run.stage_dir("dubbing")) == snapshots[0]
     assert sum(it["text"] == "Xin chào" for it in generated) == 1
     assert [it["text"] for it in generated if it["text"] != "Xin chào"] == (
-        [original, "Cảm ơn", "Cảm ơn"] if auto_repair else [original, "Cảm ơn"])
+        ([original, "Cảm ơn", "Cảm ơn"] if auto_repair else [original, "Cảm ơn"])
+        if accepted else ([original, original] if auto_repair else [original]))
+    assert len(ai_calls) <= len(attempts) * len(routes)
+    if rewrite_case == "fallback":
+        assert "fallback" in ai_calls
     assert fresh.request.get("auto_repair_attempts", {}).get("dubbing", 0) == int(auto_repair)
     assert {stage: fresh.record(stage) for stage in upstream} == upstream
     work = run.stage_dir("dubbing")
@@ -801,12 +839,12 @@ async def test_measured_c7_runner_hard_overflow_preserves_accepted_rewrite_and_o
         assert [(chunk.id, [plan[i].segment_id for i in chunk.item_indexes])
                 for chunk in chunks] == [(1, ["s0"]), (2, ["s1"])]
         assert [(item.segment_id, item.speaker_id) for item in plan] == [("s0", "speaker-A"), ("s1", "speaker-B")]
-        assert plan[1].spoken_text == "Cảm ơn"
+        assert plan[1].spoken_text == ("Cảm ơn" if accepted else original)
         assert plan[1].original_text == original
     plan, chunks = planned_runs[-1]
     state = json.loads((run.root / "dubbing_state.json").read_text())
-    assert state["accepted_text"] == {"s1": "Cảm ơn"}
-    assert state["rewrite_count"] == 1
+    assert state["accepted_text"] == ({"s1": "Cảm ơn"} if accepted else {})
+    assert state["rewrite_count"] == int(accepted)
     for chunk in chunks:
         actual = await svc._audio_duration_ms(work / f"chunk_{chunk.id:04d}.wav")
         assert abs(actual - chunk.actual_duration_ms) <= 2
@@ -817,6 +855,7 @@ async def test_measured_c7_runner_hard_overflow_preserves_accepted_rewrite_and_o
         assert str(job.error_message)
     (work / "qa-measured-proof.json").write_text(json.dumps({
         "verification": "LOCAL FFmpeg integration; leaf AI/TTS doubles",
+        "rewrite_case": rewrite_case, "ai_calls": ai_calls,
         "auto_repair": auto_repair, "attempts": [sorted(ids) for ids in attempts],
         "measured_issues": measured, "accepted_text": state["accepted_text"],
         "rewrite_count": state["rewrite_count"], "non_target_unchanged": True,
