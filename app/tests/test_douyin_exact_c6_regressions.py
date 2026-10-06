@@ -87,18 +87,26 @@ def test_model_added_question_is_still_rejected():
 
 
 @pytest.mark.parametrize(
-    "source,target",
+    "source,target,expected_kind,severity",
     [
-        ("你現在就自拍", "Bây giờ bạn hãy tự chụp 1 tấm ảnh"),
-        ("你是個月亮下巴 都下巴", "Bạn là 1 cái cằm mặt trăng, cằm dài"),
-        ("其實是最正的一個和面", "thì thật ra là 1 khuôn mặt hài hòa nhất"),
+        ("你現在就自拍", "Bây giờ bạn hãy tự chụp 1 tấm ảnh", "quantity_lost", "hard"),
+        ("你是個月亮下巴 都下巴", "Bạn là 1 cái cằm mặt trăng, cằm dài", None, None),
+        ("其實是最正的一個和面", "thì thật ra là 1 khuôn mặt hài hòa nhất", "article_asymmetry", "uncertain"),
     ],
 )
-def test_added_article_count_is_still_rejected(source, target):
-    # The reply invents a numeral the source cue does not carry; the source
-    # side is an indefinite article, so this must remain a quantity change.
-    kinds = {issue["kind"] for issue in check_translation_meaning(source, target, "zh", "vi", glossary={})}
-    assert "quantity_lost" in kinds, (source, target, kinds)
+def test_recorded_count_is_hard_but_ambiguous_article_requires_review(source, target, expected_kind, severity):
+    # The disputed ASR/added clauses remain unadjudicated. Fixing cardinal vs
+    # article classification must NOT certify these full translations as good.
+    issues = check_translation_meaning(source, target, "zh", "vi", glossary={}, include_advisories=True)
+    if expected_kind is None:
+        # Both sides express the indefinite article, not a changed cardinal.
+        # This says nothing about the unadjudicated ASR/added-clause meaning.
+        assert not {'quantity_lost','article_asymmetry'} & {i['kind'] for i in issues}
+        return
+    matching = [issue for issue in issues if issue["kind"] == expected_kind]
+    assert matching, (source, target, issues)
+    assert all(issue["severity"] == severity for issue in matching)
+    assert all(issue["action"] == ("reject" if severity == "hard" else "review") for issue in matching)
 
 
 @pytest.mark.parametrize(

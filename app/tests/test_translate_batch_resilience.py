@@ -8,6 +8,20 @@ from types import SimpleNamespace
 
 import pytest
 
+@pytest.fixture(autouse=True)
+def mocked_postfit_measurement(monkeypatch):
+    """Unit orchestration uses byte placeholders, NOT playable audio.
+
+    Real measurement/failure gates run unmocked in postfit/rhythm suites.
+    """
+    from backend.services import localization_service as service
+
+    async def measure(_path, raw_duration_ms, speed_factor):
+        return round(raw_duration_ms / speed_factor), -12.0
+
+    monkeypatch.setattr(service, "_measure_fitted_audio", measure)
+
+
 from backend.core.localization import (
     LocalizationProfile,
     LocalizationSegment,
@@ -738,7 +752,8 @@ async def test_c7_targeted_regeneration_reuses_other_raw_chunks(monkeypatch, tmp
         regenerate_chunk_ids={2},
         reuse_existing_chunks=True,
     )
-    assert generated == ["chunk_0002.pending.wav"]
+    assert [name.split(".pending", 1)[0] for name in generated] == ["chunk_0002"]
+    assert all(name.endswith(".wav") for name in generated)
     assert (work / "chunk_0002.wav").read_bytes() == b"new"
 
 
@@ -904,6 +919,7 @@ async def test_c7_optional_rewrite_provider_failure_opens_job_circuit_breaker(
             source_start_ms=i * 1000,
             source_end_ms=i * 1000 + 500,
             translation_status="success",
+            overrides={"target_start_ms": i * 1000, "target_end_ms": i * 1000 + 500},
         )
         for i in range(3)
     ])
@@ -921,15 +937,11 @@ async def test_c7_optional_rewrite_provider_failure_opens_job_circuit_breaker(
 
     ai = TimeoutAI()
     monkeypatch.setattr(ls.asyncio, "sleep", no_sleep)
-    # Measured durations must exceed the ALLOCATED window (allocate_silence
-    # grows each 500 ms source window), otherwise nothing overflows and the
-    # measured loop -- the only rewrite authority since Y1 -- never calls AI.
-    # Measured durations are chosen so the measured loop -- the only rewrite
-    # authority since Y1 removed the estimate-driven branch -- actually calls
-    # the AI (720 ms overflows the allocated 500 ms source window), while the
-    # resulting fitted speed (1.319) stays under emergency_speed_max (1.35) so
-    # a total AI outage still renders for review instead of hard-failing.
-    calls = _patch_dub_io(monkeypatch, tmp_path, [720, 720, 720])
+    # Locked 500ms windows make this outage probe independent of silence
+    # allocation. 660ms requires 1.32x: normal overflow, emergency-review fits.
+    calls = _patch_dub_io(monkeypatch, tmp_path, [660, 660, 660])
+    # Three source cues span 3 seconds; a 2s source stub is invalid at EOF.
+    monkeypatch.setattr("backend.services.video_utils.probe_duration", lambda *a, **k: 3.0)
     monkeypatch.setattr(ls, "_profile_ai_client", lambda *_: ai)
 
     result = await ls.synthesize_timed_dub(
@@ -1044,10 +1056,11 @@ async def test_c7_targeted_regeneration_keeps_overlong_non_target_immutable(
     assert adapted == [2]
     # Target chunk synthesized before and after its measured-overflow rewrite;
     # the non-target chunk is reused and never synthesized.
-    assert generated == [
-        "chunk_0002.pending.wav",
-        "chunk_0002.pending.wav",
+    assert [name.split(".pending", 1)[0] for name in generated] == [
+        "chunk_0002", "chunk_0002",
     ]
+    assert len(set(generated)) == len(generated), "Every generation owns a distinct pending path"
+    assert all(name.endswith(".wav") for name in generated)
     assert result.transcript.segments[0].translated_text == non_target_text
     assert (work / "chunk_0001.wav").read_bytes() == b"old"
     assert result.transcript.segments[1].translated_text == "ngắn"
@@ -1125,6 +1138,8 @@ async def test_c7_natural_rate_chunks_skip_audio_fit_ffmpeg(monkeypatch, tmp_pat
         for i in range(3)
     ])
     calls = _patch_dub_io(monkeypatch, tmp_path, [800, 900, 700])
+    # Three source cues span 3 seconds; a 2s source stub is invalid at EOF.
+    monkeypatch.setattr("backend.services.video_utils.probe_duration", lambda *a, **k: 3.0)
 
     result = await ls.synthesize_timed_dub(
         tx,
@@ -1156,6 +1171,8 @@ async def test_c7_only_material_speed_change_runs_audio_fit_ffmpeg(
         for i in range(3)
     ])
     calls = _patch_dub_io(monkeypatch, tmp_path, [1100, 800, 800])
+    # Three source cues span 3 seconds; a 2s source stub is invalid at EOF.
+    monkeypatch.setattr("backend.services.video_utils.probe_duration", lambda *a, **k: 3.0)
 
     await ls.synthesize_timed_dub(
         tx,
@@ -1865,10 +1882,11 @@ async def test_c7_targeted_regeneration_never_rewrites_reused_chunk(
     assert adapted == [2]
     # Chunk 2 is synthesized once before the measured-overflow rewrite and once
     # after it; chunk 1 is reused and never synthesized.
-    assert generated == [
-        "chunk_0002.pending.wav",
-        "chunk_0002.pending.wav",
+    assert [name.split(".pending", 1)[0] for name in generated] == [
+        "chunk_0002", "chunk_0002",
     ]
+    assert len(set(generated)) == len(generated), "Every generation owns a distinct pending path"
+    assert all(name.endswith(".wav") for name in generated)
     assert (work / "chunk_0002.wav").read_bytes() == b"new"
     assert result.transcript.segments[0].translated_text.startswith("đây là câu rất dài")
     assert result.transcript.segments[1].translated_text == "ngắn"
@@ -2031,7 +2049,7 @@ async def test_atomic_chunk_regeneration_preserves_previous_audio_on_failure(
         )
 
     assert target.read_bytes() == b"previous-good-audio"
-    assert not (tmp_path / "chunk_0001.pending.wav").exists()
+    assert {path.name for path in tmp_path.iterdir()} == {target.name}, "Failed generation leaves no pending artifact"
 
 
 

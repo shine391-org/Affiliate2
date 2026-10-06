@@ -227,7 +227,15 @@ def _deterministic_word_groups(words: list[dict]) -> list[list[str]]:
 
         current.append(word["id"])
         token = str(word.get("text") or "")
-        elapsed = int(word["end_ms"]) - int(group_start or word["start_ms"])
+        # `group_start` of 0 is a REAL start (a timeline whose first word begins
+        # at 0 ms), not "unset". The old `group_start or word["start_ms"]`
+        # treated it as missing, so every word's elapsed time was measured
+        # against its own start and the bounded-duration boundary could never
+        # fire on a zero-based timeline: the same 10 x 1 s cue split 6 + 4 when
+        # shifted 1 ms but collapsed into a single 10 s group at 0 ms. Compare
+        # against None explicitly.
+        group_start_ms = int(word["start_ms"] if group_start is None else group_start)
+        elapsed = int(word["end_ms"]) - group_start_ms
         if _STRONG_END.search(token) or elapsed >= 6000:
             groups.append(current)
             current = []

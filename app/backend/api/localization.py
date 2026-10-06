@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Literal
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
@@ -146,6 +148,7 @@ _TRANSLATION_KEYS = {
     *_AI_TRANSLATION_ROUTE_KEYS,
     "translation_retry_attempts", "translation_attempt_timeout_s", "translation_total_timeout_s",
     "translation_preset", "translation_instructions", "translation_guardrails", "glossary", "protected_terms",
+    "translation_automation",
 }
 _DUBBING_KEYS = {
     "rewrite_routes",
@@ -234,6 +237,36 @@ async def _restore_job_mutation(job_id: str, token: dict) -> None:
             status_code=409,
             detail="Localization job state changed while the action was being rolled back.",
         )
+
+
+class _NoRollback:
+    """Stand-in used when a caller passes a run double with no workspace.
+
+    Production always returns a real :class:`ManifestTransaction`; this exists
+    so lightweight decision tests can drive the endpoint without a manifest on
+    disk. It deliberately does NOT pretend to roll anything back.
+    """
+
+    def begin(self) -> None:
+        return None
+
+    def commit(self) -> None:
+        return None
+
+    def rollback(self) -> None:
+        return None
+
+
+def _stage_transaction(run: LocalizationRun, stage: str) -> "ManifestTransaction | _NoRollback":
+    """Transaction over the artifact window a rerun of *stage* may destroy.
+
+    Scoped to the invalidated stage and everything after it: those are the only
+    trees ``invalidate_from`` can delete. Upstream stages are never written by
+    a rerun, so they are deliberately not copied.
+    """
+    if not hasattr(run, "root") or not hasattr(run, "manifest_path"):
+        return _NoRollback()
+    return ManifestTransaction(run, STAGES[STAGES.index(stage):])
 
 
 def _earliest_stage(stages: list[str]) -> str:
@@ -1556,6 +1589,7 @@ async def rerun_localization_job(job_id: str, body: RerunRequest):
     """Rerun the SAME persisted job binding from the exact failed stage."""
     claim = await _claim_job_mutation(job_id)
     dispatched = False
+    transaction = None
     try:
         run = _load_run(job_id)
         smart_retry = body.from_stage is None
@@ -1571,6 +1605,16 @@ async def rerun_localization_job(job_id: str, body: RerunRequest):
                 status_code=409,
                 detail="Bản dịch đang chờ duyệt. Hãy duyệt/tiếp tục C6 trước khi chạy lại bước phía sau.",
             )
+
+        # The invalidation below DELETES artifact trees and rewrites the
+        # manifest, and the dispatch that follows can still fail (lost claim,
+        # unreadable source, no worker). Restoring only the Job row would leave
+        # a job whose manifest promises a rebuild that never started and whose
+        # bytes are already gone, so every manifest write from here on must
+        # survive or none of them may. Scoped to the invalidated stage and
+        # everything after it: those are the only trees this rerun can touch.
+        transaction = _stage_transaction(run, stage)
+        transaction.begin()
 
         rerun_request = {
             **run.request,
@@ -1592,6 +1636,7 @@ async def rerun_localization_job(job_id: str, body: RerunRequest):
             else set()
         )
         delete_artifacts = True
+        targeted_chunk_ids: list[int] = []
 
         if smart_retry and stage == "dubbing":
             meta = dict(run.record("dubbing").get("metadata") or {})
@@ -1603,11 +1648,21 @@ async def rerun_localization_job(job_id: str, body: RerunRequest):
                 and item.get("chunk_id") is not None
             })
             if failed_chunk_ids:
+                targeted_chunk_ids = failed_chunk_ids
                 run.update_request({
                     **run.request,
                     "regenerate_chunk_ids": failed_chunk_ids,
                 })
+                # Every non-target raw chunk is still valid input, so the
+                # targeted retry must not delete them.
                 delete_artifacts = False
+            else:
+                # Nothing overflowed, so this is a full dubbing rebuild. A
+                # regenerate_chunk_ids list recorded by an EARLIER attempt now
+                # points at chunks this very rerun is about to delete; keeping
+                # it would demand reusable bytes that no longer exist.
+                rerun_request.pop("regenerate_chunk_ids", None)
+                run.update_request(rerun_request)
         else:
             # Artifacts of this stage are about to be deleted, so a targeted
             # retry recorded by an earlier attempt can no longer be honored;
@@ -1625,16 +1680,29 @@ async def rerun_localization_job(job_id: str, body: RerunRequest):
 
         await _dispatch_existing_run(run, already_claimed=True)
         dispatched = True
+        transaction.commit()
+        transaction = None
         return {
             "ok": True,
             "job_id": job_id,
             "from_stage": stage,
             "smart_retry": smart_retry,
             "preserved_upstream": list(STAGES[:STAGES.index(stage)]),
-            "targeted_chunk_ids": run.request.get("regenerate_chunk_ids", [])
-                if smart_retry and stage == "dubbing" else [],
+            "targeted_chunk_ids": targeted_chunk_ids,
         }
     except Exception:
+        if transaction is not None:
+            try:
+                transaction.rollback()
+            except Exception as restore_error:
+                # Do not release a runnable claim onto half-restored state. The
+                # backup is retained so the disk can be recovered after the
+                # storage fault is fixed.
+                raise HTTPException(
+                    status_code=503,
+                    detail="Không thể khôi phục bản chạy lại do lỗi lưu trữ. Bản sao cũ còn trong "
+                    ".rollback của job; kiểm tra dung lượng/quyền ghi và khôi phục trước khi chạy lại.",
+                ) from restore_error
         if not dispatched:
             await _restore_job_mutation(job_id, claim)
         raise
@@ -1814,16 +1882,106 @@ async def rerender_localization_job(job_id: str, body: RenderRerunRequest):
             await _restore_job_mutation(job_id, claim)
         raise
 
+async def _merge_job_input(job_id: str, extra: dict, *, expect_batch_admitted: bool = True) -> None:
+    """Merge *extra* into the row's durable input_json.
+
+    *expect_batch_admitted* is part of the SAME write as the row's own upload
+    path when admission is finalizing, so the recovery marker and the value
+    that makes the row resumable can never disagree.
+    """
+    from backend.database import AsyncSessionLocal
+    from backend.models.job import Job
+
+    async with AsyncSessionLocal() as db:
+        row = await db.get(Job, job_id)
+        if row is None:
+            return
+        try:
+            payload = json.loads(str(row.input_json or "{}"))
+        except (TypeError, ValueError):
+            payload = {}
+        payload.update(extra)
+        row.input_json = json.dumps(payload)
+        await db.commit()
+
+
+async def _write_batch_markers(
+    admitted: list[str], markers: dict, *, expect_batch_admitted: bool = True,
+) -> None:
+    """Write the batch marker set to EVERY admitted row in ONE transaction.
+
+    The marker set used to be committed one row at a time, so a crash partway
+    through left a batch that was genuinely indistinguishable from a partially
+    uploaded one: recovery could not tell "crashed while marking" from
+    "crashed while uploading", so it could neither resume nor refuse it
+    truthfully. One transaction makes the batch all-admitted or none.
+    """
+    from sqlalchemy import select
+
+    from backend.database import AsyncSessionLocal
+    from backend.models.job import Job
+
+    async with AsyncSessionLocal() as db:
+        rows = (await db.execute(
+            select(Job).where(Job.id.in_(admitted))
+        )).scalars().all()
+        for row in rows:
+            try:
+                payload = json.loads(str(row.input_json or "{}"))
+            except (TypeError, ValueError):
+                payload = {}
+            payload.update(markers)
+            row.input_json = json.dumps(payload)
+        await db.commit()
+
+
+async def _attach_batch_item(job_id: str, claim: str | None) -> bool:
+    """Atomically move a queued item pending->running and drop its claim.
+
+    ONE conditional write, not two. Releasing the claim while the row was
+    still `pending` opened a window in which the boot sweep could fail the row
+    the coordinator was about to run - an orphan created by the recovery
+    machinery itself. Returns False when the row is no longer ours to run
+    (already terminal, or claimed by somebody else), so the coordinator skips
+    it instead of double-running it.
+    """
+    from sqlalchemy import or_, update
+
+    from backend.database import AsyncSessionLocal
+    from backend.models.job import Job
+
+    async with AsyncSessionLocal() as db:
+        stmt = update(Job).where(
+            Job.id == job_id,
+            Job.status == "pending",
+            or_(Job.task_id == claim, Job.task_id.is_(None)),
+        ).values(status="running", task_id=None)
+        res = await db.execute(stmt)
+        await db.commit()
+        return bool(res.rowcount)
+
+
 async def _run_localization_batch_sequential(specs: list[dict]) -> None:
     """Run HQ localization jobs one-by-one to avoid loading Demucs/WhisperX N times.
 
     The normal per-job runner is reused verbatim; this is only a lightweight
     coordinator and intentionally bypasses the generic max-3 heavy-task fanout.
     """
+    import os as _os
+
     from backend.core.tool_runners import run_tool_translate
 
     for spec in specs:
-        await run_tool_translate(**spec)
+        # pending->running and the claim release happen in ONE conditional
+        # write. From the moment the attach lands the item is owned by a LIVE
+        # task; leaving the marker in place would make a later crash sweep
+        # report it as an unclaimed recovery action, and clearing it first
+        # would let a sweep fail a row with nothing attached.
+        if not await _attach_batch_item(spec["job_id"], spec.get("claim")):
+            continue        # somebody else owns (or finished) this item
+        kwargs = {k: v for k, v in spec.items() if k != "claim"}
+        kwargs["in_path"] = Path(kwargs["in_path"])
+        await run_tool_translate(**kwargs)
 
 
 @router.post("/batch")
@@ -1843,38 +2001,140 @@ async def localization_batch(
     if len(files) > 20:
         raise HTTPException(status_code=400, detail="Maximum 20 videos per batch")
 
+    import os
+
+    from datetime import datetime
+    from uuid import uuid4
+
     from backend.agents.job_helper import create_job
     from backend.api.tools import VIDEO_EXTS, VIDEO_MAX_BYTES, save_upload
     from backend.core.task_runner import dispatch
+    from backend.database import AsyncSessionLocal
+    from backend.models.job import Job
 
-    jobs = []
-    specs = []
-    for file in files:
-        job = await create_job("tool:translate", "local", {
-            "target_language": target_language,
-            "mode": mode,
-            "voice_id": voice_id if mode == "full_dub" else None,
-            "caption_style": caption_style,
-            "target_aspect": target_aspect,
-            "profile_id": profile_id,
-            "batch": True,
-            "filename": file.filename,
-        })
-        in_path = await save_upload(file, job.id, VIDEO_EXTS, VIDEO_MAX_BYTES)
-        specs.append({
-            "job_id": job.id,
-            "in_path": in_path,
-            "target_language": target_language,
-            "mode": mode,
-            "voice_id": voice_id,
-            "caption_style": caption_style,
-            "emoji_style": emoji_style,
-            "target_aspect": target_aspect,
-            "profile_id": profile_id,
-        })
-        jobs.append({"job_id": job.id, "filename": file.filename})
+    batch_id = uuid4().hex
+    jobs: list[dict] = []
+    specs: list[dict] = []
+    admitted: list[str] = []
 
-    # One coordinator consumes one global heavy-task slot; jobs inside it are
-    # strictly sequential, so a 20-video batch cannot fan out 20 Demucs models.
-    dispatch(_run_localization_batch_sequential(specs))
+    try:
+        for file in files:
+            job = await create_job("tool:translate", "local", {
+                "target_language": target_language,
+                "mode": mode,
+                "voice_id": voice_id if mode == "full_dub" else None,
+                "caption_style": caption_style,
+                # Persisted: a recovered item must run the style the user asked
+                # for, not fall back to a default.
+                "emoji_style": emoji_style,
+                "target_aspect": target_aspect,
+                "profile_id": profile_id,
+                "batch": True,
+                "batch_id": batch_id,
+                "batch_index": len(jobs),
+                "filename": file.filename,
+            })
+            # Registered BEFORE the upload so a failure mid-batch still finds
+            # this row: an admitted item is never left `pending` with nothing
+            # attached to it, which is what made a rejected batch orphan file 1.
+            admitted.append(job.id)
+            in_path = await save_upload(file, job.id, VIDEO_EXTS, VIDEO_MAX_BYTES)
+            # in_path is the recovery key. Without it a restarted process holds
+            # a pending row and no way to tell which upload is its own, so the
+            # item could only ever be failed, never resumed.
+            await _merge_job_input(job.id, {
+                "in_path": str(in_path),
+                "batch_id": batch_id,
+                "batch_index": len(jobs),
+                "batch": True,
+            }, expect_batch_admitted=False)
+            specs.append({
+                "job_id": job.id,
+                "in_path": in_path,
+                "target_language": target_language,
+                "mode": mode,
+                "voice_id": voice_id,
+                "caption_style": caption_style,
+                "emoji_style": emoji_style,
+                "target_aspect": target_aspect,
+                "profile_id": profile_id,
+            })
+            jobs.append({"job_id": job.id, "filename": file.filename})
+
+        # Immutable snapshot of the RESOLVED profile, taken once at admission.
+        # Recovery replays this instead of re-resolving against live Settings,
+        # so a settings edit between the crash and the restart cannot silently
+        # change what the batch runs. A missing Settings row is not fatal here:
+        # the profile_id stays durable and the runner resolves it as usual.
+        profile_override = None
+        try:
+            # Resolve the profile ONCE, here, and persist it. This is the SAME
+            # resolution the runner performs (Settings -> profile store ->
+            # materialized snapshot, defaulting to the store's default profile
+            # when the batch named none), so a recovered item replays exactly
+            # what was admitted instead of re-resolving against whatever
+            # Settings happen to say at restart time.
+            from sqlalchemy import select as _select
+
+            from backend.database import AsyncSessionLocal as _sess
+            from backend.models.user_settings import UserSettings as _US
+            from backend.services.localization_service import (
+                materialize_localization_profile as _materialize,
+                resolve_localization_profile as _resolve,
+            )
+
+            async with _sess() as _db:
+                _row = (await _db.execute(
+                    _select(_US).where(_US.user_id == "local")
+                )).scalar_one_or_none()
+            if _row is not None:
+                _profile = _materialize(
+                    _row, _resolve(_row, profile_id),
+                    target_language=target_language,
+                    for_dub=(mode == "full_dub"),
+                )
+                profile_override = _profile.model_dump(mode="json")
+        except Exception as exc:
+            # Not fatal: profile_id stays durable and the runner resolves it
+            # exactly as it would have without this snapshot.
+            logging.getLogger(__name__).info(
+                "Batch %s: no profile snapshot at admission (%s); recovery will "
+                "resolve profile_id instead.", batch_id, exc,
+            )
+
+        # Complete-batch marker set, written BEFORE any dispatch and in ONE
+        # transaction for every row: each admitted row now carries its upload
+        # path, the shared batch id, the stable index, the size, the resolved
+        # profile snapshot, and the pid that owns it. A crash in the next
+        # instant is recoverable rather than ambiguous, and nothing that lives
+        # at this pid can be stolen by an overlapping boot.
+        await _write_batch_markers(admitted, {
+            "batch_admitted": True,
+            "batch_size": len(admitted),
+            "batch_owner_pid": os.getpid(),
+            "profile_override": profile_override,
+        })
+
+        # One coordinator consumes one global heavy-task slot; jobs inside it
+        # are strictly sequential, so a 20-video batch cannot fan out 20 Demucs
+        # models. INSIDE the try: a dispatch failure must fail the rows, not
+        # leave an admitted batch with nothing consuming it.
+        dispatch(_run_localization_batch_sequential(specs))
+    except BaseException as exc:
+        # Partial admission must fail SAFELY: mark every row this request
+        # created terminal. Cancellation is re-raised untouched - swallowing
+        # BaseException would strand the rows on shutdown.
+        detail = getattr(exc, "detail", None) or str(exc) or "Batch admission failed"
+        async with AsyncSessionLocal() as db:
+            for job_id in admitted:
+                row = await db.get(Job, job_id)
+                if row is not None and str(row.status) in {"pending", "running"}:
+                    row.status = "failed"
+                    row.error_message = (
+                        f"Batch rejected before dispatch: {detail}"
+                    )
+                    row.completed_at = datetime.utcnow()
+            await db.commit()
+        raise
+
     return {"count": len(jobs), "jobs": jobs}

@@ -4,6 +4,20 @@
 import json
 from types import SimpleNamespace
 import pytest
+
+@pytest.fixture(autouse=True)
+def mocked_postfit_measurement(monkeypatch):
+    """Unit orchestration uses byte placeholders, NOT playable audio.
+
+    Real measurement/failure gates run unmocked in postfit/rhythm suites.
+    """
+    from backend.services import localization_service as service
+
+    async def measure(_path, raw_duration_ms, speed_factor):
+        return round(raw_duration_ms / speed_factor), -12.0
+
+    monkeypatch.setattr(service, "_measure_fitted_audio", measure)
+
 from backend.core.localization import LocalizationSegment, LocalizationTranscript, fast_localization_profile
 from backend.services import localization_service as svc
 from backend.services.dubbing_rewrite_guard import check_translation_meaning
@@ -94,7 +108,8 @@ def test_review_negative_controls(source, target, sl, tl, kind):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("qc", ["standard", "strict"])
-async def test_names_remain_consistent_when_later_batch_introduces_dictionary(monkeypatch, tmp_path, qc):
+@pytest.mark.parametrize("policy", ["strict", "auto"])
+async def test_names_remain_consistent_when_later_batch_introduces_dictionary(monkeypatch, tmp_path, qc, policy):
     class AI:
         provider = SimpleNamespace(value="test")
         model = "test"
@@ -127,17 +142,21 @@ async def test_names_remain_consistent_when_later_batch_introduces_dictionary(mo
     )
     args = dict(
         target_language="vi",
-        profile=fast_localization_profile().model_copy(update={"qc_profile": qc}),
+        # QC severity and translation continuity are independent controls.
+        # New Fast selects Auto; legacy Strict must be explicit in this fixture.
+        profile=fast_localization_profile().model_copy(update={"qc_profile": qc,
+            "translation_automation": policy}),
         user_settings=None,
         for_dub=True,
         checkpoint_dir=tmp_path,
     )
-    if qc == "strict":
+    if qc == "strict" and policy == "strict":
         with pytest.raises(RuntimeError, match="12 segment.*untranslated"):
             await svc.translate_transcript(tx, **args)
     else:
         out = await svc.translate_transcript(tx, **args)
-        assert [seg.translation_status for seg in out.segments] == ["untranslated"] * 12 + ["success"]
+        rejected_status = "draft" if policy == "auto" else "untranslated"
+        assert [seg.translation_status for seg in out.segments] == [rejected_status] * 12 + ["success"]
         assert all(
             out.metadata["localized_terms"]["张三"] in seg.translated_text
             for seg in out.segments
@@ -147,6 +166,19 @@ async def test_names_remain_consistent_when_later_batch_introduces_dictionary(mo
     assert checkpoint["batches"]["0"]["items"] == []
     assert checkpoint["batches"]["0"]["pending_ids"] == [f"s{i}" for i in range(12)]
     resumed = await svc.translate_transcript(tx, **args)
+    if policy == "auto":
+        # Retention is not acceptance: inconsistent names stay exact audited
+        # drafts after resume and never contaminate the learned dictionary.
+        assert [s.translation_status for s in resumed.segments] == ["draft"] * 12 + ["success"]
+        assert resumed.metadata["localized_terms"] == {"张三": "Trương Ba"}
+        for seg in resumed.segments[:12]:
+            audit = resumed.metadata["translation_auto_drafts"][seg.id]
+            assert seg.translated_text == "Trương Tam đã đến."
+            assert audit["source_text"] == seg.source_text
+            assert audit["target_text"] == seg.translated_text and audit["issues"]
+            assert seg.qc_status == "review"
+        assert ai.calls == 2, "Resume must not silently accept or retranslate audited drafts"
+        return
     assert all(
         seg.translation_status == "success" and seg.translated_text == "Trương Ba đã đến." for seg in resumed.segments
     )

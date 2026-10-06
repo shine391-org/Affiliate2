@@ -88,6 +88,10 @@ class LocalizationProfile(BaseModel):
     # protocol (stable IDs/order + JSON schema) stays app-owned because runtime
     # parsing depends on it.
     translation_guardrails: str = DEFAULT_TRANSLATION_GUARDRAILS
+    # Opt-in continuity, not a weaker fidelity verdict: unresolved valid text
+    # may render as a warning-marked draft; publish still requires review.
+    # Old saved profiles keep strict behavior when this field is absent.
+    translation_automation: Literal["strict", "auto"] = "strict"
     glossary: dict[str, str] = Field(default_factory=dict)
     protected_terms: list[str] = Field(default_factory=list, max_length=100)
 
@@ -295,6 +299,7 @@ def fast_localization_profile() -> LocalizationProfile:
     return LocalizationProfile(
         id="vi-affiliate-fast",
         name="Vietnam Affiliate Fast",
+        translation_automation="auto",
         asr_model="small",
         asr_quality="balanced",
         alignment_mode="off",
@@ -423,7 +428,7 @@ class LocalizationSegment(BaseModel):
 
     tts_duration_ms: int | None = Field(default=None, ge=0)
 
-    translation_status: Literal["pending", "success", "failed", "untranslated"] = "pending"
+    translation_status: Literal["pending", "success", "draft", "failed", "untranslated"] = "pending"
     timing_status: Literal["pending", "fit", "adjusted", "overflow"] = "pending"
     qc_status: Literal["pending", "pass", "review", "fail"] = "pending"
 

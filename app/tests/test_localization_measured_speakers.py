@@ -7,6 +7,20 @@ from types import SimpleNamespace
 
 import pytest
 
+@pytest.fixture(autouse=True)
+def mocked_postfit_measurement(monkeypatch):
+    """Unit orchestration uses byte placeholders, NOT playable audio.
+
+    Real measurement/failure gates run unmocked in postfit/rhythm suites.
+    """
+    from backend.services import localization_service as service
+
+    async def measure(_path, raw_duration_ms, speed_factor):
+        return round(raw_duration_ms / speed_factor), -12.0
+
+    monkeypatch.setattr(service, "_measure_fitted_audio", measure)
+
+
 from backend.core.localization import (
     LocalizationProfile, LocalizationProfileStore, LocalizationSegment, LocalizationTranscript,
     fast_localization_profile,

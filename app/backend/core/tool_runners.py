@@ -1286,6 +1286,32 @@ async def run_tool_translate(
         run.verify_source_identity()
         await _cancel_checkpoint("media processing")
 
+        # ── Dependency closure of LOST artifacts ───────────────────────────
+        # The `is_complete(stage, ...)` checks below only decide whether to
+        # rebuild ONE stage. Without this, a stage whose artifact was lost
+        # (deleted delivery file, wiped mixed audio, missing transcript) is
+        # rebuilt while every LATER stage still reads `status == "complete"`
+        # and is reused -- so QC, the approval surface and the delivered video
+        # end up describing artifacts that no longer exist.
+        #
+        # Invalidate from the earliest stage that claims a completeness it can
+        # no longer prove, which invalidates its whole closure including QC, and
+        # leaves everything upstream byte-identical. `delete_artifacts=True`
+        # also drops targeting/reuse bookkeeping; targeted retry still opts out
+        # through the explicit `delete_artifacts=False` paths below.
+        damaged_stage = run.earliest_damaged_stage()
+        if damaged_stage is not None:
+            logger.warning(
+                "Localization resume: %s artifacts are missing; rebuilding from %s",
+                job_id[:8], damaged_stage,
+            )
+            run.invalidate_from(
+                damaged_stage,
+                delete_artifacts=True,
+                preserve_files={"checkpoint.json"},
+            )
+        await _cancel_checkpoint("artifact closure")
+
         # Never clean the persisted source snapshot.
         cleanup = [
             path for path in cleanup
@@ -1496,6 +1522,9 @@ async def run_tool_translate(
                 user_id,
             )
             run.start("translation")
+            if run.request.get("translation_review_approved"):
+                # A rebuilt C6 artifact cannot inherit approval of its predecessor.
+                run.update_request({**run.request, "translation_review_approved": False})
             translation_runtime = {
                 "attempts": 0,
                 "errors": 0,
@@ -1571,6 +1600,7 @@ async def run_tool_translate(
                     for_dub=is_dub,
                     checkpoint_dir=run.stage_dir("translation"),
                     progress_cb=_translation_progress,
+                    source_media=source_path,
                 )
                 path = run.save_json(
                     "translation", "transcript.json", localized.model_dump()
@@ -1582,6 +1612,10 @@ async def run_tool_translate(
                         "translated_count": sum(
                             1 for s in localized.segments
                             if s.translation_status == "success"
+                        ),
+                        "draft_count": sum(
+                            1 for s in localized.segments
+                            if s.translation_status == "draft"
                         ),
                         "translation_provider": profile.translation_provider,
                         "translation_model": profile.translation_model,
@@ -1642,6 +1676,13 @@ async def run_tool_translate(
                 raise
 
         await _cancel_checkpoint("translation review / dubbing")
+
+        # Strict keeps the forced C6 gate. Auto carries findings into final
+        # review-ready QC instead; explicit user-requested pre-TTS review below
+        # is unchanged. Auto continuity is not a quality approval.
+        if (is_dub and profile.translation_automation != "auto"
+                and localized.metadata.get("translation_guard_review")):
+            run.update_request({**run.request, "review_translation": True})
 
         # Optional human quality gate: stop after C6 and expose source/target
         # pairs before spending on TTS/render. The same manifest/job resumes at
@@ -1803,6 +1844,14 @@ async def run_tool_translate(
                         reference_media=asr_input,
                         progress_cb=_rewrite_progress,
                         job_state_path=run.root / "dubbing_state.json",
+                        # Poll the persisted job row at C7's own chunk/fit
+                        # boundaries. Cancellation currently only takes effect
+                        # between stages, so a cancelled job kept spending TTS
+                        # on every remaining chunk of a long dub. This observes
+                        # cancellation; it never interrupts a native call in
+                        # flight, so the GPU gate is still only released once
+                        # compute has actually stopped.
+                        cancel_check=lambda: job_cancelled(job_id),
                     )
                     localized = dub.transcript
                     dub_track = dub.dub_track

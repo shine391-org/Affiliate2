@@ -63,12 +63,23 @@ def compact_localization_workspace(job_id: str) -> int:
 
     # These stages are never required for render-only replay once translation,
     # dub_track and mixed_audio are durable.
+    #
+    # The reclaim is RECORDED in the manifest. Losing an artifact by deletion is
+    # damage that must invalidate the dependency closure; losing it to a
+    # deliberate retention decision is not, and treating the two identically
+    # would let a compacted workspace nuke the last-good translation/QC chain it
+    # was compacted to preserve. See LocalizationRun.earliest_damaged_stage.
+    reclaimed = set(data.get("compacted_stages") or []) | {
+        "separation", "asr", "semantic",
+    }
     for name in ("separation", "asr", "semantic"):
         directory = root / name
         if directory.exists():
             shutil.rmtree(directory, ignore_errors=True)
             if not directory.exists():
                 removed += 1
+
+    data["compacted_stages"] = sorted(reclaimed & set(STAGES))
 
     # Dubbing can contain hundreds of raw/fitted TTS files. Keep only the
     # canonical artifacts named by the manifest (transcript, dub_track, plan,
@@ -106,6 +117,13 @@ def compact_localization_workspace(job_id: str) -> int:
                 except OSError:
                     pass
 
+    # Written LAST so a crash mid-compaction never records a reclaim that did
+    # not happen; the recovery path would then see "complete" stages whose
+    # bytes are gone with no compaction to explain it.
+    manifest_path.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2, default=str) + "\n",
+        encoding="utf-8",
+    )
     return removed
 
 
@@ -375,6 +393,7 @@ class LocalizationRun:
             artifacts=serial_artifacts,
             metadata=metadata or {},
         )
+        self.data["compacted_stages"] = sorted(self.compacted_stages() - {stage})
         self._write()
 
     def mark_complete_without_artifacts(
@@ -413,6 +432,7 @@ class LocalizationRun:
         self._check_stage(stage)
         index = STAGES.index(stage)
         invalidated = list(STAGES[index:])
+        self.data["compacted_stages"] = sorted(self.compacted_stages() - set(invalidated))
         preserved_names = set(preserve_files or ())
 
         for name in invalidated:
@@ -458,6 +478,43 @@ class LocalizationRun:
         for name in STAGES:
             if self.record(name).get("status") != "complete":
                 return name
+        return None
+
+    def compacted_stages(self) -> set[str]:
+        """Stages whose artifacts retention DELIBERATELY reclaimed.
+
+        Recorded by ``compact_localization_workspace``. These are not damage:
+        the stage is still declared complete, its bytes were dropped on purpose
+        so a render-only replay stays cheap, and the retained downstream chain
+        (translation, dubbing, mix, render, QC) is exactly what must survive.
+        """
+        return {
+            name for name in (self.data.get("compacted_stages") or [])
+            if name in STAGES
+        }
+
+    def earliest_damaged_stage(self) -> str | None:
+        """Earliest stage that claims ``complete`` but cannot prove it.
+
+        A stage record is a claim plus the artifact paths that back it. When one
+        of those paths is gone the claim is false, and every LATER stage was
+        derived from the artifact that disappeared -- so this is the point from
+        which the dependency closure has to be rebuilt. ``None`` means the
+        manifest is internally consistent and a resume may reuse every stage.
+
+        Only artifacts a complete record NAMED are checked. A stage completed
+        without artifacts (skipped separation, captions-only audio stage) makes
+        no claim to violate, and reporting it as damaged would make every
+        captions-only job invalidate itself on each resume.
+        """
+        compacted = self.compacted_stages()
+        for name in STAGES:
+            record = self.record(name)
+            if record.get("status") != "complete" or name in compacted:
+                continue
+            for key in (record.get("artifacts") or {}):
+                if self.artifact(name, key) is None:
+                    return name
         return None
 
     def save_json(self, stage: str, name: str, payload: Any) -> Path:

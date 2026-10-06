@@ -224,9 +224,33 @@ def evaluate_localization_qc(
     if not final_meta["has_audio"]:
         failures.append({"code": "missing_audio_stream"})
 
+    draft_audit = transcript.metadata.get("translation_auto_drafts") or {}
+    audited_drafts: set[str] = set()
+    for segment in transcript.segments:
+        if segment.translation_status != "draft":
+            continue
+        record = draft_audit.get(segment.id) if isinstance(draft_audit, dict) else None
+        if (
+            profile.translation_automation == "auto"
+            and (segment.translated_text or "").strip()
+            and isinstance(record, dict)
+            and record.get("source_text") == segment.source_text
+            and record.get("target_text") == segment.translated_text
+            and record.get("issues")
+        ):
+            audited_drafts.add(segment.id)
+            warnings.append({
+                **record,
+                "code": "translation_auto_draft",
+                "segment_id": segment.id,
+                "source_start_ms": segment.source_start_ms,
+                "source_end_ms": segment.source_end_ms,
+                "message": "Unresolved translation defects were retained as an Auto draft; review this revision before publish.",
+            })
     untranslated = [
         s.id for s in transcript.segments
-        if s.translation_status != "success" or not (s.translated_text or "").strip()
+        if (s.translation_status != "success" and s.id not in audited_drafts)
+        or not (s.translated_text or "").strip()
     ]
     if untranslated:
         failures.append({
@@ -336,7 +360,26 @@ def evaluate_localization_qc(
 
     coverage = _speech_coverage(transcript)
     if coverage < 0.72:
-        failures.append({"code": "low_target_speech_coverage", "ratio": round(coverage, 4)})
+        # Duration is only a cadence heuristic, not semantic completeness.
+        # Auto may retain a moderately shorter dub ONLY with every cue present
+        # and measured positive TTS; the original Strict gate stays unchanged.
+        review_only = (
+            profile.translation_automation == "auto"
+            and check_tts_quality and bool(transcript.segments)
+            and not untranslated and not unlocalized
+            and coverage >= 0.50
+            and all((s.tts_duration_ms or 0) > 0
+                    and s.target_start_ms is not None and s.target_end_ms is not None
+                    and s.target_end_ms > s.target_start_ms for s in transcript.segments)
+        )
+        issue = {"code": "low_target_speech_coverage", "ratio": round(coverage, 4)}
+        if review_only:
+            issue.update(strict_min_ratio=0.72, auto_min_ratio=0.50,
+                requires_human_review=True,
+                message="Auto retained moderately shorter target speech; verify cadence and omissions before publishing this revision.")
+            warnings.append(issue)
+        else:
+            failures.append(issue)
     elif coverage < 0.88:
         warnings.append({"code": "target_speech_coverage", "ratio": round(coverage, 4)})
 
@@ -405,6 +448,7 @@ def evaluate_localization_qc(
             "video_slowdown": round(video_slowdown, 5),
             "audio_max_volume_db": max_volume,
             "translated_segments": len(transcript.segments) - len(untranslated),
+            "draft_segments": len(audited_drafts),
             "segment_count": len(transcript.segments),
             "diarization": alignment,
             "speaker_count": speaker_count,

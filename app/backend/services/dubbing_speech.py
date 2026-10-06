@@ -12,7 +12,7 @@ async def prepare_speech(transcript, *, profile, runtime, **_kwargs):
         language = "vi"
     missing = {seg.id: untranslated_han(seg.translated_text or "", language,
                    allowed=[*profile.protected_terms, *profile.glossary.values()])
-               for seg in transcript.segments if seg.translation_status == "success"}
+               for seg in transcript.segments if seg.translation_status in {"success", "draft"}}
     missing = {key: value for key, value in missing.items() if value}
     if missing:
         raise ValueError(f"Unlocalized Vietnamese text: rerun translation before dubbing ({list(missing)})")

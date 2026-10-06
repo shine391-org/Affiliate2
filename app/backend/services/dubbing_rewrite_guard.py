@@ -20,8 +20,9 @@ from __future__ import annotations
 import re
 import unicodedata
 from collections import Counter
+from dataclasses import dataclass, field
 from fractions import Fraction
-from typing import Iterable
+from typing import Iterable, Sequence
 
 # ── Language-scoped lexicons ──────────────────────────────────────────────
 # Negation markers: dropping one of these removes a distinction.
@@ -175,6 +176,105 @@ _TRANSLATION_POLARITY = (
     ({"en": "turn on", "vi": "bật", "zh": "打开"},
      {"en": "turn off", "vi": "tắt", "zh": "关闭"}),
 )
+
+# ── Semantic-group / context contract (plan VI, Task C) ─────────────────────
+# A subtitle cue is a display unit, not a semantic unit. These types let a
+# caller hand the guard the surrounding cues so an incomplete sentence can be
+# judged as the sentence it belongs to, WITHOUT any of it being required:
+# omitting the context reproduces the previous single-cue behaviour exactly.
+
+@dataclass(frozen=True)
+class GuardContext:
+    """Optional neighbouring-cue context for one cue under test.
+
+    `source_before` / `source_after` / `target_before` / `target_after` are the
+    immediately adjacent cues in the same language as the segment being checked.
+    They may license a reading that the cue alone cannot support (an elided age
+    whose question lives in the previous cue); they can never license a changed
+    fact, because a licence must name the fact it applies to.
+    """
+    source_before: str = ""
+    source_after: str = ""
+    target_before: str = ""
+    target_after: str = ""
+    group_id: str | None = None
+
+    def source_window(self) -> str:
+        return f"{self.source_before} {self.source_after}".strip()
+
+    def target_window(self) -> str:
+        return f"{self.target_before} {self.target_after}".strip()
+
+    def window(self) -> str:
+        return f"{self.source_window()} {self.target_window()}".strip()
+
+
+@dataclass(frozen=True)
+class GuardSegment:
+    """One cue inside a semantic validation group."""
+    id: str
+    source_text: str
+    translated_text: str = ""
+
+
+def build_guard_context(segments: Sequence[GuardSegment | dict], index: int,
+                        *, group_id: str | None = None) -> GuardContext:
+    """Context for `segments[index]` from its immediate neighbours only.
+
+    `segments` may be GuardSegment objects or plain mappings with the keys
+    `id`, `source_text` and `translated_text`. A context never crosses a
+    speaker change: callers build the group, this helper only reads neighbours.
+    """
+    rows = list(segments)
+    if not 0 <= index < len(rows):
+        raise IndexError(index)
+
+    def field(row, name):
+        return row[name] if isinstance(row, dict) else getattr(row, name)
+
+    def pair(position):
+        if not 0 <= position < len(rows):
+            return "", ""
+        row = rows[position]
+        return field(row, "source_text") or "", field(row, "translated_text") or ""
+
+    before_source, before_target = pair(index - 1)
+    after_source, after_target = pair(index + 1)
+    if group_id is None and len(rows) > 1:
+        group_id = f"group-{field(rows[0], 'id')}-{field(rows[-1], 'id')}"
+    return GuardContext(source_before=before_source, source_after=after_source,
+                        target_before=before_target, target_after=after_target,
+                        group_id=group_id)
+
+
+# Quantity roles. A count and an indefinite article both surface as '1', but
+# only one of them is a claim about the world: 'tự chụp 1 tấm ảnh' commits to a
+# single photo, '1 khuôn mặt' names a face without counting anything. Classifying
+# the role before comparing is what separates seg-0008 (must stay blocked) from
+# seg-0066 (uncertain, reviewable).
+ROLE_CARDINAL = "cardinal"
+ROLE_ARTICLE = "article"
+ROLE_MEASUREMENT = "measurement"
+ROLE_ORDINAL = "ordinal"
+
+# Numerals followed by a noun but NOT by a classifier/measure word are
+# indefinite articles on both sides of this language pair. Requiring the value
+# to be exactly one keeps '3 khuôn mặt' a genuine count.
+_ARTICLE_NUMERALS = ("một", "1", "mốt", "一")
+
+# Chinese clause particles that make a bare '我23了' an elided statement about
+# age rather than an unfinished number: 了 closes the clause, and the speaker
+# refers to themselves. Compiled lazily because _ZH_NUMBER is defined below.
+_ZH_ELIDED_AGE = None
+# A neighbouring cue that actually asks for the age. Strict: the licence needs
+# the question, not merely a cue that happens to contain a number.
+_AGE_QUESTION_ZH = re.compile(r"多大|年龄|年齡|几岁|幾歲|多少岁|多少歲|年纪|年紀|幾年")
+_AGE_QUESTION_VI = re.compile(r"bao nhiêu tuổi|mấy tuổi|bao nhiêu năm|tuổi gì")
+# Rhetorical/standalone interrogatives whose position is not clause-final: 哪来
+# ('where did that come from') is a complete question even with no 吗 and no
+# closing punctuation, which is exactly what a cue boundary produces. Both the
+# simplified and traditional spellings of 来 are listed.
+_ZH_WHENCE = re.compile(r"哪\s*[裡里儿兒]?\s*[来來]|哪\s*[裡里儿兒]?\s*[来來]的?")
 
 
 def _normalize(text: str) -> str:
@@ -342,6 +442,11 @@ def _numeric_text(text: str) -> str:
     Vietnamese ba/năm need a quantity context. Names such as 张三 stay intact.
     """
     text = _normalize(text)
+    # A numeral inside a personal name is not a quantity (张三 = 'Zhang San').
+    # This runs before every numeral rule so no later rule can revive it.
+    text = _mask_zh_name_numerals(text)
+    # Lexical quantities ('a little', 'some', 'absolutely not') have no value.
+    text = _mask_zh_lexical_quantities(text)
     text = re.sub(r"([\d零〇一二三四五六七八九两兩十百千万萬]+)[点點][钟鐘]", r"\1小时", text)
     # 一点点 is a degree expression; 一点五 is the decimal 1.5. Only
     # digit-valued characters after 点 permit decimal normalization.
@@ -371,12 +476,21 @@ def _numeric_text(text: str) -> str:
     text = re.sub(r"(?<!只有)(?<!一共)(?<!恰好)(?<!正好)(?<!零)(?<![零〇二两兩三四五六七八九十百千万萬])"
                   r"一(?:首|篇|首歌|篇兒|本首)", " ", text)
     text = re.sub(r"(?<![\d零〇一二三四五六七八九两兩十百千万萬])" + _ZH_NUMBER + r"?(?=\s*(?:岁|歲|歳|系列|期|章|节|節|集|步|页|頁|轮|輪|年|月|周|週|个|個|台|只|瓶|本|支|件|位|名|条|條|张|張|次|份|杯|碗|套|座|架|盒|枚|颗|顆|棵|辆|輛|篇|根|隻|只|指|首|度|公斤|千克|克|公里|千米|米|升|秒|分钟|分鐘|小時|小时|天|元|块|塊|%))", lambda m: _integer_text(m.group()), text)
+    # 兩眼 (two eyes), 兩手 (both hands), 三貓 (three cats): a numeral of 2 or
+    # more followed by any noun is a counted quantity. Chinese has no measure
+    # word here, so a classifier inventory would miss ordinary counts and reject
+    # correct translations. 一 + noun stays an article: it is handled above.
+    text = re.sub(r"(?<![\d零〇一二三四五六七八九十百千万萬])(?<![第每])(" + _ZH_NUMBER + r")(?=" + _ZH_COUNT_NOUN + r")",
+                  lambda m: _integer_text(m.group(1)), text)
     # A bare classifier with no numeral ('a girl', 'a root of finger') is an
     # indefinite article, which Vietnamese renders as 'một'. Count it so both
     # sides agree instead of reporting the target's article as a lost number.
     # 个 that already belongs to a duration alias (個月/個星期) is a unit, not
-    # an article, so it must not be turned into a count.
-    text = re.sub(r"(?<![\d零〇一二三四五六七八九两兩十百千万萬])(?<![各每這这那哪兒那個这个這個幾几數数好])(个|個)(?![月周週天年秒分刻小時时])", r"1\1", text)
+    # an article, so it must not be turned into a count. Only the unit-forming
+    # collisions are excluded: 個月 reads as 'a month', while a bare 個 in front
+    # of an ordinary noun — including 月亮 (the moon) — is an article, and
+    # treating it as a month unit made a correct translation look invented.
+    text = re.sub(r"(?<![\d零〇一二三四五六七八九两兩十百千万萬])(?<![各每這这那哪兒那個这个這個幾几數数好])(个|個)(?!月(?![亮])|周|週|星期|天|年|秒|分|刻|小時|时)", r"1\1", text)
     # 首 in 首歌/詩歌 is a lexical compound, not a bare classifier.
     text = re.sub(r"(?<![\d零〇一二三四五六七八九两兩十百千万萬])(?<![各每這这那哪兒那個这个這個幾几數数好])(?<![歌詩诗詞词樂乐])"
                   r"([隻根])", r"1\1", text)
@@ -389,6 +503,153 @@ def _numeric_text(text: str) -> str:
 
 
 _ZH_NUMBER = r"[零〇一二三四五六七八九两兩十百千万萬]+"
+# A numeral of two or more is a counted quantity whatever noun follows it
+# (兩眼 = two eyes, 三天 handled above). Chinese has no separate classifier
+# inventory for body parts or common nouns, so enumerating measure words
+# misses ordinary counts; restricting this rule to 2+ cannot collide with the
+# 一 article readings handled above.
+_ZH_COUNT_NOUN = r"[\u3400-\u9fff\uf900-\ufaff]"
+
+# Chinese has no spaces, so 张三 ('Zhang San') and 张三瓶 ('three bottles') are
+# written identically far enough for a numeral scanner. The discriminator is
+# the surname inventory: a single numeral directly after a surname is part of a
+# personal name, unless a measure/classifier/unit word follows it, in which case
+# the counted reading is the only one that makes sense (王五岁 = Wang is five,
+# 老王五元 = five yuan). Requiring that exception is what keeps genuine counts
+# (每隔三天, 买了三瓶, 三瓶水) counted instead of masking them away. The list is
+# the standard common-surname inventory (simplified and traditional spellings
+# side by side), not a fixture-specific whitelist: any unlisted surname falls
+# back to the counted reading, which is the blocking direction.
+_ZH_SURNAMES = "".join(dict.fromkeys(
+    "".join(pair) for pair in (
+        "赵趙", "钱錢", "孙孫", "李", "周", "吴吳", "郑鄭", "王", "冯馮", "陈陳",
+        "褚", "卫衛", "蒋蔣", "沈", "韩韓", "杨楊", "朱", "秦", "尤", "许許",
+        "何", "吕呂", "施", "张張", "孔", "曹", "严嚴", "华華", "金", "魏",
+        "陶", "姜", "戚", "谢謝", "邹鄒", "喻", "柏", "水", "窦竇", "章",
+        "云雲", "苏蘇", "潘", "葛", "奚", "范", "彭", "郎", "鲁魯", "韦韋",
+        "昌", "马馬", "苗", "凤鳳", "花", "方", "俞", "任", "袁", "柳",
+        "酆", "鲍鮑", "史", "唐", "费費", "廉", "岑", "薛", "雷", "贺賀",
+        "倪", "汤湯", "滕", "殷", "罗羅", "毕畢", "郝", "邬鄔", "安", "常",
+        "乐樂", "于", "时時", "傅", "皮", "卞", "齐齊", "康", "伍", "余",
+        "元", "卜", "顾顧", "孟", "平", "黄黃", "和", "穆", "萧蕭", "尹",
+        "姚", "邵", "湛", "汪", "祁", "毛", "禹", "狄", "米", "贝貝",
+        "明", "臧", "计計", "伏", "成", "戴", "谈談", "宋", "茅", "庞龐",
+        "熊", "纪紀", "舒", "屈", "项項", "祝", "董", "梁", "杜", "阮",
+        "蓝藍", "闵閔", "席", "季", "麻", "强強", "贾賈", "路", "娄婁",
+        "危", "江", "童", "颜顏", "郭", "梅", "盛", "林", "刁", "钟鐘",
+        "徐", "邱", "骆駱", "高", "夏", "蔡", "田", "樊", "胡", "凌",
+        "霍", "虞", "万萬", "支", "柯", "昝", "管", "卢盧", "莫", "经經",
+        "房", "裘", "缪", "干", "解", "应應", "宗", "丁", "宣", "贲賁",
+        "邓鄧", "郁", "单單", "杭", "洪", "包", "诸諸", "左", "石", "崔",
+        "吉", "钮鈕", "龚龔", "程", "嵇", "邢", "滑", "裴", "陆陸",
+        "荣榮", "翁", "荀", "羊", "甄", "曲", "家", "封", "芮", "储儲",
+        "靳", "汲", "邴", "糜", "松", "井", "段", "富", "巫", "乌烏",
+        "焦", "巴", "弓", "牧", "隗", "山", "谷", "车車", "侯", "宓",
+        "蓬", "全", "郗", "班", "仰", "秋", "仲", "伊", "宫宮", "宁寧",
+        "仇", "栾欒", "暴", "甘", "钭鈄", "厉厲", "戎", "祖", "武", "符",
+        "刘劉", "景", "詹", "束", "龙龍", "叶葉", "幸", "司", "韶", "郜",
+        "黎", "蓟", "薄", "印", "宿", "白", "怀懷", "蒲", "邰", "从從",
+        "鄂", "索", "咸", "籍", "赖賴", "卓", "蔺藺", "屠", "蒙", "池",
+        "乔喬", "阴陰", "鬱", "胥", "能", "苍蒼", "双雙", "闻聞", "莘",
+        "党黨", "翟", "谭譚", "贡貢", "劳勞", "姬", "申", "扶", "堵",
+        "冉", "宰", "郦酈", "雍", "郤", "璩", "桑", "桂", "濮", "牛",
+        "寿壽", "通", "边邊", "扈", "燕", "冀", "郏", "浦", "尚", "农農",
+        "温溫", "别別", "庄莊", "晏", "柴", "瞿", "阎閻", "充", "慕",
+        "连連", "茹", "习習", "宦", "艾", "鱼魚", "容", "向", "古", "易",
+        "慎", "戈", "廖", "庾", "终終", "暨", "居", "衡", "步", "都",
+        "耿", "满滿", "弘", "匡", "国國", "文", "寇", "广廣", "禄祿",
+        "阙闕", "东東", "欧歐", "殳", "沃", "利", "蔚", "越", "夔",
+        "隆", "师師", "巩鞏", "厍", "聂聶", "晁", "勾", "敖", "融", "冷",
+        "訾", "辛", "阚闞", "那", "简簡", "饶饒", "空", "曾", "毋", "沙",
+        "乜", "养養", "鞠", "须須", "丰豐", "巢", "关關", "蒯", "相",
+        "查", "后後", "荆荊", "红紅", "游", "竺", "权權", "逯", "盖蓋",
+        "益", "桓", "公",
+    )))
+# A following measure word rules out the name reading. This is the union of the
+# classifier inventory already used above plus the units the guard measures, so
+# a counted reading is never masked.
+_ZH_MEASURE_SUFFIX = "".join(dict.fromkeys(
+    ("个個次期章节節集步页頁轮輪年台只瓶本支件位名条條张張份杯碗套座架盒枚"
+     "颗顆棵辆輛篇根隻指首度双雙对對副串堆群束排段幅袋罐盆盘盤碟顶頂册冊"
+     "季幕场場层層部匹头頭尾枝株间間家组組桶勺升毫克厘千公里米元塊块点點"
+     "号號款項项通岁歲日元角毛寸斤周週天时分秒公斤千克")
+))
+_ZH_NAME_MARKER = "\ue001"
+# Lexical quantities carry no countable value, so a scanner that treats their
+# numeral as a count invents a fact the speaker never made. Each entry is a
+# fixed Chinese expression, and every one of them has a Vietnamese rendering
+# that is also not a number ('một chút'/'1 chút' is already erased as a degree
+# expression, 'vài' is never a numeral).
+_LEXICAL_QUANTITIES = (
+    # 'a little' — 有點/有点, 一點/一点, 一點兒. 一点五 (1.5) is a decimal and is
+    # excluded by the lookahead so the decimal rule still owns it.
+    r"(?:有|沒|没|不)?一[点點](?![点點零〇一二三四五六七八九\d])",
+    # 'some / a few' — 一些, 一會兒/一会儿, 一陣子, 一會.
+        r"一(?=[些會会陣阵])",
+        # '一下 / 一下子 / 下子' is the verb-reducing particle ('have a look',
+        # 'wait a moment'): like 一點 it is NOT a count, and its Vietnamese
+        # rendering ('một chút', or nothing at all) legitimately has no numeral.
+        # Only the 一 directly before 下 is masked, so a real count in the same cue
+        # (一下买了三个) is still compared as a count.
+        r"一(?=下(?:子|子儿|子兒)?)",
+    # '五官' is a fixed compound ('the five features': eyes, nose, mouth,
+    # ears, brows) used for a FACE, never a count of five items. Its
+    # Vietnamese rendering ('ngũ quan', 'đường nét khuôn mặt') carries no
+    # numeral, so counting the 五 rejects a correct translation.
+    r"五官",
+    # 'absolutely / never' — 千萬 is a verb of emphasis before a prohibition
+    # (千萬不能 = 'must absolutely not'), not 10,000,000. A numeric prefix
+    # (一千萬) or a non-prohibition reading keeps the counted meaning.
+    r"(?<![零〇一二三四五六七八九两兩十百千万萬\d])千萬(?=\s*(?:不能|不可|不要|不許|不许|別|别|勿|切記))",
+)
+_ZH_LEXICAL_QUANTITY = re.compile("|".join(_LEXICAL_QUANTITIES))
+
+
+def _mask_zh_lexical_quantities(text: str) -> str:
+    """Blank the numeral of a lexical (degree / indefinite) quantity.
+
+    This runs before every numeral rule, so '剃掉一點' and '千萬不能' no
+    longer contribute a count that the translation was right not to reproduce.
+    The expressions are fixed strings, not cue-specific patterns, so a new cue
+    containing the same words is fixed by the same rule.
+    """
+    return _ZH_LEXICAL_QUANTITY.sub(_ZH_NAME_MARKER, text)
+
+
+def _mask_zh_name_numerals(text: str) -> str:
+    """Blank out numerals that are part of a personal name.
+
+    Without this, 张三 becomes 张3 and a correct translation ('Trương Tam đã
+    đến') is rejected for inventing or losing a count that was never claimed.
+    A numeral is only masked when the character immediately before it is a
+    known surname and no measure word follows it, so every genuine count keeps
+    its value and an unlisted surname stays on the counted (blocking) side.
+    """
+    surnames = "[" + re.escape(_ZH_SURNAMES) + "]"
+    numeral = _ZH_NUMBER[:-1]  # the character class without its "+" quantifier
+    measure = "[" + re.escape(_ZH_MEASURE_SUFFIX) + "]"
+    # A multi-character numeral (张三十 / 三十) is never a bare given name, and
+    # a following measure word means the counted reading (王五岁). Both must
+    # fall through to the ordinary counted rules.
+    pattern = surnames + "(" + numeral + ")(?!" + numeral + r")(?!" + measure + ")"
+    def mask(match):
+        prefix, suffix = text[:match.start()], text[match.end():]
+        # A surname-shaped character INSIDE a noun is not a subject name:
+        # 下巴二 labels the chin '2'; it must not become the person 巴二.
+        embedded = bool(prefix and re.search(r"[\u3400-\u9fff]$", prefix))
+        introduced = bool(re.search(r"(?:老|小|阿|叫|和|与|與|找|问|問|说|說)$", prefix))
+        predicate = bool(re.match(r"(?:来|來|说|說|问|問|买|買|今年|带|帶|走|去|在|要|不|没|沒)", suffix))
+        if embedded and not introduced and not predicate:
+            return match.group()
+        return match.group()[0] + _ZH_NAME_MARKER
+    return re.sub(pattern, mask, text)
+
+def _elided_age_pattern():
+    global _ZH_ELIDED_AGE
+    if _ZH_ELIDED_AGE is None:
+        _ZH_ELIDED_AGE = re.compile(
+            r"^(?:我|你|他|她|咱)\s*(" + _ZH_NUMBER + r"|\d+)\s*了(?:\s|$|[，。！？])")
+    return _ZH_ELIDED_AGE
 # Vietnamese unit words that are ordinary words in ordinary sentences:
 # 'bao giờ' (never) is not an hour count, 'bao nhiêu tuổi' (how old) is not
 # an age measurement and 'đồng tử' (pupil) is not currency. They only name a
@@ -425,7 +686,7 @@ def _integer_text(token: str) -> str:
     return str(total + section + current)
 
 
-def _ordinal_text(text: str, language: str | None, *, standalone: bool = True) -> tuple[str, list[str]]:
+def _ordinal_text(text: str, language: str | None, *, standalone: bool = True, labelled: bool = False) -> tuple[str, list[str]]:
     """Extract ordinal slots separately from cardinal values, for comparison."""
     text = _normalize(text)
     ordinals = []
@@ -451,14 +712,18 @@ def _ordinal_text(text: str, language: str | None, *, standalone: bool = True) -
         return " " + (time_unit.group() + " " if time_unit else "") + _ORDINAL_MARKER + " "
 
     if _lexicon_for(language) == "chinese":
-        pattern = (r"第\s*(" + _ZH_NUMBER + r"|\d+)(?=\s*" + _ZH_CLASSIFIER + r")"
+        pattern = (r"第\s*(" + _ZH_NUMBER + r"|\d+)(?=\s*(?:" + _ZH_CLASSIFIER + r"|$|[，。！？；、]|\s))"
                    r"|下\s*(?:一\s*(?=" + _ZH_CLASSIFIER + r")|(?=[个個次期章节節集步页頁轮輪年月天周週]))|接下[来來]")
     elif _lexicon_for(language) == "vietnamese":
         number = r"(?:nhất|\d+|(?:" + _VI_NUMBER_WORDS + r")(?:\s+(?:" + _VI_NUMBER_WORDS + r"))*)"
         # A standalone 'thứ hai' can be Monday. Require rank context unless
         # the source already has an ordinal slot; never guess a calendar rank.
         context = "" if standalone else r"(?:video|lần|kỳ|chương|tập|bước|trang|vòng|mục|phần|đoạn|bài|người|chiếc|cái)\s+"
-        pattern = (r"(?<!\w)" + context + r"(?:thứ\s+(" + number + r")|đầu tiên)(?!\w)"
+        # A numbered section ('Bước 4') can render an explicit source rank
+        # ('第四'). Licence this ONLY at the cross-language comparison, not
+        # globally in cardinal normalization or '4 bước' measurements.
+        rank = r"(?:thứ|bước|phần|mục|chương|tập|đoạn|bài|trang|vòng)" if labelled else "thứ"
+        pattern = (r"(?<!\w)" + context + r"(?:" + rank + r"\s+(" + number + r")|đầu tiên)(?!\w)"
                    r"|(?<!\w)" + context + r"(?:tiếp theo|kế tiếp|kế đó|tiếp đến|sau đó)(?!\w)"
                    r"|(?<!\w)(?:lần|kỳ|chương|tập|bước|trang|vòng|năm|tháng|ngày|tuần)\s+sau(?!\w)")
     elif _lexicon_for(language) == "english":
@@ -493,8 +758,10 @@ def _unit_spans(text: str) -> list[tuple[int, int, str]]:
                     if alias == "đồng" and re.match(r"\s*tử", text[match.end():]):
                         # đồng tử is the pupil, not currency.
                         continue
-                    if alias == "月" and re.match(r"亮", text[match.end():]):
-                        # 月亮 is the moon, not a month count.
+                    # 月亮 is the moon, not a month count. This holds for the
+                    # 个月/個月 spellings too: 1個月亮下巴 is
+                    # 'a moon-shaped chin', not 'a one-month chin'.
+                    if unit == "month" and re.match(r"\s*[亮亮]", text[match.end():]):
                         continue
                     ordinal_unit = unit in {"day", "week", "month", "year"} and (
                         re.search(_ORDINAL_MARKER + r"\s*$", text[:match.start()])
@@ -542,9 +809,28 @@ def _translation_question(text: str, language: str | None) -> bool:
     text = _normalize(text)
     if _lexicon_for(language) == "vietnamese":
         _, interrogative = _vi_question_text(text)
+        # WH-location questions need no final particle or ASR punctuation.
+        # Do not turn negative 'không đi đâu' or 'bất kỳ nơi nào' into asks.
+        for match in re.finditer(
+            r"(?<!\w)(?:(?:ở|từ|đến|đi|ra|về|qua|bên|phía)\s+đâu|"
+            r"(?:nơi|chỗ|vùng|miền|nước|tỉnh|thành phố)\s+nào)(?!\w)", text
+        ):
+            prefix = re.split(r"[.!?;,]", text[:match.start()])[-1]
+            if re.search(r"(?:không|chẳng|chả|chưa|đừng|bất kỳ|bất cứ)\s*$", prefix):
+                continue
+            # 'I know WHERE you live' is an assertion, not an ask. Explicit
+            # final particles still count, and 'tell me where' stays a request.
+            reported = re.search(r"(?<!\w)(?:biết|nhớ|rõ)(?!\w)", prefix)
+            requested = re.search(r"(?:hãy|muốn|cho\s+(?:tôi|mình))\s+(?:biết|nhớ|rõ)(?!\w)", prefix)
+            if not reported or requested:
+                interrogative = True
         return "?" in text or interrogative
     return "?" in text or (_lexicon_for(language) == "chinese" and bool(
-       re.search(r"[吗嗎](?=\s*(?:[。，,;；。.!?！]|[嗯啊呃]|$))", text)
+           # A cue that holds only the interrogative predicate (哪来的) has no 吗,
+           # no final punctuation and no clause-final wh-word, so every existing
+           # branch misses it. 哪来 is a complete interrogative on its own.
+           _ZH_WHENCE.search(text)
+           or re.search(r"[吗嗎](?=\s*(?:[。，,;；。.!?！]|[嗯啊呃]|$))", text)
        # Spoken ASR often separates a cue at the clause boundary instead of
        # punctuation: 喜欢吗 喜欢啊. A 吗 closing any spoken clause is
        # interrogative; 吗啡 (morphine) is not, because 啡 is not a boundary.
@@ -577,17 +863,118 @@ def _vi_question_text(text: str) -> tuple[str, bool]:
         modal = re.search(r"(?<!\w)có(?:\s+thể)?\s+", prefix)
         if not re.search(r"[^\W\d_]", prefix) or (reported and not modal):
             return match.group()
-        particles += 1
+        # A particle only closes the SENTENCE when everything after it is
+        # terminal punctuation. '... cua ban a, ban xinh qua' uses the particle
+        # to mark realization inside a running sentence, which is not a
+        # question; the same particle at the end of the target still is one.
+        tail = match.string[match.end():]
+        clause_final = not re.search(r"[^\W\d_]", re.sub(r"[\s?!.,;:]+$", "", tail))
+        if clause_final:
+            particles += 1
         return prefix + " "
 
+    # The lookahead limits matching to a particle that already closes a clause
+    # (comma / terminator / end). This keeps the negation-scope rewriting below
+    # behaving exactly as before; only the COUNT above is clause-sensitive.
     pattern = (r"(?P<prefix>[^?.!,;]+?)\s+(?:không|chưa|chứ|hả|hở|nhỉ|ư|à)"
                r"(?:\s+(?:ạ|nhỉ|vậy))?(?=\s*(?:[?.,!;]|$))")
     text = re.sub(pattern, strip_particle, _normalize(text))
     return text, bool(particles)
 
 
+def _article_tokens(text: str, language: str | None) -> list[str]:
+    """Numeral occurrences that read as an indefinite article, not a count.
+
+    'tự chụp 1 tấm ảnh' counts a photo (tấm is a classifier); '1 khuôn mặt' and
+    '1 cái cằm' name a thing without counting anything. Same numeral, different
+    role, and the role decides whether an added or missing 1 is a fact change.
+    Returns the numeric values that are articles, so the caller can subtract
+    them from the plain count comparison instead of dropping the check.
+    """
+    text = _normalize(text)
+    articles: list[str] = []
+    if _lexicon_for(language) == "chinese":
+        # 一个/一個 and a bare 个/個 are the indefinite article. The normalizer
+        # has already rewritten a bare 个 to 1个, so match the numeral form too.
+        # A bare 个 names a thing without counting it (你是個月亮下巴 = 'you are
+        # a moon-shaped chin'), exactly like 一个. Requiring the numeral here
+        # made every such cue invent a count the speaker never claimed.
+        articles.extend("1" for _ in re.finditer(
+            r"(?<![\d零〇一二三四五六七八九十百千万萬])(?:(?:1|[一])?)(?:个|個|首|篇|本|张|張|只|隻|条|條)(?=" + _ZH_COUNT_NOUN + r")",
+            text))
+        return articles
+    if _lexicon_for(language) != "vietnamese":
+        return articles
+    classifiers = {alias for aliases in _UNIT_ALIASES.values() for alias in aliases}
+    classifiers.update("cái chiếc con người lần phần bộ cuốn quyển tấm máy chai quả ly cốc hộp"
+                      " bức bước chương mục tập kỳ trang vòng loạt"
+                      " bài câu chữ từ đoạn điểm ví dụ cách việc hình con số".split())
+    context = "(?:" + "|".join(_phrase_pattern(alias)
+                              for alias in sorted(classifiers, key=len, reverse=True)) + ")"
+    # The measured reading wins: 1 tấm ảnh is a count even though 1 is present.
+    # Only a numeral whose following word is NOT a classifier/measure word and
+    # is not preceded by an explicit determiner is an indefinite article.
+    for match in re.finditer(r"(?<!\w)(?:một|1|mốt)(?!\s*(?:" + context + r"|\d))(?=\s+[^\W\d_])", text):
+        prefix = text[:match.start()].rstrip()
+        if re.search(r"(?:chỉ|chính|đúng|cả|chính xác|duy nhất)$", prefix):
+            continue
+        articles.append("1")
+    return articles
+
+
+def _quantity_roles(text: str, language: str | None) -> Counter:
+    """Count (value, role) pairs so article and count readings stay distinct."""
+    roles: Counter = Counter()
+    articles = _article_tokens(text, language)
+    article_values = Counter(_number_value("1") for _ in articles)
+    measured = Counter(_number_value(value)
+                       for value in _NUMBER_RE.findall(_numeric_text(text)))
+    for value, count in measured.items():
+        remaining = count - article_values.get(value, 0)
+        for _ in range(max(remaining, 0)):
+            roles[(value, ROLE_CARDINAL)] += 1
+        for _ in range(min(count, article_values.get(value, 0))):
+            roles[(value, ROLE_ARTICLE)] += 1
+        if remaining < 0:
+            roles[(value, ROLE_ARTICLE)] += 0
+    return roles
+
+
+def _implied_age(context: GuardContext | None, source: str,
+                 source_language: str | None) -> str | None:
+    """The elided age value in `source`, licensed only by a matching question.
+
+    我23了 states an age with no unit word. Accepting the translated unit is
+    legitimate ONLY when a neighbouring cue asks for that age: without the
+    question the cue could equally be a price, a size or a rank, and a
+    translated unit would then be an invented fact.
+    """
+    if context is None or _lexicon_for(source_language) != "chinese":
+        return None
+    match = _elided_age_pattern().search(_normalize(source))
+    if not match:
+        return None
+    # The question must exist in the SOURCE window only. A question found in
+    # the target window would let the translation license its own invented
+    # fact: the target is the text under test, so 'Bao nhiêu tuổi?' appearing
+    # there could be exactly the invention the guard exists to catch. An
+    # untranslated-source cue is still checkable because the question has to
+    # come from the approved side.
+    window = _normalize(context.source_window())
+    if not (_AGE_QUESTION_ZH.search(window) or _AGE_QUESTION_VI.search(window)):
+        return None
+    return _integer_text(match.group(1))
+
+
+def _clause_polarity(text: str, language: str | None) -> list[int]:
+    """Negation presence per clause, in order, so scope is not just a count."""
+    clauses = [clause for clause in re.split(r"[，,。.！!？?；;]", _normalize(text)) if clause.strip()]
+    return [_negations(clause, language) for clause in clauses]
+
+
 def _invariants(before: str, after: str, source_language: str | None,
-                target_language: str | None, *, translation: bool = False) -> list[dict]:
+                target_language: str | None, *, translation: bool = False,
+                context: GuardContext | None = None) -> list[dict]:
     issues = []
     old_question = "?" in _normalize(before)
     new_question = "?" in _normalize(after)
@@ -664,13 +1051,58 @@ def _invariants(before: str, after: str, source_language: str | None,
     if old_neg != new_neg:
         issues.append({"kind": "negation_lost" if old_neg > new_neg else "negation_added",
                        "detail": f"negation count changed: {old_neg} -> {new_neg}"})
+    # Counts can match while the polarity moved between clauses: 我不买苹果，我买梨
+    # -> Tôi mua táo, tôi không mua lê keeps one negation in both languages and
+    # asserts the opposite thing. Comparing per-clause polarity, not just the
+    # total, is what closes that false negative.
+    if old_neg == new_neg and old_neg:
+        old_clauses = _clause_polarity(before, source_language)
+        new_clauses = _clause_polarity(after, target_language)
+        if (len(old_clauses) > 1 and len(old_clauses) == len(new_clauses)
+                and sorted(old_clauses) == sorted(new_clauses)
+                and old_clauses != new_clauses):
+            issues.append({"kind": "negation_scope_changed", "severity": "hard",
+                           "action": "reject",
+                           "detail": f"negation moved between clauses: {old_clauses} -> {new_clauses}"})
     ordinal_before, old_ordinals = _ordinal_text(numeric_before, source_language)
     standalone = not translation or _lexicon_for(source_language) != "chinese" or bool(old_ordinals)
-    ordinal_after, new_ordinals = _ordinal_text(numeric_after, target_language, standalone=standalone)
+    ordinal_after, new_ordinals = _ordinal_text(numeric_after, target_language, standalone=standalone, labelled=bool(old_ordinals))
     if old_ordinals != new_ordinals:
         issues.append({"kind": "ordinal_changed", "detail": "ordinal/sequential slots changed"})
-    if _numbers(ordinal_before) != _numbers(ordinal_after):
-        issues.append({"kind": "quantity_lost", "detail": "numeric values/counts changed"})
+    numbers_before = _numbers(ordinal_before)
+    numbers_after = _numbers(ordinal_after)
+    if numbers_before != numbers_after:
+        # Role-aware retry: a difference that is only about the indefinite
+        # article '1' is not a count change. '最正的一個' -> '1 khuôn mặt' is
+        # that case, and it is ambiguous rather than wrong, so it is reported
+        # as uncertain/review instead of being blocked or silently passed.
+        roles_before = _quantity_roles(before, source_language)
+        roles_after = _quantity_roles(after, target_language)
+        cardinals_before = Counter({k: v for k, v in roles_before.items() if k[1] != ROLE_ARTICLE})
+        cardinals_after = Counter({k: v for k, v in roles_after.items() if k[1] != ROLE_ARTICLE})
+        if cardinals_before == cardinals_after:
+            issues.append({"kind": "article_asymmetry", "severity": "uncertain",
+                           "action": "review",
+                           "detail": "count differs only in the indefinite article '1'"})
+        else:
+            issues.append({"kind": "quantity_lost", "detail": "numeric values/counts changed"})
+    implied_age = _implied_age(context, before, source_language)
+    if implied_age is not None:
+        # The translated unit is licensed for exactly this value and only for
+        # the age unit; any other unit or value stays a hard finding.
+        after_units = _units(ordinal_after)
+        if after_units - _units(ordinal_before) == {"age"}:
+            measurements = _measurements(ordinal_after)
+            if measurements.get((implied_age, "age"), 0):
+                ordinal_after = re.sub(
+                    r"(?<![\w.])(?:" + "|".join(
+                        _phrase_pattern(alias) for alias in sorted(_UNIT_ALIASES["age"], key=len, reverse=True))
+                    + r")(?![\w])", " ", ordinal_after)
+                numeric_after = re.sub(
+                    r"(?<![\w.])(?:" + "|".join(
+                        _phrase_pattern(alias) for alias in sorted(_UNIT_ALIASES["age"], key=len, reverse=True))
+                    + r")(?![\w])", " ", numeric_after)
+                numbers_after = _numbers(ordinal_after)
     if _units(ordinal_before) != _units(ordinal_after) or _measurements(ordinal_before) != _measurements(ordinal_after):
         issues.append({"kind": "unit_lost", "detail": "measurement units or numeric/unit bindings changed"})
     # Punctuation carries the speaker's intent. A question or exclamation must
@@ -691,12 +1123,42 @@ def untranslated_han(text: str, target_language: str | None, *, allowed: Iterabl
     return list(dict.fromkeys(_HAN_RE.findall(text)))
 
 
+_HARD_KINDS = frozenset({
+    "negation_lost", "negation_added", "negation_scope_changed", "quantity_lost",
+    "unit_lost", "ordinal_changed", "question_changed", "exclamation_changed",
+    "antonym_flip", "term_lost", "unlocalized_text",
+})
+
+
+def _verdicts(issues: list[dict], *, include_advisories: bool) -> list[dict]:
+    """Attach severity/action and apply the opt-in advisory policy.
+
+    Default: only hard findings, so every existing caller keeps rejecting
+    exactly what it rejected before. `include_advisories=True` also returns the
+    uncertain findings (currently `article_asymmetry`) so a caller can route
+    them to review instead of treating them as either pass or reject.
+    """
+    for issue in issues:
+        issue.setdefault("severity", "hard" if issue["kind"] in _HARD_KINDS else "uncertain")
+        issue.setdefault("action", "reject" if issue["severity"] == "hard" else "review")
+    if include_advisories:
+        return issues
+    return [issue for issue in issues if issue["severity"] == "hard"]
+
+
 def check_rewrite_meaning(before: str, after: str, target_language: str | None = None,
-                          *, protected_terms: Iterable[str] = ()) -> list[dict]:
-    """Reject deterministic invariant violations before accepting any C7 text."""
+                          *, protected_terms: Iterable[str] = (),
+                          context: GuardContext | None = None,
+                          include_advisories: bool = False) -> list[dict]:
+    """Reject deterministic invariant violations before accepting any C7 text.
+
+    `context` and `include_advisories` are additive: omitting both reproduces
+    the previous behaviour byte for byte.
+    """
     if not before.strip() or not after.strip():
         return []
-    issues = _invariants(before, after, target_language, target_language)
+    issues = _invariants(before, after, target_language, target_language,
+                         context=context)
     for term in protected_terms:
         if _contains(before, term) and not _contains(after, term):
             issues.append({"kind": "term_lost", "token": term, "detail": "explicit protected term lost"})
@@ -705,14 +1167,23 @@ def check_rewrite_meaning(before: str, after: str, target_language: str | None =
         new = _polarity_hits(after, first, second)
         if (first in old and second in new and second not in old) or (second in old and first in new and first not in old):
             issues.append({"kind": "antonym_flip", "detail": f"polarity changed: {first} / {second}"})
-    return issues
+    return _verdicts(issues, include_advisories=include_advisories)
 
 
 def check_translation_meaning(before: str, after: str, source_language: str | None,
                               target_language: str | None, *, glossary: dict[str, str],
-                              protected_terms: Iterable[str] = ()) -> list[dict]:
-    """C6 cross-language checks; do not compare literal source/target wording."""
-    issues = _invariants(before, after, source_language, target_language, translation=True)
+                              protected_terms: Iterable[str] = (),
+                              context: GuardContext | None = None,
+                              include_advisories: bool = False) -> list[dict]:
+    """C6 cross-language checks; do not compare literal source/target wording.
+
+    `context` supplies the neighbouring cues of the same semantic group so a
+    sentence that a cue boundary splits in half can still be judged; it is
+    optional and cannot change a fact. `include_advisories` adds the uncertain
+    findings, which default to being withheld from existing callers.
+    """
+    issues = _invariants(before, after, source_language, target_language,
+                         translation=True, context=context)
     remaining = untranslated_han(after, target_language, allowed=[*protected_terms, *glossary.values()])
     if remaining:
         issues.append({"kind": "unlocalized_text", "tokens": remaining, "detail": "Vietnamese captions/speech still contain untranslated Han text"})
@@ -730,4 +1201,66 @@ def check_translation_meaning(before: str, after: str, source_language: str | No
         if ((_contains(before, old_a) and not _contains(before, old_b) and _contains(after, new_b))
                 or (_contains(before, old_b) and not _contains(before, old_a) and _contains(after, new_a))):
             issues.append({"kind": "antonym_flip", "detail": "translated polarity reversed"})
-    return issues
+    return _verdicts(issues, include_advisories=include_advisories)
+
+
+def check_translation_group_meaning(
+        segments: Sequence[GuardSegment | dict], source_language: str | None,
+        target_language: str | None, *, glossary: dict[str, str] | None = None,
+        protected_terms: Iterable[str] = (), include_advisories: bool = False,
+        group_id: str | None = None) -> dict[str, list[dict]]:
+    """Judge a semantic validation group; returns issues per segment id.
+
+    A subtitle cue is a display unit, so a speech act can straddle a boundary:
+    '看你的鼻翼有沒有超過' + '你的兩個瞳孔的內側' is one question, and either
+    half alone is not a speech act. This walks the group once so a
+    boundary-split construct is judged as the sentence it belongs to, while
+    every per-cue invariant (counts, units, negation, glossary) is still checked
+    on the cue that carries it — a count changed inside the group stays blocked,
+    and an accepted member is never disturbed by a rejected sibling.
+
+    Raises ValueError on duplicate or empty ids, because a group whose members
+    cannot be addressed individually cannot be committed atomically.
+    """
+    rows = list(segments)
+    if not rows:
+        return {}
+
+    def field(row, name):
+        return row[name] if isinstance(row, dict) else getattr(row, name)
+
+    ids = [field(row, "id") for row in rows]
+    if len(set(ids)) != len(ids) or not all(isinstance(i, str) and i.strip() for i in ids):
+        raise ValueError("semantic group requires unique non-empty segment ids")
+    resolved = group_id or f"group-{ids[0]}-{ids[-1]}"
+    # The speech act of the whole group, evaluated once, is what a member is
+    # judged against for the group-level construct only.
+    source_group = " ".join((field(row, "source_text") or "") for row in rows)
+    target_group = " ".join((field(row, "translated_text") or "") for row in rows)
+    group_question = (_translation_question(source_group, source_language),
+                      _translation_question(target_group, target_language))
+    group_exclamation = ("!" in _normalize(source_group), "!" in _normalize(target_group))
+    # Boolean group presence is insufficient when each cue is an independent
+    # question: the second question cannot pay for the first one's lost act.
+    question_members = [sum(_translation_question(field(row, key) or '', language) for row in rows)
+        for key, language in [('source_text', source_language), ('translated_text', target_language)]]
+    exclamation_members = [sum('!' in _normalize(field(row, key) or '') for row in rows)
+        for key in ['source_text', 'translated_text']]
+
+    verdicts: dict[str, list[dict]] = {}
+    for index, row in enumerate(rows):
+        context = build_guard_context(rows, index, group_id=resolved)
+        issues = check_translation_meaning(
+            field(row, "source_text"), field(row, "translated_text"),
+            source_language, target_language, glossary=glossary or {},
+            protected_terms=protected_terms, context=context,
+            include_advisories=include_advisories)
+        # Suppress a speech-act finding on ONE member only when the group as a
+        # whole preserves that speech act. If the group dropped it, the finding
+        # stands on every member, so a group cannot hide a real change.
+        if group_question[0] == group_question[1] and max(question_members) <= 1:
+            issues = [issue for issue in issues if issue["kind"] != "question_changed"]
+        if group_exclamation[0] == group_exclamation[1] and max(exclamation_members) <= 1:
+            issues = [issue for issue in issues if issue["kind"] != "exclamation_changed"]
+        verdicts[ids[index]] = issues
+    return verdicts

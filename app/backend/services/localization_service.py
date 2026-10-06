@@ -18,7 +18,10 @@ import json
 import logging
 import math
 import re
+import os
+import random
 import subprocess
+import uuid
 import time as _time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -62,6 +65,132 @@ _TRANSLATION_BATCH_SIZE = 12
 _CONTEXT_CHARS = 10_000
 _DUBBING_SYNTHESIS_RULES_VERSION = 1
 _EDGE_TTS_BOUNDARY_RULE = "edge-boundary-trim-v3-neutral-pitch"
+_TTS_REQUEST_TIMEOUT_S = 120.0
+_TTS_CHUNK_DEADLINE_S = 300.0
+_POSTFIT_ROUNDING_TOLERANCE_MS = 30
+
+
+# Abandoned per-attempt TTS scratch files. A provider that streams from a
+# worker thread cannot be stopped by cancelling the await: the thread finishes
+# and RE-CREATES its file after the failure was already reported. The failing
+# call never sleeps waiting for that thread; instead the path is registered
+# here and swept by a detached task, so cleanup is bounded and does not block
+# or mask the Timeout/JobCancelledError on its way out.
+_ABANDONED_TTS_ATTEMPTS: set[Path] = set()
+_TTS_ORPHAN_SWEEP_DEADLINE_S = 30.0
+# A path is only retired after it has stayed absent for this long. Two absent
+# polls are not enough: a writer thread that is still blocked on the network
+# looks exactly like an absent file until it finally lands its bytes.
+_TTS_ORPHAN_SETTLE_S = 1.0
+_TTS_ORPHAN_SWEEPER: asyncio.Task | None = None
+
+
+def _register_abandoned_tts_attempt(path: Path) -> None:
+    """Drop a scratch file now, and keep sweeping it in case it comes back.
+
+    The immediate unlink satisfies the common case (no writer thread outlived
+    this attempt, so the file is simply garbage); the sweeper covers the case
+    where a blocked writer thread re-creates it moments later. Registering is
+    therefore always safe and never blocks the caller.
+    """
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+    _ABANDONED_TTS_ATTEMPTS.add(path)
+    _ensure_tts_orphan_sweeper()
+
+
+def _ensure_tts_orphan_sweeper() -> None:
+    global _TTS_ORPHAN_SWEEPER
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    existing = _TTS_ORPHAN_SWEEPER
+    if existing is not None and not existing.done() and existing.get_loop() is loop:
+        return
+    _TTS_ORPHAN_SWEEPER = loop.create_task(_sweep_abandoned_tts_attempts())
+
+
+async def _sweep_abandoned_tts_attempts() -> None:
+    """Re-delete registered scratch files until they stop coming back.
+
+    A path is retired after it is observed absent twice in a row, which is the
+    only completion signal an unstoppable writer thread can give us. The whole
+    sweep is additionally bounded so a permanently undeletable file cannot pin
+    the task forever.
+    """
+    loop = asyncio.get_running_loop()
+    now = loop.time()
+    deadline = now + _TTS_ORPHAN_SWEEP_DEADLINE_S
+    # A path is retired only once it has been continuously absent since we last
+    # saw it, or since registration when it was already gone.
+    stable_since: dict[Path, float] = dict.fromkeys(_ABANDONED_TTS_ATTEMPTS, now)
+    while _ABANDONED_TTS_ATTEMPTS and loop.time() < deadline:
+        for path in list(_ABANDONED_TTS_ATTEMPTS):
+            since = stable_since.setdefault(path, loop.time())
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                stable_since[path] = loop.time()
+                continue
+            if loop.time() - since >= _TTS_ORPHAN_SETTLE_S:
+                # Retired: a later registration re-adds the path and re-arms it.
+                _ABANDONED_TTS_ATTEMPTS.discard(path)
+                stable_since.pop(path, None)
+        if not _ABANDONED_TTS_ATTEMPTS:
+            break
+        await asyncio.sleep(0.05)
+
+
+async def _sweep_late_artifacts() -> None:
+    """Force the abandoned-attempt sweep to finish and clear what it tracked.
+
+    Test/diagnostic hook: it waits only for a sweeper that belongs to THIS loop,
+    so it never touches a task left behind by another event loop.
+    """
+    loop = asyncio.get_running_loop()
+    sweeper = _TTS_ORPHAN_SWEEPER
+    if sweeper is not None and not sweeper.done() \
+            and sweeper.get_loop() is loop:
+        try:
+            await asyncio.wait_for(asyncio.shield(sweeper), _TTS_ORPHAN_SWEEP_DEADLINE_S)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            pass
+    for path in list(_ABANDONED_TTS_ATTEMPTS):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        _ABANDONED_TTS_ATTEMPTS.discard(path)
+
+
+async def _cancel_checkpoint(cancel_check, context: str) -> None:
+    if cancel_check is None:
+        return
+    cancelled = cancel_check()
+    if asyncio.iscoroutine(cancelled):
+        cancelled = await cancelled
+    if cancelled:
+        from backend.core.exceptions import JobCancelledError
+        raise JobCancelledError(f"Localization cancelled during {context}")
+
+
+async def _await_provider_operation(operation, *, timeout_s: float, cancel_check=None):
+    """Bound cancellable network I/O; this does NOT kill remote/native compute."""
+    task = asyncio.ensure_future(operation)
+    try:
+        async with asyncio.timeout(timeout_s):
+            while not task.done():
+                await _cancel_checkpoint(cancel_check, "provider request")
+                await asyncio.wait({task}, timeout=0.25)
+            await _cancel_checkpoint(cancel_check, "provider result publication")
+            return await task
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
 # Edge TTS often wraps very short utterances in relatively large digital
 # leading/trailing silence. Measuring that container padding as spoken duration
@@ -347,6 +476,9 @@ async def transcribe_for_localization(
             text=tx.get("text"), language=tx.get("language"), source="whisper",
             raw_segments=tx.get("segments") or [],
         )
+        executed = dict(tx.get("asr_provenance") or {})
+        transcript.metadata["asr"] = {**executed,
+            "executor_fallback_reason": executed.get("fallback_reason")}
     if not transcript.segments:
         raise ValueError("No speech detected — nothing to localize.")
     transcript.metadata["asr"] = {
@@ -902,7 +1034,56 @@ def _validate_localized_terms(raw, batch, texts, known, profile, target_language
     return terms
 
 
-def _translation_candidates(raw, batch, known, profile, source_language, target_language):
+def _translation_guard_checks(batch, texts, profile, source_language, target_language, terms, context_segments):
+    from backend.services.dubbing_rewrite_guard import (
+        GuardContext, check_translation_meaning, check_translation_group_meaning)
+
+    rows = list(context_segments or batch)
+    positions = {segment.id: index for index, segment in enumerate(rows)}
+    targets = {s.id:s.translated_text for s in rows if s.translation_status == 'success' and s.translated_text}
+    targets.update({segment.id: text for segment, text in zip(batch, texts)})
+    contexts = {}
+    for segment in batch:
+        index = positions.get(segment.id)
+        before = rows[index - 1] if index is not None and index > 0 else None
+        after = rows[index + 1] if index is not None and index + 1 < len(rows) else None
+        if before and not (0 <= segment.source_start_ms - before.source_end_ms <= 1500):
+            before = None
+        if after and not (0 <= after.source_start_ms - segment.source_end_ms <= 1500):
+            after = None
+        contexts[segment.id] = GuardContext(
+            source_before=before.source_text if before else '', source_after=after.source_text if after else '')
+    verdicts = {segment.id: check_translation_meaning(segment.source_text, text,
+        source_language, target_language, glossary={**terms, **profile.glossary},
+        protected_terms=profile.protected_terms, context=contexts[segment.id], include_advisories=True)
+        for segment, text in zip(batch, texts)}
+    # Only syntactically open clauses may move their speech-act particle into
+    # the following cue. Do not join complete/unrelated questions to hide loss.
+    open_clause = re.compile(r'(?:超过|超過|比|在|给|給|对|對|把|被|和|与|與|到|从|從|关于|關於|有沒有|有没有|是否|能不能|会不会|會不會)\s*$')
+    for first, second in zip(rows, rows[1:]):
+        if first.id not in targets or second.id not in targets:
+            continue
+        if (first.speaker_id != second.speaker_id
+                or not 0 <= second.source_start_ms - first.source_end_ms <= 250
+                or second.source_end_ms - first.source_start_ms > 8000
+                or not open_clause.search(first.source_text)):
+            continue
+        group_id = f'{first.id}:{second.id}'
+        group = check_translation_group_meaning([
+            {'id':s.id,'source_text':s.source_text,'translated_text':targets[s.id]} for s in (first,second)],
+            source_language,target_language,glossary={**terms,**profile.glossary},
+            protected_terms=profile.protected_terms,include_advisories=True,group_id=group_id)
+        for segment in (first, second):
+            if segment.id not in verdicts:
+                continue
+            verdicts[segment.id] = [issue for issue in verdicts[segment.id]
+                                   if issue['kind'] not in {'question_changed','exclamation_changed'}]
+            verdicts[segment.id].extend({**issue,'group_id':group_id,'segment_ids':[first.id,second.id]}
+                for issue in group[segment.id] if issue['kind'] in {'question_changed','exclamation_changed'})
+    return verdicts
+
+
+def _translation_candidates(raw, batch, known, profile, source_language, target_language, *, context_segments=None):
     """Separate shape failures from item-level semantics; commit only safe terms.
 
     A conflicting proposed name invalidates ALL dependent items, not whichever
@@ -915,6 +1096,7 @@ def _translation_candidates(raw, batch, known, profile, source_language, target_
     accepted = {}
     rejected = {}
     choices = {}
+    checks = _translation_guard_checks(batch, texts, profile, source_language, target_language, known or {}, context_segments)
     for segment, text in zip(batch, texts):
         item = by_id[segment.id]
         try:
@@ -922,11 +1104,9 @@ def _translation_candidates(raw, batch, known, profile, source_language, target_
                 [segment], [text], known, profile, target_language)
             for source, target in item.get("localized_terms", {}).items():
                 choices.setdefault(source, set()).add(target)
-            violations = check_translation_meaning(segment.source_text, text,
-                source_language, target_language, glossary={**terms, **profile.glossary},
-                protected_terms=profile.protected_terms)
-            if violations:
-                rejected[segment.id] = violations
+            hard = [issue for issue in checks[segment.id] if issue.get('severity') != 'uncertain']
+            if hard:
+                rejected[segment.id] = hard
             else:
                 accepted[segment.id] = {**item, "text": text}
         except ValueError as exc:
@@ -946,15 +1126,14 @@ def _translation_candidates(raw, batch, known, profile, source_language, target_
         for item in accepted.values():
             terms.update(item.get("localized_terms", {}))
         invalid = []
+        checks = _translation_guard_checks(batch, texts, profile, source_language, target_language, terms, context_segments)
         for segment in batch:
             if segment.id not in accepted:
                 continue
-            violations = check_translation_meaning(segment.source_text,
-                accepted[segment.id]["text"], source_language, target_language,
-                glossary={**terms, **profile.glossary}, protected_terms=profile.protected_terms)
-            if violations:
+            hard = [issue for issue in checks[segment.id] if issue.get('severity') != 'uncertain']
+            if hard:
                 invalid.append(segment.id)
-                rejected[segment.id] = violations
+                rejected[segment.id] = hard
         if not invalid:
             return accepted, rejected, terms
         for seg_id in invalid:
@@ -1222,6 +1401,8 @@ async def _translate_batch_resilient(
     _split_depth: int = 0,
     _semantic_repair: bool = True,
     _repair_issues: dict | None = None,
+    context_segments=None,
+    drafts: dict | None = None,
 ) -> tuple[list[str], set[int]]:
     if not batch:
         return [], set()
@@ -1242,7 +1423,7 @@ async def _translate_batch_resilient(
         dispatch_budget=dispatch_budget)
     try:
         accepted, rejected, terms = _translation_candidates(raw, batch, localized_terms,
-            profile, source_language, target_language)
+            profile, source_language, target_language, context_segments=context_segments)
     except (json.JSONDecodeError, ValueError) as exc:
         # Only malformed STRUCTURE advances routes or permits one split level.
         # Semantic rejection below never resends accepted siblings.
@@ -1264,9 +1445,9 @@ async def _translate_batch_resilient(
                 return await _translate_batch_resilient(ai, batch, route_state=route_state,
                     target_language=target_language, context=context, profile=profile, for_dub=for_dub,
                     fallback_ai=fallback_ai, progress_cb=progress_cb, deadline_at=deadline_at,
-                    source_language=source_language, localized_terms=localized_terms,
+                    source_language=source_language, localized_terms=localized_terms, context_segments=context_segments,
                     accepted_cb=accepted_cb, dispatch_budget=dispatch_budget,
-                    _split_depth=_split_depth, _semantic_repair=_semantic_repair)
+                    _split_depth=_split_depth, _semantic_repair=_semantic_repair, drafts=drafts)
         if len(batch) == 1 or _split_depth >= 1 or _repair_issues:
             logger.warning("Translation structure failed for %d item(s): %s", len(batch), exc)
             return [segment.source_text for segment in batch], set(range(len(batch)))
@@ -1276,15 +1457,15 @@ async def _translate_batch_resilient(
         left, lf = await _translate_batch_resilient(ai, batch[:mid], route_state=route_state,
             target_language=target_language, context=context, profile=profile, for_dub=for_dub,
             fallback_ai=fallback_ai, progress_cb=progress_cb, deadline_at=deadline_at,
-            source_language=source_language, localized_terms=localized_terms,
+            source_language=source_language, localized_terms=localized_terms, context_segments=context_segments,
             accepted_cb=accepted_cb, dispatch_budget=dispatch_budget,
-            _split_depth=_split_depth + 1, _semantic_repair=_semantic_repair)
+            _split_depth=_split_depth + 1, _semantic_repair=_semantic_repair, drafts=drafts)
         right, rf = await _translate_batch_resilient(ai, batch[mid:], route_state=route_state,
             target_language=target_language, context=context, profile=profile, for_dub=for_dub,
             fallback_ai=fallback_ai, progress_cb=progress_cb, deadline_at=deadline_at,
-            source_language=source_language, localized_terms=localized_terms,
+            source_language=source_language, localized_terms=localized_terms, context_segments=context_segments,
             accepted_cb=accepted_cb, dispatch_budget=dispatch_budget,
-            _split_depth=_split_depth + 1, _semantic_repair=_semantic_repair)
+            _split_depth=_split_depth + 1, _semantic_repair=_semantic_repair, drafts=drafts)
         return left + right, lf | {mid + i for i in rf}
 
     if localized_terms is not None:
@@ -1299,15 +1480,132 @@ async def _translate_batch_resilient(
         fixed, failed = await _translate_batch_resilient(ai, pending, route_state=route_state,
             target_language=target_language, context=context, profile=profile, for_dub=for_dub,
             fallback_ai=fallback_ai, progress_cb=progress_cb, deadline_at=deadline_at,
-            source_language=source_language, localized_terms=localized_terms, accepted_cb=accepted_cb,
+            source_language=source_language, localized_terms=localized_terms, context_segments=context_segments, accepted_cb=accepted_cb,
             dispatch_budget=dispatch_budget, _split_depth=_split_depth, _semantic_repair=False,
-            _repair_issues=rejected)
+            _repair_issues=rejected, drafts=drafts)
         for index, (segment, text) in enumerate(zip(pending, fixed)):
             if index not in failed:
                 accepted[segment.id] = {"id": segment.id, "text": text}
+    if drafts is not None and rejected:
+        # Auto-only: the final unresolved rejection is preserved as an AUDITED
+        # DRAFT. The payload already passed structural validation (exact IDs,
+        # nonempty unique text), so this is a semantically rejected but
+        # structurally valid candidate -- never an empty/duplicate/missing
+        # payload, which stays an error. Only exact source/target plus reasons
+        # are recorded; the cue/timeline below are the immutable originals.
+        payload_by_id = {item["id"]: item
+                         for item in json.loads(_strip_json_fence(raw))}
+        for segment in batch:
+            if segment.id in accepted or segment.id not in rejected:
+                continue
+            item = payload_by_id.get(segment.id)
+            if item is None or not str(item.get("text") or "").strip():
+                continue
+            issues = rejected[segment.id]
+            drafts[segment.id] = {
+                "source_text": segment.source_text,
+                "target_text": item["text"],
+                "issues": issues,
+                "reasons": [issue.get("kind") for issue in issues],
+                "attempts": 2,
+                "source_start_ms": segment.source_start_ms,
+                "source_end_ms": segment.source_end_ms,
+                "speaker_id": segment.speaker_id,
+            }
     return ([accepted[segment.id]["text"] if segment.id in accepted else segment.source_text
              for segment in batch], {index for index, segment in enumerate(batch)
                                     if segment.id not in accepted})
+
+_AUTO_RECHECK_MAX_CUES = 3
+_AUTO_RECHECK_TIMEOUT_S = 15.0
+_AUTO_RECHECK_TASKS: set[asyncio.Task] = set()
+
+
+async def _recheck_pending_sources(
+    out: LocalizationTranscript,
+    pending_ids: list[str],
+    auto_drafts: dict,
+    *,
+    source_media: Path,
+    profile: LocalizationProfile,
+) -> None:
+    """Bounded re-ASR of ONLY the unresolved pending source windows.
+
+    This is a bounded HYPOTHESIS, not adjudicated ground truth: the original
+    source_text, cue and timeline stay immutable, and the result is recorded
+    under the draft audit so a reviewer can weigh it. It never replaces or
+    silently rewrites the canonical source, never touches accepted segments,
+    and never calls a paid provider -- it reuses the local Whisper path.
+    """
+    import tempfile
+    import shutil
+    from backend.services.whisper_service import whisper_service, resolve_whisper_model, WhisperService
+
+    model = resolve_whisper_model(profile.asr_quality, profile.asr_model)
+    by_id = {seg.id: seg for seg in out.segments}
+    deadline = asyncio.get_running_loop().time() + _AUTO_RECHECK_TIMEOUT_S
+    pending_ids = list(dict.fromkeys(pending_ids))
+    for index, seg_id in enumerate(pending_ids):
+        seg = by_id.get(seg_id)
+        record = auto_drafts.get(seg_id)
+        if seg is None or not isinstance(record, dict):
+            continue
+        audit = {"source_text": seg.source_text, "source_start_ms": seg.source_start_ms,
+                 "source_end_ms": seg.source_end_ms, "model": model,
+                 "authority": "unverified_local_recheck"}
+        record["source_recheck"] = audit
+        if not WhisperService.is_model_cached(profile.asr_quality, model):
+            audit["status"] = "model_unavailable"
+            continue  # auxiliary evidence must never trigger model downloads
+        remaining = deadline - asyncio.get_running_loop().time()
+        if index >= _AUTO_RECHECK_MAX_CUES or remaining <= 0:
+            audit["status"] = "budget_exhausted"
+            continue
+        if _AUTO_RECHECK_TASKS:
+            audit["status"] = "dependency_busy"
+            continue  # a timed-out native decode is still settling; no fan-out
+        work = Path(tempfile.mkdtemp(prefix="recheck-"))
+        clip = work / "source.wav"  # segment IDs are never filesystem names
+        start_ms = max(0, seg.source_start_ms - 500)
+        end_ms = min(seg.source_end_ms + 500, start_ms + 10000)
+        audit.update(window_start_ms=start_ms, window_end_ms=end_ms)
+
+        async def decode():
+            await asyncio.to_thread(_extract_reference_clip_sync, source_media, clip,
+                start_ms=start_ms, end_ms=end_ms)
+            if asyncio.get_running_loop().time() >= deadline:
+                return None
+            # Optional hypothesis must not hold the canonical compute gate:
+            # shielding a timed-out native decoder would otherwise stall C7.
+            # The one-inflight registry prevents auxiliary inference fan-out.
+            return await whisper_service.transcribe(str(clip), language=out.language or "auto",
+                quality=profile.asr_quality, model_name=model)
+
+        task = asyncio.create_task(decode())
+        _AUTO_RECHECK_TASKS.add(task)
+        def settled(done, directory=work):
+            _AUTO_RECHECK_TASKS.discard(done)
+            # Cancellation does not prove a to_thread/native producer stopped.
+            # Leave that private scratch directory for retention cleanup.
+            if not done.cancelled():
+                done.exception()  # consume failures from a detached late task
+                shutil.rmtree(directory, ignore_errors=True)
+        task.add_done_callback(settled)
+        try:
+            tx = await asyncio.wait_for(asyncio.shield(task), timeout=remaining)
+        except asyncio.TimeoutError:
+            audit["status"] = "timeout"
+            continue
+        except Exception as exc:
+            audit.update(status="unavailable", error_type=type(exc).__name__)
+            continue
+        hypothesis = " ".join(str(item.get("text") or "").strip()
+            for item in ((tx or {}).get("segments") or []) if isinstance(item, dict)).strip()
+        audit["status"] = "hypothesis" if hypothesis else "empty"
+        if hypothesis:
+            audit["hypothesis_text"] = hypothesis
+            audit["executor"] = dict((tx or {}).get("asr_provenance") or {})
+
 
 async def translate_transcript(
     transcript: LocalizationTranscript,
@@ -1318,8 +1616,12 @@ async def translate_transcript(
     for_dub: bool,
     checkpoint_dir: Path | None = None,
     progress_cb=None,
+    source_media: Path | None = None,
 ) -> LocalizationTranscript:
     import hashlib
+    policy = profile.translation_automation
+    auto_policy = policy == "auto"
+    auto_drafts: dict[str, dict] = {}
     route_clients = _profile_ai_route_clients_compat(
         user_settings, profile, "translation"
     )
@@ -1353,7 +1655,7 @@ async def translate_transcript(
         for index, client in enumerate(route_clients)
     ]
     checkpoint_meta = {
-        "meaning_guard_version": 9,
+        "meaning_guard_version": 12,
         "source_language": transcript.language,
         "protected_terms": profile.protected_terms,
         "semantic_hash": semantic_sig,
@@ -1365,15 +1667,22 @@ async def translate_transcript(
         "instructions": (getattr(profile, "translation_instructions", "") or "").strip(),
         "guardrails": (getattr(profile, "translation_guardrails", "") or "").strip(),
         "glossary_hash": glossary_hash,
+        "translation_policy": policy,
     }
     completed_batches: dict[str, dict] = {}
     localized_terms: dict[str, str] = {}
+    saved_drafts: dict[str, dict] = {}
     if checkpoint_file and checkpoint_file.exists():
         try:
             cp_data = json.loads(checkpoint_file.read_text(encoding="utf-8"))
             if all(cp_data.get(k) == v for k, v in checkpoint_meta.items()):
                 saved_batches = cp_data.get("batches", {})
                 completed_batches = saved_batches if isinstance(saved_batches, dict) else {}
+                if auto_policy:
+                    raw_drafts = cp_data.get("auto_drafts")
+                    if isinstance(raw_drafts, dict):
+                        saved_drafts = {str(k): v for k, v in raw_drafts.items()
+                                        if isinstance(v, dict)}
                 saved_route_state = cp_data.get("route_state")
                 if isinstance(saved_route_state, dict):
                     route_state.sticky_index = min(
@@ -1423,7 +1732,7 @@ async def translate_transcript(
         cached_accepted, _, localized_terms = _translation_candidates(
             json.dumps(cached_items, ensure_ascii=False),
             [seg for seg in out.segments if seg.id in ids], {},
-            profile, transcript.language, target_language)
+            profile, transcript.language, target_language, context_segments=out.segments)
         for cached in completed_batches.values():
             cached["items"] = [item for item in cached.get("items", [])
                                if item["id"] in cached_accepted]
@@ -1433,11 +1742,14 @@ async def translate_transcript(
             return
         checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
         tmp_cp = checkpoint_file.with_suffix(".tmp")
-        tmp_cp.write_text(json.dumps({**checkpoint_meta, "batches": completed_batches,
+        payload = {**checkpoint_meta, "batches": completed_batches,
             "route_state": {"sticky_index": route_state.sticky_index,
                 "failure_chain": list(route_state.failure_chain),
                 "attempt_count": route_state.attempt_count,
-                "success_count": route_state.success_count}}, ensure_ascii=False) + "\n", encoding="utf-8")
+                "success_count": route_state.success_count}}
+        if auto_policy:
+            payload["auto_drafts"] = auto_drafts
+        tmp_cp.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
         tmp_cp.replace(checkpoint_file)
 
     for start in range(0, len(out.segments), _TRANSLATION_BATCH_SIZE):
@@ -1460,7 +1772,7 @@ async def translate_transcript(
                     raise ValueError("Legacy checkpoint must be complete")
                 accepted_items, _rejected, accepted_terms = _translation_candidates(
                     json.dumps(items, ensure_ascii=False), subset, localized_terms,
-                    profile, transcript.language, target_language)
+                    profile, transcript.language, target_language, context_segments=out.segments)
                 localized_terms.update(accepted_terms)
             except (TypeError, KeyError, ValueError):
                 completed_batches.pop(batch_key, None)
@@ -1468,6 +1780,10 @@ async def translate_transcript(
 
         async def keep_accepted(additions):
             accepted_items.update(additions)
+            for segment in batch:
+                if segment.id in accepted_items:
+                    segment.translated_text = accepted_items[segment.id]["text"]
+                    segment.translation_status = "success"
             # Store explicit IDs, never positional partial texts. Names are
             # saved only alongside accepted translations that actually use them.
             items = [{"id": segment.id, "text": accepted_items[segment.id]["text"],
@@ -1478,7 +1794,20 @@ async def translate_transcript(
                 "pending_ids": [segment.id for segment in batch if segment.id not in accepted_items]}
             save_checkpoint()
 
-        pending = [segment for segment in batch if segment.id not in accepted_items]
+        # Restore any audited draft from the checkpoint BEFORE deciding what to
+        # re-translate: an already-audited draft is retained verbatim, never
+        # promoted to success and never re-entering the job glossary.
+        if auto_policy:
+            for segment in batch:
+                saved = saved_drafts.get(segment.id)
+                if (segment.id not in accepted_items and segment.id not in auto_drafts
+                        and isinstance(saved, dict)
+                        and saved.get("source_text") == segment.source_text
+                        and str(saved.get("target_text") or "").strip()
+                        and saved.get("issues")):
+                    auto_drafts[segment.id] = saved
+        pending = [segment for segment in batch
+                   if segment.id not in accepted_items and segment.id not in auto_drafts]
         if pending:
             total_batches = max(
                 1,
@@ -1497,17 +1826,31 @@ async def translate_transcript(
                     target_language=target_language,
                     context=context,
                     source_language=transcript.language,
+                    context_segments=out.segments,
                     profile=profile,
                     for_dub=for_dub,
                     fallback_ai=fallback_ai,
                     progress_cb=progress_cb,
                     localized_terms=localized_terms,
                     accepted_cb=keep_accepted,
+                    drafts=auto_drafts if auto_policy else None,
                 )
             finally:
                 # Also persist pending IDs and route audit on transport failure
                 # or cancellation, after the last durable accepted response.
                 await keep_accepted({})
+        # A resumed audited draft is restored verbatim; it is NEVER promoted to
+        # success and never re-enters the job glossary. Only a fresh rejection
+        # overwrites it with the current attempt's audit.
+        if auto_policy:
+            for segment in batch:
+                saved = saved_drafts.get(segment.id)
+                if (segment.id not in accepted_items and segment.id not in auto_drafts
+                        and isinstance(saved, dict)
+                        and saved.get("source_text") == segment.source_text
+                        and str(saved.get("target_text") or "").strip()
+                        and saved.get("issues")):
+                    auto_drafts[segment.id] = saved
 
         texts = [accepted_items[segment.id]["text"] if segment.id in accepted_items
                  else segment.source_text for segment in batch]
@@ -1517,31 +1860,73 @@ async def translate_transcript(
         for idx, (seg, text) in enumerate(zip(batch, texts)):
             seg.translated_text = text
             seg.translation_status = "untranslated" if idx in failed else "success"
+            if auto_policy and seg.id in auto_drafts:
+                # Structurally valid but semantically rejected text is retained
+                # ONLY as a warning-marked draft; it never becomes success.
+                seg.translated_text = auto_drafts[seg.id]["target_text"]
+                seg.translation_status = "draft"
+                seg.qc_status = "review"
             if not for_dub:
                 seg.target_start_ms = seg.source_start_ms
                 seg.target_end_ms = seg.source_end_ms
                 seg.timing_status = "fit"
-                seg.qc_status = "review" if idx in failed else "pass"
+                seg.qc_status = ("review" if idx in failed or seg.translation_status == "draft"
+                                 else "pass")
 
     # Terms introduced later cannot leave an earlier, inconsistent spelling
     # marked successful. Keep only genuinely accepted IDs in the checkpoint;
     # a resume repairs these IDs using the final dictionary.
-    from backend.services.dubbing_rewrite_guard import check_translation_meaning
+    final_checks = _translation_guard_checks(out.segments,
+        [s.translated_text if s.translation_status == 'success' else '' for s in out.segments],
+        profile, transcript.language, target_language, localized_terms, out.segments)
+    guard_reviews = {}
     for index, seg in enumerate(out.segments):
         if seg.translation_status != "success":
             continue
-        violations = check_translation_meaning(seg.source_text, seg.translated_text,
-            transcript.language, target_language,
-            glossary={**localized_terms, **profile.glossary}, protected_terms=profile.protected_terms)
+        violations = [issue for issue in final_checks[seg.id] if issue.get('severity') != 'uncertain']
+        advisories = [issue for issue in final_checks[seg.id] if issue.get('severity') == 'uncertain']
+        if advisories and not violations:
+            guard_reviews[seg.id] = advisories
+            seg.qc_status = "review"
         if violations:
-            seg.translated_text = seg.source_text
-            seg.translation_status = "untranslated"
+            if auto_policy and str(seg.translated_text or "").strip():
+                auto_drafts[seg.id] = {
+                    "source_text": seg.source_text, "target_text": seg.translated_text,
+                    "issues": violations, "reasons": [issue.get("kind") for issue in violations],
+                    "attempts": route_state.attempt_count, "origin": "final_global_guard",
+                    "source_start_ms": seg.source_start_ms, "source_end_ms": seg.source_end_ms,
+                    "speaker_id": seg.speaker_id,
+                }
+                seg.translation_status = "draft"
+            else:
+                seg.translated_text = seg.source_text
+                seg.translation_status = "untranslated"
             seg.qc_status = "review"
             failed_total += 1
             cached = completed_batches[str(index // _TRANSLATION_BATCH_SIZE * _TRANSLATION_BATCH_SIZE)]
             cached["items"] = [item for item in cached["items"] if item["id"] != seg.id]
             if seg.id not in cached["pending_ids"]:
                 cached["pending_ids"].append(seg.id)
+    draft_ids = {seg.id for seg in out.segments if seg.translation_status == "draft"}
+    if auto_policy and draft_ids and source_media is not None:
+        await _recheck_pending_sources(
+            out, sorted(draft_ids), auto_drafts,
+            source_media=Path(source_media), profile=profile)
+    # Global guard may demote a formerly accepted item. Learn terms only from
+    # the final successful set, never from a draft kept solely for continuity.
+    accepted_ids = {seg.id for seg in out.segments if seg.translation_status == "success"}
+    localized_terms.clear()
+    for cached in completed_batches.values():
+        for item in cached.get("items", []):
+            if item["id"] in accepted_ids:
+                localized_terms.update(item.get("localized_terms") or {})
+    if auto_policy:
+        # Drafts are a documented, warning-marked continuation state, not a
+        # missing translation. They never count as a hard failure and never
+        # satisfy the strict-QC abort; a reviewer still sees the exact audit.
+        failed_total = max(0, failed_total - len(draft_ids))
+        if draft_ids:
+            out.metadata["translation_auto_drafts"] = auto_drafts
     save_checkpoint()
 
     if failed_total == len(out.segments):
@@ -1561,6 +1946,7 @@ async def translate_transcript(
         "attempt_count": route_state.attempt_count,
         "success_count": route_state.success_count,
     }
+    out.metadata["translation_guard_review"] = guard_reviews
     out.metadata["localized_terms"] = localized_terms
     out.metadata["localization_policy_version"] = 3
     out.metadata["target_language"] = target_language
@@ -2141,19 +2527,40 @@ async def _generate_tts_chunk(
     reference_text: str | None = None,
     reference_language: str | None = None,
     attempts: int = 3,
+    request_timeout_s: float | None = None,
+    cancel_check=None,
 ) -> int:
     from backend.services.tts_service import generate_tts, retryable_tts_error
 
     last: Exception | None = None
-    for _ in range(max(1, attempts)):
-        output_path.unlink(missing_ok=True)
+    deadline = asyncio.get_running_loop().time() + _TTS_CHUNK_DEADLINE_S
+    timeout = request_timeout_s if request_timeout_s is not None else _TTS_REQUEST_TIMEOUT_S
+    if timeout <= 0:
+        raise ValueError("TTS request timeout must be positive")
+    attempts_made = 0
+    for attempt in range(max(1, attempts)):
+        await _cancel_checkpoint(cancel_check, "TTS dispatch")
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            last = TimeoutError("TTS chunk deadline exhausted")
+            break
+        attempts_made = attempt + 1
+        # Per-ATTEMPT scratch file. A provider writer thread that outlived an
+        # earlier attempt finishes writing later and can re-create whatever path
+        # it was given; sharing one path across attempts would let attempt N's
+        # stale bytes be measured and published as attempt N+1's success.
+        attempt_path = output_path.with_name(
+            f"{output_path.stem}.attempt-{attempt}-{os.getpid()}-"
+            f"{uuid.uuid4().hex[:8]}{output_path.suffix}")
+        attempt_path.unlink(missing_ok=True)
+        accepted = False
         try:
-            await generate_tts(
+            await _await_provider_operation(generate_tts(
                 text,
                 provider=runtime.provider,
                 voice_id=voice,
                 api_key=runtime.api_key,
-                output_path=output_path,
+                output_path=attempt_path,
                 model=runtime.model,
                 speed=1.0,
                 base_url=runtime.base_url,
@@ -2162,23 +2569,50 @@ async def _generate_tts_chunk(
                 reference_text=reference_text or profile.tts_reference_text,
                 reference_language=reference_language or profile.tts_reference_language,
                 target_language=target_language,
-            )
-            duration = await _audio_duration_ms(output_path)
+            ), timeout_s=min(timeout, remaining), cancel_check=cancel_check)
+            duration = await _audio_duration_ms(attempt_path)
             provider_value = getattr(runtime.provider, "value", str(runtime.provider))
             if duration > 0 and provider_value == "edge_tts":
                 duration = await asyncio.to_thread(
                     _trim_edge_tts_boundary_silence_sync,
-                    output_path,
+                    attempt_path,
                     duration,
                 )
             if duration > 0:
+                # Only an attempt that produced its OWN measurable audio may
+                # publish, and it publishes by replacing the accepted path.
+                attempt_path.replace(output_path)
+                accepted = True
                 return duration
             last = RuntimeError("TTS generated zero-duration audio")
         except Exception as exc:
+            from backend.core.exceptions import JobCancelledError
+            if isinstance(exc, JobCancelledError):
+                raise
             last = exc
             if not retryable_tts_error(exc):
                 raise
-    raise RuntimeError(f"TTS chunk failed after {attempts} attempts: {last}") from last
+        finally:
+            if not accepted:
+                # The writer thread may still re-create this file after we walk
+                # away, so hand it to the bounded sweeper instead of sleeping.
+                _register_abandoned_tts_attempt(attempt_path)
+        if attempt + 1 < max(1, attempts):
+            delay = random.uniform(0.25, min(4.0, 0.5 * 2 ** attempt))
+            try:
+                await _await_provider_operation(asyncio.sleep(delay),
+                    timeout_s=max(0.001, deadline - asyncio.get_running_loop().time()),
+                    cancel_check=cancel_check)
+            except TimeoutError:
+                # The budget ran out WHILE WAITING to retry. Cancellation
+                # already propagated as JobCancelledError above; only a genuine
+                # budget expiry lands here, and it must leave through the same
+                # normalized chunk failure as every other exhausted attempt
+                # instead of a bare TimeoutError.
+                last = TimeoutError("TTS chunk deadline exhausted during retry backoff")
+                break
+    reason = "request timeout" if isinstance(last, TimeoutError) else str(last)
+    raise RuntimeError(f"TTS chunk failed after {attempts_made} attempts: {reason}") from last
 
 
 
@@ -2251,15 +2685,15 @@ def _chunk_identity_matches(audio_path: Path, identity: str) -> bool:
         payload
         and payload.get("rules") == _DUBBING_SYNTHESIS_RULES_VERSION
         and payload.get("identity") == identity
+        and payload.get("output") is not None
+        and payload.get("output") == _chunk_output_identity(audio_path)
     )
 
 
 def _chunk_persisted_duration_ms(audio_path: Path, identity: str) -> int | None:
     payload = _chunk_identity_payload(audio_path)
     if not (
-        payload
-        and payload.get("rules") == _DUBBING_SYNTHESIS_RULES_VERSION
-        and payload.get("identity") == identity
+        payload and _chunk_identity_matches(audio_path, identity)
     ):
         return None
     try:
@@ -2278,6 +2712,7 @@ def _write_chunk_identity(
     payload = {
         "rules": _DUBBING_SYNTHESIS_RULES_VERSION,
         "identity": identity,
+        "output": _chunk_output_identity(audio_path),
     }
     if duration_ms is not None and duration_ms > 0:
         payload["duration_ms"] = int(duration_ms)
@@ -2289,6 +2724,17 @@ def _write_chunk_identity(
     tmp.replace(sidecar)
 
 
+def _chunk_output_identity(audio_path: Path) -> dict | None:
+    try:
+        digest = hashlib.sha256()
+        with audio_path.open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+        return {"size": audio_path.stat().st_size, "sha256": digest.hexdigest()}
+    except OSError:
+        return None
+
+
 async def _generate_tts_chunk_atomic(
     text: str,
     *,
@@ -2297,8 +2743,13 @@ async def _generate_tts_chunk_atomic(
     **kwargs,
 ) -> int:
     """Publish a new raw chunk only after TTS and duration probing succeed."""
-    pending = output_path.with_name(output_path.stem + ".pending" + output_path.suffix)
+    # A unique pending name per call: a provider writer thread that outlived a
+    # cancelled attempt must not be able to land on the SAME path a later
+    # attempt is using, which would publish one attempt's audio as another's.
+    pending = output_path.with_name(
+        f"{output_path.stem}.pending-{os.getpid()}-{uuid.uuid4().hex[:8]}{output_path.suffix}")
     pending.unlink(missing_ok=True)
+    published = False
     try:
         duration = await _generate_tts_chunk(
             text,
@@ -2306,6 +2757,7 @@ async def _generate_tts_chunk_atomic(
             **kwargs,
         )
         pending.replace(output_path)
+        published = True
         try:
             _write_chunk_identity(output_path, identity, duration)
         except Exception as exc:
@@ -2318,7 +2770,13 @@ async def _generate_tts_chunk_atomic(
             )
         return duration
     finally:
-        pending.unlink(missing_ok=True)
+        # A provider that writes from a worker thread (asyncio.to_thread around
+        # a SYNC SDK client) cannot be stopped by cancelling the await: the
+        # thread finishes and recreates this file after the failure was already
+        # reported. Hand the pending path to the bounded sweeper rather than
+        # sleeping here - this widens cleanup only, and never publishes
+        # anything nor swallows the Timeout/JobCancelledError on its way out.
+        _register_abandoned_tts_attempt(pending)
 
 
 async def _adapt_chunk_items(
@@ -2655,6 +3113,26 @@ def _fit_chunk_audio_sync(source: Path, destination: Path, speed_factor: float) 
     return destination
 
 
+def _audio_peak_db_sync(path: Path) -> float:
+    """Decode the actual speech artifact, not its planned interval or sidecar."""
+    result = subprocess.run([
+        "ffmpeg", "-nostdin", "-hide_banner", "-i", str(path),
+        "-af", "astats=metadata=0:reset=0", "-vn", "-f", "null", os.devnull,
+    ], capture_output=True, text=True, timeout=60)
+    matches = re.findall(r"Peak level dB:\s*(-?inf|[-\d.]+)", result.stderr)
+    if result.returncode != 0 or not matches:
+        raise RuntimeError(f"Cannot decode fitted speech: {path.name}")
+    return float(matches[-1])
+
+
+async def _measure_fitted_audio(path: Path, raw_duration_ms: int, speed_factor: float) -> tuple[int, float]:
+    # No transform: same content-addressed raw bytes retain their authoritative
+    # synthesis duration. Transformed bytes MUST be independently probed.
+    duration = raw_duration_ms if abs(speed_factor - 1.0) <= 0.001 else await _audio_duration_ms(path)
+    peak = await asyncio.to_thread(_audio_peak_db_sync, path)
+    return duration, peak
+
+
 def _compose_chunk_track_sync(
     timed_chunks: list[tuple[int, Path]],
     *,
@@ -2760,11 +3238,26 @@ async def synthesize_timed_dub(
     job_state_path: Path | None = None,
     _job_scope: str | None = None,
     _planning_text: dict[str, str] | None = None,
+    cancel_check=None,
 ) -> TimedDubResult:
     """C7 donor-derived chunk planner with measured TTS and bounded retiming."""
     work_dir.mkdir(parents=True, exist_ok=True)
     out = transcript.model_copy(deep=True)
     out.metadata["target_language"] = target_language
+    draft_ids = {seg.id for seg in out.segments if seg.translation_status == "draft"}
+    if draft_ids:
+        if profile.translation_automation != "auto":
+            raise RuntimeError("Strict dubbing cannot synthesize unapproved translation drafts.")
+        draft_audit = out.metadata.get("translation_auto_drafts") or {}
+        if not isinstance(draft_audit, dict) or any(
+            not str(seg.translated_text or "").strip()
+            or not isinstance(draft_audit.get(seg.id), dict)
+            or draft_audit[seg.id].get("source_text") != seg.source_text
+            or draft_audit[seg.id].get("target_text") != seg.translated_text
+            or not draft_audit[seg.id].get("issues")
+            for seg in out.segments if seg.id in draft_ids
+        ):
+            raise RuntimeError("Translation draft is missing its current source/target issue audit.")
     profile = profile.model_copy(update={"protected_terms": list(dict.fromkeys([
         *profile.protected_terms, *(out.metadata.get("localized_terms") or {}).values()]))})
     rewrite_ai_error: Exception | None = None
@@ -2811,7 +3304,8 @@ async def synthesize_timed_dub(
         "source": str(source_media.resolve()),
         "segments": [{"id": seg.id, "text": seg.translated_text, "source_text": seg.source_text,
                       "start": seg.source_start_ms, "end": seg.source_end_ms,
-                      "speaker": seg.speaker_id, "words": seg.source_words, "overrides": seg.overrides}
+                      "speaker": seg.speaker_id, "words": seg.source_words, "overrides": seg.overrides,
+                      "translation_status": seg.translation_status}
                      for seg in out.segments],
         "references": [reference_identity(path) for path in
                        [profile.tts_reference_audio, *profile.speaker_reference_audio.values()] if path],
@@ -2840,7 +3334,8 @@ async def synthesize_timed_dub(
             rewrite_budget[0] = max(0.0, rewrite_budget[0] - (asyncio.get_running_loop().time() - started))
     valid_segments = [
         seg for seg in out.segments
-        if seg.translation_status == "success" and (seg.translated_text or "").strip()
+        if (seg.translation_status == "success" or seg.id in draft_ids)
+        and (seg.translated_text or "").strip()
     ]
     if not valid_segments:
         raise RuntimeError("No translated speech is available for dubbing.")
@@ -2925,6 +3420,11 @@ async def synthesize_timed_dub(
                     protected_terms=[*profile.protected_terms, *profile.glossary.values()]):
                 raise ValueError(f"Invalid accepted rewrite for {seg.id}")
             seg.translated_text = accepted
+            # Keep the Auto draft audit in sync with the accepted C7 rewrite
+            # so a resumed run never reports a stale target_text.
+            draft_audit = out.metadata.get("translation_auto_drafts") or {}
+            if seg.id in draft_audit:
+                draft_audit[seg.id]["target_text"] = accepted
         item.spoken_text = clean_text_for_speech(seg.translated_text or "")
         item.estimated_duration_ms = estimate_spoken_ms(seg.translated_text or "", target_language)
     save_audit()
@@ -3006,6 +3506,7 @@ async def synthesize_timed_dub(
 
     for chunk in chunks:
         speaker_id = _chunk_speaker(plan, chunk)
+        await _cancel_checkpoint(cancel_check, "TTS chunk")
         explicit_voice = chunk.voice_id
         voice = _voice_for_chunk(profile, runtime, speaker_id, explicit_voice)
         path = work_dir / f"chunk_{chunk.id:04d}.wav"
@@ -3110,6 +3611,7 @@ async def synthesize_timed_dub(
                 reference_audio=ref.get("audio"),
                 reference_text=ref.get("text"),
                 reference_language=ref.get("language"),
+                cancel_check=cancel_check,
             )
 
         chunk.actual_duration_ms = duration_ms
@@ -3149,6 +3651,7 @@ async def synthesize_timed_dub(
     )
     for chunk in chunks:
         is_target_chunk = not targeted_regeneration or chunk.id in regenerate_chunk_ids
+        await _cancel_checkpoint(cancel_check, "timing rewrite")
         attempts, rewrite_state = rewrite_context[chunk.id]
         duration_ms = chunk.actual_duration_ms
         speaker_id = _chunk_speaker(plan, chunk)
@@ -3206,6 +3709,19 @@ async def synthesize_timed_dub(
                 accepted_entries.append(entry)
                 job_state.data["rewrite_audit"].append(entry)
                 job_state.data.setdefault("accepted_text", {})[item.segment_id] = item.spoken_text
+                # A guarded C7 rewrite of an Auto draft must keep the C6 audit
+                # current: QC reads target_text from this audit, so a stale value
+                # would report the pre-rewrite wording and fail the next resume.
+                draft_audit = out.metadata.get("translation_auto_drafts") or {}
+                if item.segment_id in draft_audit:
+                    draft_audit[item.segment_id]["target_text"] = item.spoken_text
+                    draft_audit[item.segment_id].setdefault("dubbing_rewrites", []).append({
+                        "before_target_text": before_snapshot[item.segment_id],
+                        "target_text": item.spoken_text,
+                        "reason": "measured_overflow",
+                        "chunk_id": chunk.id,
+                        "timestamp": _utc_now_iso(),
+                    })
             save_audit()
             speech_text = chunk_text(plan, chunk)
             synthesis_identity = _chunk_synthesis_identity(
@@ -3230,6 +3746,7 @@ async def synthesize_timed_dub(
                 reference_audio=ref.get("audio"),
                 reference_text=ref.get("text"),
                 reference_language=ref.get("language"),
+                cancel_check=cancel_check,
             )
             chunk.actual_duration_ms = duration_ms
             synthesis_identities[chunk.id] = synthesis_identity
@@ -3484,8 +4001,10 @@ async def synthesize_timed_dub(
                 save_audit()
 
     timed_chunks: list[tuple[int, Path]] = []
+    fitted_audio: list[dict] = []
     fitted_dir = work_dir / "fitted"
-    for chunk in fitted_chunks:
+    for position, chunk in enumerate(fitted_chunks):
+        await _cancel_checkpoint(cancel_check, "audio fit")
         if abs(chunk.speed_factor - 1.0) <= 0.001:
             timed_path = raw_paths[chunk.id]
         else:
@@ -3498,6 +4017,66 @@ async def synthesize_timed_dub(
             )
             block_paths.append(fitted)
             timed_path = fitted
+        measured_ms, peak_db = await _measure_fitted_audio(
+            timed_path, chunk.actual_duration_ms, chunk.speed_factor)
+        measured_end = chunk.start_ms + measured_ms
+        next_start = (fitted_chunks[position + 1].start_ms
+                      if position + 1 < len(fitted_chunks) else round(source_duration_s * 1000 * video_slowdown))
+        # Small processing deltas may use REAL idle space, never another
+        # speaker's slot or speech that final atrim/-shortest would remove.
+        allowed_end = min(chunk.end_ms + _POSTFIT_ROUNDING_TOLERANCE_MS, next_start)
+        # atempo may differ by a few samples/ms from raw_duration/speed. If
+        # actual speech reaches EOF/a neighbour, correct from RAW audio; never
+        # trim it or extend the output past the contract. Larger errors fail.
+        for _ in range(2):
+            excess = measured_end - allowed_end
+            if not (math.isfinite(peak_db) and 0 < excess <= _POSTFIT_ROUNDING_TOLERANCE_MS):
+                break
+            budget_ms = allowed_end - chunk.start_ms
+            if budget_ms <= 0:
+                break
+            cap = (config.emergency_speed_max if any(x.get("chunk_id") == chunk.id for x in soft_overflow)
+                   else config.speed_max)
+            corrected_speed = chunk.speed_factor * measured_ms / max(1, budget_ms - 2)
+            if corrected_speed > cap:
+                break
+            fitted = fitted_dir / f"chunk_{chunk.id:04d}.wav"
+            await asyncio.to_thread(_fit_chunk_audio_sync, raw_paths[chunk.id], fitted, corrected_speed)
+            chunk.speed_factor = corrected_speed
+            for index in chunk.item_indexes:
+                fitted_plan[index].speed_factor = corrected_speed
+            timed_path = fitted
+            measured_ms, peak_db = await _measure_fitted_audio(timed_path, chunk.actual_duration_ms, corrected_speed)
+            measured_end = chunk.start_ms + measured_ms
+        if measured_ms <= 0 or not math.isfinite(peak_db) or measured_end > allowed_end:
+            failure = {
+                "chunk_id": chunk.id, "reason": "postfit_audio_invalid",
+                "measured_fitted_duration_ms": measured_ms,
+                "measured_end_ms": measured_end, "allowed_end_ms": allowed_end,
+                "allocated_end_ms": chunk.end_ms, "silent": not math.isfinite(peak_db),
+                "segment_ids": [fitted_plan[i].segment_id for i in chunk.item_indexes],
+            }
+            raise LocalizationTimingError([failure], rewrite_count=job_state.rewrite_count,
+                all_issues=[*issues, failure])
+        # Cue offsets remain proportional estimates within a measured chunk.
+        original_end = fitted_plan[chunk.item_indexes[-1]].target_end_ms
+        allocated_ms = original_end - chunk.start_ms
+        if allocated_ms > 0:
+            for index in chunk.item_indexes:
+                item = fitted_plan[index]
+                item.target_start_ms = chunk.start_ms + round(
+                    (item.target_start_ms - chunk.start_ms) * measured_ms / allocated_ms)
+                item.target_end_ms = chunk.start_ms + round(
+                    (item.target_end_ms - chunk.start_ms) * measured_ms / allocated_ms)
+        if measured_end > chunk.end_ms:
+            issues.append({"chunk_id": chunk.id, "reason": "postfit_rounding_extension",
+                "extension_ms": measured_end - chunk.end_ms,
+                "segment_ids": [fitted_plan[i].segment_id for i in chunk.item_indexes]})
+        fitted_audio.append({"chunk_id": chunk.id, "path": str(timed_path),
+            "raw_duration_ms": chunk.actual_duration_ms,
+            "measured_fitted_duration_ms": measured_ms, "start_ms": chunk.start_ms,
+            "end_ms": measured_end, "allocated_end_ms": chunk.end_ms,
+            "peak_db": peak_db, "duration_basis": "audio_probe"})
         timed_chunks.append((chunk.start_ms, timed_path))
         if chunk.speed_factor > config.speed_accept:
             issues.append({
@@ -3527,6 +4106,9 @@ async def synthesize_timed_dub(
             item.speed_factor > 1.001 or video_slowdown > 1.001
         ) else "fit"
         seg.qc_status = "review" if item.speed_factor > config.speed_accept else "pass"
+        if seg.id in draft_ids:
+            # Measured timing success does not certify the draft's semantics.
+            seg.qc_status = "review"
         if seg.id in cadence_review_segments or any(seg.id in issue["segment_ids"] for issue in speech_issues):
             seg.qc_status = "review"
         if seg.id in soft_overflow_segments:
@@ -3539,6 +4121,7 @@ async def synthesize_timed_dub(
         max((seg.target_end_ms or 0) for seg in out.segments),
     )
     dub_track = work_dir / "dub_track.wav"
+    await _cancel_checkpoint(cancel_check, "dub track composition")
     await asyncio.to_thread(
         _compose_chunk_track_sync,
         timed_chunks,
@@ -3577,6 +4160,8 @@ async def synthesize_timed_dub(
         "rewrite_audit": job_state.data["rewrite_audit"], "acceptance_key": acceptance_key,
         "video_slowdown": video_slowdown,
         "cue_timing_basis": "source_word_anchors_with_estimated_chunk_internal_offsets",
+        "segment_tts_duration_basis": "allocated_interval_not_individual_synthesis",
+        "fitted_audio": fitted_audio,
         "cadence_split_before": sorted(forced_splits),
         "issues": issues,
         "rewrite_ai": {
@@ -3713,6 +4298,15 @@ def persist_dubbing_rewrites(
     """
     out = translation.model_copy(deep=True)
     dubbed_by_id = {seg.id: seg for seg in dubbed.segments}
+    # C7 may have rewritten an Auto draft's target text (timing overflow). The
+    # dubbed transcript carries the updated audit; merge it so the persisted C6
+    # audit never goes stale relative to the final spoken wording.
+    dubbed_audits = dubbed.metadata.get("translation_auto_drafts") or {}
+    if dubbed_audits:
+        out_audits = out.metadata.setdefault("translation_auto_drafts", {})
+        for seg_id, audit in dubbed_audits.items():
+            if isinstance(audit, dict):
+                out_audits[seg_id] = audit
     for seg in out.segments:
         resolved = dubbed_by_id.get(seg.id)
         if resolved is None:

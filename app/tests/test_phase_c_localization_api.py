@@ -26,7 +26,7 @@ async def _fake_restore(_job_id: str, _token: dict):
 
 
 @pytest.mark.asyncio
-async def test_localization_batch_coordinator_runs_jobs_sequentially(monkeypatch):
+async def test_localization_batch_coordinator_runs_jobs_sequentially(monkeypatch, tmp_path):
     active = 0
     peak = 0
     order = []
@@ -46,10 +46,21 @@ async def test_localization_batch_coordinator_runs_jobs_sequentially(monkeypatch
         "backend.core.tool_runners.run_tool_translate",
         fake_runner,
     )
+    # The coordinator now attaches pending->running in ONE conditional write
+    # before running an item. That is ownership, not sequencing, and this test
+    # pins SEQUENTIAL execution only, so the attach is stubbed here; the real
+    # conditional write against SQLite is covered by
+    # test_localization_batch_lifecycle.py::test_coordinator_attaches_running_before_releasing_the_claim.
+    async def fake_attach(_job_id, _claim=None, **_kwargs):
+        return True
+
+    monkeypatch.setattr(api, "_attach_batch_item", fake_attach)
+    # The coordinator forwards each item's runner spec verbatim (admission
+    # always records in_path); the stub runner above ignores the payload.
     await api._run_localization_batch_sequential([
-        {"job_id": "a"},
-        {"job_id": "b"},
-        {"job_id": "c"},
+        {"job_id": "a", "in_path": tmp_path / "a.mp4"},
+        {"job_id": "b", "in_path": tmp_path / "b.mp4"},
+        {"job_id": "c", "in_path": tmp_path / "c.mp4"},
     ])
 
     assert peak == 1
@@ -58,6 +69,7 @@ async def test_localization_batch_coordinator_runs_jobs_sequentially(monkeypatch
         ("start", "b"), ("end", "b"),
         ("start", "c"), ("end", "c"),
     ]
+
 
 
 def test_profile_invalidation_uses_earliest_quality_stage():
@@ -1011,6 +1023,9 @@ async def test_canonical_rerender_resume_never_calls_upstream_processors(monkeyp
 
         def verify_source_identity(self):
             return {}
+
+        def earliest_damaged_stage(self):
+            return None  # Intact mock stage inventory; closure has real-file tests.
 
         def is_complete(self, stage, required_artifacts=()):
             if statuses.get(stage) != "complete":

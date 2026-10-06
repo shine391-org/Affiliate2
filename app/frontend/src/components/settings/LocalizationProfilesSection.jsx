@@ -454,7 +454,7 @@ export default function LocalizationProfilesSection({ settings }) {
     // Canonical backend preset pins ASR/TTS/timing/QC. Preserve saved C6/C7
     // routes and prompts only, never inherit paid TTS connections/voice maps.
     const aiPolicy = Object.fromEntries(Object.entries(base || {}).filter(([key]) =>
-      key.startsWith("translation_") || key.startsWith("rewrite_") || key === "glossary"
+      (key.startsWith("translation_") && key !== "translation_automation") || key.startsWith("rewrite_") || key === "glossary"
     ))
     const next = { ...clone(preset), ...clone(aiPolicy), id }
     setSelectedId(id)
@@ -587,6 +587,16 @@ export default function LocalizationProfilesSection({ settings }) {
                 {PRESETS.map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
               </Select>
             </FormControl>
+            <FormControl size="small" fullWidth>
+              <InputLabel id="localization-automation-label">Tự động xử lý lỗi dịch</InputLabel>
+              <Select labelId="localization-automation-label" value={draft.translation_automation || "strict"} label="Tự động xử lý lỗi dịch" onChange={(e) => patch("translation_automation", e.target.value)}>
+                <MenuItem value="strict">Strict — chặn bản dịch chưa đạt kiểm tra</MenuItem>
+                <MenuItem value="auto">Auto — ưu tiên ra bản nháp, ghi rõ lỗi cần duyệt</MenuItem>
+              </Select>
+            </FormControl>
+            <Alert severity={draft.translation_automation === "auto" ? "warning" : "info"} variant="outlined">
+              Auto chấp nhận đánh đổi chất lượng có ghi nhận: tự repair rồi tiếp tục với bản nháp nếu còn bất đồng ngữ nghĩa. Bản nháp có cảnh báo, cần duyệt đúng revision trước xuất bản; không tự publish. Lỗi provider, dữ liệu rỗng hoặc JSON sai không được coi là dịch thành công.
+            </Alert>
             <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
               <TextField
                 size="small" type="number" fullWidth label="Dịch timeout / lần (giây)"

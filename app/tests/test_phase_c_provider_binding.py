@@ -309,6 +309,24 @@ def _manifest_bytes(run) -> bytes:
     return run.manifest_path.read_bytes()
 
 
+def _write_sine_wav(path: Path, duration_ms: int, rate: int = 16000) -> Path:
+    """A real, decodable WAV so C7's published-artifact measurement can run."""
+    import array
+    import math
+    import wave
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    count = rate * duration_ms // 1000
+    samples = array.array('h', (round(3000 * math.sin(2 * math.pi * 440 * n / rate))
+                                for n in range(count)))
+    with wave.open(str(path), 'wb') as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(rate)
+        handle.writeframes(samples.tobytes())
+    return path
+
+
 def _snapshot_tree(run, stage: str) -> dict[str, bytes]:
     directory = run.root / stage
     if not directory.exists():
@@ -1411,11 +1429,15 @@ async def test_canonical_auto_retry_preserves_raw_neighbors_accepted_text_and_ap
     events = []
     mock_dubbing(monkeypatch)
     async def generate(text, *, output_path, **_kwargs):
-        events.append(text)
-        if len(events) == 3:
-            raise TimeoutError("transient provider failure after accepted rewrite")
-        output_path.write_bytes(b"audio")
-        return 1800 if len(events) == 1 else 800
+            events.append(text)
+            if len(events) == 3:
+                raise TimeoutError("transient provider failure after accepted rewrite")
+            # Real decodable audio: C7 measures the PUBLISHED artifact (peak level
+            # via ffmpeg astats) and fails closed on undecodable bytes, so a
+            # byte placeholder is no longer a valid provider fixture here.
+            duration_ms = 1800 if len(events) == 1 else 800
+            _write_sine_wav(Path(output_path), duration_ms)
+            return duration_ms
     monkeypatch.setattr(svc, "_generate_tts_chunk", generate)
     rewrites = []
     async def shorten(*_args, **_kwargs):
