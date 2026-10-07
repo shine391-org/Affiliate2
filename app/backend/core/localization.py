@@ -92,6 +92,7 @@ class LocalizationProfile(BaseModel):
     # may render as a warning-marked draft; publish still requires review.
     # Old saved profiles keep strict behavior when this field is absent.
     translation_automation: Literal["strict", "auto"] = "strict"
+    translation_omission_max_ratio: float = Field(default=0.10, ge=0.0, le=0.25)
     glossary: dict[str, str] = Field(default_factory=dict)
     protected_terms: list[str] = Field(default_factory=list, max_length=100)
 
@@ -428,7 +429,7 @@ class LocalizationSegment(BaseModel):
 
     tts_duration_ms: int | None = Field(default=None, ge=0)
 
-    translation_status: Literal["pending", "success", "draft", "failed", "untranslated"] = "pending"
+    translation_status: Literal["pending", "success", "draft", "omitted", "failed", "untranslated"] = "pending"
     timing_status: Literal["pending", "fit", "adjusted", "overflow"] = "pending"
     qc_status: Literal["pending", "pass", "review", "fail"] = "pending"
 

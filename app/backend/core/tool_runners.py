@@ -1617,6 +1617,7 @@ async def run_tool_translate(
                             1 for s in localized.segments
                             if s.translation_status == "draft"
                         ),
+                        "omitted_count": sum(s.translation_status == "omitted" for s in localized.segments),
                         "translation_provider": profile.translation_provider,
                         "translation_model": profile.translation_model,
                         "translation_fallback_provider": profile.translation_fallback_provider,

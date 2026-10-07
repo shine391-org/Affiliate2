@@ -40,7 +40,7 @@ async def test_rewrite_rejects_non_shortening_and_uses_measured_feedback(candida
     assert not changed
     assert plan[0].spoken_text == original
     assert segment.translated_text == original
-    assert issues[0]["reason"] == "rewrite_not_shorter"
+    assert issues[0]["reason"] == ("rewrite_no_safe_shortening" if candidate == original else "rewrite_not_shorter")
     assert "9192" in prompts[0]
     assert "6052" in prompts[0]
     assert "word budget" in prompts[0].lower()

@@ -1127,6 +1127,7 @@ _HARD_KINDS = frozenset({
     "negation_lost", "negation_added", "negation_scope_changed", "quantity_lost",
     "unit_lost", "ordinal_changed", "question_changed", "exclamation_changed",
     "antonym_flip", "term_lost", "unlocalized_text",
+    "role_reversal", "role_loss", "relation_loss",
 })
 
 
@@ -1146,6 +1147,158 @@ def _verdicts(issues: list[dict], *, include_advisories: bool) -> list[dict]:
     return [issue for issue in issues if issue["severity"] == "hard"]
 
 
+# ── C7 semantic-role/relation guards ──────────────────────────────────────
+# Vietnamese pronouns that can serve as actor or object in a clause.
+# This is a closed class, not a whitelist of sample-specific words.
+_VI_PRONOUNS = frozenset({
+    "tôi", "tao", "mình", "tui",  # 1st person
+    "em", "anh", "chị", "bạn", "cậu", "mày",  # 2nd person / familiar
+    "nó", "hắn", "nàng", "chàng",  # 3rd person
+    "ta", "chúng ta", "chúng tôi", "chúng mình",  # inclusive
+    "họ", "chúng nó",  # 3rd person plural
+})
+
+# Explicit relation markers: dropping these removes the naming/assertion
+# relationship even when the content words survive.
+# Only markers containing "tên" are protected because "tên" explicitly
+# establishes the naming relation; "gọi là" alone can be dropped when the
+# content is preserved (e.g., "Bố cục này gọi là X" → "X" is legitimate).
+_VI_RELATION_MARKERS = (
+    "tên là", "tên gọi là", "tên của", "là tên", "có tên là", "có tên gọi là",
+)
+
+
+_VI_PARTICIPANT_RE = re.compile(
+    r"(?<!\w)(" + "|".join(re.escape(p) for p in sorted(_VI_PRONOUNS, key=len, reverse=True)) + r")(?!\w)"
+)
+_VI_ROLE_CONNECTIVES = frozenset({"và", "hay", "hoặc", "với", "của", "cũng", "đều", "cả"})
+
+
+def _extract_pronouns(text: str) -> list[str]:
+    """Closed-class participants, including multiword forms and punctuation."""
+    return [m.group() for m in _VI_PARTICIPANT_RE.finditer(_normalize(text))]
+
+
+def _role_frames(text: str) -> list[tuple[str, frozenset[str], str]]:
+    """Local participant/predicate/participant evidence, not a semantic parser.
+
+    Never infer an object from a conjunction-subject pair or compare pronoun
+    order across independent clauses. Ambiguous ellipsis is advisory.
+    """
+    frames = []
+    for clause in re.split(r"[.,;:!?\n]+", _normalize(text)):
+        roles = list(_VI_PARTICIPANT_RE.finditer(clause))
+        for left, right in zip(roles, roles[1:]):
+            predicate = frozenset(re.findall(r"[^\W_]+", clause[left.end():right.start()]))
+            if (left.group() == right.group() or not predicate or predicate <= _VI_ROLE_CONNECTIVES
+                    or predicate & {"rằng", "nếu", "khi", "bởi", "vì"}):
+                continue
+            frames.append((left.group(), predicate, right.group()))
+    return frames
+
+
+def _same_predicate(first: frozenset[str], second: frozenset[str]) -> bool:
+    return bool(first & second)
+
+
+def _extract_relation_markers(text: str) -> list[str]:
+    """Extract explicit relation markers from text."""
+    text = _normalize(text)
+    return [m for m in _VI_RELATION_MARKERS if _contains(text, m)]
+
+
+def _detect_role_reversal(before: str, after: str) -> bool:
+    """Detect actor/object reversal: 'tôi chụp em' -> 'em chụp tôi'.
+
+    A reversal requires:
+    - Both before and after have at least 2 pronouns
+    - The pronoun sets are the same (same participants)
+    - The order is reversed (actor and object swapped)
+    """
+    old, new = _role_frames(before), _role_frames(after)
+    for subject, predicate, obj in old:
+        if any(s == subject and o == obj and _same_predicate(predicate, p) for s, p, o in new):
+            continue  # The original assertion survived a clause reorder.
+        if any(s == obj and o == subject and _same_predicate(predicate, p) for s, p, o in new):
+            return True
+    return False
+
+
+def _detect_role_loss(before: str, after: str) -> bool:
+    """Detect explicit role loss: 'tôi chụp em' -> 'chụp' (both roles dropped).
+
+    Role loss requires:
+    - Before has at least 2 pronouns (actor and object)
+    - After has 0 or 1 pronoun (at least one role dropped)
+    - The verb/content is preserved (not a complete rewrite)
+    """
+    remaining = set(_extract_pronouns(after))
+    after_words = frozenset(re.findall(r"[^\W_]+", _normalize(after)))
+    return any(subject not in remaining and obj not in remaining and _same_predicate(predicate, after_words)
+               for subject, predicate, obj in _role_frames(before))
+
+
+def _detect_relation_loss(before: str, after: str) -> bool:
+    """Detect explicit relation loss: 'tên là Vũ' -> 'là Vũ'.
+
+    Relation loss requires:
+    - Before has an explicit relation marker
+    - After does NOT have that marker
+    - The content after the marker is preserved
+    """
+    before_markers = _extract_relation_markers(before)
+    if not before_markers:
+        return False
+
+    after_markers = _extract_relation_markers(after)
+
+    # These forms express the same naming relation; spelling is not identity.
+    if after_markers or _contains(after, "gọi là") or _contains(after, "mang tên"):
+        return False
+
+    # Punctuation cannot hide the name that survived the lost relation.
+    before_words = set(re.findall(r"[^\W_]+", _normalize(before)))
+    after_words = set(re.findall(r"[^\W_]+", _normalize(after)))
+    content_preserved = bool(before_words & after_words)
+
+    return content_preserved
+
+
+def _semantic_role_issues(before: str, after: str, language: str | None) -> list[dict]:
+    """Detect semantic role/relation violations in Vietnamese rewrites."""
+    if _lexicon_for(language) != "vietnamese":
+        return []
+
+    issues = []
+
+    if _detect_role_reversal(before, after):
+        issues.append({
+            "kind": "role_reversal",
+            "detail": "actor/object reversal detected",
+        })
+
+    if _detect_role_loss(before, after):
+        issues.append({
+            "kind": "role_loss",
+            "detail": "explicit actor/object loss detected",
+        })
+
+    remaining = set(_extract_pronouns(after))
+    after_words = frozenset(re.findall(r"[^\W_]+", _normalize(after)))
+    if any((subject in remaining) != (obj in remaining) and _same_predicate(predicate, after_words)
+           for subject, predicate, obj in _role_frames(before)):
+        issues.append({"kind": "role_ellipsis", "detail": "one explicit participant became implicit",
+                       "severity": "uncertain", "action": "review"})
+
+    if _detect_relation_loss(before, after):
+        issues.append({
+            "kind": "relation_loss",
+            "detail": "explicit relation marker loss detected",
+        })
+
+    return issues
+
+
 def check_rewrite_meaning(before: str, after: str, target_language: str | None = None,
                           *, protected_terms: Iterable[str] = (),
                           context: GuardContext | None = None,
@@ -1159,6 +1312,8 @@ def check_rewrite_meaning(before: str, after: str, target_language: str | None =
         return []
     issues = _invariants(before, after, target_language, target_language,
                          context=context)
+    # C7 semantic-role/relation guards
+    issues.extend(_semantic_role_issues(before, after, target_language))
     for term in protected_terms:
         if _contains(before, term) and not _contains(after, term):
             issues.append({"kind": "term_lost", "token": term, "detail": "explicit protected term lost"})

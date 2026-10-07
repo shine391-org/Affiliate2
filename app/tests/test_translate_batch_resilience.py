@@ -897,16 +897,17 @@ async def test_c7_rewrite_exhausts_bounded_retries_before_opening_the_circuit(
     assert changed is False
     # Bounded: exactly the helper's budget, then it stops.
     assert ai.calls == 3
-    assert state.get("unavailable") is True
+    assert state.get("unavailable") is False
+    assert state["retry_scope"] == "chunk"
     # The plan and caption transcript must stay untouched so a failed rewrite
     # can never half-apply.
     assert plan[0].spoken_text == "một câu rất dài"
     assert segment.translated_text == "một câu rất dài"
-    assert [i["reason"] for i in issues] == ["rewrite_ai_unavailable"]
+    assert [i["reason"] for i in issues] == ["rewrite_ai_transient"]
 
 
 @pytest.mark.asyncio
-async def test_c7_optional_rewrite_provider_failure_opens_job_circuit_breaker(
+async def test_c7_optional_transient_failure_does_not_disable_later_chunks(
     monkeypatch, tmp_path,
 ):
     long_text = "đây là một câu tiếng Việt rất dài cần được rút gọn trước khi đọc"
@@ -953,14 +954,15 @@ async def test_c7_optional_rewrite_provider_failure_opens_job_circuit_breaker(
         work_dir=tmp_path / "work",
     )
 
-    assert ai.calls == 3
+    assert ai.calls == 9  # Exactly three bounded transport attempts per chunk.
     assert calls["n"] == 3
-    unavailable = [
+    transient = [
         issue for issue in result.issues
-        if issue["reason"] == "rewrite_ai_unavailable"
+        if issue["reason"] == "rewrite_ai_transient"
     ]
-    assert len(unavailable) == 1
-    assert unavailable[0]["chunk_id"] == 1
+    assert len(transient) == 3
+    assert [i["chunk_id"] for i in transient] == [1, 2, 3]
+    assert all(i["retry_scope"] == "chunk" for i in transient)
     assert result.chunk_count == 3
 
 
@@ -1643,13 +1645,12 @@ async def test_c7_ai_rewrite_timeout_degrades_to_tts_instead_of_failing(
         work_dir=tmp_path / "work",
     )
 
-    # A transient provider failure is retried within one bounded budget before
-    # the optional rewrite is disabled for the rest of the job. The contract
-    # under test is graceful degradation, not a single-attempt call count.
+    # A transient failure exhausts this chunk's bounded transport attempts,
+    # without falsely declaring every later chunk's provider unavailable.
     assert slow.calls == 3
     assert result.chunk_count == 1
     assert any(
-        issue["reason"] == "rewrite_ai_unavailable"
+        issue["reason"] == "rewrite_ai_transient"
         for issue in result.issues
     )
     assert result.transcript.segments[0].target_start_ms is not None
@@ -1699,8 +1700,9 @@ async def test_adapt_chunk_timeout_is_best_effort_and_records_issue():
         state=state,
     )
     assert changed is False
-    assert state["unavailable"] is True
-    assert issues[0]["reason"] == "rewrite_ai_unavailable"
+    assert state["unavailable"] is False
+    assert state["retry_scope"] == "chunk"
+    assert issues[0]["reason"] == "rewrite_ai_transient"
     assert issues[0]["error_type"] == "TimeoutError"
 
 @pytest.mark.asyncio

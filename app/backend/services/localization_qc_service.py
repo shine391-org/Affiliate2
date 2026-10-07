@@ -224,6 +224,17 @@ def evaluate_localization_qc(
     if not final_meta["has_audio"]:
         failures.append({"code": "missing_audio_stream"})
 
+    from backend.services.localization_omissions import validate_translation_omissions
+    try:
+        omitted_ids = validate_translation_omissions(transcript, profile)
+    except ValueError as exc:
+        omitted_ids = set()
+        failures.append({"code": "invalid_translation_omissions", "message": str(exc)})
+    for segment in transcript.segments:
+        if segment.id in omitted_ids:
+            record = transcript.metadata["translation_omissions"][segment.id]
+            warnings.append({**record, "code": "translation_omitted", "segment_id": segment.id,
+                "message": "Unreadable cue intentionally omitted after bounded repair; review before publish."})
     draft_audit = transcript.metadata.get("translation_auto_drafts") or {}
     audited_drafts: set[str] = set()
     for segment in transcript.segments:
@@ -249,8 +260,9 @@ def evaluate_localization_qc(
             })
     untranslated = [
         s.id for s in transcript.segments
-        if (s.translation_status != "success" and s.id not in audited_drafts)
-        or not (s.translated_text or "").strip()
+        if s.id not in omitted_ids and (
+            (s.translation_status != "success" and s.id not in audited_drafts)
+            or not (s.translated_text or "").strip())
     ]
     if untranslated:
         failures.append({
@@ -265,6 +277,9 @@ def evaluate_localization_qc(
     if unlocalized:
         failures.append({"code": "unlocalized_vietnamese_text", "segment_ids": unlocalized})
 
+    for issue in timing_issues or []:
+        if issue.get("reason") in {"postfit_micro_rescue", "tts_transport_split"}:
+            warnings.append({**issue, "code": issue["reason"]})
     overflow_all = [
         issue for issue in (timing_issues or [])
         if issue.get("reason") in {"timing_overflow", "speed_limit_exceeded"}
@@ -358,7 +373,9 @@ def evaluate_localization_qc(
             ),
         })
 
-    coverage = _speech_coverage(transcript)
+    active_transcript = transcript.model_copy(update={"segments": [
+        s for s in transcript.segments if s.id not in omitted_ids]})
+    coverage = _speech_coverage(active_transcript)
     if coverage < 0.72:
         # Duration is only a cadence heuristic, not semantic completeness.
         # Auto may retain a moderately shorter dub ONLY with every cue present
@@ -447,7 +464,8 @@ def evaluate_localization_qc(
             "speech_coverage_ratio": round(coverage, 4),
             "video_slowdown": round(video_slowdown, 5),
             "audio_max_volume_db": max_volume,
-            "translated_segments": len(transcript.segments) - len(untranslated),
+            "translated_segments": len(transcript.segments) - len(untranslated) - len(omitted_ids),
+            "omitted_segments": len(omitted_ids),
             "draft_segments": len(audited_drafts),
             "segment_count": len(transcript.segments),
             "diarization": alignment,

@@ -149,6 +149,7 @@ _TRANSLATION_KEYS = {
     "translation_retry_attempts", "translation_attempt_timeout_s", "translation_total_timeout_s",
     "translation_preset", "translation_instructions", "translation_guardrails", "glossary", "protected_terms",
     "translation_automation",
+    "translation_omission_max_ratio",
 }
 _DUBBING_KEYS = {
     "rewrite_routes",

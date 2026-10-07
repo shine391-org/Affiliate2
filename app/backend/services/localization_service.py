@@ -53,6 +53,7 @@ from backend.services.dubbing_job_state import (
     DubbingJobState, reference_identity, resolve_speaker_voices, tts_binding, write_json_atomic,
     speaker_gender_warnings,
 )
+from backend.services.dubbing_cadence import read_cue_spans, place_cue_spans
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,7 @@ _EDGE_TTS_BOUNDARY_RULE = "edge-boundary-trim-v3-neutral-pitch"
 _TTS_REQUEST_TIMEOUT_S = 120.0
 _TTS_CHUNK_DEADLINE_S = 300.0
 _POSTFIT_ROUNDING_TOLERANCE_MS = 30
+_C7_REWRITE_POLICY_VERSION = 2
 
 
 # Abandoned per-attempt TTS scratch files. A provider that streams from a
@@ -1242,6 +1244,19 @@ async def _call_ai_chat_resilient(
             if client is not None
         ]
 
+    class DispatchObserver:
+        # Called by AIClient only AFTER provider admission, immediately before
+        # each wire request. Keep the existing shared budget and count the same
+        # event, rather than claiming a dispatch while merely waiting in queue.
+        count = 0
+        def consume(self):
+            if dispatch_budget is not None:
+                dispatch_budget.consume()
+            self.count += 1
+            if route_state is not None:
+                route_state.attempt_count += 1
+
+    wire = DispatchObserver()
     for client_pos, (role, client, route_index) in enumerate(usable_clients):
         if hasattr(client, "max_retries"):
             client.max_retries = 0
@@ -1284,9 +1299,8 @@ async def _call_ai_chat_resilient(
                 "model": getattr(client, "model", None),
                 "timeout_s": round(timeout_s, 1),
             })
+            dispatch_before = wire.count
             try:
-                if route_state is not None:
-                    route_state.attempt_count += 1
                 chat_kwargs = {"messages": messages, "max_tokens": max_tokens}
                 if isinstance(client, AIClient):
                     # Per-request state: independent jobs cannot overwrite a
@@ -1294,12 +1308,12 @@ async def _call_ai_chat_resilient(
                     chat_kwargs["request_context"] = AIRequestContext(
                         deadline_at=min(deadline, provider_deadline),
                         request_timeout_s=timeout_s, progress_cb=progress_cb,
-                        dispatch_budget=dispatch_budget,
+                        dispatch_budget=wire,
                     )
-                elif dispatch_budget is not None:
+                else:
                     # Compatibility test doubles represent exactly one wire
                     # attempt. Canonical clients count AFTER admission instead.
-                    dispatch_budget.consume()
+                    wire.consume()
                 result = await asyncio.wait_for(
                     client.chat(**chat_kwargs),
                     timeout=provider_remaining if policy.get("enabled") else timeout_s,
@@ -1317,6 +1331,7 @@ async def _call_ai_chat_resilient(
                     "attempt": attempt,
                     "error_type": type(exc).__name__,
                     "error": _safe_ai_error_text(exc, client),
+                    "dispatched": wire.count > dispatch_before,
                 }
                 if route_state is not None:
                     _append_ai_failure(route_state, failure)
@@ -1927,6 +1942,25 @@ async def translate_transcript(
         failed_total = max(0, failed_total - len(draft_ids))
         if draft_ids:
             out.metadata["translation_auto_drafts"] = auto_drafts
+        # Only an actual rejected candidate after bounded repair may be omitted.
+        # Provider/empty/malformed failures have no such receipt and stay failed.
+        from backend.services.dubbing_rewrite_guard import untranslated_han
+        omissions = {}
+        for seg in out.segments:
+            record = auto_drafts.get(seg.id, {})
+            if (seg.translation_status == "draft" and record.get("attempts", 0) >= 2
+                    and untranslated_han(seg.translated_text or "", target_language,
+                        allowed=[*profile.protected_terms, *profile.glossary.values()])):
+                omissions[seg.id] = {**record,
+                    "rejected_target_text": seg.translated_text,
+                    "reason": "unreadable_after_bounded_repair"}
+                seg.translated_text = ""
+                seg.translation_status = "omitted"
+                seg.qc_status = "review"
+        if omissions:
+            out.metadata["translation_omissions"] = omissions
+            from backend.services.localization_omissions import validate_translation_omissions
+            validate_translation_omissions(out, profile)
     save_checkpoint()
 
     if failed_total == len(out.segments):
@@ -2491,7 +2525,36 @@ def _trim_edge_tts_boundary_silence_sync(
         ):
             return raw_duration_ms
 
+        words_path = audio_path.with_suffix(audio_path.suffix + ".words.json")
+        timing = None
+        try:
+            candidate = json.loads(words_path.read_text(encoding="utf-8"))
+            if (candidate.get("version") == 1 and candidate.get("timing_basis") == "provider_word_boundary"
+                    and candidate.get("audio_sha256") == hashlib.sha256(audio_path.read_bytes()).hexdigest()):
+                timing = candidate
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass
         trimmed.replace(audio_path)
+        # Timings describe the ORIGINAL decoded stream. Shift the valid native
+        # events with the exact boundary trim; never rebind stale/partial events.
+        try:
+            if timing is None:
+                words_path.unlink(missing_ok=True)
+            else:
+                shift_ms = trim_start_s * 1000
+                words = []
+                for word in timing["words"]:
+                    start, end = float(word["start_ms"])-shift_ms, float(word["end_ms"])-shift_ms
+                    if (not math.isfinite(start) or not math.isfinite(end) or start < -30
+                            or end <= max(0.0, start) or end > trimmed_duration_ms + 30):
+                        raise ValueError("Native timing does not fit boundary-trimmed PCM")
+                    words.append({**word, "start_ms": max(0.0, start), "end_ms": min(end, trimmed_duration_ms)})
+                timing.update(words=words, audio_sha256=hashlib.sha256(audio_path.read_bytes()).hexdigest(),
+                              boundary_trim_start_ms=shift_ms, boundary_trim_end_ms=trim_end_s*1000)
+                write_json_atomic(words_path, timing)
+        except (OSError, ValueError, KeyError, TypeError):
+            words_path.unlink(missing_ok=True)
+            logger.warning("Edge native timing unavailable after boundary trim: %s", audio_path.name)
         logger.info(
             "Edge TTS boundary trim: %s %dms -> %dms (saved %dms; "
             "start=%.3fs end=%.3fs)",
@@ -2514,6 +2577,32 @@ def _trim_edge_tts_boundary_silence_sync(
         trimmed.unlink(missing_ok=True)
 
 
+def _fit_cadence_chunk_sync(source: Path, destination: Path, placements: list[dict], chunk_start_ms: int) -> None:
+    """Retain every decoded PCM partition and add actual source-relative pauses."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    filters = []
+    for i, unit in enumerate(placements):
+        delay = max(0, round(unit["start_ms"] - chunk_start_ms))
+        filters.append(f"[0:a]atrim=start={unit['raw_start_ms']/1000:.6f}:end={unit['raw_end_ms']/1000:.6f},"
+                       f"asetpts=PTS-STARTPTS,{atempo_filter(unit['speed_factor'])},adelay={delay}:all=1[u{i}]")
+    inputs = "".join(f"[u{i}]" for i in range(len(placements)))
+    filters.append(f"{inputs}amix=inputs={len(placements)}:duration=longest:dropout_transition=0:normalize=0[out]")
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(source),
+                    "-filter_complex", ";".join(filters), "-map", "[out]", "-ac", "1", "-ar", "24000",
+                    "-c:a", "pcm_s16le", str(destination)], check=True, capture_output=True, timeout=120)
+
+
+def _concat_tts_parts_sync(parts: list[Path], destination: Path) -> None:
+    """Concatenate complete decoded parts; no atrim, words or source fallback."""
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y"]
+    for path in parts:
+        cmd.extend(["-i", str(path)])
+    inputs = "".join(f"[{i}:a]" for i in range(len(parts)))
+    cmd.extend(["-filter_complex", f"{inputs}concat=n={len(parts)}:v=0:a=1[out]",
+                "-map", "[out]", "-ac", "1", "-ar", "24000", "-c:a", "pcm_s16le", str(destination)])
+    subprocess.run(cmd, check=True, capture_output=True, timeout=30)
+
+
 async def _generate_tts_chunk(
     text: str,
     *,
@@ -2529,11 +2618,15 @@ async def _generate_tts_chunk(
     attempts: int = 3,
     request_timeout_s: float | None = None,
     cancel_check=None,
+    recovery_events: list[dict] | None = None,
+    _allow_edge_split: bool = True,
+    _deadline_at: float | None = None,
 ) -> int:
     from backend.services.tts_service import generate_tts, retryable_tts_error
 
     last: Exception | None = None
-    deadline = asyncio.get_running_loop().time() + _TTS_CHUNK_DEADLINE_S
+    deadline = (_deadline_at if _deadline_at is not None else
+                asyncio.get_running_loop().time() + _TTS_CHUNK_DEADLINE_S)
     timeout = request_timeout_s if request_timeout_s is not None else _TTS_REQUEST_TIMEOUT_S
     if timeout <= 0:
         raise ValueError("TTS request timeout must be positive")
@@ -2582,6 +2675,11 @@ async def _generate_tts_chunk(
                 # Only an attempt that produced its OWN measurable audio may
                 # publish, and it publishes by replacing the accepted path.
                 attempt_path.replace(output_path)
+                attempt_words = attempt_path.with_suffix(attempt_path.suffix + ".words.json")
+                output_words = output_path.with_suffix(output_path.suffix + ".words.json")
+                output_words.unlink(missing_ok=True)
+                if attempt_words.exists():
+                    attempt_words.replace(output_words)
                 accepted = True
                 return duration
             last = RuntimeError("TTS generated zero-duration audio")
@@ -2611,6 +2709,61 @@ async def _generate_tts_chunk(
                 # instead of a bare TimeoutError.
                 last = TimeoutError("TTS chunk deadline exhausted during retry backoff")
                 break
+    cause = last
+    no_audio = False
+    while cause is not None:
+        if type(cause).__name__ == "NoAudioReceived":
+            no_audio = True
+            break
+        cause = cause.__cause__
+    middle = text.rfind(" ", 0, len(text) // 2 + 1)
+    if (_allow_edge_split and profile.translation_automation == "auto" and no_audio
+            and getattr(runtime.provider, "value", str(runtime.provider)) == "edge_tts"
+            and 0 < middle < len(text)-1
+            and deadline - asyncio.get_running_loop().time() > 30):
+        import tempfile
+        pieces = [text[:middle], text[middle+1:]]
+        assert " ".join(pieces) == text
+        # ONE fallback, TWO verbatim requests, same voice/rate, same absolute
+        # chunk deadline. A failed part never publishes partial/empty speech.
+        with tempfile.TemporaryDirectory(prefix="edge-split-", dir=output_path.parent) as temp:
+            parts = []
+            try:
+                for i, piece in enumerate(pieces):
+                    path = Path(temp) / f"part-{i}.wav"
+                    remaining = deadline - asyncio.get_running_loop().time()
+                    if remaining <= 30:
+                        raise TimeoutError("TTS chunk deadline exhausted during split recovery")
+                    await _generate_tts_chunk(piece, runtime=runtime, voice=voice, profile=profile,
+                        speaker_id=speaker_id, target_language=target_language, output_path=path,
+                        reference_audio=reference_audio, reference_text=reference_text,
+                        reference_language=reference_language, attempts=1,
+                        request_timeout_s=min(timeout, (remaining-30)/2), cancel_check=cancel_check,
+                        _allow_edge_split=False, _deadline_at=deadline)
+                    parts.append(path)
+                if deadline - asyncio.get_running_loop().time() <= 30:
+                    raise TimeoutError("TTS chunk deadline exhausted before split concat")
+                await _cancel_checkpoint(cancel_check, "TTS split concat")
+                joined = Path(temp) / "joined.wav"
+                await asyncio.to_thread(_concat_tts_parts_sync, parts, joined)
+                duration = await _audio_duration_ms(joined)
+                peak = await asyncio.to_thread(_audio_peak_db_sync, joined)
+                if duration <= 0 or not math.isfinite(peak):
+                    raise RuntimeError("TTS split produced silent or invalid speech")
+                await _cancel_checkpoint(cancel_check, "TTS split publish")
+                if asyncio.get_running_loop().time() >= deadline:
+                    raise TimeoutError("TTS chunk deadline exhausted before split publish")
+                joined.replace(output_path)
+                if recovery_events is not None:
+                    recovery_events.append({"reason": "tts_transport_split", "text": text,
+                        "pieces": pieces, "voice": voice, "attempts_before_split": attempts_made,
+                        "raw_duration_ms": duration, "requires_human_review": True})
+                return duration
+            except Exception as exc:
+                from backend.core.exceptions import JobCancelledError
+                if isinstance(exc, JobCancelledError):
+                    raise
+                raise RuntimeError(f"TTS verbatim split recovery failed: {exc}") from exc
     reason = "request timeout" if isinstance(last, TimeoutError) else str(last)
     raise RuntimeError(f"TTS chunk failed after {attempts_made} attempts: {reason}") from last
 
@@ -2757,6 +2910,11 @@ async def _generate_tts_chunk_atomic(
             **kwargs,
         )
         pending.replace(output_path)
+        pending_words = pending.with_suffix(pending.suffix + ".words.json")
+        output_words = output_path.with_suffix(output_path.suffix + ".words.json")
+        output_words.unlink(missing_ok=True)
+        if pending_words.exists():
+            pending_words.replace(output_words)
         published = True
         try:
             _write_chunk_identity(output_path, identity, duration)
@@ -2819,9 +2977,18 @@ async def _adapt_chunk_items(
     # for TTS pauses; this budget is guidance, never permission to drop facts.
     ratio = min(0.85, target_ms / max(duration_ms, 1))
     word_budget = max(len(items), math.floor(current_words * ratio * 0.95))
+    ordered_context = sorted(segment_by_id.values(), key=lambda s: (s.source_start_ms, s.id))
+    selected_ids = {item["id"] for item in items}
+    positions = [i for i, seg in enumerate(ordered_context) if seg.id in selected_ids]
+    neighbours = ([ordered_context[min(positions)-1]] if positions and min(positions) > 0 else [])
+    if positions and max(positions)+1 < len(ordered_context):
+        neighbours.append(ordered_context[max(positions)+1])
+    context = [{"id": seg.id, "speaker_id": seg.speaker_id,
+                "source": seg.source_text[:600], "target": (seg.translated_text or "")[:600]}
+               for seg in neighbours]
     prompt = f"""Rewrite these {target_language} dubbing lines so the WHOLE group can be spoken naturally in about {target_ms / 1000.0:.2f} seconds.
 Duration feedback: current duration {duration_ms} ms; target duration {target_ms} ms.
-Attempt {(state or {}).get('attempt', 1)}. Combined word budget: at most {word_budget} whitespace-separated words (current: {current_words}).
+Attempt {(state or {}).get('attempt', 1)}. Advisory word budget: about {word_budget} whitespace-separated words (current: {current_words}). This is guidance, NOT a quota or permission to remove facts.
 SEMANTIC GUARDRAILS (editable per profile in Settings):
 {profile.rewrite_guardrails}
 
@@ -2831,6 +2998,11 @@ LOCKED PROTOCOL:
 - Return every input ID exactly once and no extra IDs.
 - Return ONLY JSON: [{{"id":"...","text":"..."}}]
 - Make wording concise and natural for speech only after the semantic guardrails above are satisfied.
+- Preserve who does what to whom, naming relations, negation, quantities and the speech act. Remove repetition/fillers before information.
+- If no safe shortening exists, return the current text unchanged for that item. Do not invent or delete information to meet the timing goal.
+
+NEIGHBOUR CONTEXT (read-only; do not output these IDs):
+{json.dumps(context, ensure_ascii=False)}
 
 ITEMS:
 {json.dumps(items, ensure_ascii=False)}"""
@@ -2847,17 +3019,31 @@ ITEMS:
         )
 
     def record_unavailable(exc: Exception) -> bool:
+        from backend.core.ai_provider import AIProviderCooldownError, AIRequestBudgetError, is_transient_ai_error
+        expired = deadline_at is not None and asyncio.get_running_loop().time() >= deadline_at
+        if expired or isinstance(exc, AIRequestBudgetError):
+            reason, scope = "rewrite_budget_exhausted", "stage_budget"
+        elif isinstance(exc, AIProviderCooldownError):
+            reason, scope = "rewrite_ai_wait_budget", "admission"
+        elif isinstance(exc, (TimeoutError, ConnectionError)) or is_transient_ai_error(exc):
+            reason, scope = "rewrite_ai_transient", "chunk"
+        else:
+            reason, scope = "rewrite_ai_unavailable", "stage"
         logger.warning(
             "Dubbing rewrite unavailable for chunk %s: %s",
             chunk.id,
             exc,
         )
         if state is not None:
-            state["unavailable"] = True
+            state["retry_scope"] = scope
+            state["unavailable"] = scope == "stage"
+            state["budget_exhausted"] = scope == "stage_budget"
         if issues is not None:
             issues.append({
                 "chunk_id": chunk.id,
-                "reason": "rewrite_ai_unavailable",
+                "reason": reason,
+                "retry_scope": scope,
+                "dispatched": False if isinstance(exc, (AIProviderCooldownError, AIRequestBudgetError)) else None,
                 "error_type": type(exc).__name__,
                 "message": str(exc)[:300],
                 "segment_ids": [plan[i].segment_id for i in chunk.item_indexes],
@@ -3027,6 +3213,13 @@ ITEMS:
 
     current_text = chunk_text(plan, chunk)
     candidate_text = " ".join(mapped[item["id"]] for item in items)
+    if all(mapped[item["id"]] == item["current"] for item in items):
+        if state is not None:
+            state["no_safe_shortening"] = True
+        if issues is not None:
+            issues.append({"chunk_id": chunk.id, "reason": "rewrite_no_safe_shortening",
+                           "segment_ids": expected, "requires_human_review": True})
+        return False
     from backend.services.dubbing_rewrite_guard import untranslated_han
     if untranslated_han(candidate_text, target_language,
             allowed=[*profile.protected_terms, *profile.glossary.values()]):
@@ -3244,6 +3437,10 @@ async def synthesize_timed_dub(
     work_dir.mkdir(parents=True, exist_ok=True)
     out = transcript.model_copy(deep=True)
     out.metadata["target_language"] = target_language
+    from backend.services.localization_omissions import validate_translation_omissions
+    omitted_ids = validate_translation_omissions(out, profile)
+    original_positions = {seg.id: i for i, seg in enumerate(out.segments)}
+    omission_followers = set()
     draft_ids = {seg.id for seg in out.segments if seg.translation_status == "draft"}
     if draft_ids:
         if profile.translation_automation != "auto":
@@ -3300,6 +3497,7 @@ async def synthesize_timed_dub(
     approved_text = {seg.id: seg.translated_text for seg in out.segments}
     planning_text = _planning_text if _planning_text is not None else approved_text
     acceptance_input_key = hashlib.sha256(json.dumps({
+        "rewrite_policy_version": _C7_REWRITE_POLICY_VERSION,
         "binding": tts_binding(runtime, target_language), "profile": profile.model_dump(),
         "source": str(source_media.resolve()),
         "segments": [{"id": seg.id, "text": seg.translated_text, "source_text": seg.source_text,
@@ -3356,6 +3554,14 @@ async def synthesize_timed_dub(
         override = seg.overrides or {}
         start_locked = "target_start_ms" in override
         end_locked = "target_end_ms" in override
+        pos = original_positions[seg.id]
+        # Omitted source windows are real gaps, not newly available borrowable
+        # silence. Keep adjacent speech on its own side of each omission.
+        if pos > 0 and out.segments[pos-1].id in omitted_ids:
+            start_locked = True
+            omission_followers.add(seg.id)
+        if pos+1 < len(out.segments) and out.segments[pos+1].id in omitted_ids:
+            end_locked = True
         timing_locked = start_locked or end_locked
         onset_ms = seg.source_start_ms if start_locked else _speech_onset_ms(seg)
         start_ms = int(override.get("target_start_ms", onset_ms))
@@ -3392,14 +3598,14 @@ async def synthesize_timed_dub(
         "cues": [(c.segment_id, c.start_ms, c.end_ms, c.speaker_id, c.voice_id, c.timing_locked) for c in cues],
     }, sort_keys=True).encode()).hexdigest()
     layout_path = work_dir / "cadence_layout.json"
-    forced_splits: set[str] = set()
+    forced_splits: set[str] = set(omission_followers)
     try:
         layout = json.loads(layout_path.read_text(encoding="utf-8"))
         ids = layout.get("split_before", [])
         if (layout.get("key") == layout_key and isinstance(ids, list)
                 and all(isinstance(s, str) for s in ids)
                 and set(ids) <= {c.segment_id for c in cues}):
-            forced_splits = set(ids)
+            forced_splits = set(ids) | omission_followers
         elif regenerate_chunk_ids:
             raise RuntimeError("Cadence layout changed; rerun the full dubbing stage before targeted regeneration")
     except (OSError, ValueError, AttributeError):
@@ -3468,6 +3674,17 @@ async def synthesize_timed_dub(
     allocation_ids = regenerate_chunk_ids if targeted_regeneration else None
     previous_durations: dict[int, int] = {}
     synthesis_identities: dict[int, str] = {}
+    async def generate_chunk_audio(chunk_id, text, **kwargs):
+        events = []
+        duration = await _generate_tts_chunk_atomic(text, recovery_events=events, **kwargs)
+        recoveries = job_state.data.setdefault("tts_recoveries", {})
+        if events:
+            recoveries[str(chunk_id)] = {**events[-1], "identity": kwargs["identity"]}
+        else:
+            recoveries.pop(str(chunk_id), None)
+        save_audit()
+        return duration
+
     previous_allocation = job_state.data.get("measured_allocation")
     speaker_resolutions: dict[str, set[str]] = {}
     resolved_voice_genders: dict[str, set[str]] = {}
@@ -3545,6 +3762,13 @@ async def synthesize_timed_dub(
             and _chunk_identity_matches(path, initial_identity)
         )
         is_target_chunk = not targeted_regeneration or chunk.id in regenerate_chunk_ids
+        if (reuse_raw and provider_value == "edge_tts" and len(chunk.item_indexes) > 1
+                and not targeted_regeneration and read_cue_spans(
+                    path, [plan[i].spoken_text for i in chunk.item_indexes],
+                    _chunk_persisted_duration_ms(path, initial_identity) or 0) is None):
+            # Legacy caches contain no measured cue boundaries. Upgrade on a full
+            # stage rerun, never regenerate a non-target neighbour on a retry.
+            reuse_raw = False
         if targeted_regeneration and not is_target_chunk and not reuse_raw:
             raise RuntimeError(
                 f"Cannot safely targeted-regenerate chunk(s) {sorted(regenerate_chunk_ids)} "
@@ -3599,7 +3823,7 @@ async def synthesize_timed_dub(
             )
 
         if not reuse_raw:
-            duration_ms = await _generate_tts_chunk_atomic(
+            duration_ms = await generate_chunk_audio(chunk.id,
                 speech_text,
                 runtime=runtime,
                 voice=voice,
@@ -3685,6 +3909,11 @@ async def synthesize_timed_dub(
                 rewrite_disabled = True
                 rewrite_unavailable_recorded = True
                 attempts = config.rewrite_max_attempts
+            if rewrite_state.get("budget_exhausted"):
+                rewrite_disabled = True
+                rewrite_unavailable_recorded = True
+            if rewrite_state.get("no_safe_shortening") or rewrite_state.get("retry_scope") in {"chunk", "admission", "stage_budget"}:
+                break
             if not changed:
                 continue
             rewrite_calls += 1
@@ -3734,7 +3963,7 @@ async def synthesize_timed_dub(
                 reference_text=ref.get("text"),
                 reference_language=ref.get("language"),
             )
-            duration_ms = await _generate_tts_chunk_atomic(
+            duration_ms = await generate_chunk_audio(chunk.id,
                 speech_text,
                 runtime=runtime,
                 voice=voice,
@@ -3768,6 +3997,11 @@ async def synthesize_timed_dub(
             record_rewrite_setup_unavailable(chunk)
         chunk.actual_duration_ms = duration_ms
 
+    for chunk in chunks:
+        recovery = job_state.data.get("tts_recoveries", {}).get(str(chunk.id), {})
+        if recovery.get("identity") == synthesis_identities.get(chunk.id):
+            issues.append({**recovery, "chunk_id": chunk.id,
+                "segment_ids": [plan[i].segment_id for i in chunk.item_indexes]})
     # Save SOURCE-coordinate windows even when the downstream hard gate fails.
     # Output-coordinate retime must never be restored and scaled a second time.
     job_state.data["measured_allocation"] = {
@@ -3911,10 +4145,14 @@ async def synthesize_timed_dub(
     # One measured repair pass, never an unbounded synth/rewrite loop. Do not
     # change numeric chunk ownership during a targeted retry. Only split units
     # with source-word anchors and viable individual windows, never micro-cues.
+    native_cadence_chunks = {c.id for c in fitted_chunks if len(c.item_indexes) > 1
+        and read_cue_spans(raw_paths[c.id], [fitted_plan[i].spoken_text for i in c.item_indexes], c.actual_duration_ms)}
     if cadence_review_segments and not targeted_regeneration and not _cadence_retry:
         new_splits: set[str] = set()
         for chunk in fitted_chunks:
             items = [fitted_plan[i] for i in chunk.item_indexes]
+            if chunk.id in native_cadence_chunks:
+                continue
             if len(items) < 2 or not any(p.segment_id in cadence_review_segments for p in items):
                 continue
             # Judge each boundary on its own viability. A short leading cue must
@@ -4002,6 +4240,8 @@ async def synthesize_timed_dub(
 
     timed_chunks: list[tuple[int, Path]] = []
     fitted_audio: list[dict] = []
+    aligned_cue_ids: set[str] = set()
+    cadence_placements: dict[int, list[dict]] = {}
     fitted_dir = work_dir / "fitted"
     for position, chunk in enumerate(fitted_chunks):
         await _cancel_checkpoint(cancel_check, "audio fit")
@@ -4019,12 +4259,48 @@ async def synthesize_timed_dub(
             timed_path = fitted
         measured_ms, peak_db = await _measure_fitted_audio(
             timed_path, chunk.actual_duration_ms, chunk.speed_factor)
+        spans = (read_cue_spans(raw_paths[chunk.id], [fitted_plan[i].spoken_text for i in chunk.item_indexes],
+                               chunk.actual_duration_ms) if len(chunk.item_indexes) > 1 else None)
+        if spans:
+            ceiling = (config.emergency_speed_max if any(x.get("chunk_id") == chunk.id for x in soft_overflow)
+                       else config.speed_max)
+            try:
+                placements = place_cue_spans([fitted_plan[i] for i in chunk.item_indexes], chunk, spans,
+                                            speed_ceiling=ceiling, anchor_scale=video_slowdown)
+            except ValueError as exc:
+                issues.append({"reason": "measured_cadence_overflow", "chunk_id": chunk.id,
+                               "message": str(exc), "requires_human_review": True,
+                               "segment_ids": [fitted_plan[i].segment_id for i in chunk.item_indexes]})
+            else:
+                aligned_path = fitted_dir / f"cadence_{chunk.id:04d}.wav"
+                await asyncio.to_thread(_fit_cadence_chunk_sync, raw_paths[chunk.id], aligned_path, placements, chunk.start_ms)
+                aligned_ms, aligned_peak = await _measure_fitted_audio(aligned_path, chunk.actual_duration_ms, placements[0]["speed_factor"])
+                if aligned_ms > chunk.available_ms + _POSTFIT_ROUNDING_TOLERANCE_MS or not math.isfinite(aligned_peak):
+                    issues.append({"reason": "measured_cadence_postfit_invalid", "chunk_id": chunk.id,
+                                   "measured_ms": aligned_ms, "requires_human_review": True,
+                                   "segment_ids": [fitted_plan[i].segment_id for i in chunk.item_indexes]})
+                else:
+                    timed_path, measured_ms, peak_db = aligned_path, aligned_ms, aligned_peak
+                    chunk.speed_factor = placements[0]["speed_factor"]
+                    cadence_placements[chunk.id] = placements
+                    block_paths.append(aligned_path)
+                    for idx, unit in zip(chunk.item_indexes, placements):
+                        item = fitted_plan[idx]
+                        item.target_start_ms, item.target_end_ms = unit["target_start_ms"], unit["target_end_ms"]
+                        item.actual_duration_ms = round(unit["raw_end_ms"]-unit["raw_start_ms"])
+                        item.speed_factor = unit["speed_factor"]
+                        aligned_cue_ids.add(item.segment_id)
         measured_end = chunk.start_ms + measured_ms
         next_start = (fitted_chunks[position + 1].start_ms
                       if position + 1 < len(fitted_chunks) else round(source_duration_s * 1000 * video_slowdown))
         # Small processing deltas may use REAL idle space, never another
         # speaker's slot or speech that final atrim/-shortest would remove.
         allowed_end = min(chunk.end_ms + _POSTFIT_ROUNDING_TOLERANCE_MS, next_start)
+        omission_boundaries = [round(seg.source_start_ms * video_slowdown)
+            for seg in out.segments if seg.id in omitted_ids
+            and round(seg.source_start_ms * video_slowdown) >= chunk.start_ms]
+        if omission_boundaries:
+            allowed_end = min(allowed_end, min(omission_boundaries))
         # atempo may differ by a few samples/ms from raw_duration/speed. If
         # actual speech reaches EOF/a neighbour, correct from RAW audio; never
         # trim it or extend the output past the contract. Larger errors fail.
@@ -4035,14 +4311,26 @@ async def synthesize_timed_dub(
             budget_ms = allowed_end - chunk.start_ms
             if budget_ms <= 0:
                 break
-            cap = (config.emergency_speed_max if any(x.get("chunk_id") == chunk.id for x in soft_overflow)
-                   else config.speed_max)
+            regular_cap = (config.emergency_speed_max if any(x.get("chunk_id") == chunk.id for x in soft_overflow)
+                           else config.speed_max)
+            # Auto may rescue <=30ms processing error with <=1% extra speed,
+            # always under the existing emergency ceiling. This is not a
+            # global ceiling increase, truncation or overlap allowance.
+            cap = (min(config.emergency_speed_max, config.speed_max * 1.01)
+                   if profile.translation_automation == "auto" else regular_cap)
+            cap = max(regular_cap, cap)
             corrected_speed = chunk.speed_factor * measured_ms / max(1, budget_ms - 2)
             if corrected_speed > cap:
                 break
             fitted = fitted_dir / f"chunk_{chunk.id:04d}.wav"
             await asyncio.to_thread(_fit_chunk_audio_sync, raw_paths[chunk.id], fitted, corrected_speed)
             chunk.speed_factor = corrected_speed
+            if corrected_speed > regular_cap:
+                issues.append({"reason": "postfit_micro_rescue", "chunk_id": chunk.id,
+                    "processing_excess_ms": excess, "required_speed": corrected_speed,
+                    "speed_max": config.speed_max, "emergency_speed_max": config.emergency_speed_max,
+                    "segment_ids": [fitted_plan[i].segment_id for i in chunk.item_indexes],
+                    "requires_human_review": True})
             for index in chunk.item_indexes:
                 fitted_plan[index].speed_factor = corrected_speed
             timed_path = fitted
@@ -4061,7 +4349,7 @@ async def synthesize_timed_dub(
         # Cue offsets remain proportional estimates within a measured chunk.
         original_end = fitted_plan[chunk.item_indexes[-1]].target_end_ms
         allocated_ms = original_end - chunk.start_ms
-        if allocated_ms > 0:
+        if allocated_ms > 0 and chunk.id not in cadence_placements:
             for index in chunk.item_indexes:
                 item = fitted_plan[index]
                 item.target_start_ms = chunk.start_ms + round(
@@ -4087,6 +4375,12 @@ async def synthesize_timed_dub(
                 "segment_ids": [fitted_plan[i].segment_id for i in chunk.item_indexes],
             })
 
+    issues = [issue for issue in issues if not (issue.get("reason") == "estimated_onset_drift"
+              and set(issue.get("segment_ids") or []).issubset(aligned_cue_ids))]
+    cadence_review_segments.difference_update(aligned_cue_ids)
+    measured_cadence_review = {sid for issue in issues if issue.get("reason", "").startswith("measured_cadence_")
+                              for sid in issue.get("segment_ids", [])}
+
     soft_overflow_segments = {
         segment_id
         for issue in soft_overflow
@@ -4109,7 +4403,7 @@ async def synthesize_timed_dub(
         if seg.id in draft_ids:
             # Measured timing success does not certify the draft's semantics.
             seg.qc_status = "review"
-        if seg.id in cadence_review_segments or any(seg.id in issue["segment_ids"] for issue in speech_issues):
+        if seg.id in cadence_review_segments or seg.id in measured_cadence_review or any(seg.id in issue["segment_ids"] for issue in speech_issues):
             seg.qc_status = "review"
         if seg.id in soft_overflow_segments:
             # A soft-overflow segment may never look clean to QC.
@@ -4159,8 +4453,12 @@ async def synthesize_timed_dub(
         "rate_calibration": job_state.calibration(),
         "rewrite_audit": job_state.data["rewrite_audit"], "acceptance_key": acceptance_key,
         "video_slowdown": video_slowdown,
-        "cue_timing_basis": "source_word_anchors_with_estimated_chunk_internal_offsets",
-        "segment_tts_duration_basis": "allocated_interval_not_individual_synthesis",
+        "cue_timing_basis": ("measured_word_boundaries_with_source_anchor_placement" if aligned_cue_ids
+                             else "source_word_anchors_with_estimated_chunk_internal_offsets"),
+        "segment_tts_duration_basis": ("measured_partition_and_speech_interval" if aligned_cue_ids
+                                       else "allocated_interval_not_individual_synthesis"),
+        "aligned_segment_ids": sorted(aligned_cue_ids),
+        "cadence_placements": cadence_placements,
         "fitted_audio": fitted_audio,
         "cadence_split_before": sorted(forced_splits),
         "issues": issues,
@@ -4320,6 +4618,8 @@ def persist_dubbing_rewrites(
 def caption_segments_from_localization(transcript: LocalizationTranscript) -> list[dict]:
     out: list[dict] = []
     for seg in transcript.segments:
+        if seg.translation_status == "omitted":
+            continue
         text = (seg.translated_text or "").strip()
         if not text:
             continue
