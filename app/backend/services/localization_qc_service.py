@@ -142,6 +142,45 @@ def _speech_coverage(transcript: LocalizationTranscript) -> float:
     return min(2.0, target / source)
 
 
+def _cue_measured_duration_evidence(segment, dubbing: dict) -> bool:
+    """Cue-local measured evidence for a target interval.
+
+    A job-level aggregate is NEVER accepted as cue-local evidence: a chunk's
+    measured audio does not make an allocated proportional cue interval measured.
+    Evidence is, in order: the cue's own measured basis, the persisted per-segment
+    map, then a measured fitted chunk that is specific to this cue (a single-cue
+    chunk's measured audio IS this cue's synthesis, so the existing fitted-chunk
+    evidence is preserved). A shared multi-cue chunk's audio is NOT cue-specific.
+    Unknown/legacy provenance fails closed; positive allocated intervals are
+    never a substitute for measured cue-local evidence.
+    """
+    basis = getattr(segment, "tts_duration_basis", None)
+    if basis == "measured":
+        return True
+    if isinstance(dubbing, dict):
+        per_segment = dubbing.get("segment_duration_basis")
+        if (basis is None and isinstance(per_segment, dict)
+                and per_segment.get(segment.id) == "measured"):
+            return True
+        per_chunk = dubbing.get("fitted_audio")
+        if isinstance(per_chunk, list):
+            for row in per_chunk:
+                if not isinstance(row, dict):
+                    continue
+                # Only a chunk that contains exactly this cue is cue-specific
+                # measured evidence; a shared chunk's duration is not.
+                measured_ms = row.get("measured_fitted_duration_ms")
+                if (row.get("segment_ids") == [segment.id]
+                        and row.get("duration_basis") == "audio_probe"
+                        and isinstance(measured_ms, (int, float)) and not isinstance(measured_ms, bool)
+                        and 0 < measured_ms < float('inf')
+                        and row.get("start_ms") == segment.target_start_ms
+                        and row.get("end_ms") == segment.target_end_ms
+                        and measured_ms == segment.tts_duration_ms):
+                    return True
+    return False
+
+
 def evaluate_localization_qc(
     *,
     source_video: Path,
@@ -376,10 +415,13 @@ def evaluate_localization_qc(
     active_transcript = transcript.model_copy(update={"segments": [
         s for s in transcript.segments if s.id not in omitted_ids]})
     coverage = _speech_coverage(active_transcript)
+    dubbing_meta = transcript.metadata.get("dubbing") or {}
     if coverage < 0.72:
         # Duration is only a cadence heuristic, not semantic completeness.
         # Auto may retain a moderately shorter dub ONLY with every cue present
-        # and measured positive TTS; the original Strict gate stays unchanged.
+        # and cue-specific MEASURED duration evidence; the original Strict gate
+        # stays unchanged. A job-level "measured" aggregate is not cue-local
+        # proof, so a mixed/allocated job fails closed here.
         review_only = (
             profile.translation_automation == "auto"
             and check_tts_quality and bool(transcript.segments)
@@ -387,7 +429,9 @@ def evaluate_localization_qc(
             and coverage >= 0.50
             and all((s.tts_duration_ms or 0) > 0
                     and s.target_start_ms is not None and s.target_end_ms is not None
-                    and s.target_end_ms > s.target_start_ms for s in transcript.segments)
+                    and s.target_end_ms > s.target_start_ms
+                    and _cue_measured_duration_evidence(s, dubbing_meta)
+                    for s in transcript.segments)
         )
         issue = {"code": "low_target_speech_coverage", "ratio": round(coverage, 4)}
         if review_only:

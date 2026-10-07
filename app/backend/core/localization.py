@@ -429,6 +429,12 @@ class LocalizationSegment(BaseModel):
 
     tts_duration_ms: int | None = Field(default=None, ge=0)
 
+    # Provenance of the target interval for THIS cue. "measured" only when the
+    # interval came from measured provider word boundaries; "allocated" when it
+    # is a proportional estimate inside a measured chunk. None = legacy/unknown.
+    # QC must never treat a job-level aggregate as cue-local measured evidence.
+    tts_duration_basis: Literal["measured", "allocated"] | None = None
+
     translation_status: Literal["pending", "success", "draft", "omitted", "failed", "untranslated"] = "pending"
     timing_status: Literal["pending", "fit", "adjusted", "overflow"] = "pending"
     qc_status: Literal["pending", "pass", "review", "fail"] = "pending"

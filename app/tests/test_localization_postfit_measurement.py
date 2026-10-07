@@ -117,7 +117,57 @@ async def test_postfit_duration_is_measured_and_persisted(tmp_path,monkeypatch):
     assert m['raw_duration_ms']==1900
     assert m['measured_fitted_duration_ms']==await svc._audio_duration_ms(Path(m['path']))
     assert m['duration_basis']=='audio_probe'
-    assert result.transcript.metadata['dubbing']['segment_tts_duration_basis']=='allocated_interval_not_individual_synthesis'
+    dubbing=result.transcript.metadata['dubbing']
+    # One unaligned single-cue chunk: the chunk audio is measured, but the cue
+    # interval itself is an allocated proportional estimate, never individual
+    # measured synthesis. The aggregate must say so.
+    assert dubbing['segment_tts_duration_basis']=='allocated'
+    assert dubbing['segment_duration_basis']=={'s1':'allocated'}
+    assert dubbing['measured_segment_ids']==[] and dubbing['allocated_segment_ids']==['s1']
+    assert result.transcript.segments[0].tts_duration_basis=='allocated'
+
+
+@pytest.mark.asyncio
+async def test_mixed_measured_and_allocated_cues_report_mixed_basis(tmp_path,monkeypatch):
+    """A measured word-boundary chunk plus an allocated single-cue chunk must
+    report the job as MIXED, not overclaim the whole job as measured."""
+    import hashlib, json
+    tx=LocalizationTranscript(segments=[
+        LocalizationSegment(id='s1',source_text='source',translated_text='Xin chào',
+            source_start_ms=0,source_end_ms=3000,translation_status='success'),
+        LocalizationSegment(id='s2',source_text='source',translated_text='Cảm ơn',
+            source_start_ms=3000,source_end_ms=6000,translation_status='success'),
+        LocalizationSegment(id='s3',source_text='source',translated_text='Tạm biệt.',
+            source_start_ms=9000,source_end_ms=12000,translation_status='success')])
+    monkeypatch.setattr(svc,'_profile_ai_route_clients_compat',lambda *_: (_ for _ in ()).throw(RuntimeError('no AI')))
+    monkeypatch.setattr(svc,'_tts_config',lambda *_:runtime())
+    monkeypatch.setattr('backend.services.video_utils.probe_duration',lambda *_:13.0)
+    async def generate(text,*,output_path,**kwargs):
+        if 'Xin' in text:
+            audio(output_path,1600)
+            side=Path(output_path).with_suffix(Path(output_path).suffix+'.words.json')
+            side.write_text(json.dumps({'version':1,'text':text,'processed_text':text,'voice':'qa',
+                'audio_sha256':hashlib.sha256(Path(output_path).read_bytes()).hexdigest(),
+                'timing_basis':'provider_word_boundary',
+                'words':[{'word':w,'start_ms':i*400,'end_ms':(i+1)*400}
+                         for i,w in enumerate(text.split())]},ensure_ascii=False),encoding='utf-8')
+            return 1600
+        audio(output_path,600)
+        return 600
+    monkeypatch.setattr(svc,'_generate_tts_chunk',generate)
+    profile=LocalizationProfile(id='qa',name='qa',dub_rewrite_attempts=0,video_retime_mode='off')
+    result=await svc.synthesize_timed_dub(tx,source_media=tmp_path/'source.mp4',
+        target_language='Vietnamese',profile=profile,user_settings=object(),work_dir=tmp_path/'work')
+    dubbing=result.transcript.metadata['dubbing']
+    assert dubbing['segment_tts_duration_basis']=='mixed'
+    assert dubbing['segment_duration_basis']=={'s1':'measured','s2':'measured','s3':'allocated'}
+    assert dubbing['measured_segment_ids']==['s1','s2']
+    assert dubbing['allocated_segment_ids']==['s3']
+    assert dubbing['aligned_segment_ids']==['s1','s2']
+    assert dubbing['cue_timing_basis']=='mixed_measured_word_boundaries_and_estimated_chunk_internal_offsets'
+    by={s.id:s for s in result.transcript.segments}
+    assert by['s1'].tts_duration_basis=='measured' and by['s2'].tts_duration_basis=='measured'
+    assert by['s3'].tts_duration_basis=='allocated'
 
 
 @pytest.mark.asyncio

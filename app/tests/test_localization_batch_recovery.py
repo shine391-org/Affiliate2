@@ -180,7 +180,8 @@ async def test_accepted_batch_dispatches_every_item(monkeypatch, tmp_path):
 
 
 async def _seed_pending(job_id: str, *, in_path: Path | None, batch_id: str = "b1",
-                        index: int = 0, size: int = 1, admitted: bool = True):
+                        index: int = 0, size: int = 1, admitted: bool = True,
+                        status: str = "pending"):
     """Seed one batch row as ADMISSION actually leaves it.
 
     Recovery now requires the full marker set (``batch_admitted`` + a matching
@@ -204,7 +205,7 @@ async def _seed_pending(job_id: str, *, in_path: Path | None, batch_id: str = "b
     async with AsyncSessionLocal() as db:
         db.add(Job(
             id=job_id, user_id="local", job_type="tool:translate",
-            status="pending", title=job_id,
+            status=status, title=job_id,
             input_json=json.dumps(payload),
         ))
         await db.commit()
@@ -542,4 +543,172 @@ async def test_two_overlapping_recovery_passes_dispatch_one_owner(tmp_path,monke
         database.recover_pending_localization_batch_items())
     assert first+second==['job-concurrent']
     assert len(dispatched)==1
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Terminal sibling bug: recovery must use ALL original batch members
+# ══════════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_recovery_with_terminal_success_sibling(tmp_path, monkeypatch):
+    """A batch with a terminal SUCCESS sibling must still recover the pending item.
+
+    The original bug: recovery only queried status='pending' rows, so a
+    terminal sibling (success/failed/cancelled) was invisible. The completeness
+    check compared batch_size against the count of PENDING rows only, making
+    size != len(members) true whenever any sibling had already completed.
+    Recovery then failed the remaining pending items as 'incomplete'.
+    """
+    from backend.database import recover_pending_localization_batch_items
+
+    upload = tmp_path / "tools_in" / "sibling.mp4"
+    upload.parent.mkdir(parents=True, exist_ok=True)
+    upload.write_bytes(b"video-bytes")
+
+    # Three-item batch: success plus two pending, seeded out of index order.
+    await _seed_pending("job-sib-success", in_path=upload, batch_id="b-sib",
+                        index=0, size=3, admitted=True, status="success")
+    await _seed_pending("job-sib-pending-last", in_path=upload, batch_id="b-sib",
+                        index=2, size=3, admitted=True, status="pending")
+    await _seed_pending("job-sib-pending", in_path=upload, batch_id="b-sib",
+                        index=1, size=3, admitted=True, status="pending")
+
+    dispatched: list = []
+    monkeypatch.setattr(
+        api, "_run_localization_batch_sequential",
+        lambda specs: dispatched.append(list(specs)),
+    )
+
+    recovered = await recover_pending_localization_batch_items()
+
+    assert recovered == ["job-sib-pending", "job-sib-pending-last"], (
+        "a terminal success sibling must not block recovery of pending items"
+    )
+    assert len(dispatched) == 1
+    assert [spec["job_id"] for spec in dispatched[0]] == recovered
+    assert str((await _rows())["job-sib-success"].status) == "success"
+    assert await recover_pending_localization_batch_items() == []
+    assert len(dispatched) == 1
+
+
+@pytest.mark.asyncio
+async def test_recovery_with_terminal_failed_sibling(tmp_path, monkeypatch):
+    """A batch with a terminal FAILED sibling must still recover the pending item."""
+    from backend.database import recover_pending_localization_batch_items
+
+    upload = tmp_path / "tools_in" / "sibling-f.mp4"
+    upload.parent.mkdir(parents=True, exist_ok=True)
+    upload.write_bytes(b"video-bytes")
+
+    await _seed_pending("job-sib-failed", in_path=upload, batch_id="b-sibf",
+                        index=0, size=2, admitted=True, status="failed")
+    await _seed_pending("job-sib-pending2", in_path=upload, batch_id="b-sibf",
+                        index=1, size=2, admitted=True, status="pending")
+
+    dispatched: list = []
+    monkeypatch.setattr(
+        api, "_run_localization_batch_sequential",
+        lambda specs: dispatched.append(list(specs)),
+    )
+
+    recovered = await recover_pending_localization_batch_items()
+
+    assert recovered == ["job-sib-pending2"], (
+        "a terminal failed sibling must not block recovery of the pending item"
+    )
+    assert len(dispatched) == 1
+
+
+@pytest.mark.asyncio
+async def test_recovery_with_terminal_cancelled_sibling(tmp_path, monkeypatch):
+    """A batch with a terminal CANCELLED sibling must still recover the pending item."""
+    from backend.database import recover_pending_localization_batch_items
+
+    upload = tmp_path / "tools_in" / "sibling-c.mp4"
+    upload.parent.mkdir(parents=True, exist_ok=True)
+    upload.write_bytes(b"video-bytes")
+
+    await _seed_pending("job-sib-cancelled", in_path=upload, batch_id="b-sibc",
+                        index=0, size=2, admitted=True, status="cancelled")
+    await _seed_pending("job-sib-pending3", in_path=upload, batch_id="b-sibc",
+                        index=1, size=2, admitted=True, status="pending")
+
+    dispatched: list = []
+    monkeypatch.setattr(
+        api, "_run_localization_batch_sequential",
+        lambda specs: dispatched.append(list(specs)),
+    )
+
+    recovered = await recover_pending_localization_batch_items()
+
+    assert recovered == ["job-sib-pending3"], (
+        "a terminal cancelled sibling must not block recovery of the pending item"
+    )
+    assert len(dispatched) == 1
+
+
+@pytest.mark.asyncio
+async def test_recovery_all_siblings_terminal_still_recovers_pending(tmp_path, monkeypatch):
+    """A batch where ALL siblings are terminal must still recover the pending item.
+
+    This is the extreme case: only one pending row exists in the DB, but the
+    batch_size says 3. The original code saw 1 != 3 and failed the row.
+    """
+    from backend.database import recover_pending_localization_batch_items
+
+    upload = tmp_path / "tools_in" / "allterm.mp4"
+    upload.parent.mkdir(parents=True, exist_ok=True)
+    upload.write_bytes(b"video-bytes")
+
+    await _seed_pending("job-term-0", in_path=upload, batch_id="b-allterm",
+                        index=0, size=3, admitted=True, status="success")
+    await _seed_pending("job-term-1", in_path=upload, batch_id="b-allterm",
+                        index=1, size=3, admitted=True, status="failed")
+    await _seed_pending("job-term-pending", in_path=upload, batch_id="b-allterm",
+                        index=2, size=3, admitted=True, status="pending")
+
+    dispatched: list = []
+    monkeypatch.setattr(
+        api, "_run_localization_batch_sequential",
+        lambda specs: dispatched.append(list(specs)),
+    )
+
+    recovered = await recover_pending_localization_batch_items()
+
+    assert recovered == ["job-term-pending"], (
+        "even when all siblings are terminal, the pending item must be recovered"
+    )
+    assert len(dispatched) == 1
+
+
+@pytest.mark.asyncio
+async def test_recovery_all_siblings_pending_still_works(tmp_path, monkeypatch):
+    """Regression: a batch where ALL items are pending must still recover all of them."""
+    from backend.database import recover_pending_localization_batch_items
+
+    upload = tmp_path / "tools_in" / "allpend.mp4"
+    upload.parent.mkdir(parents=True, exist_ok=True)
+    upload.write_bytes(b"video-bytes")
+
+    await _seed_pending("job-allp-0", in_path=upload, batch_id="b-allp",
+                        index=0, size=3, admitted=True, status="pending")
+    await _seed_pending("job-allp-1", in_path=upload, batch_id="b-allp",
+                        index=1, size=3, admitted=True, status="pending")
+    await _seed_pending("job-allp-2", in_path=upload, batch_id="b-allp",
+                        index=2, size=3, admitted=True, status="pending")
+
+    dispatched: list = []
+    monkeypatch.setattr(
+        api, "_run_localization_batch_sequential",
+        lambda specs: dispatched.append(list(specs)),
+    )
+
+    recovered = await recover_pending_localization_batch_items()
+
+    assert recovered == ["job-allp-0", "job-allp-1", "job-allp-2"]
+    assert len(dispatched) == 1
+    assert {spec["job_id"] for spec in dispatched[0]} == {
+        "job-allp-0", "job-allp-1", "job-allp-2"
+    }
 

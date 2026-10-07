@@ -1691,7 +1691,7 @@ async def rerun_localization_job(job_id: str, body: RerunRequest):
             "preserved_upstream": list(STAGES[:STAGES.index(stage)]),
             "targeted_chunk_ids": targeted_chunk_ids,
         }
-    except Exception:
+    except (Exception, asyncio.CancelledError):
         if transaction is not None:
             try:
                 transaction.rollback()

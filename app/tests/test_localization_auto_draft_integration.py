@@ -79,6 +79,7 @@ def test_real_qc_moderate_duration_coverage_is_review_only_in_auto(video,ratio,p
     tx.segments[0].translated_text='3 kg.'
     tx.segments[0].target_end_ms=round(1000*ratio)
     tx.segments[0].tts_duration_ms=round(1000*ratio)
+    tx.segments[0].tts_duration_basis='measured'
     tx.metadata.pop('translation_auto_drafts')
     report=qc.evaluate_localization_qc(source_video=video,final_video=video,transcript=tx,
         profile=LocalizationProfile(id='qa',name='QA',translation_automation=policy,
@@ -111,4 +112,75 @@ def test_auto_coverage_does_not_hide_missing_or_severely_short_speech(video,defe
             diarization_mode='off'),check_tts_quality=True)
     assert report.status=='FAILED'
     assert report.failures
+
+
+def _success_tx(*rows):
+    return LocalizationTranscript(language='zh',segments=list(rows),metadata={'target_language':'vi'})
+
+
+def _seg(seg_id,start,end,target_start,target_end,tts,basis):
+    return LocalizationSegment(id=seg_id,source_text='原文',translated_text='Lời dịch.',
+        source_start_ms=start,source_end_ms=end,target_start_ms=target_start,target_end_ms=target_end,
+        tts_duration_ms=tts,translation_status='success',tts_duration_basis=basis)
+
+
+@pytest.mark.parametrize('mode',['measured','single_cue_audio'])
+def test_real_qc_moderate_coverage_relaxation_requires_positive_measured_evidence(video,mode):
+    seg=_seg('s1',0,1000,0,600,600,'measured' if mode=='measured' else 'allocated')
+    tx=_success_tx(seg)
+    if mode=='measured':
+        tx.metadata['dubbing']={'segment_tts_duration_basis':'measured',
+            'segment_duration_basis':{'s1':'measured'}}
+    else:
+        tx.metadata['dubbing']={'segment_tts_duration_basis':'allocated',
+            'fitted_audio':[{'segment_ids':['s1'],'duration_basis':'audio_probe',
+                'measured_fitted_duration_ms':600,'start_ms':0,'end_ms':600}]}
+    report=qc.evaluate_localization_qc(source_video=video,final_video=video,transcript=tx,
+        profile=LocalizationProfile(id='qa',name='QA',translation_automation='auto',
+            diarization_mode='off'),check_tts_quality=True)
+    assert report.status=='NEEDS_REVIEW',report.as_dict()
+    warning=next(x for x in report.warnings if x['code']=='low_target_speech_coverage')
+    assert warning['requires_human_review'] is True and warning['auto_min_ratio']==0.50
+    assert not any(x['code']=='low_target_speech_coverage' for x in report.failures)
+
+
+@pytest.mark.parametrize('mode',['allocated','aggregate_measured_but_allocated','aggregate_only',
+    'legacy_no_basis','conflicting_map','shared_chunk','empty_probe','stale_probe'])
+def test_real_qc_moderate_coverage_relaxation_fails_closed_without_cue_measured_evidence(video,mode):
+    basis=None if mode in {'aggregate_only','legacy_no_basis'} else 'allocated'
+    seg=_seg('s1',0,1000,0,600,600,basis)
+    tx=_success_tx(seg)
+    tx.metadata['dubbing']={'segment_tts_duration_basis':(
+        'allocated' if mode=='allocated' else 'measured'),
+        'segment_duration_basis':{} if mode=='aggregate_only' else {'s1':basis}}
+    if mode=='legacy_no_basis':tx.metadata.pop('dubbing')
+    if mode=='conflicting_map':tx.metadata['dubbing']['segment_duration_basis']={'s1':'measured'}
+    if mode in {'shared_chunk','empty_probe','stale_probe'}:
+        tx.metadata['dubbing']['fitted_audio']=[{
+            'segment_ids':['s1','other'] if mode=='shared_chunk' else ['s1'],
+            'duration_basis':'audio_probe','measured_fitted_duration_ms':0 if mode=='empty_probe' else 600,
+            'start_ms':1000 if mode=='stale_probe' else 0,'end_ms':1600 if mode=='stale_probe' else 600}]
+    report=qc.evaluate_localization_qc(source_video=video,final_video=video,transcript=tx,
+        profile=LocalizationProfile(id='qa',name='QA',translation_automation='auto',
+            diarization_mode='off'),check_tts_quality=True)
+    assert report.status=='FAILED',report.as_dict()
+    assert any(x['code']=='low_target_speech_coverage' for x in report.failures)
+
+
+@pytest.mark.parametrize('mixed_basis',['measured','allocated'])
+def test_real_qc_mixed_measured_and_allocated_cues_never_relax_on_partial_evidence(video,mixed_basis):
+    # Two cues give the same 0.60 coverage; only the per-cue basis differs.
+    tx=_success_tx(_seg('s1',0,1000,0,600,600,'measured'),
+                   _seg('s2',1000,2000,1000,1600,600,mixed_basis))
+    tx.metadata['dubbing']={'segment_tts_duration_basis':'mixed',
+        'segment_duration_basis':{'s1':'measured','s2':mixed_basis}}
+    report=qc.evaluate_localization_qc(source_video=video,final_video=video,transcript=tx,
+        profile=LocalizationProfile(id='qa',name='QA',translation_automation='auto',
+            diarization_mode='off'),check_tts_quality=True)
+    if mixed_basis=='measured':
+        assert report.status=='NEEDS_REVIEW',report.as_dict()
+        assert not any(x['code']=='low_target_speech_coverage' for x in report.failures)
+    else:
+        assert report.status=='FAILED',report.as_dict()
+        assert any(x['code']=='low_target_speech_coverage' for x in report.failures)
 

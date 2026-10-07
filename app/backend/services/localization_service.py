@@ -1501,7 +1501,10 @@ async def _translate_batch_resilient(
         for index, (segment, text) in enumerate(zip(pending, fixed)):
             if index not in failed:
                 accepted[segment.id] = {"id": segment.id, "text": text}
-    if drafts is not None and rejected:
+    if drafts is not None and rejected and not _semantic_repair:
+        # Only the final semantic attempt owns this receipt. The parent must
+        # never restore its pre-repair raw payload after a child returns; an
+        # invalid/provider-failed repair has no final rejected candidate.
         # Auto-only: the final unresolved rejection is preserved as an AUDITED
         # DRAFT. The payload already passed structural validation (exact IDs,
         # nonempty unique text), so this is a semantically rejected but
@@ -1518,11 +1521,15 @@ async def _translate_batch_resilient(
                 continue
             issues = rejected[segment.id]
             drafts[segment.id] = {
+                "segment_id": segment.id,
                 "source_text": segment.source_text,
                 "target_text": item["text"],
                 "issues": issues,
                 "reasons": [issue.get("kind") for issue in issues],
-                "attempts": 2,
+                "attempts": 2 if _repair_issues else 1,
+                "semantic_attempts": 2 if _repair_issues else 1,
+                "repair_attempted": bool(_repair_issues and segment.id in _repair_issues),
+                "origin": "semantic_repair" if _repair_issues else "initial_candidate",
                 "source_start_ms": segment.source_start_ms,
                 "source_end_ms": segment.source_end_ms,
                 "speaker_id": segment.speaker_id,
@@ -1906,9 +1913,11 @@ async def translate_transcript(
         if violations:
             if auto_policy and str(seg.translated_text or "").strip():
                 auto_drafts[seg.id] = {
+                    "segment_id": seg.id,
                     "source_text": seg.source_text, "target_text": seg.translated_text,
                     "issues": violations, "reasons": [issue.get("kind") for issue in violations],
-                    "attempts": route_state.attempt_count, "origin": "final_global_guard",
+                    "attempts": 1, "semantic_attempts": 1, "repair_attempted": False,
+                    "origin": "final_global_guard",
                     "source_start_ms": seg.source_start_ms, "source_end_ms": seg.source_end_ms,
                     "speaker_id": seg.speaker_id,
                 }
@@ -1945,10 +1954,12 @@ async def translate_transcript(
         # Only an actual rejected candidate after bounded repair may be omitted.
         # Provider/empty/malformed failures have no such receipt and stay failed.
         from backend.services.dubbing_rewrite_guard import untranslated_han
+        from backend.services.localization_omissions import has_cue_local_repair_evidence
         omissions = {}
         for seg in out.segments:
             record = auto_drafts.get(seg.id, {})
-            if (seg.translation_status == "draft" and record.get("attempts", 0) >= 2
+            if (seg.translation_status == "draft"
+                    and has_cue_local_repair_evidence(seg, record)
                     and untranslated_han(seg.translated_text or "", target_language,
                         allowed=[*profile.protected_terms, *profile.glossary.values()])):
                 omissions[seg.id] = {**record,
@@ -4364,7 +4375,12 @@ async def synthesize_timed_dub(
             "raw_duration_ms": chunk.actual_duration_ms,
             "measured_fitted_duration_ms": measured_ms, "start_ms": chunk.start_ms,
             "end_ms": measured_end, "allocated_end_ms": chunk.end_ms,
-            "peak_db": peak_db, "duration_basis": "audio_probe"})
+            "peak_db": peak_db, "duration_basis": "audio_probe",
+            "segment_ids": [fitted_plan[i].segment_id for i in chunk.item_indexes],
+            # The chunk audio is always measured; each cue's target interval is
+            # measured only when word-boundary placement produced it, otherwise
+            # it is a proportional estimate inside this measured chunk.
+            "segment_duration_basis": ("measured" if chunk.id in cadence_placements else "allocated")})
         timed_chunks.append((chunk.start_ms, timed_path))
         if chunk.speed_factor > config.speed_accept:
             issues.append({
@@ -4396,6 +4412,7 @@ async def synthesize_timed_dub(
         seg.target_start_ms = item.target_start_ms
         seg.target_end_ms = item.target_end_ms
         seg.tts_duration_ms = item.target_end_ms - item.target_start_ms
+        seg.tts_duration_basis = "measured" if seg.id in aligned_cue_ids else "allocated"
         seg.timing_status = "adjusted" if (
             item.speed_factor > 1.001 or video_slowdown > 1.001
         ) else "fit"
@@ -4444,6 +4461,24 @@ async def synthesize_timed_dub(
         "resolved_voice_genders": {speaker: sorted(values) for speaker, values in resolved_voice_genders.items()},
     }
     max_fitted_speed = max([1.0, *[c.speed_factor for c in fitted_chunks]])
+    placed_segment_ids = {item.segment_id for item in fitted_plan}
+    measured_segment_ids = sorted(aligned_cue_ids)
+    allocated_segment_ids = sorted(placed_segment_ids - aligned_cue_ids)
+    if measured_segment_ids and allocated_segment_ids:
+        segment_tts_duration_basis = "mixed"
+    elif measured_segment_ids:
+        segment_tts_duration_basis = "measured"
+    else:
+        segment_tts_duration_basis = "allocated"
+    cue_timing_basis = {
+        "measured": "measured_word_boundaries_with_source_anchor_placement",
+        "allocated": "source_word_anchors_with_estimated_chunk_internal_offsets",
+        "mixed": "mixed_measured_word_boundaries_and_estimated_chunk_internal_offsets",
+    }[segment_tts_duration_basis]
+    segment_duration_basis = {
+        segment_id: ("measured" if segment_id in aligned_cue_ids else "allocated")
+        for segment_id in placed_segment_ids
+    }
     out.metadata["dubbing"] = {
         "chunk_count": len(fitted_chunks),
         "max_raw_required_speed": max_raw_required_speed,
@@ -4453,10 +4488,11 @@ async def synthesize_timed_dub(
         "rate_calibration": job_state.calibration(),
         "rewrite_audit": job_state.data["rewrite_audit"], "acceptance_key": acceptance_key,
         "video_slowdown": video_slowdown,
-        "cue_timing_basis": ("measured_word_boundaries_with_source_anchor_placement" if aligned_cue_ids
-                             else "source_word_anchors_with_estimated_chunk_internal_offsets"),
-        "segment_tts_duration_basis": ("measured_partition_and_speech_interval" if aligned_cue_ids
-                                       else "allocated_interval_not_individual_synthesis"),
+        "cue_timing_basis": cue_timing_basis,
+        "segment_tts_duration_basis": segment_tts_duration_basis,
+        "segment_duration_basis": segment_duration_basis,
+        "measured_segment_ids": measured_segment_ids,
+        "allocated_segment_ids": allocated_segment_ids,
         "aligned_segment_ids": sorted(aligned_cue_ids),
         "cadence_placements": cadence_placements,
         "fitted_audio": fitted_audio,

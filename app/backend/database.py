@@ -711,8 +711,7 @@ async def recover_pending_localization_batch_items() -> list[str]:
 
         async with AsyncSessionLocal() as db:
             rows = (await db.execute(
-                select(Job).where(Job.job_type == "tool:translate",
-                                  Job.status == "pending")
+                select(Job).where(Job.job_type == "tool:translate")
             )).scalars().all()
 
             # Group by batch id first: completeness is a property of the whole
@@ -746,7 +745,10 @@ async def recover_pending_localization_batch_items() -> list[str]:
                     m for m in admitted
                     if str(m[0].task_id or "").startswith("recovery_claim:batch:")
                 ]
-                candidates = [m for m in admitted if m not in claimed]
+                # Terminal/running siblings prove original membership, never
+                # authorize redispatch. Claims and live owners remain protected.
+                candidates = [m for m in admitted
+                              if m[0].status == "pending" and m not in claimed]
                 if not candidates:
                     continue
 
@@ -764,6 +766,9 @@ async def recover_pending_localization_batch_items() -> list[str]:
                 )
                 if incomplete:
                     for job, _payload_ in members:
+                        if (job.status != "pending"
+                                or str(job.task_id or "").startswith("recovery_claim:batch:")):
+                            continue
                         if _process_owns_batch_item(job):
                             continue      # a live owner's row is not ours
                         await _fail_batch_item(

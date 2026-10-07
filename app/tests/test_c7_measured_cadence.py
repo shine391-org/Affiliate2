@@ -45,6 +45,11 @@ def test_measured_word_cadence_preserves_source_pause_without_resynthesizing_cue
     assert energy(result.dub_track,shift+3100,shift+3600)>1000
     assert not any(i['reason']=='estimated_onset_drift' for i in result.issues)
     assert result.transcript.metadata['dubbing']['cue_timing_basis']=='measured_word_boundaries_with_source_anchor_placement'
+    # Every cue came from measured provider word boundaries: the job may report
+    # the measured aggregate, and each cue carries its own measured evidence.
+    assert result.transcript.metadata['dubbing']['segment_tts_duration_basis']=='measured'
+    assert result.transcript.metadata['dubbing']['segment_duration_basis']=={'s0':'measured','s1':'measured'}
+    assert all(s.tts_duration_basis=='measured' for s in result.transcript.segments)
     assert [s.source_start_ms for s in tx.segments]==[shift,shift+3000]
     assert max(p.speed_factor for p in result.plan)<=1.30
 

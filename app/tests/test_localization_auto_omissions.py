@@ -15,6 +15,9 @@ def omitted_tx():
     return LocalizationTranscript(language='zh',segments=rows,metadata={'target_language':'vi',
         'translation_omissions':{'4':{'source_text':'原文','source_start_ms':400,'source_end_ms':500,
             'rejected_target_text':'Lời 右台','issues':[{'kind':'unlocalized_text'}],
+            'segment_id':'4','speaker_id':None,'target_text':'Lời 右台',
+            'semantic_attempts':2,'repair_attempted':True,'origin':'semantic_repair',
+            'reasons':['unlocalized_text'],
             'attempts':2,'reason':'unreadable_after_bounded_repair'}}})
 
 
@@ -34,7 +37,7 @@ def test_invalid_omissions_fail_qc(video,defect):
     tx=omitted_tx()
     if defect=='missing':tx.metadata['translation_omissions']={}
     if defect=='stale':tx.metadata['translation_omissions']['4']['source_end_ms']=501
-    if defect=='unrepaired':tx.metadata['translation_omissions']['4']['attempts']=1
+    if defect=='unrepaired':tx.metadata['translation_omissions']['4']['semantic_attempts']=1
     if defect=='empty_candidate':tx.metadata['translation_omissions']['4']['rejected_target_text']=''
     if defect=='over_budget':tx.segments.pop()
     if defect=='all_omitted':tx.segments=tx.segments[4:5]

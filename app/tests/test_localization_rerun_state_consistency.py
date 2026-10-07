@@ -19,6 +19,7 @@ provider is involved.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -311,3 +312,151 @@ async def test_manifest_transaction_rolls_back_its_own_writes(real_run):
 
     assert _manifest_state(LocalizationRun.load(run.job_id)) == before
     assert not (run.root / ".rollback").exists()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# P1 — CancelledError during dispatch must roll back and re-raise
+# ══════════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_cancelled_dispatch_restores_manifest_and_releases_claim(
+    real_run, monkeypatch,
+):
+    """A CancelledError during dispatch must roll back the manifest, restore
+    artifact bytes, release the mutation claim, and re-raise the cancellation.
+
+    ``asyncio.CancelledError`` inherits from ``BaseException`` (not ``Exception``)
+    on Python 3.8+, so an ``except Exception:`` handler silently skips rollback
+    and claim release. The endpoint must catch it explicitly, restore state, and
+    re-raise so the caller's cancellation is never swallowed.
+    """
+    run = real_run()
+    before = _manifest_state(run)
+    original_manifest_bytes = run.manifest_path.read_bytes()
+    original_request = dict(run.request)
+
+    async def cancel_dispatch(_run, **_kwargs):
+        raise asyncio.CancelledError()
+
+    await _patch_endpoint(monkeypatch, run, dispatch=cancel_dispatch)
+
+    with pytest.raises(asyncio.CancelledError):
+        await api.rerun_localization_job(
+            run.job_id, api.RerunRequest(from_stage="dubbing"),
+        )
+
+    # Manifest bytes must be exactly the original
+    after_bytes = run.manifest_path.read_bytes()
+    assert after_bytes == original_manifest_bytes, (
+        "cancelled dispatch must restore the exact original manifest bytes"
+    )
+
+    # Request must be exactly the original
+    after = _manifest_state(LocalizationRun.load(run.job_id))
+    assert after["request"] == original_request, (
+        "cancelled dispatch must restore the exact original request"
+    )
+
+    # Artifact bytes must be exactly the original
+    assert after["dubbing_files"] == before["dubbing_files"], (
+        "cancelled dispatch must restore deleted artifact bytes"
+    )
+
+    # Rollback backup must be cleaned up
+    assert not (run.root / ".rollback").exists(), (
+        "rollback backup must be cleaned up after cancellation rollback"
+    )
+
+
+@pytest.mark.asyncio
+async def test_cancelled_dispatch_restores_exact_artifact_bytes(
+    real_run, monkeypatch,
+):
+    """Verify exact byte-level restoration of artifacts after cancellation."""
+    run = real_run()
+    before = _manifest_state(run)
+
+    async def cancel_dispatch(_run, **_kwargs):
+        raise asyncio.CancelledError()
+
+    await _patch_endpoint(monkeypatch, run, dispatch=cancel_dispatch)
+
+    with pytest.raises(asyncio.CancelledError):
+        await api.rerun_localization_job(
+            run.job_id, api.RerunRequest(from_stage="dubbing"),
+        )
+
+    after = _manifest_state(LocalizationRun.load(run.job_id))
+    assert after["dubbing_files"] == before["dubbing_files"], (
+        "every artifact file must be restored to its exact original bytes"
+    )
+    # Verify specific known files
+    dub_dir = run.root / "dubbing"
+    assert (dub_dir / "chunk_0001.wav").read_bytes() == b"raw-one"
+    assert (dub_dir / "chunk_0003.wav").read_bytes() == b"raw-three"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error_type", [asyncio.CancelledError, RuntimeError])
+async def test_rerun_rollback_restores_real_sqlite_claim_and_original_exception(
+    real_run, monkeypatch, error_type,
+):
+    """Only dispatch is stubbed: real SQLite CAS, manifest and artifact rollback."""
+    from datetime import datetime
+    from backend.database import AsyncSessionLocal, Base, engine
+    from backend.models.job import Job
+
+    run = real_run(job_id="real-claim-" + error_type.__name__)
+    original_manifest = run.manifest_path.read_bytes()
+    original_files = _manifest_state(run)
+    fields = ("status", "task_id", "progress_pct", "current_step", "error_message",
+              "started_at", "completed_at", "input_json", "output_json")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    async with AsyncSessionLocal() as db:
+        row = Job(id=run.job_id, user_id="local", job_type="tool:translate",
+            status="failed", task_id="original-task", progress_pct=62.5,
+            current_step="dubbing", error_message="original failure",
+            started_at=datetime(2026, 1, 1), completed_at=datetime(2026, 1, 2),
+            input_json='{"original":true}', output_json='{"saved":true}')
+        db.add(row)
+        await db.commit()
+        await db.refresh(row)
+        original_row = {field: getattr(row, field) for field in fields}
+
+    error = error_type("dispatch interrupted")
+
+    async def fail_dispatch(current, **kwargs):
+        assert kwargs["already_claimed"] is True
+        async with AsyncSessionLocal() as db:
+            claimed = await db.get(Job, run.job_id)
+            assert claimed is not None
+            assert str(claimed.status) == "pending"
+            assert str(claimed.task_id).startswith("recovery_claim:failed:")
+        assert current.request != original_files["request"]
+        assert not (run.root / "dubbing" / "chunk_0001.wav").exists()
+        raise error
+
+    monkeypatch.setattr(api, "_load_run", lambda _: run)
+    monkeypatch.setattr(api, "_dispatch_existing_run", fail_dispatch)
+    try:
+        with pytest.raises(error_type) as raised:
+            await api.rerun_localization_job(run.job_id, api.RerunRequest(from_stage="dubbing"))
+        assert raised.value is error, "ordinary exception/cancellation must propagate unchanged"
+        assert run.manifest_path.read_bytes() == original_manifest
+        assert _manifest_state(LocalizationRun.load(run.job_id)) == original_files
+        assert not (run.root / ".rollback").exists()
+        async with AsyncSessionLocal() as db:
+            restored = await db.get(Job, run.job_id)
+            assert restored is not None
+            assert {field: getattr(restored, field) for field in fields} == original_row
+        # A fresh real claim proves cancellation did not leave the job locked.
+        claim = await api._claim_job_mutation(run.job_id)
+        await api._restore_job_mutation(run.job_id, claim)
+    finally:
+        async with AsyncSessionLocal() as db:
+            row = await db.get(Job, run.job_id)
+            if row is not None:
+                await db.delete(row)
+                await db.commit()
