@@ -74,3 +74,70 @@ def test_boundary_trim_keeps_identity_bound_word_timing_on_the_trimmed_audio(tmp
     assert after['words'][0]['start_ms']<200
     assert after['words'][1]['end_ms']<=duration
     assert after['text']==before['text']
+
+
+@pytest.mark.asyncio
+async def test_postfit_whole_chunk_rescue_invalidates_measured_cue_provenance(tmp_path, monkeypatch):
+    """If cadence audio is replaced, cue-local measured timing must not survive."""
+    tx = LocalizationTranscript(language='zh', segments=[
+        LocalizationSegment(id='s0', source_text='源', translated_text='Xin',
+            translation_status='success', source_start_ms=0, source_end_ms=800),
+        LocalizationSegment(id='s1', source_text='文', translated_text='Cảm',
+            translation_status='success', source_start_ms=800, source_end_ms=1600),
+    ])
+    monkeypatch.setattr(svc, '_profile_ai_route_clients_compat', lambda *_: [])
+    monkeypatch.setattr(svc, '_tts_config', lambda *_: svc.TTSRuntimeConfig(
+        TTSProvider.EDGE_TTS, 'vi-VN-HoaiMyNeural', '', None, None, None))
+    monkeypatch.setattr('backend.services.video_utils.probe_duration', lambda *_: 1.6)
+
+    async def generate(text, *, output_path, **kwargs):
+        rate = 16000
+        samples = [round(7000 * math.sin(2 * math.pi * 220 * i / rate))
+                   for i in range(rate * 1600 // 1000)]
+        with wave.open(str(output_path), 'wb') as w:
+            w.setnchannels(1); w.setsampwidth(2); w.setframerate(rate)
+            w.writeframes(struct.pack('<' + 'h' * len(samples), *samples))
+        side = output_path.with_suffix(output_path.suffix + '.words.json')
+        side.write_text(json.dumps({
+            'version': 1, 'text': text, 'processed_text': text,
+            'voice': 'vi-VN-HoaiMyNeural',
+            'audio_sha256': hashlib.sha256(output_path.read_bytes()).hexdigest(),
+            'timing_basis': 'provider_word_boundary',
+            'words': [
+                {'word': 'Xin', 'start_ms': 0, 'end_ms': 800},
+                {'word': 'Cảm', 'start_ms': 800, 'end_ms': 1600},
+            ],
+        }, ensure_ascii=False), encoding='utf-8')
+        return 1600
+
+    real_cadence_fit = svc._fit_cadence_chunk_sync
+    cadence_calls = []
+    def cadence_fit(source, destination, placements, chunk_start_ms):
+        real_cadence_fit(source, destination, placements, chunk_start_ms)
+        cadence_calls.append(destination)
+        # Inject only a tiny processing overrun. The canonical post-fit rescue
+        # must replace this with a whole-chunk fit and downgrade cue provenance.
+        raw = destination.with_suffix('.fault.wav')
+        destination.replace(raw)
+        svc._fit_chunk_audio_sync(raw, destination, 1600 / 1603)
+        raw.unlink(missing_ok=True)
+        return destination
+
+    monkeypatch.setattr(svc, '_generate_tts_chunk', generate)
+    monkeypatch.setattr(svc, '_fit_cadence_chunk_sync', cadence_fit)
+    profile = LocalizationProfile(
+        id='p', name='P', translation_automation='auto',
+        video_retime_mode='off', dub_rewrite_attempts=0,
+        dub_speed_max=1.25, dub_emergency_speed_max=1.35,
+    )
+    result = await svc.synthesize_timed_dub(
+        tx, source_media=tmp_path / 'source.mp4', target_language='Vietnamese',
+        profile=profile, user_settings=None, work_dir=tmp_path / 'dub')
+    assert cadence_calls
+    assert any(i['reason'] == 'measured_cadence_postfit_fallback'
+               for i in result.issues)
+    dubbing = result.transcript.metadata['dubbing']
+    assert dubbing['segment_tts_duration_basis'] == 'allocated'
+    assert dubbing['measured_segment_ids'] == []
+    assert dubbing['allocated_segment_ids'] == ['s0', 's1']
+    assert all(s.tts_duration_basis == 'allocated' for s in result.transcript.segments)
