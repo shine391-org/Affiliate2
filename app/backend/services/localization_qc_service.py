@@ -317,7 +317,16 @@ def evaluate_localization_qc(
         failures.append({"code": "unlocalized_vietnamese_text", "segment_ids": unlocalized})
 
     for issue in timing_issues or []:
-        if issue.get("reason") in {"postfit_micro_rescue", "tts_transport_split"}:
+        if issue.get("reason") in {
+            "postfit_micro_rescue",
+            "tts_transport_split",
+            "measured_cadence_overflow",
+            "measured_cadence_postfit_invalid",
+            "measured_cadence_postfit_fallback",
+        }:
+            # Preserve the exact cadence failure instead of collapsing it into a
+            # generic segment_needs_review warning. Studio/batch operators need
+            # the chunk and cue ids to know whether automatic repair succeeded.
             warnings.append({**issue, "code": issue["reason"]})
     overflow_all = [
         issue for issue in (timing_issues or [])
