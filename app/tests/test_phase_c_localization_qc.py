@@ -253,3 +253,33 @@ def test_qc_requires_review_when_dubbing_rewrite_ai_was_unavailable(
     assert "dubbing_rewrite_degraded" in {
         item["code"] for item in report.warnings
     }
+
+
+def test_qc_surfaces_measured_cadence_failure_with_chunk_and_segments(monkeypatch, tmp_path):
+    source = tmp_path / "s.mp4"
+    final = tmp_path / "f.mp4"
+    source.write_bytes(b"s")
+    final.write_bytes(b"f")
+    monkeypatch.setattr(qc, "probe_media", lambda _: _media())
+    monkeypatch.setattr(qc, "audio_max_volume_db", lambda _: -1.0)
+    issue = {
+        "reason": "measured_cadence_postfit_fallback",
+        "chunk_id": 7,
+        "segment_ids": ["s1"],
+        "requires_human_review": True,
+    }
+    report = qc.evaluate_localization_qc(
+        source_video=source,
+        final_video=final,
+        transcript=_tx(qc_status="review", tts_duration_basis="allocated"),
+        profile=LocalizationProfile(id="x", name="X", diarization_mode="off"),
+        timing_issues=[issue],
+        check_tts_quality=False,
+    )
+    assert report.status == "NEEDS_REVIEW"
+    warning = next(
+        row for row in report.warnings
+        if row["code"] == "measured_cadence_postfit_fallback"
+    )
+    assert warning["chunk_id"] == 7
+    assert warning["segment_ids"] == ["s1"]
