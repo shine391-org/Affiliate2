@@ -937,7 +937,7 @@ def _translation_prompt(
     timing = (
         "For dubbing, keep each translation concise and naturally speakable. "
         "The downstream chunk planner will combine adjacent lines and measure real TTS. "
-        "When two Vietnamese phrasings preserve exactly the same facts and intent, "
+        "When two target-language phrasings preserve exactly the same facts and intent, "
         "prefer the shorter naturally spoken one. Treat source_duration_ms as a "
         "soft pacing hint, never a hard word limit; never omit facts to fit time."
         if for_dub
