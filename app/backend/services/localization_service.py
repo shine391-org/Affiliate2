@@ -4156,8 +4156,37 @@ async def synthesize_timed_dub(
     # One measured repair pass, never an unbounded synth/rewrite loop. Do not
     # change numeric chunk ownership during a targeted retry. Only split units
     # with source-word anchors and viable individual windows, never micro-cues.
-    native_cadence_chunks = {c.id for c in fitted_chunks if len(c.item_indexes) > 1
-        and read_cue_spans(raw_paths[c.id], [fitted_plan[i].spoken_text for i in c.item_indexes], c.actual_duration_ms)}
+    # Word-boundary metadata is only useful if it can actually be placed inside
+    # the source-anchored cue windows. Previously mere metadata presence skipped
+    # adaptive split repair; a later place_cue_spans() failure then stranded the
+    # chunk in NEEDS_REVIEW even though the bounded split path could repair it.
+    native_cadence_chunks: set[int] = set()
+    for cadence_chunk in fitted_chunks:
+        if len(cadence_chunk.item_indexes) <= 1:
+            continue
+        cadence_spans = read_cue_spans(
+            raw_paths[cadence_chunk.id],
+            [fitted_plan[i].spoken_text for i in cadence_chunk.item_indexes],
+            cadence_chunk.actual_duration_ms,
+        )
+        if not cadence_spans:
+            continue
+        cadence_ceiling = (
+            config.emergency_speed_max
+            if any(x.get("chunk_id") == cadence_chunk.id for x in soft_overflow)
+            else config.speed_max
+        )
+        try:
+            place_cue_spans(
+                [fitted_plan[i] for i in cadence_chunk.item_indexes],
+                cadence_chunk,
+                cadence_spans,
+                speed_ceiling=cadence_ceiling,
+                anchor_scale=video_slowdown,
+            )
+        except ValueError:
+            continue
+        native_cadence_chunks.add(cadence_chunk.id)
     if cadence_review_segments and not targeted_regeneration and not _cadence_retry:
         new_splits: set[str] = set()
         for chunk in fitted_chunks:
@@ -4270,6 +4299,18 @@ async def synthesize_timed_dub(
             timed_path = fitted
         measured_ms, peak_db = await _measure_fitted_audio(
             timed_path, chunk.actual_duration_ms, chunk.speed_factor)
+        # Keep the planner-owned cue timing so a later post-fit fallback can
+        # invalidate measured cadence without leaving measured placements in the
+        # transcript after replacing cadence audio with a whole-chunk fit.
+        pre_cadence_timing = {
+            fitted_plan[i].segment_id: (
+                fitted_plan[i].target_start_ms,
+                fitted_plan[i].target_end_ms,
+                fitted_plan[i].actual_duration_ms,
+                fitted_plan[i].speed_factor,
+            )
+            for i in chunk.item_indexes
+        }
         spans = (read_cue_spans(raw_paths[chunk.id], [fitted_plan[i].spoken_text for i in chunk.item_indexes],
                                chunk.actual_duration_ms) if len(chunk.item_indexes) > 1 else None)
         if spans:
@@ -4335,6 +4376,27 @@ async def synthesize_timed_dub(
                 break
             fitted = fitted_dir / f"chunk_{chunk.id:04d}.wav"
             await asyncio.to_thread(_fit_chunk_audio_sync, raw_paths[chunk.id], fitted, corrected_speed)
+            # This rescue fits the WHOLE raw chunk, so provider word-boundary
+            # placements no longer describe the bytes we are about to render.
+            # Invalidate cue-local measured provenance and restore planner timing;
+            # the proportional measured-chunk allocation below will recompute it.
+            if chunk.id in cadence_placements:
+                cadence_placements.pop(chunk.id, None)
+                for index in chunk.item_indexes:
+                    item = fitted_plan[index]
+                    aligned_cue_ids.discard(item.segment_id)
+                    (
+                        item.target_start_ms,
+                        item.target_end_ms,
+                        item.actual_duration_ms,
+                        item.speed_factor,
+                    ) = pre_cadence_timing[item.segment_id]
+                issues.append({
+                    "reason": "measured_cadence_postfit_fallback",
+                    "chunk_id": chunk.id,
+                    "segment_ids": [fitted_plan[i].segment_id for i in chunk.item_indexes],
+                    "requires_human_review": True,
+                })
             chunk.speed_factor = corrected_speed
             if corrected_speed > regular_cap:
                 issues.append({"reason": "postfit_micro_rescue", "chunk_id": chunk.id,
