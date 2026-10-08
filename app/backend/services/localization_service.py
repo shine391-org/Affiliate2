@@ -63,13 +63,14 @@ def _utc_now_iso() -> str:
     return _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime())
 
 _TRANSLATION_BATCH_SIZE = 12
+_C6_TRANSLATION_PROMPT_VERSION = 2  # C6 checkpoint invalidation for changed guidance.
 _CONTEXT_CHARS = 10_000
 _DUBBING_SYNTHESIS_RULES_VERSION = 1
 _EDGE_TTS_BOUNDARY_RULE = "edge-boundary-trim-v3-neutral-pitch"
 _TTS_REQUEST_TIMEOUT_S = 120.0
 _TTS_CHUNK_DEADLINE_S = 300.0
 _POSTFIT_ROUNDING_TOLERANCE_MS = 30
-_C7_REWRITE_POLICY_VERSION = 2
+_C7_REWRITE_POLICY_VERSION = 3
 
 
 # Abandoned per-attempt TTS scratch files. A provider that streams from a
@@ -935,7 +936,10 @@ def _translation_prompt(
     ]
     timing = (
         "For dubbing, keep each translation concise and naturally speakable. "
-        "The downstream chunk planner will combine adjacent lines and measure real TTS."
+        "The downstream chunk planner will combine adjacent lines and measure real TTS. "
+        "When two Vietnamese phrasings preserve exactly the same facts and intent, "
+        "prefer the shorter naturally spoken one. Treat source_duration_ms as a "
+        "soft pacing hint, never a hard word limit; never omit facts to fit time."
         if for_dub
         else "Keep each segment aligned to the same semantic unit."
     )
@@ -1678,6 +1682,7 @@ async def translate_transcript(
     ]
     checkpoint_meta = {
         "meaning_guard_version": 12,
+        "translation_prompt_version": _C6_TRANSLATION_PROMPT_VERSION,
         "source_language": transcript.language,
         "protected_terms": profile.protected_terms,
         "semantic_hash": semantic_sig,
@@ -2948,6 +2953,20 @@ async def _generate_tts_chunk_atomic(
         _register_abandoned_tts_attempt(pending)
 
 
+def _rewrite_speech_budget_ms(measured_ms: int, window_ms: int, speed_max: float) -> int:
+    """Advisory natural-TTS target, not a final playback deadline.
+
+    A 1000-ms window at 1.30x permits up to 1300 ms of speech before the
+    existing audio fit. Leave 5% headroom for TTS/FFmpeg variability, rather
+    than prompting the LLM to delete meaning to reach 1000 ms naturally.
+    This estimate NEVER approves a rewrite: actual TTS measurement and the
+    regular/emergency fit ceilings remain authoritative.
+    """
+    if measured_ms <= 0 or window_ms <= 0 or not math.isfinite(speed_max):
+        return max(0, min(measured_ms, window_ms))
+    return max(1, min(measured_ms - 1, math.floor(window_ms * speed_max * 0.95)))
+
+
 async def _adapt_chunk_items(
     ai,
     *,
@@ -2986,8 +3005,11 @@ async def _adapt_chunk_items(
     # Feed the actual natural-rate measurement back into the next attempt,
     # rather than asking the same vague question again. Leave modest headroom
     # for TTS pauses; this budget is guidance, never permission to drop facts.
-    ratio = min(0.85, target_ms / max(duration_ms, 1))
-    word_budget = max(len(items), math.floor(current_words * ratio * 0.95))
+    speech_budget_ms = _rewrite_speech_budget_ms(
+        duration_ms, chunk.available_ms, profile.dub_speed_max,
+    )
+    ratio = min(0.95, speech_budget_ms / max(duration_ms, 1))
+    word_budget = max(len(items), math.floor(current_words * ratio))
     ordered_context = sorted(segment_by_id.values(), key=lambda s: (s.source_start_ms, s.id))
     selected_ids = {item["id"] for item in items}
     positions = [i for i, seg in enumerate(ordered_context) if seg.id in selected_ids]
@@ -2997,8 +3019,10 @@ async def _adapt_chunk_items(
     context = [{"id": seg.id, "speaker_id": seg.speaker_id,
                 "source": seg.source_text[:600], "target": (seg.translated_text or "")[:600]}
                for seg in neighbours]
-    prompt = f"""Rewrite these {target_language} dubbing lines so the WHOLE group can be spoken naturally in about {target_ms / 1000.0:.2f} seconds.
-Duration feedback: current duration {duration_ms} ms; target duration {target_ms} ms.
+    prior_guard_feedback = (state or {}).get("last_meaning_guard") or []
+    prompt = f"""Rewrite these {target_language} dubbing lines for natural speech that can be audio-fitted into the source window without exceeding the normal speed ceiling.
+MEASURED TTS: current natural-rate duration {duration_ms} ms; available source window {target_ms} ms; normal playback speed ceiling {profile.dub_speed_max:.2f}x.
+Advisory natural-rate speech target: approximately {speech_budget_ms} ms (includes 5% headroom before final audio fitting). This is NOT a requirement to speak naturally within {target_ms} ms, nor permission to lose meaning. Real TTS will be measured again before accepting timing.
 Attempt {(state or {}).get('attempt', 1)}. Advisory word budget: about {word_budget} whitespace-separated words (current: {current_words}). This is guidance, NOT a quota or permission to remove facts.
 SEMANTIC GUARDRAILS (editable per profile in Settings):
 {profile.rewrite_guardrails}
@@ -3011,6 +3035,9 @@ LOCKED PROTOCOL:
 - Make wording concise and natural for speech only after the semantic guardrails above are satisfied.
 - Preserve who does what to whom, naming relations, negation, quantities and the speech act. Remove repetition/fillers before information.
 - If no safe shortening exists, return the current text unchanged for that item. Do not invent or delete information to meet the timing goal.
+
+PREVIOUS REJECTED PROPOSAL (invariant labels only; do not repeat those errors):
+{json.dumps(prior_guard_feedback, ensure_ascii=False)}
 
 NEIGHBOUR CONTEXT (read-only; do not output these IDs):
 {json.dumps(context, ensure_ascii=False)}
@@ -3276,6 +3303,11 @@ ITEMS:
                 "after": new_text,
             })
     if meaning_violations:
+        if state is not None:
+            state["last_meaning_guard"] = [
+                {"segment_id": row["segment_id"], "kind": row.get("kind", "unknown")}
+                for row in meaning_violations[:16]
+            ]
         if issues is not None:
             issues.append({
                 "chunk_id": chunk.id,
@@ -3289,6 +3321,8 @@ ITEMS:
             [v["kind"] for v in meaning_violations],
         )
         return False
+    if state is not None:
+        state.pop("last_meaning_guard", None)
     for idx in chunk.item_indexes:
         item = plan[idx]
         new_text = mapped[item.segment_id]
