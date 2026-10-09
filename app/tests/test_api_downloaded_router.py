@@ -483,6 +483,78 @@ class TestOtherPosts:
         assert client.get(f"/api/downloaded/{vid}").status_code == 404
 
 
+def test_deleting_source_in_active_localization_job_is_blocked(client, tmp_path):
+    """Source must remain readable until the queued worker takes its snapshot."""
+    import json
+    from backend.database import AsyncSessionLocal
+    from backend.models.downloaded_video import DownloadedVideo
+    from backend.models.job import Job
+
+    source = tmp_path / "active-source.mp4"
+    source.write_bytes(b"valid source under active worker")
+    async def seed():
+        async with AsyncSessionLocal() as db:
+            item = DownloadedVideo(user_id="local", title="active source",
+                                   platform="tiktok", video_path=str(source))
+            db.add(item)
+            await db.flush()
+            task = Job(user_id="local", job_type="tool:translate", status="pending",
+                       input_json=json.dumps({"downloaded_video_id": item.id}))
+            db.add(task)
+            await db.commit()
+            return item.id, task.id
+
+    video_id, task_id = asyncio.run(seed())
+    blocked = client.delete(f"/api/downloaded/{video_id}")
+    assert blocked.status_code == 409
+    assert source.read_bytes() == b"valid source under active worker"
+    assert client.get(f"/api/downloaded/{video_id}").status_code == 200
+
+    async def finish():
+        async with AsyncSessionLocal() as db:
+            row = await db.get(Job, task_id)
+            row.status = "success"
+            await db.commit()
+
+    asyncio.run(finish())
+    assert client.delete(f"/api/downloaded/{video_id}").status_code == 200
+    assert not source.exists()
+    async def clean():
+        async with AsyncSessionLocal() as db:
+            row = await db.get(Job, task_id)
+            if row is not None:
+                await db.delete(row)
+                await db.commit()
+    asyncio.run(clean())
+
+
+def test_deleting_one_of_two_source_rows_does_not_unlink_shared_media(client, tmp_path):
+    """Two legitimate DB owners may share a historical media path."""
+    from backend.database import AsyncSessionLocal
+    from backend.models.downloaded_video import DownloadedVideo
+
+    shared = tmp_path / "shared.mp4"
+    shared.write_bytes(b"must survive first deletion")
+
+    async def seed():
+        async with AsyncSessionLocal() as db:
+            rows = [
+                DownloadedVideo(user_id="local", platform="youtube",
+                                title=f"shared-{i}", video_path=str(shared))
+                for i in range(2)
+            ]
+            db.add_all(rows)
+            await db.commit()
+            return [row.id for row in rows]
+
+    one, two = asyncio.run(seed())
+    assert client.delete(f"/api/downloaded/{one}").status_code == 200
+    assert shared.read_bytes() == b"must survive first deletion"
+    assert client.get(f"/api/downloaded/{two}").status_code == 200
+    assert client.delete(f"/api/downloaded/{two}").status_code == 200
+    assert not shared.exists()
+
+
 # ── the AI-backed routes ────────────────────────────────────────────────────
 
 @pytest.fixture()

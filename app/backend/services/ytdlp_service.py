@@ -672,18 +672,30 @@ def _apply_cookies(
     return True
 
 
+def _hostname_matches(url: str, *domains: str) -> bool:
+    """Only a real hostname may select a platform-specific auth/identity path.
+
+    A crafted unrelated URL containing 'tiktok.com/' in its path must never
+    trigger TikTok cookie or Douyin CDP logic.
+    """
+    from urllib.parse import urlsplit
+    try:
+        host = (urlsplit(url).hostname or "").lower().rstrip(".")
+    except (AttributeError, ValueError, TypeError):
+        return False
+    return any(host == domain or host.endswith("." + domain) for domain in domains)
+
+
 def _is_youtube_url(url: str) -> bool:
-    value = (url or "").lower()
-    return "youtube.com/" in value or "youtu.be/" in value
+    return _hostname_matches(url, "youtube.com", "youtu.be", "youtube-nocookie.com")
 
 
 def _is_douyin_url(url: str) -> bool:
-    value = (url or "").lower()
-    return "douyin.com/" in value or "iesdouyin.com/" in value
+    return _hostname_matches(url, "douyin.com", "iesdouyin.com")
 
 
 def _is_tiktok_url(url: str) -> bool:
-    return "tiktok.com/" in (url or "").lower()
+    return _hostname_matches(url, "tiktok.com")
 
 
 def _is_bytedance_url(url: str) -> bool:
@@ -691,13 +703,11 @@ def _is_bytedance_url(url: str) -> bool:
 
 
 def _required_bytedance_cookie_count(url: str, session: dict) -> int:
-    value = (url or "").lower()
-    if "douyin.com/" in value or "iesdouyin.com/" in value:
+    if _is_douyin_url(url):
         return int(session.get("douyin_cookie_count") or 0)
-    if "tiktok.com/" in value:
+    if _is_tiktok_url(url):
         return int(session.get("tiktok_cookie_count") or 0)
     return 0
-
 
 async def _prepare_download_source(
     url: str,

@@ -21,18 +21,20 @@ Completed:
 - Phase A — application baseline
 - Phase B — Sources + Radar, QA PASS, merged to `master`
 
-Current implementation branch:
+Development branches change per task. Verify local `git status -sb`,
+`git rev-parse HEAD`, and the requested task branch before writing. Do not
+assume a historical phase branch is the current implementation branch.
 
-`phase-c-media-ai-hq-localization`
+Current scope (as of 2026-10-09):
 
-Current scope:
-
-Phase C implementation is frozen for architecture work; localization quality
-tuning is profile/model/prompt driven unless real-media QA exposes a technical
-defect. Phase D Smart Cut is wired and awaits local QA. Phase E Creative Remake
-is intentionally deferred after donor audit. Phase F is active: F1 native
-Publish ownership is wired and awaits QA; F2 native Performance convergence is
-next.
+Phase G database convergence was merged to master. Localization Fast Mode and
+real-media C13 acceptance remain in progress on
+`feat/localization-fast-mode`; local commits may be ahead of GitHub.
+Smart Cut is implemented behind the Studio source/clip workflow and needs
+workflow acceptance. Creative Remake HQ is still deferred. Publish is guarded
+by explicit human approval; live-provider QA is a separate gate.
+Consult `PROJECT_STATUS.md` and actual code/QA evidence rather than treating
+older TECHNICAL PASS milestones as full real-media acceptance.
 
 Read before changing Phase-C code:
 
