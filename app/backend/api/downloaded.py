@@ -379,17 +379,16 @@ async def batch_download_from_urls(body: dict = None):
     if not urls:
         raise HTTPException(status_code=400, detail="No usable URLs provided")
 
-    # URL trust boundary. This endpoint is reachable by the chat planner (i.e.
-    # by LLM-relayed values) as well as by our own UI, and every entry here is
-    # handed to yt-dlp — which happily accepts `file:///etc/passwd`. Guard at
-    # the endpoint so the check can't be bypassed by a different caller.
+    # LLM/agent-controlled URLs must never enter yt-dlp as local, ambiguous,
+    # credential-bearing or private-IP targets. DNS is checked at the downloader
+    # boundary too (including concrete Douyin/CDN targets).
+    from backend.services.download_url_guard import validate_download_url
     for u in urls:
-        link = (u.get("url") or "").strip()
-        if not link.lower().startswith(("http://", "https://")):
-            raise HTTPException(
-                status_code=400,
-                detail="Every url must be a full http(s) link",
-            )
+        link = u.get("url") or ""
+        try:
+            validate_download_url(link)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     from backend.services.download_options import normalize as _normalize_opts
     options = _normalize_opts(body.get("options"))
