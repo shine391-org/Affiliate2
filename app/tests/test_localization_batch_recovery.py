@@ -150,6 +150,9 @@ async def test_upload_rejection_marks_earlier_items_failed(monkeypatch, tmp_path
         )
         assert job.error_message
     assert dispatched == [], "a rejected batch must not dispatch a partial queue"
+    assert not list((tmp_path / "tools_in").glob("*.mp4")), (
+        "rejected admission must reclaim earlier uploaded source files"
+    )
 
 
 @pytest.mark.asyncio
