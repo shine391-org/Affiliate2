@@ -836,7 +836,7 @@ async def recover_pending_localization_batch_items() -> list[str]:
                         # must not silently re-resolve against live Settings.
                         "profile_override": payload.get("profile_override"),
                         "auto_repair": bool(payload.get("auto_repair", False)),
-                        "cleanup_input": bool(payload.get("cleanup_input", True)),
+                        "cleanup_input": bool(payload.get("cleanup_input", False)),
                     })
             await db.commit()
 
