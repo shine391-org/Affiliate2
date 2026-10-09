@@ -3262,22 +3262,10 @@ ITEMS:
     if untranslated_han(candidate_text, target_language,
             allowed=[*profile.protected_terms, *profile.glossary.values()]):
         return record_invalid("rewrite_reintroduced_foreign_script")
-    # A paraphrase that grows cannot solve a duration overflow. Reject it
-    # atomically so neither the plan nor the caption transcript drifts.
-    if len(candidate_text) >= len(current_text) or (
-        current_words > 1
-        and len(candidate_text.split()) >= current_words
-    ):
-        retried = await retry_on_invalid("rewrite_not_shorter")
-        if retried is not None:
-            return retried
-        if issues is not None:
-            issues.append({
-                "chunk_id": chunk.id,
-                "reason": "rewrite_not_shorter",
-                "segment_ids": expected,
-            })
-        return False
+    # Do NOT use characters/whitespace token count as a proxy for speech time:
+    # Vietnamese pronunciation, digits and punctuation make that unreliable.
+    # The caller synthesizes into an isolated candidate artifact and only
+    # accepts rewrites whose measured audio is strictly faster.
 
     changed = False
     # Meaning guard (Y3): validate EVERY proposed line against the approved
@@ -3961,44 +3949,11 @@ async def synthesize_timed_dub(
                 break
             if not changed:
                 continue
-            rewrite_calls += 1
-            accepted_entries = []
-            # Persist accepted changes before another provider call can fail.
-            for i in chunk.item_indexes:
-                item = plan[i]
-                if (item.spoken_text == before_snapshot[item.segment_id]
-                        and segment_by_id[item.segment_id].translated_text == caption_before[item.segment_id]):
-                    continue
-                entry = {
-                    "segment_id": item.segment_id, "chunk_id": chunk.id,
-                    "before": before_snapshot[item.segment_id], "after": item.spoken_text,
-                    "caption_before": caption_before[item.segment_id],
-                    "caption_after": segment_by_id[item.segment_id].translated_text,
-                    "reason": "measured_overflow", "duration_before_ms": duration_before_ms,
-                    "duration_after_ms": None, "available_ms": chunk.available_ms,
-                    "required_speed_before": required_speed(duration_before_ms, chunk.available_ms),
-                    "dub_speed_max": config.speed_max, "timestamp": _utc_now_iso(),
-                    "status": "accepted", "acceptance_key": acceptance_key,
-                }
-                accepted_entries.append(entry)
-                job_state.data["rewrite_audit"].append(entry)
-                job_state.data.setdefault("accepted_text", {})[item.segment_id] = item.spoken_text
-                # A guarded C7 rewrite of an Auto draft must keep the C6 audit
-                # current: QC reads target_text from this audit, so a stale value
-                # would report the pre-rewrite wording and fail the next resume.
-                draft_audit = out.metadata.get("translation_auto_drafts") or {}
-                if item.segment_id in draft_audit:
-                    draft_audit[item.segment_id]["target_text"] = item.spoken_text
-                    draft_audit[item.segment_id].setdefault("dubbing_rewrites", []).append({
-                        "before_target_text": before_snapshot[item.segment_id],
-                        "target_text": item.spoken_text,
-                        "reason": "measured_overflow",
-                        "chunk_id": chunk.id,
-                        "timestamp": _utc_now_iso(),
-                    })
-            save_audit()
+            # The meaning guard proves only semantic acceptability. It does NOT
+            # prove duration. Keep the last-good raw audio and script intact
+            # until a separately synthesized candidate has actually improved.
             speech_text = chunk_text(plan, chunk)
-            synthesis_identity = _chunk_synthesis_identity(
+            candidate_identity = _chunk_synthesis_identity(
                 text=speech_text,
                 runtime=runtime,
                 voice=voice,
@@ -4008,26 +3963,120 @@ async def synthesize_timed_dub(
                 reference_text=ref.get("text"),
                 reference_language=ref.get("language"),
             )
-            duration_ms = await generate_chunk_audio(chunk.id,
-                speech_text,
-                runtime=runtime,
-                voice=voice,
-                profile=profile,
-                speaker_id=speaker_id,
-                target_language=target_language,
-                output_path=path,
-                identity=synthesis_identity,
-                reference_audio=ref.get("audio"),
-                reference_text=ref.get("text"),
-                reference_language=ref.get("language"),
-                cancel_check=cancel_check,
+            candidate_path = path.with_name(
+                f"{path.stem}.rewrite-{uuid.uuid4().hex[:8]}{path.suffix}"
             )
-            chunk.actual_duration_ms = duration_ms
-            synthesis_identities[chunk.id] = synthesis_identity
-            observe_chunk(voice, speaker_id, ref, speech_text, synthesis_identity, duration_ms)
-            for entry in accepted_entries:
-                entry["duration_after_ms"] = duration_ms
-            save_audit()
+            candidate_events: list[dict] = []
+            candidate_duration_ms = 0
+            accepted_candidate = False
+            try:
+                candidate_duration_ms = await _generate_tts_chunk_atomic(
+                    speech_text,
+                    output_path=candidate_path,
+                    identity=candidate_identity,
+                    runtime=runtime,
+                    voice=voice,
+                    profile=profile,
+                    speaker_id=speaker_id,
+                    target_language=target_language,
+                    reference_audio=ref.get("audio"),
+                    reference_text=ref.get("text"),
+                    reference_language=ref.get("language"),
+                    cancel_check=cancel_check,
+                    recovery_events=candidate_events,
+                )
+                if candidate_duration_ms >= duration_before_ms:
+                    # The AI wrote different words, but REAL TTS got no faster.
+                    # Reject without touching original audio, sidecars, accepted
+                    # C7 text or the current revision's rewrite_count.
+                    issues.append({
+                        "chunk_id": chunk.id,
+                        "reason": "rewrite_measured_not_faster",
+                        "duration_before_ms": duration_before_ms,
+                        "duration_after_ms": candidate_duration_ms,
+                        "segment_ids": [plan[i].segment_id for i in chunk.item_indexes],
+                    })
+                    for i in chunk.item_indexes:
+                        item = plan[i]
+                        job_state.data["rewrite_audit"].append({
+                            "segment_id": item.segment_id, "chunk_id": chunk.id,
+                            "before": before_snapshot[item.segment_id], "after": item.spoken_text,
+                            "duration_before_ms": duration_before_ms,
+                            "duration_after_ms": candidate_duration_ms,
+                            "status": "rejected_measured",
+                            "reason": "rewrite_measured_not_faster",
+                            "timestamp": _utc_now_iso(),
+                            "acceptance_key": acceptance_key,
+                        })
+                    continue
+
+                # Publish the candidate only AFTER positive measurement. Sidecars
+                # remain identity-bound; an interrupted promotion cannot falsely
+                # mark wrong audio reusable at the next resume.
+                candidate_path.replace(path)
+                for sidecar in (".words.json", ".input.json"):
+                    source_sidecar = candidate_path.with_name(candidate_path.name + sidecar)
+                    target_sidecar = path.with_name(path.name + sidecar)
+                    target_sidecar.unlink(missing_ok=True)
+                    if source_sidecar.exists():
+                        source_sidecar.replace(target_sidecar)
+                accepted_candidate = True
+                duration_ms = candidate_duration_ms
+                synthesis_identities[chunk.id] = candidate_identity
+                chunk.actual_duration_ms = duration_ms
+                observe_chunk(voice, speaker_id, ref, speech_text, candidate_identity, duration_ms)
+                recoveries = job_state.data.setdefault("tts_recoveries", {})
+                if candidate_events:
+                    recoveries[str(chunk.id)] = {
+                        **candidate_events[-1], "identity": candidate_identity,
+                    }
+                else:
+                    recoveries.pop(str(chunk.id), None)
+
+                rewrite_calls += 1
+                for i in chunk.item_indexes:
+                    item = plan[i]
+                    if (item.spoken_text == before_snapshot[item.segment_id]
+                            and segment_by_id[item.segment_id].translated_text == caption_before[item.segment_id]):
+                        continue
+                    entry = {
+                        "segment_id": item.segment_id, "chunk_id": chunk.id,
+                        "before": before_snapshot[item.segment_id], "after": item.spoken_text,
+                        "caption_before": caption_before[item.segment_id],
+                        "caption_after": segment_by_id[item.segment_id].translated_text,
+                        "reason": "measured_overflow", "duration_before_ms": duration_before_ms,
+                        "duration_after_ms": duration_ms, "available_ms": chunk.available_ms,
+                        "required_speed_before": required_speed(duration_before_ms, chunk.available_ms),
+                        "dub_speed_max": config.speed_max, "timestamp": _utc_now_iso(),
+                        "status": "accepted", "acceptance_key": acceptance_key,
+                    }
+                    job_state.data["rewrite_audit"].append(entry)
+                    job_state.data.setdefault("accepted_text", {})[item.segment_id] = item.spoken_text
+                    draft_audit = out.metadata.get("translation_auto_drafts") or {}
+                    if item.segment_id in draft_audit:
+                        draft_audit[item.segment_id]["target_text"] = item.spoken_text
+                        draft_audit[item.segment_id].setdefault("dubbing_rewrites", []).append({
+                            "before_target_text": before_snapshot[item.segment_id],
+                            "target_text": item.spoken_text,
+                            "reason": "measured_overflow", "chunk_id": chunk.id,
+                            "timestamp": _utc_now_iso(),
+                        })
+                save_audit()
+            finally:
+                if not accepted_candidate:
+                    for i in chunk.item_indexes:
+                        item = plan[i]
+                        item.spoken_text = before_snapshot[item.segment_id]
+                        item.estimated_duration_ms = estimate_spoken_ms(
+                            item.spoken_text, target_language,
+                        )
+                        # Approved/replayed C6 text remains the authority on
+                        # every rejected or failed candidate TTS attempt.
+                        segment_by_id[item.segment_id].translated_text = caption_before[item.segment_id]
+                    save_audit()
+                candidate_path.unlink(missing_ok=True)
+                for sidecar in (".words.json", ".input.json"):
+                    candidate_path.with_name(candidate_path.name + sidecar).unlink(missing_ok=True)
             allocate_silence(
                 plan, chunks, config, timeline_end_ms=source_duration_ms,
                 only_chunk_ids=allocation_ids,
