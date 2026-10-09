@@ -75,3 +75,19 @@ test("legacy redirects preserve query/hash while adding canonical parameters", (
     "/studio/localize?source=abc&step=source&batch=1#files",
   )
 })
+
+test("Studio active subroutes mount their real views, not redirect into Localize", () => {
+  const routes = readFileSync(new URL("./App.jsx", import.meta.url), "utf8")
+  const studio = readFileSync(new URL("./pages/Studio.jsx", import.meta.url), "utf8")
+  for (const mode of ["manual", "smart-cut"]) {
+    assert.match(routes, new RegExp(`path="studio/${mode}"\\s+element={<Studio\\s*/>}`))
+    assert.match(studio, new RegExp(`mode === "${mode}"`))
+  }
+  assert.match(routes, /path="clips" element={<LegacyRedirect to="\\/studio\\/manual"/)
+})
+
+test("Batch UI exposes and submits opt-in backend auto_repair", () => {
+  const form = readFileSync(new URL("./pages/LocalizationBatch.jsx", import.meta.url), "utf8")
+  assert.match(form, /form\\.append\\("auto_repair", String\\(autoRepair\\)\\)/)
+  assert.match(form, /checked={autoRepair}/)
+})
