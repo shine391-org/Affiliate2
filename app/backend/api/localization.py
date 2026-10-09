@@ -1972,17 +1972,34 @@ async def _run_localization_batch_sequential(specs: list[dict]) -> None:
 
     from backend.core.tool_runners import run_tool_translate
 
+    from backend.agents.job_helper import update_job_status
+
     for spec in specs:
-        # pending->running and the claim release happen in ONE conditional
-        # write. From the moment the attach lands the item is owned by a LIVE
-        # task; leaving the marker in place would make a later crash sweep
-        # report it as an unclaimed recovery action, and clearing it first
-        # would let a sweep fail a row with nothing attached.
-        if not await _attach_batch_item(spec["job_id"], spec.get("claim")):
-            continue        # somebody else owns (or finished) this item
-        kwargs = {k: v for k, v in spec.items() if k != "claim"}
-        kwargs["in_path"] = Path(kwargs["in_path"])
-        await run_tool_translate(**kwargs)
+        # Each item is independent. An unexpected runner exception must not
+        # strand later pending siblings with no live coordinator.
+        try:
+            # pending->running and claim release are one conditional write.
+            if not await _attach_batch_item(spec["job_id"], spec.get("claim")):
+                continue  # another owner already claimed/completed this item
+            kwargs = {k: v for k, v in spec.items() if k != "claim"}
+            kwargs["in_path"] = Path(kwargs["in_path"])
+            await run_tool_translate(**kwargs)
+        except Exception as exc:
+            logging.getLogger(__name__).exception(
+                "Localization batch item %s crashed; continuing siblings",
+                spec["job_id"],
+            )
+            # Job helper refuses to overwrite existing terminal/cancelled
+            # status. Preserve canonical status instead of forcing failure.
+            try:
+                await update_job_status(
+                    spec["job_id"], "failed",
+                    error_message=f"Unhandled localization batch error: {exc}",
+                )
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "Could not mark batch item %s failed", spec["job_id"]
+                )
 
 
 @router.post("/batch")
@@ -1995,6 +2012,7 @@ async def localization_batch(
     emoji_style: str = Form("moderate"),
     target_aspect: str | None = Form(None),
     profile_id: str | None = Form(None),
+    auto_repair: bool = Form(False),
 ):
     """C9 batch = one proven localization runner applied to N source files."""
     if not files:
@@ -2031,6 +2049,8 @@ async def localization_batch(
                 "target_aspect": target_aspect,
                 "profile_id": profile_id,
                 "batch": True,
+                "auto_repair": bool(auto_repair),
+                "cleanup_input": True,
                 "batch_id": batch_id,
                 "batch_index": len(jobs),
                 "filename": file.filename,
@@ -2048,6 +2068,8 @@ async def localization_batch(
                 "batch_id": batch_id,
                 "batch_index": len(jobs),
                 "batch": True,
+                "auto_repair": bool(auto_repair),
+                "cleanup_input": True,
             }, expect_batch_admitted=False)
             specs.append({
                 "job_id": job.id,
@@ -2059,6 +2081,8 @@ async def localization_batch(
                 "emoji_style": emoji_style,
                 "target_aspect": target_aspect,
                 "profile_id": profile_id,
+                "auto_repair": bool(auto_repair),
+                "cleanup_input": True,
             })
             jobs.append({"job_id": job.id, "filename": file.filename})
 
