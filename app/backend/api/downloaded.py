@@ -375,6 +375,10 @@ async def batch_download_from_urls(body: dict = None):
                 detail=(f"Each entry must be a URL string or an object with a "
                         f"`url` field, got {type(u).__name__}"),
             )
+    # The chat planner may supply a non-string field. Fail as a 400, not an
+    # AttributeError while trying to call .strip() on an integer/list.
+    if any(not isinstance(u.get("url", ""), str) for u in normalized):
+        raise HTTPException(status_code=400, detail="Each url must be a string")
     urls = [u for u in normalized if (u.get("url") or "").strip()]
     if not urls:
         raise HTTPException(status_code=400, detail="No usable URLs provided")
