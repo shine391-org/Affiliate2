@@ -2164,6 +2164,17 @@ async def localization_batch(
                     )
                     row.completed_at = datetime.utcnow()
             await db.commit()
+        # None of these files has a live coordinator after a rejected
+        # admission. Delete earlier successful uploads, not just the partial
+        # temp file from the item that failed.
+        for staged_spec in specs:
+            try:
+                Path(staged_spec["in_path"]).unlink(missing_ok=True)
+            except OSError:
+                logging.getLogger(__name__).warning(
+                    "Could not reclaim rejected batch upload %s",
+                    staged_spec["job_id"],
+                )
         raise
 
     return {"count": len(jobs), "jobs": jobs}
