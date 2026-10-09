@@ -2389,25 +2389,31 @@ async def run_tool_translate(
                 f"Tự động sửa: thử lại đúng bước {stage} (1/1)...",
                 user_id,
             )
-            await run_tool_translate(
-                job_id,
-                run.source_path,
-                str(run.request.get("target_language") or target_language),
-                str(run.request.get("mode") or mode),
-                str(run.request.get("voice_id") or voice_id or ""),
-                str(run.effective_profile.get("caption_style") or caption_style or "viral"),
-                str(run.request.get("emoji_style") or emoji_style or "moderate"),
-                user_id=user_id,
-                target_aspect=run.effective_profile.get("target_aspect") or run.request.get("target_aspect"),
-                profile_id=run.request.get("profile_id"),
-                profile_override=run.effective_profile,
-                review_translation=bool(run.request.get("review_translation")),
-                cleanup_input=False,
-                mask_box=run.request.get("mask_box"),
-                caption_placement=run.request.get("caption_placement"),
-                downloaded_video_id=run.request.get("downloaded_video_id"),
-                auto_repair=None,
-            )
+            try:
+                await run_tool_translate(
+                    job_id,
+                    run.source_path,
+                    str(run.request.get("target_language") or target_language),
+                    str(run.request.get("mode") or mode),
+                    str(run.request.get("voice_id") or voice_id or ""),
+                    str(run.effective_profile.get("caption_style") or caption_style or "viral"),
+                    str(run.request.get("emoji_style") or emoji_style or "moderate"),
+                    user_id=user_id,
+                    target_aspect=run.effective_profile.get("target_aspect") or run.request.get("target_aspect"),
+                    profile_id=run.request.get("profile_id"),
+                    profile_override=run.effective_profile,
+                    review_translation=bool(run.request.get("review_translation")),
+                    cleanup_input=False,
+                    mask_box=run.request.get("mask_box"),
+                    caption_placement=run.request.get("caption_placement"),
+                    downloaded_video_id=run.request.get("downloaded_video_id"),
+                    auto_repair=None,
+                )
+            finally:
+                # Recursive stage-only repair reuses the immutable source copy.
+                # The outer invocation still owns its original upload scratch;
+                # releasing it here closes the success/failure leak on retry.
+                _cleanup_paths(*cleanup)
             return
 
         await _tool_fail(job_id, e, cleanup, user_id, "translate")
