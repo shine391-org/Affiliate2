@@ -256,6 +256,40 @@ async def test_dubbing_hard_overflow_auto_repair_targets_only_overflow_chunk(
 
 
 @pytest.mark.asyncio
+async def test_auto_repair_reclaims_initial_upload_after_nested_runner(
+    storage, monkeypatch, tmp_path,
+):
+    """A recovered job retains its canonical source but not the upload scratch."""
+    run = _make_run("dub-repair-upload-cleanup", storage,
+                    request_extra={"auto_repair": True})
+    await _seed_job(run.job_id)
+    upload = storage / "tools" / "in" / "uploaded.mp4"
+    upload.parent.mkdir(parents=True, exist_ok=True)
+    upload.write_bytes(SOURCE_BYTES)
+    calls = []
+
+    async def synth(localized, **kwargs):
+        calls.append(set(kwargs.get("regenerate_chunk_ids") or set()))
+        if len(calls) == 1:
+            raise LocalizationTimingError([{
+                "chunk_id": 1, "reason": "timing_overflow",
+                "required_speed": 1.8, "speed_max": 1.30,
+                "emergency_speed_max": 1.35, "segment_ids": ["s0"],
+            }])
+        return _dub_result(localized, kwargs["work_dir"])
+
+    _patch_leaves(monkeypatch, tmp_path, synth=synth)
+    from backend.core.tool_runners import run_tool_translate
+    await run_tool_translate(
+        run.job_id, upload, "Vietnamese", "full_dub", "", "viral", "none",
+        cleanup_input=True,
+    )
+    assert calls == [set(), {1}]
+    assert not upload.exists(), "retry completion must release original scratch"
+    assert run.source_path.is_file(), "the immutable resumable source must survive"
+
+
+@pytest.mark.asyncio
 async def test_dubbing_second_hard_overflow_stops_after_one_repair(
     storage, monkeypatch, tmp_path,
 ):
