@@ -1073,6 +1073,11 @@ async def download_video(
     than erroring). Surfacing it is what lets a UI say "you asked for 4K, this
     source only had 1080p" instead of implying the cap was honoured.
     """
+    # Fail before touching CDP/cookies or creating output files. The endpoint
+    # performs a cheap syntactic check; the download service verifies DNS too
+    # so chat/scout/AI-corrected URLs cannot bypass that trust boundary.
+    from backend.services.download_url_guard import validate_public_download_target
+    await asyncio.to_thread(validate_public_download_target, url)
     if output_dir is None:
         output_dir = settings.VIDEOS_DIR
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1099,6 +1104,7 @@ async def download_video(
         url, cookie_session, douyin_cdp_url=douyin_cdp_url, title_hint=title_hint,
         alternates_out=_douyin_alternates,
     )
+    await asyncio.to_thread(validate_public_download_target, effective_url)
     use_browser_cookies = cookie_session_ok and resolved_via is None
     _format_chain = _format_chain_for_source(
         effective_url, resolved_via, _format_chain
@@ -1200,6 +1206,9 @@ async def download_video(
             # would make this a fresh per-rendition local and silently undo
             # the once-only guarantee the rung exists to provide.
             nonlocal opt_pps_dropped
+            # Every alternate URL gets its own DNS validation; the original
+            # source preflight alone does not protect a rewritten CDN target.
+            validate_public_download_target(target_url)
 
             attempt_base = {**base_opts, "http_headers": target_headers}
             video_path = None
