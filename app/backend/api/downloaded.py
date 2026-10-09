@@ -225,16 +225,80 @@ def drop_bench_caches(video_id: str) -> int:
     return removed
 
 
+def _job_uses_downloaded_source(input_data: object, video: DownloadedVideo) -> bool:
+    """Recognize a source reference in durable job inputs (including batches).
+
+    Do not infer ownership from titles or guessed file names. A pending job
+    may not yet have copied the source to its immutable workspace.
+    """
+    source_paths = {
+        str(Path(p).resolve())
+        for p in (video.video_path, video.audio_path) if p
+    }
+    reference_keys = {
+        "downloaded_video_id", "source_downloaded_video_id", "source_id", "video_id"
+    }
+    file_keys = {"in_path", "video_path", "source_path", "input_path"}
+    pending = [(input_data, 0)]
+    while pending:
+        item, depth = pending.pop()
+        if depth > 8:
+            continue
+        if isinstance(item, dict):
+            for key, value in item.items():
+                if key in reference_keys and value == video.id:
+                    return True
+                if key in file_keys and isinstance(value, str) and source_paths:
+                    try:
+                        if str(Path(value).resolve()) in source_paths:
+                            return True
+                    except (OSError, ValueError):
+                        pass
+                if isinstance(value, (dict, list)):
+                    pending.append((value, depth + 1))
+        elif isinstance(item, list):
+            pending.extend((value, depth + 1) for value in item)
+    return False
+
+
 @router.delete("/downloaded/{video_id}")
 async def delete_downloaded(video_id: str):
     """Delete a downloaded video — removes DB record and files from disk."""
+    from sqlalchemy import text
+    from backend.models.job import Job
+
     async with AsyncSessionLocal() as db:
+        # Guard deletion against job admission/recovery in another backend
+        # process. The lock is intentionally taken before reading source state.
+        await db.execute(text("BEGIN IMMEDIATE"))
         result = await db.execute(
             select(DownloadedVideo).where(DownloadedVideo.id == video_id)
         )
         video = result.scalar_one_or_none()
         if not video:
+            await db.rollback()
             raise HTTPException(status_code=404, detail="Downloaded video not found")
+
+        active = (await db.execute(select(Job).where(
+            Job.status.in_(["pending", "running", "awaiting_review"])
+        ))).scalars().all()
+        for job in active:
+            try:
+                inputs = json.loads(job.input_json or "{}")
+            except (TypeError, ValueError):
+                # Cannot prove that a corrupted active job does NOT own the
+                # source. Fail closed rather than deleting media underneath it.
+                await db.rollback()
+                raise HTTPException(
+                    status_code=409,
+                    detail="An active job has unreadable input; source deletion is blocked",
+                )
+            if _job_uses_downloaded_source(inputs, video):
+                await db.rollback()
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Source is in use by active job {job.id}; cancel/finish it before deleting",
+                )
 
         # Delete files from disk
         for path_str in [video.video_path, video.audio_path]:
