@@ -224,6 +224,7 @@ async def _tool_success(
     job_id: str, out_path: Path, cleanup: list[Path], user_id: str,
     extra_output: dict | None = None,
     expect: dict | None = None,
+    completion_step: str = "Done",
 ) -> bool:
     """Validate the artifact, mark job success, emit job_complete, delete
     input scratch files. Returns True when the artifact was delivered, False
@@ -267,7 +268,7 @@ async def _tool_success(
     if extra_output:
         output_data.update(extra_output)
     accepted = await update_job_status(
-        job_id, "success", progress_pct=100, current_step="Done",
+        job_id, "success", progress_pct=100, current_step=completion_step,
         output_data=output_data,
     )
     if not accepted:
@@ -2183,12 +2184,21 @@ async def run_tool_translate(
                 previous_generated_video_id
             )
 
+        # A playable render is a successful TOOL artifact even if editorial
+        # QC fails. Keep the file reviewable, but never label failed QC "Done"
+        # or imply Publish is allowed. Publish uses qc_status as its hard gate.
+        qc_completion_step = {
+            "READY": "Rendered · QC READY",
+            "NEEDS_REVIEW": "Rendered · QC NEEDS_REVIEW (approval required)",
+            "FAILED": "Rendered · QC FAILED (not publishable)",
+        }.get(str(qc.get("status") or "").upper(), "Rendered · QC unknown")
         delivered = await _tool_success(
             job_id,
             delivery_path,
             cleanup,
             user_id,
             extra_output=output_meta,
+            completion_step=qc_completion_step,
         )
         if not delivered:
             if delivery_is_new:
