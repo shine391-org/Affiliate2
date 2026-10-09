@@ -12,7 +12,7 @@
 2. **Batch auto-repair UI:** explicit **off-by-default** checkbox sends `auto_repair=true/false` through the existing FastAPI contract. Never interpret as QC approval.
 3. **Download platform identification:** resolve hostname, not `m.`/first-label heuristics or tokens embedded in unrelated URL paths. Preserve Douyin CDP and TikTok cookie selection for verified hostnames.
 4. **Performance recommended posting time:** use verified `PublicationRecord.published_at`, never `GeneratedVideo.created_at`; require actual 1–24h metric snapshots, normalize first-day views by elapsed hours, require >=3 qualified samples, and label confidence heuristic.
-5. **Download-source deletion:** block if any pending/running/review-paused Job references the source id or file path; take a SQLite `BEGIN IMMEDIATE` before checking and removing source. This is a conservative active-job guard, **not** a cross-filesystem/SQLite atomic transaction.
+5. **Download-source deletion:** block if any pending/running/review-paused Job references the source id or file path; take a SQLite `BEGIN IMMEDIATE` before checking and removing source. Preserve media files referenced by other DownloadedVideo or GeneratedVideo rows (including sidecars). This is a conservative guard, **not** a cross-filesystem/SQLite atomic transaction.
 6. **Frontend test discovery:** run nested Node `*.test.js` files as well as root ones.
 7. **QA evidence honesty:** historical metadata-only video smoke cannot mark localization `PASS` or claim a secondary voice was tested.
 8. **Agent documentation:** remove stale hardcoded implementation branch.
