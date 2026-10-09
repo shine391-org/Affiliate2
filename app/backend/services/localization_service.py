@@ -3249,7 +3249,6 @@ ITEMS:
         retried = await retry_on_invalid("id_mismatch")
         return retried if retried is not None else record_invalid("id_mismatch")
 
-    current_text = chunk_text(plan, chunk)
     candidate_text = " ".join(mapped[item["id"]] for item in items)
     if all(mapped[item["id"]] == item["current"] for item in items):
         if state is not None:
