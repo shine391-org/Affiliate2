@@ -145,3 +145,32 @@ async def test_tool_success_preserves_qc_failed_job_completion_label(
     assert steps == [(
         "success", "Rendered · QC FAILED (not publishable)", "FAILED",
     )]
+
+
+@pytest.mark.asyncio
+async def test_agent_download_rejects_private_url_before_ai_correction(monkeypatch):
+    from backend.core import task_runner
+    from backend.services import ytdlp_service
+
+    calls = []
+    async def download_video(**_kwargs):
+        calls.append("download")
+        raise AssertionError("must reject before invoking downloader")
+
+    monkeypatch.setattr(ytdlp_service, "download_video", download_video)
+    with pytest.raises(ValueError):
+        await task_runner._download_single_video_to_db(
+            "job", "http://127.0.0.1/admin", "bad", "local",
+        )
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_batch_download_rejects_non_string_url_without_job():
+    from backend.api import downloaded
+
+    with pytest.raises(HTTPException) as exc:
+        await downloaded.batch_download_from_urls({
+            "urls": [{"url": 123}], "analyze": False,
+        })
+    assert exc.value.status_code == 400
