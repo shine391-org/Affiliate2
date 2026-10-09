@@ -35,7 +35,7 @@ def _detect_platform(url: str) -> str:
 
     try:
         host = (urlsplit(url).hostname or "").lower().rstrip(".")
-    except (TypeError, ValueError):
+    except (AttributeError, TypeError, ValueError):
         return "unknown"
     if not host:
         return ""
