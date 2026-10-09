@@ -1,5 +1,7 @@
 # PROJECT_STATUS.md
 
+> **ACTIVE 2026-10-09:** The integration and acceptance gates for `feat/localization-fast-mode` are tracked in **[docs/ACTIVE_WORK_DOD.md](docs/ACTIVE_WORK_DOD.md)**. Cross-flow fixes were integrated by PR #20; post-merge tests and real Edge TTS → final-video acceptance remain **BLOCKED / not yet verified**. The historical phase summaries below do not override this active release gate.
+
 ## Overall status: PHASE G MERGED TO MASTER — FINAL CLOSEOUT HARDENING
 
 Phase A and Phase B are complete and merged to `master`.
