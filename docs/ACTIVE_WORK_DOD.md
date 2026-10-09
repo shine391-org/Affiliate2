@@ -34,6 +34,28 @@
 
 **Do not run all tests or begin another broad audit** unless a failing focused regression shows a shared dependency outside these scopes.
 
+## 2A. Six product-quality contracts — PRIMARY PRODUCT DoD
+
+**Scope:** These six obligations take precedence over descriptions such as "tests passed", "fix implemented", "chunk fit", "timing review", or "real video rendered". The T0–T5 timing/semantic gates and TIM-01…TIM-05 issue tickets below are the **engineering implementation** of these six obligations, not a substitute for them. A genuine external TTS failure (G1) is a separate infrastructure blocker, not proof of correctness for any obligation.
+
+| Product case | What code can / cannot solve | Current assessment (2026-10-09, static HEAD review only) | Concrete DoD |
+| --- | --- | --- | --- |
+| **P-Q1: Wrong sentence split / context loss** | Most deterministic splitting can be corrected in `semantic_segmentation.normalize_semantic_cues`, `refine_semantic_cues_with_ai`, `dubbing_planner.build_plan`; preserve real word boundaries, speaker/voice changes and source punctuation. ASR word errors need source/audio evidence. | **IMPLEMENTED, UNVERIFIED E2E**: word-ID-only semantic grouping, hard-speaker boundaries, strong-end regex, continuation cap/orphan rescue exist; splitting can still sound unnatural on live voice. | Reproduce live wrong-split examples; words/IDs one-to-one with source; no speaker crossing, no lost fragment/negation/question particle; deterministic fixture and real-source review (T0/T4/T5). |
+| **P-Q2: Wrong negation, number, name, relationship** | Large portion addressable with contextual C6 guard and *re-translate only rejected IDs*; fuzzy idioms, pronouns and implicit context require human/semantic review. Avoid falsely blocking correct Vietnamese. | **PARTIAL / NOT PROVEN**: `_translation_guard_checks`, `_translation_candidates`, `_translate_batch` targeted semantic repair and name dictionary exist; tests include context fixtures. Not a proof all mistranslations are caught. | Source→Vietnamese spot check and mutation fixtures for negation including idioms, digits/units/ages, names, subjects/objects, questions and answer particles; rejected cues are repaired within cap or explicitly fail/review; no global guard weakening or sibling retranslate (T0/T5). |
+| **P-Q3: AI makes meaning-changing shorter rewrite** | Reject candidate by semantic invariants; retain last approved C6/C7; audio must also be **measured faster**, not just fewer words. Semantic subtleties can still need listening/review. | **IMPLEMENTED, TECHNICAL GAPS OPEN**: `check_rewrite_meaning`, `rewrite_measured_not_faster` and candidate WAV measurement exist; optional candidate-TTS failure/promotion atomicity risks TIM-01/TIM-02 remain. | Valid shorthand accepted only if meaning guard passes and real speech gets shorter. Wrong meaning, slower TTS, provider failure or canceled trial => unchanged last-good audio + C6 caption + current accepted audit; no truncated meaning (T1/T2). |
+| **P-Q4: TTS longer than source window** | Use actual silence budget, measured rewrite, bounded atempo, bounded fallback retime; solve only if a feasible schedule exists. | **IMPLEMENTED ALGORITHM, NOT VERIFIED 5–10 MIN VIDEO**: `allocate_silence`, `fit_timeline`, postfit probes and QC overflow tiers exist. Multi-cue onsets may still be estimated (TIM-03). | Measured raw and fitted audio, no overlap/cut, normal <= speed cap, emergency => review, hard overflow => fail; cue-local cadence evidence where needed, no silent success (T3/T4/T5). |
+| **P-Q5: 200ms source vs 2s Vietnamese** | **Sometimes unsatisfiable** inside a fixed timeline. Can recover only with genuine silence, safe rewriting or explicitly authorized image retime. Never speed x10, delete words, falsify subtitle timing, or claim auto-fit. | **INTENTIONAL LIMITATION, MUST FAIL HONESTLY**: existing max-speed/retime/soft/hard reporting; no general automated guarantee. | Controlled impossible-window fixture remains marked `FAILED` or `NEEDS_REVIEW` per documented bounded policy, with original and needed milliseconds, proposed slowdown and human resolution. No overflow hidden by QA (T3/T5). |
+| **P-Q6: Unnatural voice, mispronunciation, prosody** | Some improvements via punctuation, phrase grouping, speaker/voice binding, pronunciation normalization and provider selection. **Cannot fully guarantee by rules**; requires real audio and the voice/provider actually working. | **PARTIAL, PROVIDER BLOCKED**: continuation handling, speaker mapping, QC preview/voice warnings exist. Edge `NoAudioReceived` still prevents the current real acceptance. | Listen to >=20 representative source/target cues incl. question, short answer, speaker turn and Chinese names; confirm tone/emphasis/natural breaks; wrong audible speech => targeted repair or explicit `NEEDS_REVIEW`, never automatic quality PASS. Validate actual selected Vietnamese TTS first (G1/G2/T5). |
+
+### Non-negotiable closure order / no new phase
+
+1. **Code gate**: Reproduce and resolve only TIM-01 to TIM-04 as needed; run existing C6 source/context/guard and semantic-segmentation regressions on merged head, plus C7 cadence/fit/regeneration/resume regressions. Add only concrete missing failing cases from P-Q1/P-Q2; no speculative multi-file refactor.
+2. **TTS gate**: Direct out-of-pipeline sample from actual configured voices and provider, then resume the failed chunk or explicit rebind. Avoid changing C6 when only TTS fails.
+3. **Product gate**: ONE actual 5–10 min video + source-meaning review + cue-level measured timing/QC + voice listening and Library artifact. Record individual **P-Q1…P-Q6 PASS / NEEDS_REVIEW / BLOCKED** with sampled errors and actual evidence; `NEEDS_REVIEW` is not unconditional approval to publish.
+4. **Stop**: If provider no-audio blocks E2E, report the blocking external dependency and completed code-gate evidence. If meaning/timing is inherently infeasible, flag it; do not spin endless rewrites/tests.
+
+---
+
 ## 3. REOPENED: source sentences and timing — code review on integrated HEAD
 
 **Review basis:** static reading of `localization_service.py`, `dubbing_planner.py`, `dubbing_cadence.py`, `semantic_segmentation.py`, `localization_qc_service.py` and related tests on integrated head `5a6ae4e`. The findings below are **not** a claim that pytest or real-media QA ran.
@@ -105,7 +127,7 @@ Run targeted Ruff/compile and `git diff --check`. Test only **after** updating l
 
 ## 6. Final handoff format / stop conditions
 
-One final report only, with: **HEAD + remote match**, **what changed**, **focused test counts/errors**, **direct Edge CLI evidence**, **real chunk 23 outcome**, **5–10 min E2E + QC + Library**, **G0–G4 plus T0–T5 PASS/BLOCKED**, **single next root-cause action**.
+One final report only, with: **HEAD + remote match**, **what changed**, **focused test counts/errors**, **direct Edge CLI evidence**, **real chunk 23 outcome**, **5–10 min E2E + QC + Library**, **G0–G4, P-Q1–P-Q6 and T0–T5 PASS/NEEDS_REVIEW/BLOCKED**, **single next root-cause action**.
 
 - **Code gate passes** only when combined changes pass focused tests/build and review.
 - **Product gate passes** only on an actual output video, not unit mocks or pre-existing WAVs.
