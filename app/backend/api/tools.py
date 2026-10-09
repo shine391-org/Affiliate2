@@ -106,16 +106,27 @@ async def save_upload(
     ext = Path(file.filename).suffix.lower()
     if ext not in allowed_exts:
         raise HTTPException(400, f"Unsupported format {ext}. Use: {sorted(allowed_exts)}")
-    raw = await file.read()
-    if not raw:
-        raise HTTPException(400, "Uploaded file is empty")
-    if len(raw) > max_bytes:
-        raise HTTPException(413, f"File too large (max {max_bytes // 1024 // 1024} MB)")
-
+    # Stream, cap during receive, and only publish a complete upload.
+    # A 1 GB file must never be materialized as a single bytes allocation.
     tools_in_dir().mkdir(parents=True, exist_ok=True)
     target = tools_in_dir() / f"{job_id}{suffix}{ext}"
-    target.write_bytes(raw)
-    return target
+    pending = tools_in_dir() / f".{job_id}{suffix}.{uuid4().hex}.partial"
+    total = 0
+    try:
+        with pending.open("wb") as out:
+            while chunk := await file.read(1 << 20):
+                total += len(chunk)
+                if total > max_bytes:
+                    raise HTTPException(
+                        413, f"File too large (max {max_bytes // 1024 // 1024} MB)"
+                    )
+                out.write(chunk)
+        if not total:
+            raise HTTPException(400, "Uploaded file is empty")
+        pending.replace(target)
+        return target
+    finally:
+        pending.unlink(missing_ok=True)
 
 
 def tool_out_path(job_id: str, ext: str = ".mp4") -> Path:
