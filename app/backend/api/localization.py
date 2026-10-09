@@ -2031,6 +2031,10 @@ async def localization_batch(
     from backend.database import AsyncSessionLocal
     from backend.models.job import Job
 
+    # Direct Python callers (including recovery tests) receive FastAPI's Form
+    # descriptor when the argument is omitted. Only an actual boolean True
+    # enables self-repair; the public HTTP binder supplies that boolean.
+    auto_repair_enabled = auto_repair is True
     batch_id = uuid4().hex
     jobs: list[dict] = []
     specs: list[dict] = []
@@ -2049,7 +2053,7 @@ async def localization_batch(
                 "target_aspect": target_aspect,
                 "profile_id": profile_id,
                 "batch": True,
-                "auto_repair": bool(auto_repair),
+                "auto_repair": auto_repair_enabled,
                 "cleanup_input": True,
                 "batch_id": batch_id,
                 "batch_index": len(jobs),
@@ -2068,7 +2072,7 @@ async def localization_batch(
                 "batch_id": batch_id,
                 "batch_index": len(jobs),
                 "batch": True,
-                "auto_repair": bool(auto_repair),
+                "auto_repair": auto_repair_enabled,
                 "cleanup_input": True,
             }, expect_batch_admitted=False)
             specs.append({
@@ -2081,7 +2085,7 @@ async def localization_batch(
                 "emoji_style": emoji_style,
                 "target_aspect": target_aspect,
                 "profile_id": profile_id,
-                "auto_repair": bool(auto_repair),
+                "auto_repair": auto_repair_enabled,
                 "cleanup_input": True,
             })
             jobs.append({"job_id": job.id, "filename": file.filename})
