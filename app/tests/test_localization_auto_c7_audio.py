@@ -138,3 +138,63 @@ async def test_guarded_draft_rewrite_preserves_current_audit_qc_persistence_and_
         assert resumed.transcript.segments[0].translation_status == 'draft'
     assert calls == [before, after], 'No new provider audio is needed for matching accepted text'
     assert tx.metadata['translation_auto_drafts']['d']['target_text'] == before
+
+
+@pytest.mark.asyncio
+async def test_slow_rewrite_preserves_last_good_audio_and_approved_text(tmp_path, monkeypatch):
+    """AI-shorter words do not imply shorter TTS; reject after actual audio probe."""
+    import json
+    from tests.test_localization_auto_draft_integration import video
+    from backend.services.localization_service import LocalizationTimingError
+
+    before = 'cộng thêm 2 loại cà phê có hương vị khác nhau'
+    after = 'thêm 2 loại cà phê khác vị'
+    calls = []
+
+    async def generate(text, *, output_path, **kwargs):
+        calls.append(text)
+        duration = 3500 if text == before else 4000
+        audio(Path(output_path), duration)
+        return duration
+
+    class AI:
+        max_retries = 0
+        async def chat(self, **kwargs):
+            return json.dumps([{'id': 's', 'text': after}], ensure_ascii=False)
+
+    monkeypatch.setattr(svc, '_generate_tts_chunk', generate)
+    monkeypatch.setattr(svc, '_tts_config', lambda *_: runtime())
+    monkeypatch.setattr(svc, '_profile_ai_route_clients_compat', lambda *_: [AI()])
+    source = video.__wrapped__(tmp_path)
+    seg = LocalizationSegment(
+        id='s', source_text='加上兩種不同口味的咖啡',
+        translated_text=before, source_start_ms=0, source_end_ms=2000,
+        translation_status='success',
+        overrides={'target_start_ms': 0, 'target_end_ms': 2000},
+    )
+    tx = LocalizationTranscript(language='zh', segments=[seg])
+    profile = LocalizationProfile(
+        id='measured-reject', name='Measured reject',
+        translation_automation='auto', dub_rewrite_attempts=1,
+        video_retime_mode='off', diarization_mode='off',
+    )
+    work = tmp_path/'work'
+    with pytest.raises(LocalizationTimingError):
+        await svc.synthesize_timed_dub(
+            tx, source_media=source, target_language='Vietnamese',
+            profile=profile, user_settings=object(), work_dir=work,
+        )
+
+    # The candidate is measured, but cannot replace better audio or C6 text.
+    assert calls == [before, after]
+    assert tx.segments[0].translated_text == before
+    assert abs(await svc._audio_duration_ms(work/'chunk_0001.wav') - 3500) <= 15
+    assert not list(work.glob('chunk_0001.rewrite-*'))
+    state = json.loads((work/'dubbing_state.json').read_text(encoding='utf-8'))
+    assert not state.get('accepted_text')
+    assert state['rewrite_count'] == 0
+    rejected = [row for row in state['rewrite_audit']
+                if row.get('status') == 'rejected_measured']
+    assert len(rejected) == 1
+    assert rejected[0]['before'] == before and rejected[0]['after'] == after
+    assert rejected[0]['duration_after_ms'] == 4000
