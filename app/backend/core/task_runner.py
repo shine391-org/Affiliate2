@@ -411,6 +411,10 @@ async def _download_single_video_to_db(job_id: str, url: str, title: str, user_i
     from datetime import datetime
     from pathlib import Path
 
+    # Reject unsafe agent/scout-supplied targets before attempting any
+    # AI-based URL correction; a private URL is not a broken video link.
+    from backend.services.download_url_guard import validate_download_url
+    validate_download_url(url)
     video_id = str(uuid4())[:12]
 
     try:
@@ -426,6 +430,10 @@ async def _download_single_video_to_db(job_id: str, url: str, title: str, user_i
             # the caption search keyed on the exact aweme id.
             title_hint=title or "",
         )
+    except ValueError:
+        # DNS/private-target preflight is a policy rejection, not a
+        # recoverable URL typo to hand to an AI URL rewriter.
+        raise
     except Exception as first_error:
         # A Douyin URL carries the requested aweme identity. Rewriting it with
         # an LLM can silently turn a controlled failure into the wrong video,
