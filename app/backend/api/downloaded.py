@@ -300,18 +300,37 @@ async def delete_downloaded(video_id: str):
                     detail=f"Source is in use by active job {job.id}; cancel/finish it before deleting",
                 )
 
-        # Delete files from disk
-        for path_str in [video.video_path, video.audio_path]:
-            if path_str:
-                p = Path(path_str)
-                if p.exists():
-                    p.unlink()
+        # Another source or generated artifact can legitimately point at the
+        # same disk path (historical/imported rows). Deleting ONE row must not
+        # delete the other owner's media. Compare resolved paths conservatively.
+        from backend.models.generated_video import GeneratedVideo
+        source_refs = (await db.execute(select(
+            DownloadedVideo.video_path, DownloadedVideo.audio_path
+        ).where(DownloadedVideo.id != video_id))).all()
+        generated_refs = (await db.execute(select(
+            GeneratedVideo.video_path, GeneratedVideo.audio_path,
+            GeneratedVideo.video_path_landscape,
+        ))).all()
+        protected_paths = {
+            str(Path(p).resolve())
+            for record in [*source_refs, *generated_refs]
+            for p in record if p
+        }
+        shared_video_path = bool(
+            video.video_path and str(Path(video.video_path).resolve()) in protected_paths
+        )
+        for path_str in {video.video_path, video.audio_path} - {None, ""}:
+            p = Path(path_str)
+            if str(p.resolve()) in protected_paths:
+                continue
+            if p.exists():
+                p.unlink()
 
         # Sidecar subtitles kept by the `subtitles: "file"` download option
         # live next to the video (`<stem>.<lang>.srt/.vtt`) with no DB column
         # of their own — sweep them with the row or they orphan forever: a
         # delete must cover every file the row owns.
-        if video.video_path:
+        if video.video_path and not shared_video_path:
             vp = Path(video.video_path)
             for ext in ("srt", "vtt"):
                 for f in vp.parent.glob(f"{vp.stem}.*.{ext}"):
