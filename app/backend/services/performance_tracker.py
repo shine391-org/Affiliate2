@@ -377,12 +377,13 @@ async def recommend_posting_time(
             hour_performance.setdefault(upload_hour, []).append(early_views_per_hour)
             day_performance.setdefault(upload_day, []).append(early_views_per_hour)
 
-    if not hour_performance:
+    qualified_count = sum(len(values) for values in hour_performance.values())
+    if qualified_count < 3:
         return {
             "recommendation": None,
             "confidence": 0,
-            "sample_size": len(platform_videos),
-            "message": "Not enough verified publication times with 1–24h view snapshots.",
+            "sample_size": qualified_count,
+            "message": "Need at least 3 verified publication timestamps with comparable 1–24h view snapshots.",
         }
 
     # Find best hour
