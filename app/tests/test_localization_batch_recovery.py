@@ -712,3 +712,25 @@ async def test_recovery_all_siblings_pending_still_works(tmp_path, monkeypatch):
         "job-allp-0", "job-allp-1", "job-allp-2"
     }
 
+
+
+@pytest.mark.asyncio
+async def test_batch_auto_repair_and_cleanup_are_durable_at_admission(
+    monkeypatch, tmp_path,
+):
+    dispatched = []
+    _patch_batch(monkeypatch, dispatched=dispatched, tmp_path=tmp_path)
+    result = await api.localization_batch(
+        files=[_upload("clip.mp4")], target_language="vi",
+        mode="full_dub", voice_id="", caption_style="viral",
+        emoji_style="moderate", target_aspect=None, profile_id=None,
+        auto_repair=True,
+    )
+    rows = await _rows()
+    assert len(rows) == 1
+    payload = json.loads(next(iter(rows.values())).input_json)
+    assert payload["auto_repair"] is True
+    assert payload["cleanup_input"] is True
+    assert dispatched[0][0]["auto_repair"] is True
+    assert dispatched[0][0]["cleanup_input"] is True
+    assert dispatched[0][0]["job_id"] == result["jobs"][0]["job_id"]
