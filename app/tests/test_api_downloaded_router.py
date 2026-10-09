@@ -528,6 +528,33 @@ def test_deleting_source_in_active_localization_job_is_blocked(client, tmp_path)
     asyncio.run(clean())
 
 
+def test_deleting_one_of_two_source_rows_does_not_unlink_shared_media(client, tmp_path):
+    """Two legitimate DB owners may share a historical media path."""
+    from backend.database import AsyncSessionLocal
+    from backend.models.downloaded_video import DownloadedVideo
+
+    shared = tmp_path / "shared.mp4"
+    shared.write_bytes(b"must survive first deletion")
+
+    async def seed():
+        async with AsyncSessionLocal() as db:
+            rows = [
+                DownloadedVideo(user_id="local", platform="youtube",
+                                title=f"shared-{i}", video_path=str(shared))
+                for i in range(2)
+            ]
+            db.add_all(rows)
+            await db.commit()
+            return [row.id for row in rows]
+
+    one, two = asyncio.run(seed())
+    assert client.delete(f"/api/downloaded/{one}").status_code == 200
+    assert shared.read_bytes() == b"must survive first deletion"
+    assert client.get(f"/api/downloaded/{two}").status_code == 200
+    assert client.delete(f"/api/downloaded/{two}").status_code == 200
+    assert not shared.exists()
+
+
 # ── the AI-backed routes ────────────────────────────────────────────────────
 
 @pytest.fixture()
