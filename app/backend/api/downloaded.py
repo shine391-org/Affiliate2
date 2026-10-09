@@ -455,22 +455,21 @@ async def import_local_video(
     # Stream upload to disk (max 2GB)
     MAX_UPLOAD_SIZE = 2 * 1024 * 1024 * 1024
     file_size = 0
-    with open(dest_path, "wb") as f:
-        while chunk := await file.read(1024 * 1024):  # 1MB chunks
-            file_size += len(chunk)
-            if file_size > MAX_UPLOAD_SIZE:
-                f.close()
-                dest_path.unlink(missing_ok=True)
-                raise HTTPException(413, "File too large. Maximum upload size is 2GB.")
-            f.write(chunk)
-
-    # An empty upload is not an import. The size was capped above but never
-    # floored, so a zero-byte file became a Library row pointing at zero bytes
-    # — it would fail later in whatever tool the user pointed at it, with no
-    # hint that the import itself was the problem.
-    if file_size == 0:
-        dest_path.unlink(missing_ok=True)
-        raise HTTPException(400, "The uploaded file is empty.")
+    pending_path = dest_path.with_suffix(dest_path.suffix + ".partial")
+    try:
+        with open(pending_path, "wb") as f:
+            while chunk := await file.read(1024 * 1024):  # 1MB chunks
+                file_size += len(chunk)
+                if file_size > MAX_UPLOAD_SIZE:
+                    raise HTTPException(413, "File too large. Maximum upload size is 2GB.")
+                f.write(chunk)
+        if file_size == 0:
+            raise HTTPException(400, "The uploaded file is empty.")
+        # Only a complete upload may replace the destination. The finally also
+        # handles disconnects and cancellation without deleting a prior file.
+        pending_path.replace(dest_path)
+    finally:
+        pending_path.unlink(missing_ok=True)
 
     file_size_mb = round(file_size / (1024 * 1024), 2)
     display_title = title or Path(file.filename).stem if file.filename else "Imported video"

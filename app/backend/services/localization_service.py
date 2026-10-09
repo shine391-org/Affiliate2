@@ -3351,9 +3351,10 @@ def _audio_peak_db_sync(path: Path) -> float:
 
 
 async def _measure_fitted_audio(path: Path, raw_duration_ms: int, speed_factor: float) -> tuple[int, float]:
-    # No transform: same content-addressed raw bytes retain their authoritative
-    # synthesis duration. Transformed bytes MUST be independently probed.
-    duration = raw_duration_ms if abs(speed_factor - 1.0) <= 0.001 else await _audio_duration_ms(path)
+    # Natural speed does not imply unchanged bytes: cadence still trims,
+    # delays and mixes PCM. Every transformed artifact must be probed.
+    # Probe raw artifacts too rather than infer byte identity from a rate.
+    duration = await _audio_duration_ms(path)
     peak = await asyncio.to_thread(_audio_peak_db_sync, path)
     return duration, peak
 

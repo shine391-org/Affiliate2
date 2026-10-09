@@ -15,6 +15,10 @@ from backend.services import download_url_guard as guard
     "https://10.1.2.3/movie",
     "http://169.254.169.254/latest/meta-data",
     "http://[::1]/",
+    "http://[::ffff:127.0.0.1]/",
+    "http://[::ffff:10.0.0.1]/",
+    "http://192.0.2.1/",
+    "http://[2001:db8::1]/",
     "http://localhost/video",
     "https://admin:secret@cdn.example.com/stream",
     "https://cdn.example.com:8080/video",
@@ -30,6 +34,35 @@ def test_download_guard_allows_public_video_host_without_network():
     assert guard.validate_download_url(
         "https://www.douyin.com/video/123"
     ) == "https://www.douyin.com/video/123"
+
+
+@pytest.mark.parametrize("address", [
+    "224.0.0.1", "239.255.255.250", "ff02::1", "::ffff:224.0.0.1",
+])
+def test_download_guard_rejects_multicast_literals(address):
+    host = f"[{address}]" if ":" in address else address
+    with pytest.raises(ValueError):
+        guard.validate_download_url(f"http://{host}/video")
+
+
+@pytest.mark.parametrize("address", [
+    "224.0.0.1", "239.255.255.250", "ff02::1", "::ffff:224.0.0.1",
+])
+def test_download_guard_rejects_mixed_public_multicast_dns(monkeypatch, address):
+    monkeypatch.setattr(guard.socket, "getaddrinfo", lambda *_args, **_kw: [
+        (None, None, None, None, ("8.8.8.8", 0)),
+        (None, None, None, None, (address, 0)),
+    ])
+    with pytest.raises(ValueError):
+        guard.validate_public_download_target("https://cdn.example.com/video")
+
+
+@pytest.mark.parametrize("url", [
+    "https://www.tiktok.com/@creator/video/123",
+    "https://[::ffff:8.8.8.8]/video",
+])
+def test_download_guard_keeps_public_targets(url):
+    assert guard.validate_download_url(url) == url
 
 
 def test_download_guard_dns_answer_must_all_be_global(monkeypatch):

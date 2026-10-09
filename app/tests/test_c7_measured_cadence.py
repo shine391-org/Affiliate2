@@ -10,6 +10,7 @@ import pytest
 from backend.core.localization import LocalizationProfile,LocalizationSegment,LocalizationTranscript
 from backend.services import localization_service as svc
 from backend.services.tts_service import TTSProvider
+from backend.services.video_utils import probe_duration as real_probe_duration
 
 
 def energy(path,start_ms,end_ms):
@@ -26,7 +27,8 @@ def test_measured_word_cadence_preserves_source_pause_without_resynthesizing_cue
         for i,text in enumerate(['Xin chào','Cảm ơn'])])
     monkeypatch.setattr(svc,'_profile_ai_route_clients_compat',lambda *_: [])
     monkeypatch.setattr(svc,'_tts_config',lambda *_:svc.TTSRuntimeConfig(TTSProvider.EDGE_TTS,'vi-VN-HoaiMyNeural','',None,None,None))
-    monkeypatch.setattr('backend.services.video_utils.probe_duration',lambda *_:10.0)
+    monkeypatch.setattr('backend.services.video_utils.probe_duration',
+        lambda path, *args: 10.0 if path == tmp_path / 'source.mp4' else real_probe_duration(path, *args))
     calls=[]
     async def generate(text,*,output_path,**kwargs):
         calls.append(text)
@@ -88,7 +90,8 @@ async def test_postfit_whole_chunk_rescue_invalidates_measured_cue_provenance(tm
     monkeypatch.setattr(svc, '_profile_ai_route_clients_compat', lambda *_: [])
     monkeypatch.setattr(svc, '_tts_config', lambda *_: svc.TTSRuntimeConfig(
         TTSProvider.EDGE_TTS, 'vi-VN-HoaiMyNeural', '', None, None, None))
-    monkeypatch.setattr('backend.services.video_utils.probe_duration', lambda *_: 1.6)
+    monkeypatch.setattr('backend.services.video_utils.probe_duration',
+        lambda path, *args: 1.6 if path == tmp_path / 'source.mp4' else real_probe_duration(path, *args))
 
     async def generate(text, *, output_path, **kwargs):
         rate = 16000
@@ -117,10 +120,16 @@ async def test_postfit_whole_chunk_rescue_invalidates_measured_cue_provenance(tm
         cadence_calls.append(destination)
         # Inject only a tiny processing overrun. The canonical post-fit rescue
         # must replace this with a whole-chunk fit and downgrade cue provenance.
-        raw = destination.with_suffix('.fault.wav')
-        destination.replace(raw)
-        svc._fit_chunk_audio_sync(raw, destination, 1600 / 1603)
-        raw.unlink(missing_ok=True)
+        # atempo on this short signal may round back to 1600ms, leaving the
+        # rescue branch untested. Inject exactly 3ms of PCM instead.
+        with wave.open(str(destination), 'rb') as audio:
+            params = audio.getparams()
+            frames = audio.readframes(audio.getnframes())
+        frame_size = params.nchannels * params.sampwidth
+        frames += frames[-frame_size:] * round(params.framerate * 0.003)
+        with wave.open(str(destination), 'wb') as audio:
+            audio.setparams(params)
+            audio.writeframes(frames)
         return destination
 
     monkeypatch.setattr(svc, '_generate_tts_chunk', generate)

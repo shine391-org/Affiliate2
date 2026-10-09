@@ -42,7 +42,7 @@ def validate_download_url(url: str) -> str:
         if "." not in host or host.startswith(".") or ".." in host:
             raise ValueError("Download URL must have a public hostname") from None
     else:
-        if not ip.is_global:
+        if not ip.is_global or ip.is_multicast:
             raise ValueError("Download URL cannot target a private/reserved IP")
     return url
 
@@ -66,6 +66,6 @@ def validate_public_download_target(url: str) -> str:
                 ip = ipaddress.ip_address(answer[4][0].split("%", 1)[0])
             except (ValueError, IndexError, TypeError) as exc:
                 raise ValueError("Download host has invalid DNS response") from exc
-            if not ip.is_global:
+            if not ip.is_global or ip.is_multicast:
                 raise ValueError("Download host resolves to a private/reserved IP")
     return url

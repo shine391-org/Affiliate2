@@ -31,6 +31,17 @@ def runtime():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('duration', [600, 1603, 2000])
+@pytest.mark.parametrize('speed', [1.0, 1.0005])
+async def test_transformed_audio_is_probed_even_at_natural_speed(tmp_path, duration, speed):
+    """Rate alone cannot prove cadence trim/mix/delay left raw bytes intact."""
+    path = audio(tmp_path / 'cadence.wav', duration)
+    measured, peak = await svc._measure_fitted_audio(path, 1600, speed)
+    assert measured == duration
+    assert math.isfinite(peak)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('policy',['strict','auto'])
 async def test_auto_postfit_can_correct_tiny_delta_at_regular_speed_ceiling(tmp_path,monkeypatch,policy):
     async def generate(text,*,output_path,**kwargs):
@@ -141,7 +152,7 @@ async def test_mixed_measured_and_allocated_cues_report_mixed_basis(tmp_path,mon
             source_start_ms=9000,source_end_ms=12000,translation_status='success')])
     monkeypatch.setattr(svc,'_profile_ai_route_clients_compat',lambda *_: (_ for _ in ()).throw(RuntimeError('no AI')))
     monkeypatch.setattr(svc,'_tts_config',lambda *_:runtime())
-    monkeypatch.setattr('backend.services.video_utils.probe_duration',lambda *_:13.0)
+    monkeypatch.setattr('backend.services.video_utils.probe_duration',source_probe(13.0))
     async def generate(text,*,output_path,**kwargs):
         if 'Xin' in text:
             audio(output_path,1600)
