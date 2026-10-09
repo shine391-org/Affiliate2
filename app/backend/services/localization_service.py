@@ -2617,6 +2617,27 @@ def _concat_tts_parts_sync(parts: list[Path], destination: Path) -> None:
     cmd.extend(["-filter_complex", f"{inputs}concat=n={len(parts)}:v=0:a=1[out]",
                 "-map", "[out]", "-ac", "1", "-ar", "24000", "-c:a", "pcm_s16le", str(destination)])
     subprocess.run(cmd, check=True, capture_output=True, timeout=30)
+    # Probe metadata alone cannot certify the complete concatenated stream.
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-xerror",
+                    "-i", str(destination), "-f", "null", "-"],
+                   check=True, capture_output=True, timeout=30)
+
+
+def _edge_zero_audio_transport_failure(exc: Exception, path: Path) -> bool:
+    """Only explicit no-audio or a reset before Edge's streaming writer wrote bytes."""
+    cause = exc
+    while cause is not None:
+        if type(cause).__name__ == "NoAudioReceived":
+            return True
+        if isinstance(cause, ConnectionResetError):
+            try:
+                return path.stat().st_size == 0
+            except FileNotFoundError:
+                return True
+            except OSError:
+                return False
+        cause = cause.__cause__
+    return False
 
 
 async def _generate_tts_chunk(
@@ -2647,6 +2668,7 @@ async def _generate_tts_chunk(
     if timeout <= 0:
         raise ValueError("TTS request timeout must be positive")
     attempts_made = 0
+    zero_audio_transport_failure = False
     for attempt in range(max(1, attempts)):
         await _cancel_checkpoint(cancel_check, "TTS dispatch")
         remaining = deadline - asyncio.get_running_loop().time()
@@ -2663,6 +2685,7 @@ async def _generate_tts_chunk(
             f"{uuid.uuid4().hex[:8]}{output_path.suffix}")
         attempt_path.unlink(missing_ok=True)
         accepted = False
+        zero_audio_transport_failure = False
         try:
             await _await_provider_operation(generate_tts(
                 text,
@@ -2704,6 +2727,8 @@ async def _generate_tts_chunk(
             if isinstance(exc, JobCancelledError):
                 raise
             last = exc
+            # Inspect before abandoned-attempt cleanup can erase partial audio.
+            zero_audio_transport_failure = _edge_zero_audio_transport_failure(exc, attempt_path)
             if not retryable_tts_error(exc):
                 raise
         finally:
@@ -2725,15 +2750,10 @@ async def _generate_tts_chunk(
                 # instead of a bare TimeoutError.
                 last = TimeoutError("TTS chunk deadline exhausted during retry backoff")
                 break
-    cause = last
-    no_audio = False
-    while cause is not None:
-        if type(cause).__name__ == "NoAudioReceived":
-            no_audio = True
-            break
-        cause = cause.__cause__
     middle = text.rfind(" ", 0, len(text) // 2 + 1)
-    if (_allow_edge_split and profile.translation_automation == "auto" and no_audio
+    # Transport recovery does not change or approve translation. Strict and
+    # Auto share this exact verbatim, same-provider/voice/rate recovery path.
+    if (_allow_edge_split and zero_audio_transport_failure
             and getattr(runtime.provider, "value", str(runtime.provider)) == "edge_tts"
             and 0 < middle < len(text)-1
             and deadline - asyncio.get_running_loop().time() > 30):
@@ -2756,6 +2776,9 @@ async def _generate_tts_chunk(
                         reference_language=reference_language, attempts=1,
                         request_timeout_s=min(timeout, (remaining-30)/2), cancel_check=cancel_check,
                         _allow_edge_split=False, _deadline_at=deadline)
+                    peak = await asyncio.to_thread(_audio_peak_db_sync, path)
+                    if not math.isfinite(peak):
+                        raise RuntimeError("TTS split part produced silent or invalid speech")
                     parts.append(path)
                 if deadline - asyncio.get_running_loop().time() <= 30:
                     raise TimeoutError("TTS chunk deadline exhausted before split concat")
@@ -2770,6 +2793,8 @@ async def _generate_tts_chunk(
                 if asyncio.get_running_loop().time() >= deadline:
                     raise TimeoutError("TTS chunk deadline exhausted before split publish")
                 joined.replace(output_path)
+                # Concatenation has no whole-text measured word-boundary receipt.
+                output_path.with_suffix(output_path.suffix + ".words.json").unlink(missing_ok=True)
                 if recovery_events is not None:
                     recovery_events.append({"reason": "tts_transport_split", "text": text,
                         "pieces": pieces, "voice": voice, "attempts_before_split": attempts_made,
@@ -3795,12 +3820,20 @@ async def synthesize_timed_dub(
             and _chunk_identity_matches(path, initial_identity)
         )
         is_target_chunk = not targeted_regeneration or chunk.id in regenerate_chunk_ids
-        if (reuse_raw and provider_value == "edge_tts" and len(chunk.item_indexes) > 1
+        transport_recovery = job_state.data.get("tts_recoveries", {}).get(str(chunk.id), {})
+        verified_transport_recovery = (
+            transport_recovery.get("reason") == "tts_transport_split"
+            and transport_recovery.get("identity") == initial_identity
+        )
+        if (reuse_raw and not verified_transport_recovery
+                and provider_value == "edge_tts" and len(chunk.item_indexes) > 1
                 and not targeted_regeneration and read_cue_spans(
                     path, [plan[i].spoken_text for i in chunk.item_indexes],
                     _chunk_persisted_duration_ms(path, initial_identity) or 0) is None):
             # Legacy caches contain no measured cue boundaries. Upgrade on a full
             # stage rerun, never regenerate a non-target neighbour on a retry.
+            # A verified split intentionally has no measured word boundaries;
+            # keep its valid raw audio and replay the human-review receipt.
             reuse_raw = False
         if targeted_regeneration and not is_target_chunk and not reuse_raw:
             raise RuntimeError(

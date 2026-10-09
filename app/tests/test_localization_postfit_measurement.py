@@ -206,8 +206,9 @@ async def test_cancellation_stops_tts_before_network_dispatch(tmp_path,monkeypat
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('policy',['strict','auto'])
 @pytest.mark.parametrize('partial_failure',[False,True])
-async def test_edge_noaudio_verbatim_split_is_bounded_atomic_and_measured(tmp_path,monkeypatch,partial_failure):
+async def test_edge_noaudio_verbatim_split_is_bounded_atomic_and_measured(tmp_path,monkeypatch,partial_failure,policy):
     from edge_tts.exceptions import NoAudioReceived
     from backend.core.exceptions import VoiceGenerationError
     text='xanh xanh dáng vẻ cô gái trẻ ấy Chúng tôi đến đài phát thanh truyền hình cũng học nhiếp ảnh Nhận đi, nhìn bên phải'
@@ -224,7 +225,7 @@ async def test_edge_noaudio_verbatim_split_is_bounded_atomic_and_measured(tmp_pa
     monkeypatch.setattr(svc.asyncio,'sleep',sleep)
     cfg=svc.TTSRuntimeConfig(provider=TTSProvider.EDGE_TTS,default_voice='vi-VN-HoaiMyNeural',api_key='',model=None,base_url=None,region=None)
     out=tmp_path/'raw.wav';events=[]
-    kwargs=dict(runtime=cfg,voice=cfg.default_voice,profile=LocalizationProfile(id='qa',name='qa',translation_automation='auto'),
+    kwargs=dict(runtime=cfg,voice=cfg.default_voice,profile=LocalizationProfile(id='qa',name='qa',translation_automation=policy),
         speaker_id=None,target_language='Vietnamese',output_path=out,recovery_events=events)
     if partial_failure:
         with pytest.raises(RuntimeError):await svc._generate_tts_chunk(text,**kwargs)
@@ -254,8 +255,8 @@ async def test_generic_empty_edge_failure_never_splits_or_omits(tmp_path,monkeyp
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('blocked_by',['strict','deadline'])
-async def test_edge_split_obeys_strict_policy_and_parent_deadline(tmp_path,monkeypatch,blocked_by):
+@pytest.mark.parametrize('policy',['strict','auto'])
+async def test_edge_split_obeys_parent_deadline(tmp_path,monkeypatch,policy):
     import asyncio
     from edge_tts.exceptions import NoAudioReceived
     from backend.core.exceptions import VoiceGenerationError
@@ -269,14 +270,15 @@ async def test_edge_split_obeys_strict_policy_and_parent_deadline(tmp_path,monke
     cfg=svc.TTSRuntimeConfig(provider=TTSProvider.EDGE_TTS,default_voice='qa',api_key='',model=None,base_url=None,region=None)
     with pytest.raises(RuntimeError,match='TTS chunk failed'):
         await svc._generate_tts_chunk('Lời dịch đầy đủ',runtime=cfg,voice='qa',
-            profile=LocalizationProfile(id='qa',name='qa',translation_automation='strict' if blocked_by=='strict' else 'auto'),
+            profile=LocalizationProfile(id='qa',name='qa',translation_automation=policy),
             speaker_id=None,target_language='Vietnamese',output_path=tmp_path/'raw.wav',
             _deadline_at=asyncio.get_running_loop().time()+20)
     assert len(calls)==3
 
 
 @pytest.mark.asyncio
-async def test_c7_transport_recovery_audit_survives_raw_reuse_and_requires_review(tmp_path,monkeypatch):
+@pytest.mark.parametrize('policy',['strict','auto'])
+async def test_c7_transport_recovery_audit_survives_raw_reuse_and_requires_review(tmp_path,monkeypatch,policy):
     import json
     from edge_tts.exceptions import NoAudioReceived
     from backend.core.exceptions import VoiceGenerationError
@@ -296,7 +298,7 @@ async def test_c7_transport_recovery_audit_survives_raw_reuse_and_requires_revie
     monkeypatch.setattr('backend.services.video_utils.probe_duration',source_probe(1.8))
     tx=LocalizationTranscript(segments=[LocalizationSegment(id='s1',source_text='原文',translated_text=text,
         source_start_ms=0,source_end_ms=1500,translation_status='success')])
-    profile=LocalizationProfile(id='qa',name='qa',translation_automation='auto',dub_rewrite_attempts=0,video_retime_mode='off',target_aspect='source')
+    profile=LocalizationProfile(id='qa',name='qa',translation_automation=policy,dub_rewrite_attempts=0,video_retime_mode='off',target_aspect='source')
     kwargs=dict(source_media=tmp_path/'source.mp4',target_language='Vietnamese',profile=profile,
         user_settings=object(),work_dir=tmp_path/'work')
     result=await svc.synthesize_timed_dub(tx,**kwargs)
@@ -317,3 +319,5 @@ async def test_c7_transport_recovery_audit_survives_raw_reuse_and_requires_revie
         profile=profile,timing_issues=resumed.issues,check_tts_quality=True)
     assert report.status=='NEEDS_REVIEW' and not report.failures,report.as_dict()
     assert any(x['code']=='tts_transport_split' for x in report.warnings)
+    from backend.services.localization_publish_service import _publishable_qc
+    assert not _publishable_qc({'qc_status':report.status,'qc_human_approved':False})
