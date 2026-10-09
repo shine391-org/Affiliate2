@@ -16,7 +16,8 @@ def has_cue_local_repair_evidence(segment, record) -> bool:
         and record.get('origin') == 'semantic_repair'
         and record.get('repair_attempted') is True
         and type(record.get('semantic_attempts')) is int
-        and record['semantic_attempts'] == 2
+        # Initial proposal + one repair + at most seven configured fallbacks.
+        and 2 <= record['semantic_attempts'] <= 9
         and isinstance(record.get('target_text'), str)
         and bool(record['target_text'].strip())
         and isinstance(issues, list) and bool(issues)
@@ -57,3 +58,4 @@ def validate_translation_omissions(transcript, profile) -> set[str]:
             or duration/total > limit+1e-9):
         raise ValueError('Translation omission budget exceeded; remaining speech required')
     return {s.id for s in omitted}
+

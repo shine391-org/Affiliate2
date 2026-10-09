@@ -323,6 +323,8 @@ def evaluate_localization_qc(
             "measured_cadence_overflow",
             "measured_cadence_postfit_invalid",
             "measured_cadence_postfit_fallback",
+            "multi_cue_unverified_timing",
+            "rewrite_tts_unavailable",
         }:
             # Preserve the exact cadence failure instead of collapsing it into a
             # generic segment_needs_review warning. Studio/batch operators need
@@ -532,3 +534,4 @@ def evaluate_localization_qc(
             "unresolved_overlap_count": len(overlaps),
         },
     )
+

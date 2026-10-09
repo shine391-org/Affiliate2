@@ -4,6 +4,21 @@
 
 > This is the authoritative current TODO/DoD for the localization + cross-flow integration. Older QA/audit reports are historical evidence, not instructions to restart an already-fixed item.
 
+## Engineering fixes — 2026-10-09 review closure
+
+The follow-up implementation fixes the reproduced shared-silence allocation defect,
+optional candidate-TTS recovery, bundle promotion rollback/invalidation, missing
+multi-cue cadence warning, and stale unmeasured-acceptance tests (TIM-01–TIM-04).
+It also adds bounded configured-route fallback for semantic rejections, local
+source context for C6, source/name revalidation for C7, and the reproduced
+predicate/difference guard cases. See [QA_LOCALIZATION_CLOSURE_20261009.md](QA_LOCALIZATION_CLOSURE_20261009.md).
+
+These code fixes do **not** close G1/G2 provider diagnosis or G3/T5 real-video
+acceptance. Generic semantic correctness, simultaneous-speaker mixing, local
+video retiming and independent target-audio alignment remain unproved/unimplemented;
+no automatic READY or zero-intervention claim follows from this change.
+
+
 ## 1. Integrated code — what exists
 
 - Previous canonical branch through `e526c86`: C6 semantic/meaning guards, measured-first C7 timing, **commit rewrite only after candidate audio measures faster** (preserve last-good text/audio otherwise), speaker/voice fallback review and stage-only recovery, batch/source scratch cleanup, URL/DNS preflight.
@@ -133,3 +148,4 @@ One final report only, with: **HEAD + remote match**, **what changed**, **focuse
 - **Product gate passes** only on an actual output video, not unit mocks or pre-existing WAVs.
 - Any unresolved HARD overflow or transport no-audio must be marked **BLOCKED**, not described as success.
 - No force push, no master merge, no implicit provider change, no new branch or rewrite of history for this closeout.
+

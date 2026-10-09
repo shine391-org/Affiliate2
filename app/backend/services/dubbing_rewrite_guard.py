@@ -989,6 +989,18 @@ def _invariants(before: str, after: str, source_language: str | None,
         if _lexicon_for(target_language) == "vietnamese":
             negation_after, _ = _vi_question_text(after)
         if _lexicon_for(source_language) == "chinese" and _lexicon_for(target_language) == "vietnamese":
+            # 不同 is a lexical difference predicate, naturally rendered as
+            # 'khác' or 'không giống'. Mask the paired realization only; an
+            # outer 不是/không still carries its own negation. 不同意 is disagree.
+            different = r"不同(?!意)"
+            count = len(re.findall(different, _normalize(negation_before)))
+            if count:
+                paired_target, matches = re.subn(
+                    r"(?<!\w)(?:khác(?:\s+nhau)?|không\s+giống(?:\s+nhau)?)(?!\w)",
+                    " ", _normalize(negation_after), count=count)
+                if matches == count:
+                    negation_before = re.sub(different, " ", _normalize(negation_before))
+                    negation_after = paired_target
             # 准 can mean permission or accuracy. Only explicit adjectival /
             # measurement contexts use the 'inaccurate' reading; bare 不准
             # stays a prohibition. Vietnamese may express it lexically as sai.
@@ -1127,7 +1139,7 @@ _HARD_KINDS = frozenset({
     "negation_lost", "negation_added", "negation_scope_changed", "quantity_lost",
     "unit_lost", "ordinal_changed", "question_changed", "exclamation_changed",
     "antonym_flip", "term_lost", "unlocalized_text",
-    "role_reversal", "role_loss", "relation_loss",
+    "role_reversal", "role_loss", "relation_loss", "predicate_reversal",
 })
 
 
@@ -1299,6 +1311,63 @@ def _semantic_role_issues(before: str, after: str, language: str | None) -> list
     return issues
 
 
+def _predicate_roles(text: str, language: str | None) -> set[str]:
+    """Small explicit predicate inventory, not a general semantic certificate.
+
+    Match compound predicates before their component verbs: 'cho X vay' is
+    lending, not borrowing; 'không thấm nước' is not water permeability.
+    Multiple opposed predicates are retained, so a sentence discussing buying
+    AND selling does not fail merely because their order changes.
+    """
+    text = _normalize(text)
+    language = _lexicon_for(language)
+    roles = set()
+    if language == "vietnamese":
+        if _contains(text, "mua"):
+            roles.add("buy")
+        if _contains(text, "bán"):
+            roles.add("sell")
+        if any(_contains(text, phrase) for phrase in ("chống nước", "chống thấm", "không thấm nước")):
+            roles.add("waterproof")
+        for phrase in ("không thấm nước", "chống thấm nước"):
+            text = text.replace(phrase, "")
+        if _contains(text, "thấm nước"):
+            roles.add("permeable")
+        lending = re.compile(r"\bcho\s+(?!(?:phép|biết|thấy|rằng)\b)(?:(?![.!?;,]|\b(?:vay|mượn)\b).){0,60}\b(?:vay|mượn)\b")
+        if lending.search(text):
+            roles.add("lend")
+            text = lending.sub("", text)
+        if _contains(text, "vay") or _contains(text, "mượn"):
+            roles.add("borrow")
+    elif language == "chinese":
+        if re.search(r"[买買]", text):
+            roles.add("buy")
+        if re.search(r"[卖賣]", text):
+            roles.add("sell")
+        if re.search(r"防水|防渗|防滲|不透水", text):
+            roles.add("waterproof")
+        text = text.replace("不透水", "")
+        if re.search(r"渗水|滲水|透水|漏水", text):
+            roles.add("permeable")
+        # 借 is ambiguous alone. Only an explicit direction licenses a verdict.
+        if re.search(r"借[^。！？；，,;]{0,20}[给給]|借出", text):
+            roles.add("lend")
+        if re.search(r"[向跟从從][^。！？；，,;]{1,20}借|借入", text):
+            roles.add("borrow")
+    return roles
+
+
+def _predicate_reversals(before: str, after: str, source_language, target_language) -> list[dict]:
+    old = _predicate_roles(before, source_language)
+    new = _predicate_roles(after, target_language)
+    issues = []
+    for a, b in (("buy", "sell"), ("waterproof", "permeable"), ("lend", "borrow")):
+        left, right = old & {a, b}, new & {a, b}
+        if len(left) == len(right) == 1 and left != right:
+            issues.append({"kind": "predicate_reversal", "detail": f"predicate changed: {sorted(left)} -> {sorted(right)}"})
+    return issues
+
+
 def check_rewrite_meaning(before: str, after: str, target_language: str | None = None,
                           *, protected_terms: Iterable[str] = (),
                           context: GuardContext | None = None,
@@ -1314,6 +1383,7 @@ def check_rewrite_meaning(before: str, after: str, target_language: str | None =
                          context=context)
     # C7 semantic-role/relation guards
     issues.extend(_semantic_role_issues(before, after, target_language))
+    issues.extend(_predicate_reversals(before, after, target_language, target_language))
     for term in protected_terms:
         if _contains(before, term) and not _contains(after, term):
             issues.append({"kind": "term_lost", "token": term, "detail": "explicit protected term lost"})
@@ -1339,6 +1409,7 @@ def check_translation_meaning(before: str, after: str, source_language: str | No
     """
     issues = _invariants(before, after, source_language, target_language,
                          translation=True, context=context)
+    issues.extend(_predicate_reversals(before, after, source_language, target_language))
     remaining = untranslated_han(after, target_language, allowed=[*protected_terms, *glossary.values()])
     if remaining:
         issues.append({"kind": "unlocalized_text", "tokens": remaining, "detail": "Vietnamese captions/speech still contain untranslated Han text"})
@@ -1419,3 +1490,4 @@ def check_translation_group_meaning(
             issues = [issue for issue in issues if issue["kind"] != "exclamation_changed"]
         verdicts[ids[index]] = issues
     return verdicts
+

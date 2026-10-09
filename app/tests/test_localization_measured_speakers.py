@@ -113,18 +113,78 @@ async def test_multiple_accepted_rewrites_count_a_segment_once_and_measure_match
 
 
 @pytest.mark.asyncio
-async def test_audit_survives_failure_after_an_accepted_rewrite(monkeypatch, tmp_path):
+async def test_failed_candidate_never_counts_as_an_accepted_rewrite(monkeypatch, tmp_path):
     mock_dubbing(monkeypatch, durations=[1800], fail_after=1)
     async def chat(*args, **kwargs):
         return '[{"id":"s0","text":"Xin chào"}]'
     monkeypatch.setattr(service, "_call_ai_chat_resilient", chat)
-    with pytest.raises(RuntimeError, match="provider failed"):
+    with pytest.raises(service.LocalizationTimingError):
         await service.synthesize_timed_dub(transcript(("Xin chào tất cả mọi người",), speakers=False),
             source_media=tmp_path / "source.mp4", target_language="Vietnamese",
             profile=fast_localization_profile(), user_settings=None, work_dir=tmp_path / "dub")
     audit = json.loads((tmp_path / "dub/rewrite_audit.json").read_text())
-    assert audit["rewrite_count"] == 1
-    assert audit["entries"][0]["duration_after_ms"] is None
+    assert audit["rewrite_count"] == 0
+    assert not [entry for entry in audit["entries"] if entry.get("status") == "accepted"]
+
+
+@pytest.mark.asyncio
+async def test_candidate_transport_failure_keeps_good_audio_and_fits_with_retime(monkeypatch, tmp_path):
+    mock_dubbing(monkeypatch, durations=[1400], fail_after=1)
+    async def chat(*args, **kwargs):
+        return '[{"id":"s0","text":"Xin chào"}]'
+    monkeypatch.setattr(service, "_call_ai_chat_resilient", chat)
+    result = await service.synthesize_timed_dub(
+        transcript(("Xin chào tất cả mọi người",), speakers=False),
+        source_media=tmp_path / "source.mp4", target_language="Vietnamese",
+        profile=fast_localization_profile(), user_settings=None, work_dir=tmp_path / "dub")
+    assert result.rewrite_count == 0
+    assert result.transcript.segments[0].translated_text == "Xin chào tất cả mọi người"
+    assert any(issue['reason'] == 'rewrite_tts_unavailable' for issue in result.issues)
+    assert (tmp_path / 'dub/chunk_0001.wav').read_bytes() == b'audio'
+
+
+@pytest.mark.asyncio
+async def test_measured_accepted_rewrite_survives_later_candidate_failure(monkeypatch, tmp_path):
+    mock_dubbing(monkeypatch, durations=[2000, 1800], fail_after=2)
+    texts = iter(('Xin chào tất cả mọi người', 'Xin chào'))
+    async def chat(*args, **kwargs):
+        return json.dumps([{'id': 's0', 'text': next(texts)}])
+    monkeypatch.setattr(service, '_call_ai_chat_resilient', chat)
+    with pytest.raises(service.LocalizationTimingError):
+        await service.synthesize_timed_dub(
+            transcript(('Xin chào tất cả mọi người đang xem video này',), speakers=False),
+            source_media=tmp_path / 'source.mp4', target_language='Vietnamese',
+            profile=fast_localization_profile(), user_settings=None, work_dir=tmp_path / 'dub')
+    audit = json.loads((tmp_path / 'dub/rewrite_audit.json').read_text())
+    assert audit['rewrite_count'] == 1
+    assert audit['entries'][0]['duration_after_ms'] == 1800
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('kind', ['cancel', 'config', 'io', 'wrapped_io'])
+async def test_optional_candidate_does_not_swallow_cancel_config_or_disk_fault(monkeypatch, tmp_path, kind):
+    from backend.core.exceptions import JobCancelledError
+    mock_dubbing(monkeypatch, durations=[1400])
+    async def chat(*args, **kwargs):
+        return '[{"id":"s0","text":"Xin chào"}]'
+    monkeypatch.setattr(service, '_call_ai_chat_resilient', chat)
+    original = service._generate_tts_chunk_atomic
+    wrapped = RuntimeError('TTS chunk failed')
+    wrapped.__cause__ = OSError('disk full')
+    error = {'cancel': JobCancelledError('cancelled'),
+             'config': ValueError('invalid voice'), 'io': OSError('disk full'), 'wrapped_io': wrapped}[kind]
+    async def generate(*args, output_path, **kwargs):
+        if '.rewrite-' in output_path.name:
+            raise error
+        return await original(*args, output_path=output_path, **kwargs)
+    monkeypatch.setattr(service, '_generate_tts_chunk_atomic', generate)
+    with pytest.raises(type(error)):
+        await service.synthesize_timed_dub(
+            transcript(('Xin chào tất cả mọi người',), speakers=False),
+            source_media=tmp_path / 'source.mp4', target_language='Vietnamese',
+            profile=fast_localization_profile(), user_settings=None, work_dir=tmp_path / 'dub')
+    assert (tmp_path / 'dub/chunk_0001.wav').read_bytes() == b'audio'
+    assert json.loads((tmp_path / 'dub/rewrite_audit.json').read_text())['rewrite_count'] == 0
 
 
 @pytest.mark.asyncio
@@ -365,3 +425,4 @@ def test_qc_cannot_clean_unverified_multi_speaker_output(monkeypatch, tmp_path, 
         transcript=tx, profile=profile)
     assert report.metrics["speaker_count"] == 2
     assert report.status == ("READY" if kind in {"distinct", "shared"} else "NEEDS_REVIEW")
+

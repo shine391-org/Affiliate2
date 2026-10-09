@@ -150,19 +150,24 @@ async def test_resume_after_accepted_rewrite_failure_keeps_c6_immutable_and_does
     profile = fast_localization_profile()
     args = dict(source_media=tmp_path / "s.mp4", target_language="Vietnamese", profile=profile,
                 user_settings=None, work_dir=tmp_path / "dub", reuse_existing_chunks=True)
-    mock_dubbing(monkeypatch, durations=[1800], fail_after=1)
+    mock_dubbing(monkeypatch, durations=[1800, 800])
     async def shorten(*_args, **_kwargs): return '[{"id":"s0","text":"Xin chào"}]'
     monkeypatch.setattr(svc, "_call_ai_chat_resilient", shorten)
-    with pytest.raises(RuntimeError, match="provider failed"):
+    def fail_compose(*args, **kwargs):
+        raise RuntimeError("composition failed after measured acceptance")
+    monkeypatch.setattr(svc, '_compose_chunk_track_sync', fail_compose)
+    with pytest.raises(RuntimeError, match="composition failed"):
         await svc.synthesize_timed_dub(tx, **args)
     events = mock_dubbing(monkeypatch)
     async def forbidden(*_args, **_kwargs): pytest.fail("Accepted measured rewrite must survive retry")
     monkeypatch.setattr(svc, "_call_ai_chat_resilient", forbidden)
     result = await svc.synthesize_timed_dub(tx, **args)
-    assert events[0][1] == "Xin chào" and result.rewrite_count == 1
+    assert events == [] and result.rewrite_count == 1
+    assert result.transcript.segments[0].translated_text == "Xin chào"
     assert tx.model_dump() == original
     audit = json.loads((tmp_path / "dub/rewrite_audit.json").read_text())
     assert len(audit["entries"]) == 1 and audit["entries"][0]["duration_before_ms"] == 1800
+    assert audit["entries"][0]["duration_after_ms"] == 800
 
 
 @pytest.mark.asyncio
@@ -227,3 +232,4 @@ async def test_azure_voice_discovery_preserves_saved_region_and_form_override(mo
         result = await settings_api.discover_tts_voices(settings_api.TTSProbeRequest(connection_id="azure-bound", region=region))
         assert result["voices"][0]["gender"] == "Male"
         assert seen[-1] == (TTSProvider.AZURE, "test-key", None, expected)
+
