@@ -1,5 +1,7 @@
 # Affiliate2 — Cross-flow audit and targeted fixes (2026-10-09)
 
+> **HISTORICAL SNAPSHOT — superseded by [ACTIVE_WORK_DOD.md](ACTIVE_WORK_DOD.md).** The cross-flow work was merged into `feat/localization-fast-mode` via [PR #20](https://github.com/shine391-org/Affiliate2/pull/20), merge `fbd129d`. The old statements below saying `9282657` is unpublished or that strict transport splitting is pending describe the **pre-integration** situation and are no longer current. The rebase landed as `713c1cc` / `6eba93c`; full TTS/media acceptance is still BLOCKED. **Do not use this old document as an active DoD.**
+
 ## Scope and provenance
 
 - This patch branch starts from remote `feat/localization-fast-mode` SHA `fbd77fe861b7300b40459c8a50a99d1c8932404d`.
