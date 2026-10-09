@@ -1098,9 +1098,11 @@ async def run_tool_translate(
     elif cleanup_input is None:
         # Safe by default: only treat as ephemeral scratch if inside tools/in or tools/staging
         try:
-            from backend.api.tools import tools_in_dir, tools_staging_dir
+            from backend.api.tools import tools_in_dir
             res_orig = original_input.resolve()
-            if res_orig.is_relative_to(tools_in_dir().resolve()) or res_orig.is_relative_to(tools_staging_dir().resolve()):
+            upload_root = tools_in_dir().resolve()
+            staging_root = (upload_root / ".staging").resolve()
+            if res_orig.is_relative_to(upload_root) or res_orig.is_relative_to(staging_root):
                 cleanup.append(original_input)
         except Exception:
             pass
