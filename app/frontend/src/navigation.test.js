@@ -80,10 +80,10 @@ test("Studio active subroutes mount their real views, not redirect into Localize
   const routes = readFileSync(new URL("./App.jsx", import.meta.url), "utf8")
   const studio = readFileSync(new URL("./pages/Studio.jsx", import.meta.url), "utf8")
   for (const mode of ["manual", "smart-cut"]) {
-    assert.match(routes, new RegExp(`path="studio/${mode}"\\s+element={<Studio\\s*/>}`))
-    assert.match(studio, new RegExp(`mode === "${mode}"`))
+    assert.ok(routes.includes(`<Route path="studio/${mode}" element={<Studio />} />`))
+    assert.ok(studio.includes(`mode === "${mode}"`))
   }
-  assert.match(routes, /path="clips" element={<LegacyRedirect to="\\/studio\\/manual"/)
+  assert.ok(routes.includes('<Route path="clips" element={<LegacyRedirect to="/studio/manual" />} />'))
 })
 
 test("Batch UI exposes and submits opt-in backend auto_repair", () => {
