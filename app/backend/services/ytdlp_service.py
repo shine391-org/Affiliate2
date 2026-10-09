@@ -681,7 +681,7 @@ def _hostname_matches(url: str, *domains: str) -> bool:
     from urllib.parse import urlsplit
     try:
         host = (urlsplit(url).hostname or "").lower().rstrip(".")
-    except (ValueError, TypeError):
+    except (AttributeError, ValueError, TypeError):
         return False
     return any(host == domain or host.endswith("." + domain) for domain in domains)
 
