@@ -21,7 +21,14 @@ async def test_provider_wait_is_visible_and_not_counted_as_dispatch(handler):
     async def progress(*args, **kwargs):
         messages.append(args[2])
 
+    async def _cancel_checkpoint(*_args, **_kwargs):
+        """The extracted closure is exec'd into a namespace of its own, so every
+        module-level name it references has to be supplied here. Without this
+        the handler dies on the first progress tick with a NameError that has
+        nothing to do with the provider-wait behaviour under test."""
+
     namespace["_tool_progress"] = progress
+    namespace["_cancel_checkpoint"] = _cancel_checkpoint
     exec(compile(ast.fix_missing_locations(ast.Module(body=[node], type_ignores=[])),
                  "runner-progress", "exec"), namespace)
     await namespace[handler]({"event": "provider_wait", "wait_s": 30,

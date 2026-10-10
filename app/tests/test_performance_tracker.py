@@ -18,7 +18,35 @@ import json
 from datetime import datetime, timedelta
 from unittest.mock import patch, MagicMock, AsyncMock
 
+import pytest
+
 from backend.services import performance_tracker as pt
+
+
+# ── schema ────────────────────────────────────────────────────────────────
+#
+# The recommender reads generated videos and their metric snapshots, so these
+# tests hit the database. Without this they only passed when some OTHER module
+# happened to create the tables first: run alone, `sample_size` came back 0
+# against three rows the test had just inserted, which reads as a product bug
+# rather than as a missing table.
+#
+# Models are imported INSIDE the fixture on purpose - create_all only emits a
+# table whose model has been imported by the time it runs.
+@pytest.fixture(scope="module", autouse=True)
+def _schema():
+    import asyncio as _asyncio
+
+    async def _create():
+        from backend.database import Base, engine
+        from backend.models.generated_video import GeneratedVideo  # noqa: F401
+        from backend.models.video_metrics import VideoMetrics  # noqa: F401
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    _asyncio.run(_create())
+    yield
 
 _UID = "test-perf-tracker"
 
@@ -26,6 +54,7 @@ _UID = "test-perf-tracker"
 async def _cleanup():
     from backend.database import AsyncSessionLocal
     from backend.models.generated_video import GeneratedVideo
+    from backend.models.phase_g import PublicationRecord
     from backend.models.video_metrics import VideoMetrics
     from sqlalchemy import delete, select
 
@@ -37,6 +66,15 @@ async def _cleanup():
         if vids:
             await db.execute(
                 delete(VideoMetrics).where(VideoMetrics.generated_video_id.in_(vids))
+            )
+            # Publication rows are keyed by video id and are NOT cascade-deleted
+            # with the video. Leaving them behind means the next run sees the
+            # recommender's publication query succeed against a video that no
+            # longer has a metric, so the averages come out diluted.
+            await db.execute(
+                delete(PublicationRecord).where(
+                    PublicationRecord.generated_video_id.in_(vids)
+                )
             )
         await db.execute(delete(GeneratedVideo).where(GeneratedVideo.user_id == _UID))
         await db.commit()
@@ -54,8 +92,19 @@ def _run(coro_factory):
     asyncio.run(go())
 
 
-async def _add_uploaded_video(db, **overrides):
+async def _add_uploaded_video(db, *, published_at=None, **overrides):
+    """Create an uploaded video, plus the publication record the recommender
+    requires.
+
+    Since ea46089 the recommender refuses to substitute ``video.created_at``
+    for a publication timestamp - created_at is the RENDER time, so using it
+    as the posting hour would report a posting-time insight built on the wrong
+    clock. A test that seeds only the video is therefore measuring nothing:
+    every row is skipped and sample_size comes back 0.
+    """
     from backend.models.generated_video import GeneratedVideo
+    from backend.models.phase_g import PublicationRecord
+
     kwargs = dict(
         user_id=_UID,
         status="uploaded",
@@ -67,6 +116,11 @@ async def _add_uploaded_video(db, **overrides):
     gv = GeneratedVideo(**kwargs)
     db.add(gv)
     await db.flush()
+    if published_at is not None:
+        db.add(PublicationRecord(
+            generated_video_id=gv.id, platform="youtube",
+            status="PUBLISHED", published_at=published_at,
+        ))
     return gv
 
 
@@ -191,16 +245,25 @@ def test_recommend_posting_time_metrics_but_no_early_velocity():
         # (without reaching the buggy day_breakdown builder — see note below).
         async with AsyncSessionLocal() as db:
             for i in range(3):
+                published = datetime.utcnow()
                 gv = await _add_uploaded_video(
-                    db, uploaded_platforms_json=json.dumps(["youtube"]))
+                    db, uploaded_platforms_json=json.dumps(["youtube"]),
+                    published_at=published)
+                # A snapshot taken AT posting time establishes no velocity: the
+                # recommender only counts 1h..24h windows. The rows are still
+                # published and measured, they just cannot be compared.
                 db.add(VideoMetrics(generated_video_id=gv.id, platform="youtube",
-                                    views=0, fetched_at=datetime.utcnow()))
+                                    views=0, fetched_at=published))
             await db.commit()
 
         rec = await pt.recommend_posting_time(_UID, platform="youtube")
         assert rec["recommendation"] is None
-        assert rec["sample_size"] == 3
-        assert "Not enough performance data" in rec["message"]
+        # `sample_size` counts QUALIFIED videos - those with a snapshot in the
+        # 1h..24h window. A snapshot taken at posting time establishes no
+        # velocity, so none of these three qualify, which is exactly the
+        # condition this test exists to pin.
+        assert rec["sample_size"] == 0
+        assert "Need at least 3 verified publication timestamps" in rec["message"]
 
     _run(body)
 
@@ -220,16 +283,17 @@ def test_recommend_posting_time_happy_path_builds_breakdowns():
         # 3 youtube uploads with real early velocity, on two distinct weekdays
         # so day_breakdown has more than one entry to sort.
         async with AsyncSessionLocal() as db:
-            for i, (created, views) in enumerate([
+            for created, views in [
                 (datetime(2026, 7, 20, 14, 0), 900),   # Monday
                 (datetime(2026, 7, 20, 14, 0), 1100),  # Monday
                 (datetime(2026, 7, 22, 9, 0), 300),    # Wednesday
-            ]):
+            ]:
                 gv = await _add_uploaded_video(
-                    db, created_at=created,
+                    db, created_at=created, published_at=created,
                     uploaded_platforms_json=json.dumps(["youtube"]))
                 db.add(VideoMetrics(generated_video_id=gv.id, platform="youtube",
-                                    views=views, fetched_at=created + timedelta(hours=2)))
+                                    views=views,
+                                    fetched_at=created + timedelta(hours=2)))
             await db.commit()
 
         rec = await pt.recommend_posting_time(_UID, platform="youtube")
@@ -242,7 +306,10 @@ def test_recommend_posting_time_happy_path_builds_breakdowns():
 
         # Every breakdown value must be a rounded NUMBER, not a list.
         day_bd = rec["day_breakdown"]
-        assert day_bd == {"monday": 1000.0, "wednesday": 300.0}
+        # day_breakdown is observed VIEWS PER HOUR, not a total or a mean of the
+    # raw view counts: each video contributes views/elapsed_hours, so Monday is
+        # (900/2 + 1100/2) / 2 = 500.0 and Wednesday is 300/2 = 150.0.
+        assert day_bd == {"monday": 500.0, "wednesday": 150.0}
         assert all(isinstance(v, (int, float)) for v in day_bd.values())
         # ...and ordered Monday-first, not alphabetically or by insertion.
         assert list(day_bd) == ["monday", "wednesday"]
