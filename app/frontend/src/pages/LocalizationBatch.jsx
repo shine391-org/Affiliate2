@@ -91,7 +91,14 @@ export default function LocalizationBatch({ embedded = false }) {
               type="file"
               multiple
               accept=".mp4,.mov,.mkv,.webm,.m4v"
-              onChange={(e) => setFiles(Array.from(e.target.files || []).slice(0, 20))}
+              onChange={(e) => {
+                const chosen = Array.from(e.target.files || [])
+                if (chosen.length > 20) {
+                  showSnackbar(`Chỉ nhận tối đa 20 video. Đã bỏ qua ${chosen.length - 20} tệp.`, "warning")
+                }
+                setFiles(chosen.slice(0, 20))
+                e.target.value = ""
+              }}
             />
           </Button>
 

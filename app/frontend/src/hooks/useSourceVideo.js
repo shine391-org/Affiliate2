@@ -14,18 +14,22 @@ export default function useSourceVideo() {
   const [sourceLoading, setSourceLoading] = useState(false)
 
   useEffect(() => {
-    if (!sourceId) return
+    if (!sourceId) { setSource(null); setSourceLoading(false); return undefined }
+    let alive = true
+    setSource(null)
     setSourceLoading(true)
     http.get(`/api/downloaded/${sourceId}`)
       .then(res => {
+        if (!alive) return
         const data = res.data
         if (typeof data.insights_json === "string") {
           try { data.insights = JSON.parse(data.insights_json) } catch {}
         }
         setSource(data)
       })
-      .catch(() => setSource(null))
-      .finally(() => setSourceLoading(false))
+      .catch(() => { if (alive) setSource(null) })
+      .finally(() => { if (alive) setSourceLoading(false) })
+    return () => { alive = false }
   }, [sourceId])
 
   return { source, sourceLoading, sourceId }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Alert, Box, Button, Checkbox, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Divider, Drawer,
   FormControl, FormControlLabel, IconButton, InputLabel, MenuItem, Paper, Radio, RadioGroup,
@@ -88,6 +88,9 @@ export default function StudioLocalize({ source, sourcesLoading }) {
   }
   const [expertOpen, setExpertOpen] = useState(false)
   const jobId = params.get("job") || ""
+  const currentJobRef = useRef(jobId)
+  const detailRequestRef = useRef(0)
+  currentJobRef.current = jobId
   const { bindingPrompt, setBindingPrompt, openBindingPrompt, consumeBindingPrompt } = useJobBoundBindingPrompt(jobId)
   useEffect(() => {
     setRetryingFailure(false)
@@ -115,9 +118,11 @@ export default function StudioLocalize({ source, sourcesLoading }) {
       if (!alive) return
       setProfiles(data?.profiles || [])
       setProfileId((current) => current || data?.default_profile_id || "")
-    }).catch(() => {})
+    }).catch((error) => {
+      if (alive) showSnackbar(error.response?.data?.detail || "Không thể tải hồ sơ bản địa hóa", "error")
+    })
     return () => { alive = false }
-  }, [])
+  }, [showSnackbar])
 
   const selectedProfile = useMemo(() => profiles.find((item) => item.id === profileId) || null, [profiles, profileId])
 
@@ -150,24 +155,50 @@ export default function StudioLocalize({ source, sourcesLoading }) {
   }, [jobId])
 
   const loadDetail = useCallback(async () => {
-    if (!jobId) { setDetail(null); setDetailError(""); return }
+    const requestedJob = jobId
+    const requestId = ++detailRequestRef.current
+    if (!requestedJob) { setDetail(null); setDetailError(""); return }
     try {
-      const { data } = await http.get(`/api/localization/jobs/${jobId}`)
+      const { data } = await http.get(`/api/localization/jobs/${requestedJob}`)
+      if (requestId !== detailRequestRef.current || currentJobRef.current !== requestedJob) return
       setDetail(data)
       setDetailError("")
     } catch (error) {
+      if (requestId !== detailRequestRef.current || currentJobRef.current !== requestedJob) return
       if (error.response?.status === 404) { setDetail(null); setDetailError(""); return }
-      if (error.response?.status !== 404) setDetailError(error.response?.data?.detail || error.message)
+      setDetailError(error.response?.data?.detail || error.message)
     }
   }, [jobId])
 
   useEffect(() => {
-    let alive = true
     loadDetail()
+    return () => { detailRequestRef.current += 1 }
+  }, [loadDetail])
+
+  // Only active jobs need repeated detail loading. Serial timeouts prevent
+  // overlapping full-manifest requests; completed/review jobs refresh on action.
+  useEffect(() => {
+    if (!jobId || (detail && !["pending", "running"].includes(detail.job_status))) return undefined
+    let alive = true
+    let timer = null
+    const tick = async () => {
+      if (document.visibilityState === "visible") await loadDetail()
+      if (alive) timer = setTimeout(tick, document.visibilityState === "visible" ? 3000 : 15000)
+    }
+    timer = setTimeout(tick, 3000)
+    const onFocus = () => { if (alive) loadDetail() }
+    window.addEventListener("focus", onFocus)
+    return () => { alive = false; clearTimeout(timer); window.removeEventListener("focus", onFocus) }
+  }, [jobId, detail?.job_status, loadDetail])
+
+  useEffect(() => {
     if (!jobId) return undefined
-    const timer = setInterval(() => { if (alive) loadDetail() }, 3000)
-    return () => { alive = false; clearInterval(timer) }
-  }, [jobId, loadDetail])
+    const onFocus = () => loadDetail()
+    // Terminal/review jobs do not poll but must still reflect external reruns.
+    if (detail && ["pending", "running"].includes(detail.job_status)) return undefined
+    window.addEventListener("focus", onFocus)
+    return () => window.removeEventListener("focus", onFocus)
+  }, [jobId, detail?.job_status, loadDetail])
 
   const effective = detail?.manifest?.effective_profile || selectedProfile || {}
   const stages = detail?.manifest?.stages || {}
