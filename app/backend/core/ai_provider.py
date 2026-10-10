@@ -72,6 +72,13 @@ def is_ai_rate_limit_error(exc) -> bool:
         return True
     return status == 502 and any(marker in _ai_error_body(exc) for marker in (
         'gửi tin quá thường xuyên', 'too many messages', 'too many requests', 'rate limit',
+        # The local FreeDeepseekAPI relay answers in the upstream account's own
+        # language. A Russian upstream account reports rate limiting as
+        # 'Слишком частые сообщения', which no English/Vietnamese marker matches,
+        # so the shared cooldown was never published and the caller retried
+        # blind against an already-saturated pool. Match the upstream wording
+        # rather than guessing the account's locale.
+        'слишком частые сообщения', 'слишком много запросов', 'повторите попытку позже',
     ))
 
 

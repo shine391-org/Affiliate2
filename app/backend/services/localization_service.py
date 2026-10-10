@@ -1454,7 +1454,13 @@ async def _translate_batch_resilient(
                 "model": getattr(current, "model", None), "attempt": 1,
                 "error_type": "InvalidStructuredOutput", "error": str(exc)[:240],
             })
-            if not _repair_issues and route_state.sticky_index + 1 < len(route_state.clients):
+            # Advance to the next configured route on malformed structure. This
+            # applies to the semantic-repair pass too: a repair that lands on a
+            # route returning malformed JSON must not strand the segment, since
+            # a later configured route can still answer correctly. The recursive
+            # call passes _repair_issues along, so the guard below re-fires only
+            # while routes remain and each route is visited at most once here.
+            if route_state.sticky_index + 1 < len(route_state.clients):
                 route_state.sticky_index += 1
                 next_client = route_state.current
                 await _emit_ai_progress(progress_cb, {"event": "switch_fallback", "stage": "translation",
@@ -1505,6 +1511,45 @@ async def _translate_batch_resilient(
         for index, (segment, text) in enumerate(zip(pending, fixed)):
             if index not in failed:
                 accepted[segment.id] = {"id": segment.id, "text": text}
+    # A semantic rejection that bounded repair could NOT fix is still an
+    # unresolved candidate. The next configured route may produce meaning-valid
+    # text, so advance to it instead of abandoning the segment. Every accepted
+    # sibling is already durable (accepted_cb ran before repair), so this only
+    # re-asks for the segments that are still unresolved; the repair pass itself
+    # is not repeated on the new route, which keeps the attempt count bounded.
+    still_rejected = {segment.id for segment in batch
+                      if segment.id in rejected and segment.id not in accepted}
+    if (still_rejected and not _repair_issues and _semantic_repair
+            and route_state is not None
+            and route_state.sticky_index + 1 < len(route_state.clients)):
+        route_state.sticky_index += 1
+        next_client = route_state.current
+        _append_ai_failure(route_state, {
+            "connection_id": getattr(route_state.clients[route_state.sticky_index - 1],
+                                     "connection_name", None),
+            "provider": getattr(getattr(route_state.clients[route_state.sticky_index - 1],
+                                        "provider", None), "value",
+                                str(getattr(route_state.clients[route_state.sticky_index - 1],
+                                            "provider", ""))),
+            "model": getattr(route_state.clients[route_state.sticky_index - 1], "model", None),
+            "attempt": 1, "error_type": "SemanticRejection",
+            "error": f"repair did not resolve {sorted(still_rejected)}",
+        })
+        await _emit_ai_progress(progress_cb, {"event": "switch_fallback", "stage": "translation",
+            "reason": "semantic_rejection_after_repair",
+            "provider": getattr(next_client, "connection_name", None),
+            "model": getattr(next_client, "model", None)})
+        remaining = [segment for segment in batch if segment.id in still_rejected]
+        retried, retry_failed = await _translate_batch_resilient(
+            ai, remaining, route_state=route_state,
+            target_language=target_language, context=context, profile=profile, for_dub=for_dub,
+            fallback_ai=fallback_ai, progress_cb=progress_cb, deadline_at=deadline_at,
+            source_language=source_language, localized_terms=localized_terms,
+            context_segments=context_segments, accepted_cb=accepted_cb,
+            dispatch_budget=dispatch_budget, _split_depth=_split_depth,
+            _semantic_repair=False, _repair_issues=rejected, drafts=drafts)
+        for segment, text in zip(remaining, retried):
+            accepted[segment.id] = {"id": segment.id, "text": text}
     if drafts is not None and rejected and not _semantic_repair:
         # Only the final semantic attempt owns this receipt. The parent must
         # never restore its pre-repair raw payload after a child returns; an
@@ -1681,7 +1726,7 @@ async def translate_transcript(
         for index, client in enumerate(route_clients)
     ]
     checkpoint_meta = {
-        "meaning_guard_version": 12,
+        "meaning_guard_version": 13,
         "translation_prompt_version": _C6_TRANSLATION_PROMPT_VERSION,
         "source_language": transcript.language,
         "protected_terms": profile.protected_terms,
@@ -4531,6 +4576,13 @@ async def synthesize_timed_dub(
                 "measured_fitted_duration_ms": measured_ms,
                 "measured_end_ms": measured_end, "allowed_end_ms": allowed_end,
                 "allocated_end_ms": chunk.end_ms, "silent": not math.isfinite(peak_db),
+                # A reviewer must be able to see HOW MUCH the fitted audio
+                # overran, not just that it did. Without this the shared
+                # error preview renders "speed ?x".
+                "required_speed": round(measured_ms / chunk.available_ms, 4)
+                if chunk.available_ms > 0 else None,
+                "overflow_ms": max(0, measured_end - allowed_end),
+                "speed_factor": chunk.speed_factor,
                 "segment_ids": [fitted_plan[i].segment_id for i in chunk.item_indexes],
             }
             raise LocalizationTimingError([failure], rewrite_count=job_state.rewrite_count,
