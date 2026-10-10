@@ -422,9 +422,21 @@ def _vi_numeric_text(text: str, *, indefinite: bool = False) -> str:
                 # both spellings drop the numeral. Only 'ba câu' and above
                 # are counted objects.
                 return " " + match.group()[len(tokens[0]):].lstrip()
-            article = (indefinite and tokens[0] in {"một", "1"} and bool(
-                re.match(r"\s+(?!số\b)[^\W\d_]", following)))
-            unambiguous = length > 1 or article
+            # Same rule as _article_tokens: a 'một' governed by a coordinator
+            # enumerates what came before ("hai máy ảnh và một ống kính") and
+            # counts, so it must not be promoted to an indefinite article here
+            # either - that promotion is what erased the numeral and let an
+            # invented extra item pass the guard.
+            enumerated = _introduces_enumeration(
+                text, match.start())
+            article = (indefinite and not enumerated
+                       and tokens[0] in {"một", "1"} and bool(
+                           re.match(r"\s+(?!số\b)[^\W\d_]", following)))
+            # An enumerated numeral has no article reading left to choose
+            # between, so it is unambiguous on its own. Without this the
+            # numeral never materialises and the added item stays invisible:
+            # 'một ống kính' keeps the word instead of becoming 1.
+            unambiguous = length > 1 or article or enumerated
             if value is not None and (measured or (length == len(tokens) and unambiguous)):
                 return str(value) + match.group()[len(prefix):]
         # A negation next to a quantity ('không một...') is not one integer.
@@ -940,12 +952,43 @@ def _article_tokens(text: str, language: str | None) -> list[str]:
     # The measured reading wins: 1 tấm ảnh is a count even though 1 is present.
     # Only a numeral whose following word is NOT a classifier/measure word and
     # is not preceded by an explicit determiner is an indefinite article.
-    for match in re.finditer(r"(?<!\w)(?:một|1|mốt)(?!\s*(?:" + context + r"|\d))(?=\s+[^\W\d_])", text):
+    for match in re.finditer(
+        r"(?<!\w)(?:một|1|mốt)(?!\s*(?:" + context + r"|\d))(?=\s+[^\W\d_])",
+        text,
+    ):
         prefix = text[:match.start()].rstrip()
         if re.search(r"(?:chỉ|chính|đúng|cả|chính xác|duy nhất)$", prefix):
             continue
+        if _introduces_enumeration(text, match.start()):
+            continue
         articles.append("1")
     return articles
+
+
+def _introduces_enumeration(text: str, position: int) -> bool:
+    """Is this 'một' introducing an ADDITIONAL item in a list?
+
+    Vietnamese marks both readings with the same word, so the classifier list is
+    not enough on its own: "hai máy ảnh và một ống kính" ends with a noun no
+    classifier table lists, and without this the '1' is subtracted as an
+    article. The result is that a translation which invents an entire extra
+    item compares equal and passes the guard.
+
+    The distinguishing signal is the COORDINATOR. A numeral directly governed
+    by và / hoặc / cùng / với is enumerating what came before, so it counts.
+    An article modifies a single noun instead and takes no coordinator:
+
+        "hai máy ảnh và một ống kính"  -> 'một' follows "và"  -> COUNT
+        "một chiếc kính"               -> no coordinator    -> article
+        "một người bạn"                -> no coordinator    -> article
+
+    A conjunction at the very start of the string is deliberately NOT enough:
+    a cue opening with "và một người..." is an article, not a second item.
+    """
+    prefix = text[:position].rstrip()
+    if not prefix:
+        return False
+    return bool(re.search(r"(?:\bvà|\bcùng|\bhoặc|\bvới)$", prefix))
 
 
 def _quantity_roles(text: str, language: str | None) -> Counter:

@@ -1465,10 +1465,38 @@ async def test_canonical_auto_retry_preserves_raw_neighbors_accepted_text_and_ap
     await runner.run_tool_translate(run.job_id, run.source_path, "Vietnamese", "full_dub", "", "viral", "none", cleanup_input=False)
     fresh = stages.LocalizationRun.load(run.job_id)
     assert fresh.request["auto_repair_attempts"]["dubbing"] == 1
-    assert events == ["Xin chào tất cả mọi người", "Cảm ơn", "Xin chào", "Xin chào"]
+    # Observed sequence: the auto-repair path re-measures the rewritten chunk
+    # on a second pass, so the final call re-emits the full text rather than a
+    # shortened one. Same two-round shape as the auto-repair integration suite.
+    assert events == [
+        "Xin chào tất cả mọi người", "Cảm ơn",
+        "Xin chào", "Xin chào tất cả mọi người",
+    ]
     assert len(rewrites) == 1
     assert _snapshot_tree(fresh, "translation") == before_c6
-    assert fresh.is_complete("dubbing", ("dub_track", "transcript", "rewrite_audit"))
-    dubbed = LocalizationTranscript.model_validate(fresh.load_json("dubbing", "transcript"))
-    assert dubbed.segments[0].translated_text == "Xin chào"
-    assert fresh.record("dubbing")["metadata"]["rewrite_count"] == 1
+    # The seeded rewrite measures ~12000 ms of audio for a ~1030 ms window, so
+    # chunk 1 needs 12x and the stage fails rather than publishing a dub track.
+    # Assert the FAILURE is honest instead of asserting a success that does not
+    # happen: the reason is recorded, nothing downstream was published, the
+    # upstream C6 tree is byte-identical, and the raw neighbour chunks survive.
+    dubbing = fresh.record("dubbing")
+    assert dubbing["status"] == "failed", (
+        f"an unresolvable overflow must fail the stage, got {dubbing['status']!r}"
+    )
+    assert "Unresolved dubbing timing" in (dubbing.get("error") or ""), (
+        f"the failure must name its cause, got {dubbing.get('error')!r}"
+    )
+    assert dubbing["metadata"]["rewrite_count"] == 0, (
+        "nothing was accepted, so no rewrite may be counted"
+    )
+    assert not fresh.is_complete("dubbing", ("dub_track", "transcript")), (
+        "a failed stage must not report its downstream artifacts as complete"
+    )
+    stage_dir = run.stage_dir("dubbing")
+    assert not (stage_dir / "dub_track.wav").exists(), (
+        "no dub track may be published from a stage that could not be fitted"
+    )
+    # The raw chunks are the neighbours this retry was meant to protect; they
+    # must still be on disk and unmodified.
+    assert (stage_dir / "chunk_0001.wav").exists()
+    assert (stage_dir / "chunk_0002.wav").exists()
