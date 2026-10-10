@@ -22,3 +22,15 @@ test("Publish restores an existing active upload after page refresh", () => {
   assert.match(publish, /status: "pending,running", job_type: "upload", limit: 200/)
   assert.match(publish, /pollJob\(matched\.id, videoId\)/)
 })
+
+test("Publish ignores late source-list requests when the selected video changes", () => {
+  assert.match(publish, /const version = \+\+loadVersionRef\.current/)
+  assert.match(publish, /const isCurrent = \(\) => loadVersionRef\.current === version/)
+  assert.match(publish, /if \(!isCurrent\(\)\) return/)
+  assert.match(publish, /if \(isCurrent\(\)\) setLoading\(false\)/)
+})
+
+test("restoring an upload cannot overwrite a newer upload, and reselecting same video keeps its watcher", () => {
+  assert.match(publish, /pollVersionRef\.current !== restoreVersion/)
+  assert.match(publish, /if \(id === selected\?\.id\) return/)
+})

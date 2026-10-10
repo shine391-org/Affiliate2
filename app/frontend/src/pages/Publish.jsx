@@ -54,6 +54,7 @@ export default function Publish() {
   const [error, setError] = useState("")
   const [job, setJob] = useState(null)
   const pollRef = useRef(null)
+  const loadVersionRef = useRef(0)
   const pollVersionRef = useRef(0)
   const [pollError, setPollError] = useState("")
 
@@ -81,6 +82,8 @@ export default function Publish() {
   const [tiktokCreatorRefreshKey, setTikTokCreatorRefreshKey] = useState(0)
 
   const load = useCallback(async () => {
+    const version = ++loadVersionRef.current
+    const isCurrent = () => loadVersionRef.current === version
     setLoading(true)
     setError("")
     try {
@@ -88,6 +91,7 @@ export default function Publish() {
         http.get("/api/videos", { params: { limit: 100 } }),
         http.get("/api/settings"),
       ])
+      if (!isCurrent()) return
       let eligible = (videoRes.data?.videos || []).filter((video) =>
         ["ready", "uploaded"].includes(video.status) && video.video_path && !video.artifact_missing
       )
@@ -100,6 +104,7 @@ export default function Publish() {
       if (requested && !eligible.some((video) => video.id === requested)) {
         try {
           const { data: requestedVideo } = await http.get(`/api/videos/${requested}`)
+          if (!isCurrent()) return
           const publishable = ["ready", "uploaded"].includes(requestedVideo?.status) && requestedVideo?.video_path && !requestedVideo?.artifact_missing
           if (!publishable) {
             setVideos(eligible)
@@ -108,6 +113,7 @@ export default function Publish() {
           }
           eligible = [requestedVideo, ...eligible]
         } catch (e) {
+          if (!isCurrent()) return
           setVideos(eligible)
           setError(e.response?.status === 404
             ? "Video được yêu cầu không còn tồn tại."
@@ -125,13 +131,16 @@ export default function Publish() {
         }, { replace: true })
       }
     } catch (e) {
-      setError(e.response?.data?.detail || "Không thể tải không gian Xuất bản.")
+      if (isCurrent()) setError(e.response?.data?.detail || "Không thể tải không gian Xuất bản.")
     } finally {
-      setLoading(false)
+      if (isCurrent()) setLoading(false)
     }
   }, [selectedId, setParams])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    load()
+    return () => { loadVersionRef.current += 1 }
+  }, [load])
   useEffect(() => {
     const onFocus = () => load()
     window.addEventListener("focus", onFocus)
