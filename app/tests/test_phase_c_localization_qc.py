@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
+import pytest
+
 from backend.core.localization import LocalizationProfile, LocalizationSegment, LocalizationTranscript
 from backend.services import localization_qc_service as qc
 
@@ -283,3 +285,40 @@ def test_qc_surfaces_measured_cadence_failure_with_chunk_and_segments(monkeypatc
     )
     assert warning["chunk_id"] == 7
     assert warning["segment_ids"] == ["s1"]
+
+@pytest.mark.parametrize("target,width,height,should_fail", [
+    ("9:16", 900, 1200, True),   # portrait but actually 3:4
+    ("16:9", 1200, 900, True),   # landscape but actually 4:3
+    ("1:1", 800, 900, True),
+    ("9:16", 0, 0, True),
+    ("9:16", 1080, 1920, False),
+    ("16:9", 1920, 1080, False),
+    ("1:1", 1080, 1080, False),
+    ("9:16", 1080, 1922, False),  # slight encoder rounding tolerance
+])
+def test_qc_checks_actual_aspect_ratio_not_orientation(
+    monkeypatch, tmp_path, target, width, height, should_fail,
+):
+    source = tmp_path / "source.mp4"
+    final = tmp_path / "final.mp4"
+    source.write_bytes(b"s")
+    final.write_bytes(b"f")
+    monkeypatch.setattr(qc, "probe_media", lambda path: _media(
+        width=width if path == final else 1920,
+        height=height if path == final else 1080,
+    ))
+    monkeypatch.setattr(qc, "audio_max_volume_db", lambda _: -1.0)
+    report = qc.evaluate_localization_qc(
+        source_video=source, final_video=final,
+        transcript=_tx(),
+        profile=LocalizationProfile(
+            id="aspect-qa", name="Aspect QA", target_aspect=target,
+            diarization_mode="off",
+        ),
+        check_tts_quality=False,
+    )
+    wrong_aspect = [f for f in report.failures if f["code"] == "wrong_final_aspect"]
+    assert bool(wrong_aspect) is should_fail
+    if should_fail:
+        assert report.status == "FAILED"
+        assert wrong_aspect[0]["expected"] == target

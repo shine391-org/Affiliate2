@@ -31,6 +31,27 @@ def runtime():
 
 
 @pytest.mark.asyncio
+async def test_multi_cue_chunk_without_events_keeps_unverified_cadence_warning(tmp_path, monkeypatch):
+    async def generate(text, *, output_path, **kwargs):
+        audio(output_path, 1400)
+        return 1400
+    monkeypatch.setattr(svc, '_generate_tts_chunk', generate)
+    monkeypatch.setattr(svc, '_tts_config', lambda *_: runtime())
+    monkeypatch.setattr('backend.services.video_utils.probe_duration', source_probe(2.0))
+    tx = LocalizationTranscript(segments=[LocalizationSegment(
+        id=str(i), source_text=text, translated_text=text, source_start_ms=i*800,
+        source_end_ms=(i+1)*800, translation_status='success')
+        for i, text in enumerate(('Xin chào', 'bạn'))])
+    profile = LocalizationProfile(id='p', name='P', dub_rewrite_attempts=0, video_retime_mode='off')
+    result = await svc.synthesize_timed_dub(tx, source_media=tmp_path/'source.mp4',
+        target_language='Vietnamese', profile=profile, user_settings=object(), work_dir=tmp_path/'work')
+    issue = next(i for i in result.issues if i['reason'] == 'multi_cue_unverified_timing')
+    assert issue['segment_ids'] == ['0', '1']
+    assert all(s.tts_duration_basis == 'allocated' and s.qc_status == 'review'
+               for s in result.transcript.segments)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('duration', [600, 1603, 2000])
 @pytest.mark.parametrize('speed', [1.0, 1.0005])
 async def test_transformed_audio_is_probed_even_at_natural_speed(tmp_path, duration, speed):
@@ -321,3 +342,4 @@ async def test_c7_transport_recovery_audit_survives_raw_reuse_and_requires_revie
     assert any(x['code']=='tts_transport_split' for x in report.warnings)
     from backend.services.localization_publish_service import _publishable_qc
     assert not _publishable_qc({'qc_status':report.status,'qc_human_approved':False})
+

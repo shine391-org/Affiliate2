@@ -41,6 +41,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.models.downloaded_video import DownloadedVideo
 from backend.models.generated_video import GeneratedVideo, NICHE_MAX_CHARS
 from backend.models.job import Job
+from backend.models.scout_result import ScoutResult
 from backend.services.library_taxonomy import (
     MEDIA_AUDIO,
     MEDIA_ORDER,
@@ -223,6 +224,14 @@ async def _generated_items(db: AsyncSession) -> list[dict]:
 
 async def _downloaded_items(db: AsyncSession) -> list[dict]:
     rows = (await db.execute(select(DownloadedVideo))).scalars().all()
+    # The downloaded GET endpoint must stay read-only. Legacy rows with no
+    # denormalized title still display their Scout title in Library.
+    missing_title_ids = {v.scout_result_id for v in rows if not v.title and v.scout_result_id}
+    scout_titles = {}
+    if missing_title_ids:
+        scout_titles = dict((await db.execute(
+            select(ScoutResult.id, ScoutResult.title).where(ScoutResult.id.in_(missing_title_ids))
+        )).all())
     items = []
     for v in rows:
         has_video = _exists(v.video_path)
@@ -246,7 +255,7 @@ async def _downloaded_items(db: AsyncSession) -> list[dict]:
             "origin": p.origin,
             "producer_key": p.key,
             "producer": p.label,
-            "title": v.title or "Untitled",
+            "title": v.title or scout_titles.get(v.scout_result_id) or "Untitled",
             "thumb_url": (
                 f"/api/downloaded/{v.id}/thumbnail?v={_version(v.thumbnail_path)}"
                 if _exists(v.thumbnail_path) else None

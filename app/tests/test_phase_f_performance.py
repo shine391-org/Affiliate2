@@ -187,3 +187,47 @@ def test_sync_disconnected_and_provider_error_do_not_persist():
                 assert response.status_code == 502
             assert (await client.get(f"/api/videos/{vid}/performance")).json()["history"] == {}
     run(body)
+
+
+def test_optimal_posting_time_uses_publication_not_asset_created_at():
+    async def body():
+        from sqlalchemy import select
+        created = datetime(2026, 10, 1, 1, 0, 0)
+        posted_day = datetime(2026, 10, 5)
+        fixtures = [(8, 120), (8, 140), (20, 800)]
+        async with AsyncSessionLocal() as db:
+            for hour, views in fixtures:
+                item = GeneratedVideo(
+                    user_id=_UID, title=f"Posted at {hour}", status="uploaded",
+                    youtube_video_id=f"yt-{hour}-{views}",
+                    uploaded_platforms_json='["youtube"]', created_at=created,
+                )
+                db.add(item)
+                await db.flush()
+                published_at = posted_day.replace(hour=hour)
+                db.add(PublicationRecord(
+                    generated_video_id=item.id, platform="youtube",
+                    status="PUBLISHED", published_at=published_at,
+                    mapping_status="mapped",
+                ))
+                db.add(VideoMetrics(
+                    generated_video_id=item.id, platform="youtube",
+                    views=views, fetched_at=published_at + timedelta(hours=2),
+                ))
+            # A legacy video with no publication record must not be assigned
+            # the time it was rendered or fake a posting-time observation.
+            db.add(GeneratedVideo(
+                user_id=_UID, title="legacy unknown publish time",
+                status="uploaded", uploaded_platforms_json='["youtube"]',
+                created_at=created, youtube_video_id="yt-legacy",
+            ))
+            await db.commit()
+
+        result = await pt.recommend_posting_time(_UID, "youtube")
+        assert result["sample_size"] == 3
+        assert result["recommendation"]["hour_utc"] == 20
+        assert result["confidence_basis"] == "heuristic_sample_size_not_statistical_confidence"
+        assert set(result["hour_breakdown"]) == {"8", "20"}
+        assert result["hour_breakdown"]["20"] == 400.0
+
+    run(body)

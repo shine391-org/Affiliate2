@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import {
-  Alert, Box, Button, Chip, FormControl, InputLabel, MenuItem,
+  Alert, Box, Button, Checkbox, Chip, FormControl, FormControlLabel, InputLabel, MenuItem,
   Select, Stack, Typography,
 } from "@mui/material"
 import CloudUploadOutlinedIcon from "@mui/icons-material/CloudUploadOutlined"
@@ -19,6 +19,7 @@ export default function LocalizationBatch({ embedded = false }) {
   const [profileId, setProfileId] = useState("")
   const [target, setTarget] = useState("vi")
   const [mode, setMode] = useState("full_dub")
+  const [autoRepair, setAutoRepair] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [jobs, setJobs] = useState([])
 
@@ -43,6 +44,7 @@ export default function LocalizationBatch({ embedded = false }) {
       form.append("target_language", target)
       form.append("mode", mode)
       form.append("profile_id", profileId)
+      form.append("auto_repair", String(autoRepair))
       const { data } = await http.post("/api/localization/batch", form, {
         headers: { "Content-Type": "multipart/form-data" },
         timeout: 120000,
@@ -89,7 +91,14 @@ export default function LocalizationBatch({ embedded = false }) {
               type="file"
               multiple
               accept=".mp4,.mov,.mkv,.webm,.m4v"
-              onChange={(e) => setFiles(Array.from(e.target.files || []).slice(0, 20))}
+              onChange={(e) => {
+                const chosen = Array.from(e.target.files || [])
+                if (chosen.length > 20) {
+                  showSnackbar(`Chỉ nhận tối đa 20 video. Đã bỏ qua ${chosen.length - 20} tệp.`, "warning")
+                }
+                setFiles(chosen.slice(0, 20))
+                e.target.value = ""
+              }}
             />
           </Button>
 
@@ -122,6 +131,11 @@ export default function LocalizationBatch({ embedded = false }) {
               </Select>
             </FormControl>
           </Stack>
+
+          <FormControlLabel
+            control={<Checkbox checked={autoRepair} onChange={(event) => setAutoRepair(event.target.checked)} />}
+            label="Tự sửa lỗi có thể phục hồi (giới hạn retry; không tự duyệt QC)"
+          />
 
           <Button
             variant="contained"

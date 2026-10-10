@@ -34,20 +34,25 @@ export default function useWebSocket() {
 
   useEffect(() => {
     ws.connect()
+    let mounted = true
 
     // Restore running/pending jobs from API so active jobs survive page refresh
     const restoreJobs = async () => {
       try {
-        // ONE request for both statuses (the endpoint takes a comma list).
-        // This used to be two, on a load that already fetches jobs twice more
-        // for the Activity panel. Limit is 40, not 20, because it now covers
-        // what were two separate 20-row windows.
-        const { data } = await http.get("/api/jobs", {
-          params: { status: "running,pending", limit: 40 },
-        })
-        const allJobs = data.jobs || []
-        // Restore active jobs from API on reconnect
-        allJobs.forEach(j => {
+        // One status filter, fetched in pages: a long-running job must survive
+        // refresh even when it is older than the first 40 active rows.
+        let offset = 0
+        let total = 0
+        do {
+          const { data } = await http.get("/api/jobs", {
+            params: { status: "running,pending,queued", limit: 100, offset },
+          })
+          if (!mounted) return
+          const page = data.jobs || []
+          total = Number(data.total || 0)
+          if (!page.length) break
+          offset += page.length
+          page.forEach(j => {
           if (!useAppStore.getState().activeJobs[j.id]) {
             const msg = localizeUiMessage(j.current_step || j.title || j.job_type)
             // Parse input_json to preserve job metadata (e.g. type: "clip_extraction")
@@ -59,7 +64,8 @@ export default function useWebSocket() {
               updateJobProgress(j.id, j.progress_pct, j.current_step || "")
             }
           }
-        })
+          })
+        } while (offset < total)
       } catch (err) {
         // Silent fail — jobs will be picked up on next WS message
       }
@@ -331,6 +337,7 @@ export default function useWebSocket() {
     ]
 
     return () => {
+      mounted = false
       unsubs.forEach(fn => fn())
       if (rafRef.current != null) {
         cancelAnimationFrame(rafRef.current)

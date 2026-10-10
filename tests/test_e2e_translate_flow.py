@@ -6,6 +6,7 @@ import subprocess
 import shutil
 from pathlib import Path
 
+# Historical standalone smoke harness: does NOT grade translation, timing or voices.
 viralmint_path = os.path.abspath("tools/ViralMint")
 if viralmint_path not in sys.path:
     sys.path.insert(0, viralmint_path)
@@ -218,7 +219,7 @@ async def run_e2e_translation_pipeline():
         has_audio = bool(final_a)
         
         if aspect_is_9x16 and duration_ok and has_video and has_audio:
-            verdict = "PASS"
+            verdict = "STRUCTURAL_PASS_QUALITY_UNVERIFIED"
         else:
             verdict = "PARTIAL"
     elif error_msg and ("GEMINI_API_KEY REQUIRED" in error_msg or "No AI provider configured" in error_msg):
@@ -234,7 +235,7 @@ async def run_e2e_translation_pipeline():
         "target_language": "Vietnamese",
         "mode": "full_dub",
         "voice_id": "vi-VN-HoaiMyNeural",
-        "secondary_voice_tested": "vi-VN-NamMinhNeural",
+        "secondary_voice_tested": False,
         "source": {
             "resolution": f"{source_w}x{source_h}",
             "header_duration": source_dur_header,
@@ -250,6 +251,9 @@ async def run_e2e_translation_pipeline():
             "caption_frame_evidence": str(evidence_dir / "vietnamese_caption_evidence.jpg") if frame_extracted else None,
         },
         "job_status": status,
+        "quality_gate": "NOT_EVALUATED",
+        "translation_fidelity_verified": False,
+        "timing_and_speaker_qa_verified": False,
         "error_message": error_msg,
         "verdict": verdict
     }
@@ -259,7 +263,7 @@ async def run_e2e_translation_pipeline():
         json.dump(evidence, f, ensure_ascii=False, indent=2)
 
     print(f"\n==========================================")
-    print(f"FINAL VERDICT: {verdict}")
+    print(f"STRUCTURAL SMOKE VERDICT: {verdict} (semantic and speaker QA not performed)")
     print(f"Resolution: {final_w}x{final_h} (9:16: {aspect_is_9x16})")
     print(f"Duration: {final_dur}s vs Source {source_actual_duration}s (Ratio: {duration_ratio}x, <=1.20: {duration_ok})")
     print(f"Caption Frame: {frame_extracted}")

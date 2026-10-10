@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import {
   Box, Typography, Tabs, Tab, Button, Chip, Stack, Paper, IconButton,
   CircularProgress, Alert, Avatar, Divider, Tooltip, FormControl, Select,
@@ -366,6 +366,7 @@ function ChannelDetail({ channel, onBack }) {
   const [pageTokens, setPageTokens] = useState({ 0: null })
   const [hasMore, setHasMore] = useState(false)
   const [nextPageToken, setNextPageToken] = useState(null)
+  const videoRequestRef = useRef(0)
   const showSnackbar = useAppStore((s) => s.showSnackbar)
   const isYT = channel.platform === "youtube"
   const isDouyin = channel.platform === "douyin"
@@ -376,6 +377,7 @@ function ChannelDetail({ channel, onBack }) {
     token = null,
     requestedLimit = rowsPerPage,
   ) => {
+    const requestId = ++videoRequestRef.current
     setLoading(true)
     setError(null)
     try {
@@ -388,6 +390,7 @@ function ChannelDetail({ channel, onBack }) {
         ...channelRequestConfig,
         params,
       })
+      if (requestId !== videoRequestRef.current) return
       setVideos(resp.videos || [])
       setChannelInfo(resp.channel || resp.user || null)
       if (isDouyin) {
@@ -402,9 +405,9 @@ function ChannelDetail({ channel, onBack }) {
         }))
       }
     } catch (e) {
-      setError(e.response?.data?.detail || e.message)
+      if (requestId === videoRequestRef.current) setError(e.response?.data?.detail || e.message)
     } finally {
-      setLoading(false)
+      if (requestId === videoRequestRef.current) setLoading(false)
     }
   }, [channel.id, channel.platform, isDouyin, rowsPerPage])
 
@@ -412,6 +415,7 @@ function ChannelDetail({ channel, onBack }) {
     setPage(0)
     setPageTokens({ 0: null })
     fetchData(false, 0, null, rowsPerPage)
+    return () => { videoRequestRef.current += 1 }
   }, [fetchData, rowsPerPage])
 
   const handleRefresh = () => {
@@ -637,26 +641,32 @@ function PlatformTab({ platform }) {
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [selectedChannel, setSelectedChannel] = useState(null)
+  const channelRequestRef = useRef(0)
   const showSnackbar = useAppStore((s) => s.showSnackbar)
   const isYT = platform === "youtube"
 
   const fetchChannels = useCallback(async () => {
+    const requestId = ++channelRequestRef.current
     setLoading(true)
     try {
       const { data } = await http.get("/api/channels/list", { params: { platform } })
+      if (requestId !== channelRequestRef.current) return
       const list = data.channels || []
       setChannels(list)
       setSelectedChannel((current) => (
         reconcileSelectedChannel(current, list, platform)
       ))
     } catch (e) {
-      showSnackbar(`Không thể tải kênh: ${e.message}`, "error")
+      if (requestId === channelRequestRef.current) showSnackbar(`Không thể tải kênh: ${e.message}`, "error")
     } finally {
-      setLoading(false)
+      if (requestId === channelRequestRef.current) setLoading(false)
     }
   }, [platform, showSnackbar]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { fetchChannels() }, [fetchChannels])
+  useEffect(() => {
+    fetchChannels()
+    return () => { channelRequestRef.current += 1 }
+  }, [fetchChannels])
 
   useEffect(() => {
     setSelectedChannel(null)

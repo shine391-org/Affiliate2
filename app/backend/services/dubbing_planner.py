@@ -481,52 +481,55 @@ def allocate_silence(
             if previous.end_ms >= chunk.end_ms:
                 raise ValueError(f"timing conflict: chunk {chunk.id} has no positive window after overlap normalization")
             chunk.start_ms = previous.end_ms
-    # Allocate the later cue first: it may need the tail of the preceding gap,
-    # which the preceding cue must not consume before that request is known.
-    for pos in range(len(chunks) - 1, -1, -1):
-        chunk = chunks[pos]
-        if only_chunk_ids is not None and chunk.id not in only_chunk_ids:
-            continue
-        if fixed_start[pos] and fixed_end[pos]:
-            continue
-        start, end = original[pos]
-        duration = chunk.actual_duration_ms or sum(
-            plan[idx].estimated_duration_ms for idx in chunk.item_indexes
-        )
-        needed = max(0, duration - chunk.available_ms)
-        if not needed:
-            continue
-        span_limit = max(_NATURAL_CONTINUATION_MAX_SPAN_MS, end - start)
-        if pos + 1 < len(chunks):
-            source_gap = max(0, original[pos + 1][0] - end)
-            reserve = min(source_gap, _NATURAL_CONTINUATION_GAP_MS)
-            boundary = chunks[pos + 1].start_ms - reserve
-        else:
-            boundary = end if timeline_end_ms is None else timeline_end_ms
-        extension = max(0, min(
-            needed, boundary - chunk.end_ms,
-            end + config.gap_tolerance_ms - chunk.end_ms,
-            span_limit - chunk.available_ms,
-        ))
-        if not fixed_end[pos]:
-            chunk.end_ms += extension
-        # Prefer a mild speed-up to moving onset unnecessarily. Following
-        # silence, when sufficient, has already provided the full natural slot.
-        needed = max(0, math.ceil(duration / config.speed_accept) - chunk.available_ms)
-        if not needed or fixed_start[pos]:
-            continue
-        if pos:
-            source_gap = max(0, start - original[pos - 1][1])
-            reserve = min(source_gap, _NATURAL_CONTINUATION_GAP_MS)
-            boundary = chunks[pos - 1].end_ms + reserve
-        else:
-            boundary = 0
-        extension = max(0, min(
-            needed, chunk.start_ms - boundary,
-            chunk.start_ms - max(0, start - config.gap_tolerance_ms),
-            span_limit - chunk.available_ms,
-        ))
-        chunk.start_ms -= extension
+    # Meet every chunk's hard demand before spending shared silence on comfort.
+    # Reverse order reserves only the minimum preceding slack needed by a later
+    # chunk; improving it to 1.15x first can strand an otherwise feasible neighbour.
+    # Following silence remains preferred; early onset is never used just for 1x.
+    for target_speed in (config.speed_max, config.speed_accept, 1.0):
+        for pos in range(len(chunks) - 1, -1, -1):
+            chunk = chunks[pos]
+            if only_chunk_ids is not None and chunk.id not in only_chunk_ids:
+                continue
+            if fixed_start[pos] and fixed_end[pos]:
+                continue
+            start, end = original[pos]
+            duration = chunk.actual_duration_ms or sum(
+                plan[idx].estimated_duration_ms for idx in chunk.item_indexes
+            )
+            needed = max(0, math.ceil(duration / target_speed) - chunk.available_ms)
+            if not needed:
+                continue
+            span_limit = max(_NATURAL_CONTINUATION_MAX_SPAN_MS, end - start)
+            if pos + 1 < len(chunks):
+                source_gap = max(0, original[pos + 1][0] - end)
+                reserve = min(source_gap, _NATURAL_CONTINUATION_GAP_MS)
+                boundary = chunks[pos + 1].start_ms - reserve
+            else:
+                boundary = end if timeline_end_ms is None else timeline_end_ms
+            extension = max(0, min(
+                needed, boundary - chunk.end_ms,
+                end + config.gap_tolerance_ms - chunk.end_ms,
+                span_limit - chunk.available_ms,
+            ))
+            if not fixed_end[pos]:
+                chunk.end_ms += extension
+            # Prefer a mild speed-up to moving onset unnecessarily. Following
+            # silence, when sufficient, has already provided the full natural slot.
+            needed = max(0, math.ceil(duration / max(target_speed, config.speed_accept)) - chunk.available_ms)
+            if not needed or fixed_start[pos]:
+                continue
+            if pos:
+                source_gap = max(0, start - original[pos - 1][1])
+                reserve = min(source_gap, _NATURAL_CONTINUATION_GAP_MS)
+                boundary = chunks[pos - 1].end_ms + reserve
+            else:
+                boundary = 0
+            extension = max(0, min(
+                needed, chunk.start_ms - boundary,
+                chunk.start_ms - max(0, start - config.gap_tolerance_ms),
+                span_limit - chunk.available_ms,
+            ))
+            chunk.start_ms -= extension
     return chunks
 
 
@@ -669,3 +672,4 @@ def atempo_filter(speed: float) -> str:
         remaining /= 0.5
     parts.append(f"atempo={remaining:.3f}")
     return ",".join(parts)
+

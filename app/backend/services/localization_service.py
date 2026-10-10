@@ -63,14 +63,14 @@ def _utc_now_iso() -> str:
     return _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime())
 
 _TRANSLATION_BATCH_SIZE = 12
-_C6_TRANSLATION_PROMPT_VERSION = 2  # C6 checkpoint invalidation for changed guidance.
+_C6_TRANSLATION_PROMPT_VERSION = 3  # C6 checkpoint invalidation for changed guidance.
 _CONTEXT_CHARS = 10_000
 _DUBBING_SYNTHESIS_RULES_VERSION = 1
 _EDGE_TTS_BOUNDARY_RULE = "edge-boundary-trim-v3-neutral-pitch"
 _TTS_REQUEST_TIMEOUT_S = 120.0
 _TTS_CHUNK_DEADLINE_S = 300.0
 _POSTFIT_ROUNDING_TOLERANCE_MS = 30
-_C7_REWRITE_POLICY_VERSION = 3
+_C7_REWRITE_POLICY_VERSION = 4
 
 
 # Abandoned per-attempt TTS scratch files. A provider that streams from a
@@ -1422,6 +1422,7 @@ async def _translate_batch_resilient(
     _repair_issues: dict | None = None,
     context_segments=None,
     drafts: dict | None = None,
+    _semantic_attempt: int = 1,
 ) -> tuple[list[str], set[int]]:
     if not batch:
         return [], set()
@@ -1431,6 +1432,24 @@ async def _translate_batch_resilient(
         deadline_at = asyncio.get_running_loop().time() + float(profile.translation_total_timeout_s)
     prompt = _translation_prompt(target_language=target_language, batch=batch,
         transcript_context=context, profile=profile, for_dub=for_dub, localized_terms=localized_terms)
+    # Global context may retain only the beginning/end of a long video. Keep
+    # immediate source neighbours for middle batches and targeted repairs too.
+    rows = list(context_segments or [])
+    positions = {s.id: i for i, s in enumerate(rows)}
+    selected_ids = {s.id for s in batch}
+    neighbours = {}
+    for segment in batch:
+        position = positions.get(segment.id)
+        if position is None:
+            continue
+        for index in (position - 1, position + 1):
+            if 0 <= index < len(rows) and rows[index].id not in selected_ids:
+                neighbour = rows[index]
+                neighbours[neighbour.id] = {"source_id": neighbour.id,
+                    "speaker_id": neighbour.speaker_id, "source_text": neighbour.source_text[:300]}
+    if neighbours:
+        prompt += "\n\nLOCAL SOURCE CONTEXT (read-only; do not output these IDs):\n" + json.dumps(
+            list(neighbours.values()), ensure_ascii=False)
     if _repair_issues:
         prompt += "\n\nTARGETED REPAIR: Only the supplied rejected IDs. Preserve meaning; fix these invariants:\n" + json.dumps(_repair_issues, ensure_ascii=False)
     raw = await _call_ai_chat_resilient(ai, fallback_ai,
@@ -1458,7 +1477,7 @@ async def _translate_batch_resilient(
             # applies to the semantic-repair pass too: a repair that lands on a
             # route returning malformed JSON must not strand the segment, since
             # a later configured route can still answer correctly. The recursive
-            # call passes _repair_issues along, so the guard below re-fires only
+            # call passes _repair_issues along, so this guard re-fires only
             # while routes remain and each route is visited at most once here.
             if route_state.sticky_index + 1 < len(route_state.clients):
                 route_state.sticky_index += 1
@@ -1472,7 +1491,8 @@ async def _translate_batch_resilient(
                     fallback_ai=fallback_ai, progress_cb=progress_cb, deadline_at=deadline_at,
                     source_language=source_language, localized_terms=localized_terms, context_segments=context_segments,
                     accepted_cb=accepted_cb, dispatch_budget=dispatch_budget,
-                    _split_depth=_split_depth, _semantic_repair=_semantic_repair, drafts=drafts)
+                    _split_depth=_split_depth, _semantic_repair=_semantic_repair, drafts=drafts,
+                    _semantic_attempt=_semantic_attempt)
         if len(batch) == 1 or _split_depth >= 1 or _repair_issues:
             logger.warning("Translation structure failed for %d item(s): %s", len(batch), exc)
             return [segment.source_text for segment in batch], set(range(len(batch)))
@@ -1484,13 +1504,15 @@ async def _translate_batch_resilient(
             fallback_ai=fallback_ai, progress_cb=progress_cb, deadline_at=deadline_at,
             source_language=source_language, localized_terms=localized_terms, context_segments=context_segments,
             accepted_cb=accepted_cb, dispatch_budget=dispatch_budget,
-            _split_depth=_split_depth + 1, _semantic_repair=_semantic_repair, drafts=drafts)
+            _split_depth=_split_depth + 1, _semantic_repair=_semantic_repair, drafts=drafts,
+            _semantic_attempt=_semantic_attempt)
         right, rf = await _translate_batch_resilient(ai, batch[mid:], route_state=route_state,
             target_language=target_language, context=context, profile=profile, for_dub=for_dub,
             fallback_ai=fallback_ai, progress_cb=progress_cb, deadline_at=deadline_at,
             source_language=source_language, localized_terms=localized_terms, context_segments=context_segments,
             accepted_cb=accepted_cb, dispatch_budget=dispatch_budget,
-            _split_depth=_split_depth + 1, _semantic_repair=_semantic_repair, drafts=drafts)
+            _split_depth=_split_depth + 1, _semantic_repair=_semantic_repair, drafts=drafts,
+            _semantic_attempt=_semantic_attempt)
         return left + right, lf | {mid + i for i in rf}
 
     if localized_terms is not None:
@@ -1507,49 +1529,38 @@ async def _translate_batch_resilient(
             fallback_ai=fallback_ai, progress_cb=progress_cb, deadline_at=deadline_at,
             source_language=source_language, localized_terms=localized_terms, context_segments=context_segments, accepted_cb=accepted_cb,
             dispatch_budget=dispatch_budget, _split_depth=_split_depth, _semantic_repair=False,
-            _repair_issues=rejected, drafts=drafts)
+            _repair_issues=rejected, drafts=drafts, _semantic_attempt=_semantic_attempt + 1)
         for index, (segment, text) in enumerate(zip(pending, fixed)):
             if index not in failed:
                 accepted[segment.id] = {"id": segment.id, "text": text}
-    # A semantic rejection that bounded repair could NOT fix is still an
-    # unresolved candidate. The next configured route may produce meaning-valid
-    # text, so advance to it instead of abandoning the segment. Every accepted
-    # sibling is already durable (accepted_cb ran before repair), so this only
-    # re-asks for the segments that are still unresolved; the repair pass itself
-    # is not repeated on the new route, which keeps the attempt count bounded.
-    still_rejected = {segment.id for segment in batch
-                      if segment.id in rejected and segment.id not in accepted}
-    if (still_rejected and not _repair_issues and _semantic_repair
-            and route_state is not None
+    if (rejected and not _semantic_repair and route_state is not None
             and route_state.sticky_index + 1 < len(route_state.clients)):
-        route_state.sticky_index += 1
-        next_client = route_state.current
+        # A well-formed but wrong answer is also a reason to try the configured
+        # fallback. Keep accepted siblings durable and share the SAME deadline
+        # and dispatch budget; never silently select an unconfigured provider.
+        pending = [segment for segment in batch if segment.id in rejected]
         _append_ai_failure(route_state, {
-            "connection_id": getattr(route_state.clients[route_state.sticky_index - 1],
-                                     "connection_name", None),
-            "provider": getattr(getattr(route_state.clients[route_state.sticky_index - 1],
-                                        "provider", None), "value",
-                                str(getattr(route_state.clients[route_state.sticky_index - 1],
-                                            "provider", ""))),
-            "model": getattr(route_state.clients[route_state.sticky_index - 1], "model", None),
-            "attempt": 1, "error_type": "SemanticRejection",
-            "error": f"repair did not resolve {sorted(still_rejected)}",
+            "connection_id": getattr(route_state.current, "connection_name", None),
+            "model": getattr(route_state.current, "model", None),
+            "error_type": "SemanticGuardRejected", "pending_ids": [s.id for s in pending],
         })
+        route_state.sticky_index += 1
         await _emit_ai_progress(progress_cb, {"event": "switch_fallback", "stage": "translation",
-            "reason": "semantic_rejection_after_repair",
-            "provider": getattr(next_client, "connection_name", None),
-            "model": getattr(next_client, "model", None)})
-        remaining = [segment for segment in batch if segment.id in still_rejected]
-        retried, retry_failed = await _translate_batch_resilient(
-            ai, remaining, route_state=route_state,
+            "reason": "semantic_rejection", "pending_ids": [s.id for s in pending],
+            "provider": getattr(route_state.current, "connection_name", None)})
+        fixed, failed = await _translate_batch_resilient(ai, pending, route_state=route_state,
             target_language=target_language, context=context, profile=profile, for_dub=for_dub,
             fallback_ai=fallback_ai, progress_cb=progress_cb, deadline_at=deadline_at,
             source_language=source_language, localized_terms=localized_terms,
-            context_segments=context_segments, accepted_cb=accepted_cb,
-            dispatch_budget=dispatch_budget, _split_depth=_split_depth,
-            _semantic_repair=False, _repair_issues=rejected, drafts=drafts)
-        for segment, text in zip(remaining, retried):
-            accepted[segment.id] = {"id": segment.id, "text": text}
+            context_segments=context_segments, accepted_cb=accepted_cb, dispatch_budget=dispatch_budget,
+            _split_depth=_split_depth, _semantic_repair=False, _repair_issues=rejected,
+            drafts=drafts, _semantic_attempt=_semantic_attempt + 1)
+        for index, (segment, text) in enumerate(zip(pending, fixed)):
+            if index not in failed:
+                accepted[segment.id] = {"id": segment.id, "text": text}
+        # Only the leaf may keep its FINAL rejected candidate as a draft.
+        return ([accepted[s.id]["text"] if s.id in accepted else s.source_text for s in batch],
+                {i for i, s in enumerate(batch) if s.id not in accepted})
     if drafts is not None and rejected and not _semantic_repair:
         # Only the final semantic attempt owns this receipt. The parent must
         # never restore its pre-repair raw payload after a child returns; an
@@ -1575,8 +1586,8 @@ async def _translate_batch_resilient(
                 "target_text": item["text"],
                 "issues": issues,
                 "reasons": [issue.get("kind") for issue in issues],
-                "attempts": 2 if _repair_issues else 1,
-                "semantic_attempts": 2 if _repair_issues else 1,
+                "attempts": _semantic_attempt,
+                "semantic_attempts": _semantic_attempt,
                 "repair_attempted": bool(_repair_issues and segment.id in _repair_issues),
                 "origin": "semantic_repair" if _repair_issues else "initial_candidate",
                 "source_start_ms": segment.source_start_ms,
@@ -2905,6 +2916,53 @@ def _chunk_synthesis_identity(
     return hashlib.sha256(raw).hexdigest()
 
 
+def _promote_chunk_bundle(candidate: Path, destination: Path) -> None:
+    """Publish audio/events/identity together, or restore the last-good bundle.
+
+    Invalidate the identity BEFORE changing bytes; publish it LAST. A process
+    crash therefore leaves either a hash-bound bundle or a non-reusable artifact.
+    Recoverable I/O errors restore the previous bundle, with identity last too.
+    """
+    import shutil
+    import tempfile
+
+    if not candidate.is_file():
+        raise FileNotFoundError(f"Missing candidate audio: {candidate.name}")
+    suffixes = ("", ".words.json", ".input.json")
+    with tempfile.TemporaryDirectory(prefix="promote-", dir=destination.parent) as temp:
+        backups = {}
+        for suffix in suffixes:
+            target = destination.with_name(destination.name + suffix)
+            if target.exists():
+                backup = Path(temp) / ("previous" + suffix)
+                shutil.copy2(target, backup)
+                backups[suffix] = backup
+        identity = _chunk_identity_path(destination)
+        identity.unlink(missing_ok=True)
+        try:
+            for suffix in suffixes:
+                source = candidate.with_name(candidate.name + suffix)
+                target = destination.with_name(destination.name + suffix)
+                if source.exists():
+                    source.replace(target)
+                else:
+                    target.unlink(missing_ok=True)
+        except BaseException:
+            identity.unlink(missing_ok=True)
+            try:
+                for suffix in suffixes:
+                    target = destination.with_name(destination.name + suffix)
+                    if suffix in backups:
+                        backups[suffix].replace(target)
+                    else:
+                        target.unlink(missing_ok=True)
+            except BaseException:
+                # Never let an incomplete rollback retain a reuse receipt.
+                identity.unlink(missing_ok=True)
+                raise
+            raise
+
+
 def _chunk_identity_path(audio_path: Path) -> Path:
     return audio_path.with_name(audio_path.name + ".input.json")
 
@@ -2988,22 +3046,14 @@ async def _generate_tts_chunk_atomic(
     pending = output_path.with_name(
         f"{output_path.stem}.pending-{os.getpid()}-{uuid.uuid4().hex[:8]}{output_path.suffix}")
     pending.unlink(missing_ok=True)
-    published = False
     try:
         duration = await _generate_tts_chunk(
             text,
             output_path=pending,
             **kwargs,
         )
-        pending.replace(output_path)
-        pending_words = pending.with_suffix(pending.suffix + ".words.json")
-        output_words = output_path.with_suffix(output_path.suffix + ".words.json")
-        output_words.unlink(missing_ok=True)
-        if pending_words.exists():
-            pending_words.replace(output_words)
-        published = True
         try:
-            _write_chunk_identity(output_path, identity, duration)
+            _write_chunk_identity(pending, identity, duration)
         except Exception as exc:
             # Missing identity only disables future reuse; it must not invalidate
             # a TTS artifact that was already generated and measured correctly.
@@ -3012,6 +3062,7 @@ async def _generate_tts_chunk_atomic(
                 output_path.name,
                 exc,
             )
+        _promote_chunk_bundle(pending, output_path)
         return duration
     finally:
         # A provider that writes from a worker thread (asyncio.to_thread around
@@ -3021,6 +3072,8 @@ async def _generate_tts_chunk_atomic(
         # sleeping here - this widens cleanup only, and never publishes
         # anything nor swallows the Timeout/JobCancelledError on its way out.
         _register_abandoned_tts_attempt(pending)
+        for suffix in (".words.json", ".input.json"):
+            pending.with_name(pending.name + suffix).unlink(missing_ok=True)
 
 
 def _rewrite_speech_budget_ms(measured_ms: int, window_ms: int, speed_max: float) -> int:
@@ -3359,6 +3412,20 @@ ITEMS:
                 "before": item.spoken_text,
                 "after": new_text,
             })
+    # C7 must still satisfy source facts and the job's accepted name dictionary,
+    # not merely preserve invariants relative to a potentially imperfect C6.
+    if (state or {}).get("source_language"):
+        selected = [segment_by_id[plan[i].segment_id] for i in chunk.item_indexes]
+        source_checks = _translation_guard_checks(
+            selected, [mapped[s.id] for s in selected], profile,
+            state["source_language"], target_language,
+            state.get("localized_terms") or {}, ordered_context,
+        )
+        for segment in selected:
+            meaning_violations.extend({**issue, "segment_id": segment.id,
+                "chunk_id": chunk.id, "before": segment.translated_text,
+                "after": mapped[segment.id], "basis": "source"}
+                for issue in source_checks[segment.id] if issue.get("severity") == "hard")
     if meaning_violations:
         if state is not None:
             state["last_meaning_guard"] = [
@@ -4001,7 +4068,9 @@ async def synthesize_timed_dub(
             and required_speed(duration_ms, chunk.available_ms) > config.speed_max
             and attempts < config.rewrite_max_attempts
         ):
-            rewrite_state.update(measured_duration_ms=duration_ms, attempt=attempts + 1)
+            rewrite_state.update(measured_duration_ms=duration_ms, attempt=attempts + 1,
+                                 source_language=out.language,
+                                 localized_terms=out.metadata.get("localized_terms") or {})
             # Snapshot the approved text so the audit can prove what changed.
             before_snapshot = {
                 plan[i].segment_id: plan[i].spoken_text for i in chunk.item_indexes
@@ -4048,21 +4117,45 @@ async def synthesize_timed_dub(
             candidate_duration_ms = 0
             accepted_candidate = False
             try:
-                candidate_duration_ms = await _generate_tts_chunk_atomic(
-                    speech_text,
-                    output_path=candidate_path,
-                    identity=candidate_identity,
-                    runtime=runtime,
-                    voice=voice,
-                    profile=profile,
-                    speaker_id=speaker_id,
-                    target_language=target_language,
-                    reference_audio=ref.get("audio"),
-                    reference_text=ref.get("text"),
-                    reference_language=ref.get("language"),
-                    cancel_check=cancel_check,
-                    recovery_events=candidate_events,
-                )
+                try:
+                    candidate_duration_ms = await _generate_tts_chunk_atomic(
+                        speech_text,
+                        output_path=candidate_path,
+                        identity=candidate_identity,
+                        runtime=runtime,
+                        voice=voice,
+                        profile=profile,
+                        speaker_id=speaker_id,
+                        target_language=target_language,
+                        reference_audio=ref.get("audio"),
+                        reference_text=ref.get("text"),
+                        reference_language=ref.get("language"),
+                        cancel_check=cancel_check,
+                        recovery_events=candidate_events,
+                    )
+                except Exception as exc:
+                    from backend.core.exceptions import JobCancelledError
+                    from backend.services.tts_service import retryable_tts_error
+                    cause, seen = exc, set()
+                    fatal = False
+                    while cause is not None and id(cause) not in seen:
+                        seen.add(id(cause))
+                        if (isinstance(cause, JobCancelledError)
+                                or isinstance(cause, OSError)
+                                and not isinstance(cause, (ConnectionError, TimeoutError))):
+                            fatal = True
+                            break
+                        cause = cause.__cause__
+                    if fatal or not retryable_tts_error(exc):
+                        raise
+                    issues.append({
+                        "reason": "rewrite_tts_unavailable", "chunk_id": chunk.id,
+                        "segment_ids": [plan[i].segment_id for i in chunk.item_indexes],
+                        "error_type": type(exc).__name__, "requires_human_review": True,
+                    })
+                    # Optional improvement failed. finally restores text; keep
+                    # last-good measured audio and try bounded fit/retime instead.
+                    break
                 if candidate_duration_ms >= duration_before_ms:
                     # The AI wrote different words, but REAL TTS got no faster.
                     # Reject without touching original audio, sidecars, accepted
@@ -4091,13 +4184,7 @@ async def synthesize_timed_dub(
                 # Publish the candidate only AFTER positive measurement. Sidecars
                 # remain identity-bound; an interrupted promotion cannot falsely
                 # mark wrong audio reusable at the next resume.
-                candidate_path.replace(path)
-                for sidecar in (".words.json", ".input.json"):
-                    source_sidecar = candidate_path.with_name(candidate_path.name + sidecar)
-                    target_sidecar = path.with_name(path.name + sidecar)
-                    target_sidecar.unlink(missing_ok=True)
-                    if source_sidecar.exists():
-                        source_sidecar.replace(target_sidecar)
+                _promote_chunk_bundle(candidate_path, path)
                 accepted_candidate = True
                 duration_ms = candidate_duration_ms
                 synthesis_identities[chunk.id] = candidate_identity
@@ -4626,6 +4713,15 @@ async def synthesize_timed_dub(
     cadence_review_segments.difference_update(aligned_cue_ids)
     measured_cadence_review = {sid for issue in issues if issue.get("reason", "").startswith("measured_cadence_")
                               for sid in issue.get("segment_ids", [])}
+    for chunk in fitted_chunks:
+        if len(chunk.item_indexes) > 1 and chunk.id not in cadence_placements:
+            segment_ids = [fitted_plan[i].segment_id for i in chunk.item_indexes]
+            cadence_review_segments.update(segment_ids)
+            issues.append({
+                "reason": "multi_cue_unverified_timing", "chunk_id": chunk.id,
+                "segment_ids": segment_ids, "timing_basis": "allocated",
+                "requires_human_review": True,
+            })
 
     soft_overflow_segments = {
         segment_id
@@ -4902,3 +4998,4 @@ def caption_segments_from_localization(transcript: LocalizationTranscript) -> li
             "speaker_id": seg.speaker_id,
         })
     return out
+
