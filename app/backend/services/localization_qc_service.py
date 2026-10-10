@@ -473,12 +473,21 @@ def evaluate_localization_qc(
             "delta": round(duration_delta, 3),
         })
 
-    if profile.target_aspect == "9:16":
-        if final_meta["height"] <= final_meta["width"]:
-            failures.append({"code": "wrong_final_aspect", "expected": "9:16"})
-    elif profile.target_aspect == "16:9":
-        if final_meta["width"] <= final_meta["height"]:
-            failures.append({"code": "wrong_final_aspect", "expected": "16:9"})
+    # Orientation alone is not an aspect-ratio check: 3:4 is not 9:16.
+    target_ratios = {"9:16": (9, 16), "16:9": (16, 9), "1:1": (1, 1)}
+    target_ratio = target_ratios.get(profile.target_aspect)
+    if target_ratio:
+        width, height = final_meta["width"], final_meta["height"]
+        numerator, denominator = target_ratio
+        # 1.5% relative tolerance accommodates codec even-dimension rounding.
+        if width <= 0 or height <= 0 or abs(width * denominator - height * numerator) > (
+            0.015 * height * numerator
+        ):
+            failures.append({
+                "code": "wrong_final_aspect",
+                "expected": profile.target_aspect,
+                "actual": f"{width}:{height}",
+            })
 
     max_volume = audio_max_volume_db(final_video)
     if max_volume is not None and max_volume >= -0.05:

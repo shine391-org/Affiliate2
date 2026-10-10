@@ -64,8 +64,6 @@ async def list_downloaded(
                 if not title:
                     title = sr.title
                     platform = sr.platform
-                    v.title = title
-                    v.platform = platform
                 thumbnail_url = sr.thumbnail_url
 
             source_url = sr.video_url if sr else None
@@ -111,9 +109,6 @@ async def list_downloaded(
                 "media_metadata": _safe_json(v.media_metadata_json, {}),
                 "created_at": v.created_at.isoformat() if v.created_at else None,
             })
-
-        # Persist any backfilled titles
-        await db.commit()
 
     return {"videos": items, "total": total}
 
