@@ -54,6 +54,8 @@ export default function Publish() {
   const [error, setError] = useState("")
   const [job, setJob] = useState(null)
   const pollRef = useRef(null)
+  const pollVersionRef = useRef(0)
+  const [pollError, setPollError] = useState("")
 
   const selectedId = params.get("video") || ""
   const requestedTarget = params.get("target") || ""
@@ -63,6 +65,9 @@ export default function Publish() {
       : (videos[0] || null),
     [videos, selectedId],
   )
+
+  const selectedIdRef = useRef(selected?.id || null)
+  selectedIdRef.current = selected?.id || null
 
   const [title, setTitle] = useState("")
   const [caption, setCaption] = useState("")
@@ -132,7 +137,6 @@ export default function Publish() {
     window.addEventListener("focus", onFocus)
     return () => window.removeEventListener("focus", onFocus)
   }, [load])
-  useEffect(() => () => { if (pollRef.current) clearTimeout(pollRef.current) }, [])
 
   useEffect(() => {
     let alive = true
@@ -188,12 +192,14 @@ export default function Publish() {
   }, [selected?.id, requestedTarget]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const choose = (id) => {
+    stopPolling()
+    setJob(null)
+    setPollError("")
     setParams((prev) => {
       const next = new URLSearchParams(prev)
       next.set("video", id)
       return next
     })
-    setJob(null)
     setError("")
   }
 
@@ -217,26 +223,78 @@ export default function Publish() {
     window.open(route, "_blank", "noopener,noreferrer")
   }
 
-  const pollJob = (jobId) => {
+  const stopPolling = () => {
+    pollVersionRef.current += 1
     if (pollRef.current) clearTimeout(pollRef.current)
-    const tick = async () => {
+    pollRef.current = null
+  }
+
+  const pollJob = (jobId, videoId) => {
+    stopPolling()
+    const version = pollVersionRef.current
+    const current = () => pollVersionRef.current === version && selectedIdRef.current === videoId
+
+    // Serial, bounded-backoff polling: one network blip cannot orphan a publish.
+    const tick = async (failures = 0) => {
+      if (!current()) return
+      let nextFailures = 0
       try {
         const { data } = await http.get(`/api/jobs/${jobId}`)
+        if (!current()) return
         setJob(data)
+        setPollError("")
         if (terminal(data.status)) {
-          pollRef.current = null
+          stopPolling()
           await load()
-          if (data.status === "success") showSnackbar("Tác vụ xuất bản đã hoàn tất", "success")
+          if (selectedIdRef.current === videoId && data.status === "success") {
+            showSnackbar("Tác vụ xuất bản đã hoàn tất", "success")
+          }
           return
         }
       } catch {
-        pollRef.current = null
-        return
+        if (!current()) return
+        nextFailures = failures + 1
+        setPollError("Mất kết nối khi theo dõi xuất bản. Đang tự kiểm tra lại; không gửi lại video.")
       }
-      pollRef.current = setTimeout(tick, 1800)
+      if (current()) {
+        const delay = nextFailures ? Math.min(30000, 1800 * 2 ** Math.min(nextFailures, 4)) : 1800
+        pollRef.current = setTimeout(() => tick(nextFailures), delay)
+      }
     }
-    pollRef.current = setTimeout(tick, 800)
+    pollRef.current = setTimeout(() => tick(), 800)
   }
+
+  // On reload or when switching videos, resume only the persisted upload job
+  // belonging to that exact GeneratedVideo. Never inherit another video's job.
+  useEffect(() => {
+    stopPolling()
+    setJob(null)
+    setPollError("")
+    if (!selected?.id) return undefined
+    const videoId = selected.id
+    let alive = true
+    http.get("/api/jobs", { params: { status: "pending,running", job_type: "upload", limit: 200 } })
+      .then(({ data }) => {
+        if (!alive || selectedIdRef.current !== videoId) return
+        const matched = (data.jobs || []).find((candidate) => {
+          try {
+            return JSON.parse(candidate.input_json || "{}").generated_video_id === videoId
+          } catch {
+            return false
+          }
+        })
+        if (matched) {
+          setJob(matched)
+          pollJob(matched.id, videoId)
+        }
+      })
+      .catch(() => {
+        if (alive && selectedIdRef.current === videoId) {
+          setPollError("Không thể kiểm tra tác vụ xuất bản đang chạy. Hãy làm mới để thử lại.")
+        }
+      })
+    return () => { alive = false; stopPolling() }
+  }, [selected?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const deleteVideo = async () => {
     if (!selected) return
@@ -257,6 +315,7 @@ export default function Publish() {
 
   const publish = async (platform) => {
     if (!selected) return
+    const publishingVideoId = selected.id
     if (!selected.publish_approved) {
       setError("Hãy duyệt đúng video này trước khi xuất bản.")
       return
@@ -304,12 +363,14 @@ export default function Publish() {
         : ["facebook", "instagram"].includes(platform)
           ? { [platform]: { title: title.trim(), caption: caption.trim() } }
           : {}
-      const { data } = await http.post(`/api/videos/${selected.id}/upload`, {
+      const { data } = await http.post(`/api/videos/${publishingVideoId}/upload`, {
         platforms: [platform],
         publish_options: publishOptions,
       })
+      if (selectedIdRef.current !== publishingVideoId) return
       setJob({ id: data.job_id, status: "pending", current_step: "Đã xếp hàng", progress_pct: 0 })
-      pollJob(data.job_id)
+      setPollError("")
+      pollJob(data.job_id, publishingVideoId)
     } catch (e) {
       setError(e.response?.data?.detail || `Không thể xuất bản lên ${platform}.`)
     }
@@ -444,9 +505,11 @@ export default function Publish() {
                   {active && <LinearProgress variant={job.progress_pct ? "determinate" : "indeterminate"}
                     value={Math.min(100, Number(job.progress_pct || 0))} sx={{ mt: 1 }} />}
                   {job.error_message && <Alert severity="error" sx={{ mt: 1 }}>{job.error_message}</Alert>}
+                  {pollError && <Alert severity="warning" sx={{ mt: 1 }}>{pollError}</Alert>}
                 </Paper>
               )}
 
+              {!job && pollError && <Alert severity="warning">{pollError}</Alert>}
               <Divider />
 
               <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>Nền tảng đích</Typography>
