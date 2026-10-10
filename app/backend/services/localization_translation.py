@@ -33,10 +33,19 @@ from backend.core.localization import (
     LocalizationTranscript,
 )
 from backend.services import localization_service as _facade
+
+def _translation_batch_size() -> int:
+    """Cues per translation request.
+
+    Resolved through the facade because tests shrink it to force the
+    multi-batch path; a module-level copy here would ignore the patch and the
+    test would run a single batch while asserting on the second prompt.
+    """
+    return _facade._TRANSLATION_BATCH_SIZE
+
 from backend.services.localization_service import (
     _C6_TRANSLATION_PROMPT_VERSION,
     _MAX_AI_FAILURE_HISTORY,
-    _TRANSLATION_BATCH_SIZE,
     _await_provider_operation,
     _cancel_checkpoint,
     _selected_ai_connection_id,
@@ -740,13 +749,13 @@ async def translate_transcript(
     # batches. Revalidate cached items together before deciding which IDs to
     # resume; dictionary order must not change their meaning.
     cached_items = []
-    for start in range(0, len(out.segments), _TRANSLATION_BATCH_SIZE):
+    for start in range(0, len(out.segments), _translation_batch_size()):
         key = str(start)
         cached = completed_batches.get(key)
         if not isinstance(cached, dict) or cached.get("failed"):
             completed_batches.pop(key, None)
             continue
-        batch = out.segments[start:start + _TRANSLATION_BATCH_SIZE]
+        batch = out.segments[start:start + _translation_batch_size()]
         items = cached.get("items")
         try:
             ids = {item["id"] for item in items}
@@ -780,9 +789,9 @@ async def translate_transcript(
         tmp_cp.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
         tmp_cp.replace(checkpoint_file)
 
-    for start in range(0, len(out.segments), _TRANSLATION_BATCH_SIZE):
+    for start in range(0, len(out.segments), _translation_batch_size()):
         await _cancel_checkpoint(cancel_check, "translation")
-        batch = out.segments[start:start + _TRANSLATION_BATCH_SIZE]
+        batch = out.segments[start:start + _translation_batch_size()]
         batch_key = str(start)
         cached = completed_batches.get(batch_key)
         accepted_items = {}
@@ -840,9 +849,9 @@ async def translate_transcript(
         if pending:
             total_batches = max(
                 1,
-                (len(out.segments) + _TRANSLATION_BATCH_SIZE - 1) // _TRANSLATION_BATCH_SIZE,
+                (len(out.segments) + _translation_batch_size() - 1) // _translation_batch_size(),
             )
-            batch_number = (start // _TRANSLATION_BATCH_SIZE) + 1
+            batch_number = (start // _translation_batch_size()) + 1
             await _emit_ai_progress(progress_cb, {
                 "event": "batch",
                 "stage": "translation",
@@ -935,7 +944,7 @@ async def translate_transcript(
                 seg.translation_status = "untranslated"
             seg.qc_status = "review"
             failed_total += 1
-            cached = completed_batches[str(index // _TRANSLATION_BATCH_SIZE * _TRANSLATION_BATCH_SIZE)]
+            cached = completed_batches[str(index // _translation_batch_size() * _translation_batch_size())]
             cached["items"] = [item for item in cached["items"] if item["id"] != seg.id]
             if seg.id not in cached["pending_ids"]:
                 cached["pending_ids"].append(seg.id)

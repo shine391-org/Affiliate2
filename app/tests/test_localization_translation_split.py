@@ -196,35 +196,47 @@ def test_public_names_are_the_same_objects_as_before_the_split():
 # ── structure ───────────────────────────────────────────────────────────
 
 
-def test_the_facade_import_runs_after_every_collaborator_is_defined():
+def test_the_facade_imports_run_after_every_collaborator_is_defined():
     """Import order, not convention, is what makes the split importable.
 
-    ``localization_translation`` imports its collaborators FROM
-    ``localization_service``, so the facade's own import of the moved module
-    must be the LAST executable statement in the file. Anywhere earlier and a
-    collaborator declared further down is simply missing at that moment - an
-    ImportError on a name that exists in the file.
+    ``localization_translation`` and ``localization_tts`` both import their
+    collaborators back from ``localization_service``, so the facade's own
+    imports of them must run after every one of those collaborators is
+    defined. Anywhere earlier and a collaborator declared further down is
+    simply missing at that moment - an ImportError on a name that exists in
+    the file.
+
+    Checked as "both facade imports come after every module-level definition",
+    not "is the last statement": after a second split the file has two
+    facade imports and only the later one is last.
     """
     path = pathlib.Path("app/backend/services/localization_service.py")
     tree = ast.parse(path.read_text(encoding="utf-8"))
 
-    facade_line = None
-    for node in tree.body:
-        if (
-            isinstance(node, ast.ImportFrom)
-            and node.module == "backend.services.localization_translation"
-        ):
-            facade_line = node.lineno
-    assert facade_line is not None, "the facade import is missing entirely"
-
-    body = [
-        n for n in tree.body
-        if not isinstance(n, (ast.Expr,)) or not isinstance(n.value, ast.Constant)
+    facade_lines = [
+        n.lineno for n in tree.body
+        if isinstance(n, ast.ImportFrom)
+        and n.module in (
+            "backend.services.localization_translation",
+            "backend.services.localization_tts",
+        )
     ]
-    assert body[-1].lineno == facade_line, (
-        f"the facade import is at line {facade_line} but the last statement is "
-        f"at line {body[-1].lineno}; the moved module would import this one "
-        f"before its collaborators exist"
+    assert len(facade_lines) == 2, (
+        f"expected both facade imports, found {len(facade_lines)}"
+    )
+
+    first_facade = min(facade_lines)
+    last_def = max(
+        n.lineno for n in tree.body
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
+                          ast.Assign, ast.AnnAssign, ast.For, ast.While,
+                          ast.If, ast.With, ast.Try))
+        and not isinstance(n, ast.Expr)
+    )
+    assert last_def < first_facade, (
+        f"a module-level definition at line {last_def} sits between the "
+        f"facade imports starting at {first_facade}; the moved modules would "
+        f"import this one before it exists"
     )
 
 
