@@ -20,3 +20,10 @@ test("polling stays responsive to active jobs held outside the latest jobs page"
   assert.match(jobs, /Object.keys\(state.activeJobs \|\| \{\}\)\.length > 0/)
   assert.match(jobs, /requestId !== fetchRequestRef\.current/)
 })
+
+test("WebSocket active-job restoration is paginated rather than truncated at 40", () => {
+  const websocket = readFileSync(new URL("./hooks/useWebSocket.js", import.meta.url), "utf8")
+  assert.match(websocket, /status: "running,pending,queued", limit: 100, offset/)
+  assert.match(websocket, /while \(offset < total\)/)
+  assert.match(websocket, /if \(!mounted\) return/)
+})

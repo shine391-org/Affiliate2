@@ -118,6 +118,17 @@ class TestListing:
         rows = body if isinstance(body, list) else body.get("videos", body.get("items", []))
         assert len(rows) >= 2
 
+    def test_list_get_does_not_commit_database_writes(self, client, monkeypatch):
+        # Reads may display fallback Scout metadata but must not persist it.
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        async def forbidden_commit(_session):
+            raise AssertionError("GET /downloaded attempted db.commit()")
+
+        monkeypatch.setattr(AsyncSession, "commit", forbidden_commit)
+        response = client.get("/api/downloaded")
+        assert response.status_code == 200, response.text
+
     def test_it_pages(self, client):
         r = client.get("/api/downloaded", params={"limit": 1, "offset": 0})
         assert r.status_code == 200
