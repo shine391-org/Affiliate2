@@ -9,6 +9,23 @@ import pytest
 from backend.core.localization import LocalizationProfile, LocalizationSegment, LocalizationTranscript
 from backend.services import localization_service as svc
 from backend.services.tts_service import TTSProvider
+from backend.services import video_utils as vu
+
+
+def _freeze_source_duration(monkeypatch, seconds: float):
+    """Freeze probe_duration for the SOURCE video only, not for chunk WAVs.
+
+    Postfit measurement calls probe_duration on the real chunk WAV. A constant
+    there makes a 100 ms stub read as a 4000 ms artifact, tripping the
+    overflow gate on a healthy cue. Registered through monkeypatch so the
+    original probe is restored and cannot leak into a later test.
+    """
+    real = vu.probe_duration
+    def probe(path, *args):
+        if str(path).lower().endswith(".mp4"):
+            return seconds
+        return real(path, *args)
+    monkeypatch.setattr(vu, "probe_duration", probe)
 
 
 @pytest.mark.parametrize("overrides,words,expected", [
@@ -37,7 +54,7 @@ def test_real_speech_anchor_preserves_fallback_and_expert_locks(tmp_path, monkey
     monkeypatch.setattr(svc, "_tts_config", lambda *_: svc.TTSRuntimeConfig(
         provider=TTSProvider.EDGE_TTS, default_voice="vi-VN-HoaiMyNeural", api_key="", model=None, base_url=None, region=None,
     ))
-    monkeypatch.setattr("backend.services.video_utils.probe_duration", lambda *_: 4.0)
+    _freeze_source_duration(monkeypatch, 4.0)
     async def generate(text, *, output_path, **kwargs):
         with wave.open(str(output_path), "wb") as wav:
             wav.setnchannels(1); wav.setsampwidth(2); wav.setframerate(16000)
@@ -69,7 +86,7 @@ def test_padded_dialogue_is_not_one_front_loaded_synthesis(tmp_path, monkeypatch
     monkeypatch.setattr(svc, "_tts_config", lambda *_: svc.TTSRuntimeConfig(
         provider=TTSProvider.EDGE_TTS, default_voice="vi-VN-HoaiMyNeural", api_key="", model=None, base_url=None, region=None,
     ))
-    monkeypatch.setattr("backend.services.video_utils.probe_duration", lambda *_: 7.0)
+    _freeze_source_duration(monkeypatch, 7.0)
     texts = []
     async def generate(text, *, output_path, **kwargs):
         texts.append(text)
@@ -140,7 +157,7 @@ def test_front_loaded_merged_audio_is_reviewed_not_called_aligned(tmp_path, monk
     monkeypatch.setattr(svc, "_tts_config", lambda *_: svc.TTSRuntimeConfig(
         provider=TTSProvider.EDGE_TTS, default_voice="vi-VN-HoaiMyNeural", api_key="", model=None, base_url=None, region=None,
     ))
-    monkeypatch.setattr("backend.services.video_utils.probe_duration", lambda *_: 7.0)
+    _freeze_source_duration(monkeypatch, 7.0)
     async def generate(text, *, output_path, **kwargs):
         with wave.open(str(output_path), "wb") as wav:
             wav.setnchannels(1); wav.setsampwidth(2); wav.setframerate(16000)
@@ -179,7 +196,7 @@ def test_measured_drift_repairs_once_and_persists_layout_for_resume(tmp_path, mo
     monkeypatch.setattr(svc, "_tts_config", lambda *_: svc.TTSRuntimeConfig(
         provider=TTSProvider.EDGE_TTS, default_voice="vi-VN-HoaiMyNeural", api_key="", model=None, base_url=None, region=None,
     ))
-    monkeypatch.setattr("backend.services.video_utils.probe_duration", lambda *_: 7.0)
+    _freeze_source_duration(monkeypatch, 7.0)
     calls=[]
     async def generate(text, *, output_path, **kwargs):
         calls.append(text)
@@ -236,7 +253,7 @@ def test_repair_that_creates_overflow_is_rejected_and_original_layout_kept(tmp_p
     monkeypatch.setattr(svc, "_tts_config", lambda *_: svc.TTSRuntimeConfig(
         provider=TTSProvider.EDGE_TTS, default_voice="vi-VN-HoaiMyNeural", api_key="", model=None, base_url=None, region=None,
     ))
-    monkeypatch.setattr("backend.services.video_utils.probe_duration", lambda *_: 7.0)
+    _freeze_source_duration(monkeypatch, 7.0)
     calls=[]
     async def generate(text, *, output_path, **kwargs):
         calls.append(text)

@@ -195,6 +195,10 @@ async def test_tool_success_fails_the_job_instead_of_shipping_a_broken_file(tmp_
     async def fake_update(job_id, status, **kw):
         calls["status"] = status
         calls["error"] = kw.get("error_message")
+        # _tool_fail emits job_failed only when the terminal write is
+        # accepted. Returning None (a bare stub) reads as a suppressed job, so
+        # the event is never emitted and the wiring assertion cannot run.
+        return True
 
     async def fake_send(msg, user_id):
         calls.setdefault("ws", []).append(msg.get("type"))
@@ -221,6 +225,11 @@ async def test_tool_success_still_ships_a_good_file(tmp_path, monkeypatch):
     async def fake_update(job_id, status, **kw):
         calls["status"] = status
         calls["output"] = kw.get("output_data")
+        # _tool_success treats the return value as "the terminal write was
+        # accepted". A stub that returns None reads as a suppressed/cancelled
+        # job, which makes a good artifact look undelivered. Mirror the real
+        # contract: only a FAILED status is refused.
+        return status != "failed"
 
     async def fake_send(msg, user_id):
         calls.setdefault("ws", []).append(msg.get("type"))
