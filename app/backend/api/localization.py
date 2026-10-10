@@ -2093,9 +2093,21 @@ async def localization_batch(
         # Immutable snapshot of the RESOLVED profile, taken once at admission.
         # Recovery replays this instead of re-resolving against live Settings,
         # so a settings edit between the crash and the restart cannot silently
-        # change what the batch runs. A missing Settings row is not fatal here:
-        # the profile_id stays durable and the runner resolves it as usual.
+        # change what the batch runs.
+        #
+        # The outcome is CLASSIFIED, never silently dropped. Two failures look
+        # identical in the row if both land as an unlabelled `None`:
+        #   * no Settings row at all - benign, the runner resolves profile_id
+        #     at execution time exactly as it would have without a snapshot;
+        #   * a profile that cannot be resolved - deterministic, and it will
+        #     raise the SAME way on every recovery attempt.
+        # The second case still admits the batch (the snapshot is an aid to
+        # recovery, not the user's fault, and profile_id stays durable), but it
+        # records WHY there is no snapshot so a recovery failure can explain
+        # itself instead of looking like an unexplained crash.
         profile_override = None
+        profile_snapshot_status = "no_settings"
+        profile_snapshot_error: str | None = None
         try:
             # Resolve the profile ONCE, here, and persist it. This is the SAME
             # resolution the runner performs (Settings -> profile store ->
@@ -2123,12 +2135,20 @@ async def localization_batch(
                     for_dub=(mode == "full_dub"),
                 )
                 profile_override = _profile.model_dump(mode="json")
+                profile_snapshot_status = "captured"
         except Exception as exc:
+            profile_override = None
+            profile_snapshot_status = "unreproducible"
+            profile_snapshot_error = f"{type(exc).__name__}: {exc}"[:500]
             # Not fatal: profile_id stays durable and the runner resolves it
-            # exactly as it would have without this snapshot.
-            logging.getLogger(__name__).info(
-                "Batch %s: no profile snapshot at admission (%s); recovery will "
-                "resolve profile_id instead.", batch_id, exc,
+            # exactly as it would have without this snapshot. Logged at
+            # WARNING, not INFO: a deterministic resolution failure must be
+            # visible in the server log, not filed as routine noise.
+            logging.getLogger(__name__).warning(
+                "Batch %s: profile snapshot could not be materialized (%s); "
+                "recovery will resolve profile_id instead and may fail the "
+                "same way.",
+                batch_id, exc,
             )
 
         # Complete-batch marker set, written BEFORE any dispatch and in ONE
@@ -2138,11 +2158,17 @@ async def localization_batch(
         # instant is recoverable rather than ambiguous, and nothing that lives
         # at this pid can be stolen by an overlapping boot.
         await _write_batch_markers(admitted, {
-            "batch_admitted": True,
-            "batch_size": len(admitted),
-            "batch_owner_pid": os.getpid(),
-            "profile_override": profile_override,
-        })
+                "batch_admitted": True,
+                "batch_size": len(admitted),
+                "batch_owner_pid": os.getpid(),
+                "profile_override": profile_override,
+                # The classification travels WITH the snapshot. Recovery replays
+                # `profile_override`; `profile_snapshot_status` is what lets an
+                # operator tell "there was never a Settings row" from "the
+                # profile cannot be resolved and recovery will fail identically".
+                "profile_snapshot_status": profile_snapshot_status,
+                "profile_snapshot_error": profile_snapshot_error,
+            })
 
         # One coordinator consumes one global heavy-task slot; jobs inside it
         # are strictly sequential, so a 20-video batch cannot fan out 20 Demucs

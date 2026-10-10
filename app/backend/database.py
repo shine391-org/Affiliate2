@@ -782,6 +782,21 @@ async def recover_pending_localization_batch_items() -> list[str]:
                 for job, payload in candidates:
                     if _process_owns_batch_item(job):
                         continue      # LIVE coordinator owns this queue
+                    # The admission diagnosis, replayed at the moment it matters.
+                    # `unreproducible` means the profile could not be resolved
+                    # when the batch was admitted, so the runner is about to
+                    # re-resolve `profile_id` against live Settings and will
+                    # very likely fail the SAME way. Recovery is exactly where
+                    # an operator looks, so say it here rather than leaving the
+                    # reason buried in a row nobody opens.
+                    if payload.get("profile_snapshot_status") == "unreproducible":
+                        logger.warning(
+                            "Batch %s item %s was admitted with NO reproducible "
+                            "profile snapshot (%s); recovery will re-resolve "
+                            "profile_id and may fail identically.",
+                            batch_id, job.id,
+                            payload.get("profile_snapshot_error") or "no reason recorded",
+                        )
                     in_path = payload.get("in_path")
                     if not in_path or not Path(str(in_path)).is_file():
                         # Nothing to resume from. Failed loudly rather than
