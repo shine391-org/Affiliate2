@@ -1212,6 +1212,7 @@ async def _call_ai_chat_resilient(
     route_state: _AIStageRouteState | None = None,
     deadline_at: float | None = None,
     dispatch_budget: _TranslationDispatchBudget | None = None,
+    cancel_check=None,
 ) -> str:
     """One owner for AI retry/fallback with hard wall-clock budgets.
 
@@ -1278,6 +1279,7 @@ async def _call_ai_chat_resilient(
         policy = getattr(client, "traffic_policy", None) or {}
         client_attempts = min(max_attempts, 2) if policy.get("enabled") else max_attempts
         for attempt in range(1, client_attempts + 1):
+            await _cancel_checkpoint(cancel_check, "translation")
             global_remaining = deadline - loop.time()
             provider_remaining = provider_deadline - loop.time()
             if global_remaining <= 0:
@@ -1303,6 +1305,10 @@ async def _call_ai_chat_resilient(
                 "model": getattr(client, "model", None),
                 "timeout_s": round(timeout_s, 1),
             })
+            # Progress/DB callbacks may yield and observe a cancellation after
+            # the attempt's initial check. Do not schedule chat before checking
+            # again: its task could dispatch while the async check is pending.
+            await _cancel_checkpoint(cancel_check, f"{stage} dispatch")
             dispatch_before = wire.count
             try:
                 chat_kwargs = {"messages": messages, "max_tokens": max_tokens}
@@ -1318,15 +1324,19 @@ async def _call_ai_chat_resilient(
                     # Compatibility test doubles represent exactly one wire
                     # attempt. Canonical clients count AFTER admission instead.
                     wire.consume()
-                result = await asyncio.wait_for(
+                result = await _await_provider_operation(
                     client.chat(**chat_kwargs),
-                    timeout=provider_remaining if policy.get("enabled") else timeout_s,
+                    timeout_s=provider_remaining if policy.get("enabled") else timeout_s,
+                    cancel_check=cancel_check,
                 )
                 if route_state is not None:
                     route_state.sticky_index = route_index
                     route_state.success_count += 1
                 return result
             except Exception as exc:
+                from backend.core.exceptions import JobCancelledError
+                if isinstance(exc, JobCancelledError):
+                    raise
                 last_error = exc
                 failure = {
                     "connection_id": getattr(client, "connection_name", None),
@@ -1379,7 +1389,17 @@ async def _call_ai_chat_resilient(
                         "max_attempts": max_attempts,
                         "backoff_s": round(backoff, 2),
                     })
-                    await asyncio.sleep(max(0.0, backoff))
+                    try:
+                        await _await_provider_operation(
+                            asyncio.sleep(max(0.0, backoff)),
+                            timeout_s=max(0.001, remaining),
+                            cancel_check=cancel_check,
+                        )
+                    except TimeoutError:
+                        # This provider's share expired while waiting. Let the
+                        # route/global deadline owner choose fallback or emit
+                        # the established deadline error with provenance.
+                        break
 
         next_pos = client_pos + 1
         if next_pos < len(usable_clients):
@@ -1423,6 +1443,7 @@ async def _translate_batch_resilient(
     context_segments=None,
     drafts: dict | None = None,
     _semantic_attempt: int = 1,
+    cancel_check=None,
 ) -> tuple[list[str], set[int]]:
     if not batch:
         return [], set()
@@ -1458,7 +1479,7 @@ async def _translate_batch_resilient(
         attempt_timeout_s=profile.translation_attempt_timeout_s,
         total_timeout_s=profile.translation_total_timeout_s, progress_cb=progress_cb,
         stage="translation", route_state=route_state, deadline_at=deadline_at,
-        dispatch_budget=dispatch_budget)
+        dispatch_budget=dispatch_budget, cancel_check=cancel_check)
     try:
         accepted, rejected, terms = _translation_candidates(raw, batch, localized_terms,
             profile, source_language, target_language, context_segments=context_segments)
@@ -1492,7 +1513,7 @@ async def _translate_batch_resilient(
                     source_language=source_language, localized_terms=localized_terms, context_segments=context_segments,
                     accepted_cb=accepted_cb, dispatch_budget=dispatch_budget,
                     _split_depth=_split_depth, _semantic_repair=_semantic_repair, drafts=drafts,
-                    _semantic_attempt=_semantic_attempt)
+                    _semantic_attempt=_semantic_attempt, cancel_check=cancel_check)
         if len(batch) == 1 or _split_depth >= 1 or _repair_issues:
             logger.warning("Translation structure failed for %d item(s): %s", len(batch), exc)
             return [segment.source_text for segment in batch], set(range(len(batch)))
@@ -1505,14 +1526,14 @@ async def _translate_batch_resilient(
             source_language=source_language, localized_terms=localized_terms, context_segments=context_segments,
             accepted_cb=accepted_cb, dispatch_budget=dispatch_budget,
             _split_depth=_split_depth + 1, _semantic_repair=_semantic_repair, drafts=drafts,
-            _semantic_attempt=_semantic_attempt)
+            _semantic_attempt=_semantic_attempt, cancel_check=cancel_check)
         right, rf = await _translate_batch_resilient(ai, batch[mid:], route_state=route_state,
             target_language=target_language, context=context, profile=profile, for_dub=for_dub,
             fallback_ai=fallback_ai, progress_cb=progress_cb, deadline_at=deadline_at,
             source_language=source_language, localized_terms=localized_terms, context_segments=context_segments,
             accepted_cb=accepted_cb, dispatch_budget=dispatch_budget,
             _split_depth=_split_depth + 1, _semantic_repair=_semantic_repair, drafts=drafts,
-            _semantic_attempt=_semantic_attempt)
+            _semantic_attempt=_semantic_attempt, cancel_check=cancel_check)
         return left + right, lf | {mid + i for i in rf}
 
     if localized_terms is not None:
@@ -1529,7 +1550,8 @@ async def _translate_batch_resilient(
             fallback_ai=fallback_ai, progress_cb=progress_cb, deadline_at=deadline_at,
             source_language=source_language, localized_terms=localized_terms, context_segments=context_segments, accepted_cb=accepted_cb,
             dispatch_budget=dispatch_budget, _split_depth=_split_depth, _semantic_repair=False,
-            _repair_issues=rejected, drafts=drafts, _semantic_attempt=_semantic_attempt + 1)
+            _repair_issues=rejected, drafts=drafts, _semantic_attempt=_semantic_attempt + 1,
+            cancel_check=cancel_check)
         for index, (segment, text) in enumerate(zip(pending, fixed)):
             if index not in failed:
                 accepted[segment.id] = {"id": segment.id, "text": text}
@@ -1554,7 +1576,7 @@ async def _translate_batch_resilient(
             source_language=source_language, localized_terms=localized_terms,
             context_segments=context_segments, accepted_cb=accepted_cb, dispatch_budget=dispatch_budget,
             _split_depth=_split_depth, _semantic_repair=False, _repair_issues=rejected,
-            drafts=drafts, _semantic_attempt=_semantic_attempt + 1)
+            drafts=drafts, _semantic_attempt=_semantic_attempt + 1, cancel_check=cancel_check)
         for index, (segment, text) in enumerate(zip(pending, fixed)):
             if index not in failed:
                 accepted[segment.id] = {"id": segment.id, "text": text}
@@ -1699,6 +1721,7 @@ async def translate_transcript(
     checkpoint_dir: Path | None = None,
     progress_cb=None,
     source_media: Path | None = None,
+    cancel_check=None,
 ) -> LocalizationTranscript:
     import hashlib
     policy = profile.translation_automation
@@ -1836,6 +1859,7 @@ async def translate_transcript(
         tmp_cp.replace(checkpoint_file)
 
     for start in range(0, len(out.segments), _TRANSLATION_BATCH_SIZE):
+        await _cancel_checkpoint(cancel_check, "translation")
         batch = out.segments[start:start + _TRANSLATION_BATCH_SIZE]
         batch_key = str(start)
         cached = completed_batches.get(batch_key)
@@ -1917,6 +1941,7 @@ async def translate_transcript(
                     localized_terms=localized_terms,
                     accepted_cb=keep_accepted,
                     drafts=auto_drafts if auto_policy else None,
+                    cancel_check=cancel_check,
                 )
             finally:
                 # Also persist pending IDs and route audit on transport failure

@@ -85,9 +85,3 @@ test("Studio active subroutes mount their real views, not redirect into Localize
   }
   assert.ok(routes.includes('<Route path="clips" element={<LegacyRedirect to="/studio/manual" />} />'))
 })
-
-test("Batch UI exposes and submits opt-in backend auto_repair", () => {
-  const form = readFileSync(new URL("./pages/LocalizationBatch.jsx", import.meta.url), "utf8")
-  assert.match(form, /form\\.append\\("auto_repair", String\\(autoRepair\\)\\)/)
-  assert.match(form, /checked={autoRepair}/)
-})

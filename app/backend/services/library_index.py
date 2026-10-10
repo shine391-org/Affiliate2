@@ -276,6 +276,31 @@ async def _downloaded_items(db: AsyncSession) -> list[dict]:
     return items
 
 
+async def _job_output_for_index(db: AsyncSession, job: Job | None):
+    """Shared eligibility for the index and single-ID video resolution."""
+    if job is None or job.status not in {"success", "failed", "cancelled"}:
+        return None
+    if job.status != "success" and job.job_type != "tool:translate":
+        return None
+    out = _json_or_none(job.output_json)
+    if not out or out.get("translation_review_pending"):
+        return None
+    file_str = out.get("file")
+    if not file_str or not _exists(file_str):
+        return None
+    # A valid GeneratedVideo owns the richer row. A stale pointer or missing
+    # generated file must not hide the job's valid last-good localization.
+    generated_id = out.get("generated_video_id")
+    if generated_id:
+        generated = await db.get(GeneratedVideo, str(generated_id))
+        if generated is not None and _exists(generated.video_path):
+            return None
+    producer = classify(job.job_type)
+    if producer is None:
+        return None
+    return out, producer, Path(file_str)
+
+
 async def _job_items(db: AsyncSession) -> tuple[list[dict], set[str]]:
     """Tool outputs, plus the music-library filenames they also wrote.
 
@@ -296,39 +321,14 @@ async def _job_items(db: AsyncSession) -> tuple[list[dict], set[str]]:
     items: list[dict] = []
     music_copies: set[str] = set()
     for j in rows:
-        if j.status != "success" and j.job_type != "tool:translate":
+        eligible = await _job_output_for_index(db, j)
+        if eligible is None:
             continue
-        out = _json_or_none(j.output_json)
-        if not out:
-            continue
-        # A C6 translation review checkpoint is not a user asset. Older builds
-        # marked that pause as a successful .json output; keep those rows
-        # recoverable in Activity/Studio but never show the checkpoint in Library.
-        if out.get("translation_review_pending"):
-            continue
-        file_str = out.get("file")
-        if not file_str or not _exists(file_str):
-            continue
-        # A job may ALSO register a GeneratedVideo row for the same file.
-        # Suppress the job copy only while that richer row still exists AND its
-        # artifact exists. A stale/deleted generated_video_id must not hide a
-        # perfectly valid last-good job output from the Library.
-        generated_id = out.get("generated_video_id")
-        if generated_id:
-            generated = await db.get(GeneratedVideo, str(generated_id))
-            if generated is not None and _exists(generated.video_path):
-                continue
-        p = classify(j.job_type)
-        if p is None:
-            # scout / analyze / download / render jobs — activity, not a file
-            # the user picks. The taxonomy's NON_LIBRARY_JOB_TYPES records which
-            # types are deliberately here, so an unclassified NEW tool reads as
-            # the oversight it is rather than as a decision.
-            continue
+        out, p, path = eligible
+        file_str = str(path)
         lib_name = out.get("library_filename")
         if isinstance(lib_name, str) and lib_name:
             music_copies.add(lib_name)
-        path = Path(file_str)
         suffix_media = _suffix_media(path.suffix)
         inp = _json_or_none(j.input_json) or {}
         duration = out.get("duration_seconds")
@@ -418,26 +418,18 @@ async def resolve_job_video(db: AsyncSession, job_id: str) -> Path | None:
     where edited videos existed on disk but no resolver could find them, is
     exactly why they couldn't be fed back into a tool.
 
-    Resolution goes THROUGH the index, so only a file the library lists — and
-    only one inside STORAGE_ROOT — can ever come back.
+    Resolution shares the index's eligibility predicate, but reads only this
+    job and its optional GeneratedVideo owner, never the complete Library.
     """
-    all_items = await gather(db)
-    item = next(
-        (it for it in all_items
-         if it["source"] == "job" and it["id"] == job_id and it["media"] == "video"),
-        None,
-    )
-    if item is None:
+    eligible = await _job_output_for_index(db, await db.get(Job, job_id))
+    if eligible is None:
         return None
-    from backend.models.job import Job as _Job
-    job = await db.get(_Job, job_id)
-    out = _json_or_none(job.output_json) if job else None
-    file_str = out.get("file") if out else None
-    if not file_str:
+    _out, producer, file_path = eligible
+    if (_suffix_media(file_path.suffix) or producer.media) != "video":
         return None
     from backend.api.videos import _safe_resolve_path
     try:
-        path = _safe_resolve_path(file_str)
+        path = _safe_resolve_path(str(file_path))
     except Exception:  # noqa: BLE001 — traversal guard rejected it
         return None
     return path if path.is_file() else None

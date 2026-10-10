@@ -164,8 +164,9 @@ async def _tool_progress(job_id: str, pct: float, step: str, user_id: str):
     update_job_status alone is invisible to the frontend."""
     from backend.agents.job_helper import update_job_status
     from backend.core.ws_manager import ws_manager
-    await update_job_status(job_id, "running", progress_pct=pct, current_step=step)
-    await ws_manager.send_progress(job_id, pct, step, user_id)
+    accepted = await update_job_status(job_id, "running", progress_pct=pct, current_step=step)
+    if accepted:
+        await ws_manager.send_progress(job_id, pct, step, user_id)
 
 
 # Demucs owns the separation stage (job 6% → 15%); ASR starts at 16%.
@@ -1537,6 +1538,7 @@ async def run_tool_translate(
             translation_batch = {"current": 1, "total": 1}
 
             async def _translation_progress(event: dict):
+                await _cancel_checkpoint("translation progress")
                 name = event.get("event")
                 if name == "batch":
                     translation_batch["current"] = int(event.get("batch") or 1)
@@ -1604,7 +1606,9 @@ async def run_tool_translate(
                     checkpoint_dir=run.stage_dir("translation"),
                     progress_cb=_translation_progress,
                     source_media=source_path,
+                    cancel_check=lambda: job_cancelled(job_id),
                 )
+                await _cancel_checkpoint("translation artifact publication")
                 path = run.save_json(
                     "translation", "transcript.json", localized.model_dump()
                 )

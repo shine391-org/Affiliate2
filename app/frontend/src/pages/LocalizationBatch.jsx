@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { Link as RouterLink } from "react-router-dom"
 import {
   Alert, Box, Button, Checkbox, Chip, FormControl, FormControlLabel, InputLabel, MenuItem,
   Select, Stack, Typography,
@@ -23,20 +24,42 @@ export default function LocalizationBatch({ embedded = false }) {
   const [submitting, setSubmitting] = useState(false)
   const [jobs, setJobs] = useState([])
 
-  useEffect(() => {
-    http.get("/api/settings/localization-profiles")
-      .then(({ data }) => {
-        setProfiles(data?.profiles || [])
-        setProfileId(data?.default_profile_id || "")
-      })
-      .catch(() => {})
+  const [profilesLoading, setProfilesLoading] = useState(true)
+  const [profilesError, setProfilesError] = useState("")
+  const profileRequest = useRef(0)
+  const selectedProfile = profiles.find((profile) => profile.id === profileId)
+
+  const loadProfiles = useCallback(async () => {
+    const request = ++profileRequest.current
+    setProfilesLoading(true)
+    setProfilesError("")
+    try {
+      const { data } = await http.get("/api/settings/localization-profiles")
+      if (request !== profileRequest.current) return
+      const next = data?.profiles || []
+      setProfiles(next)
+      setProfileId((previous) => next.some((profile) => profile.id === previous)
+        ? previous
+        : next.find((profile) => profile.id === data?.default_profile_id)?.id || next[0]?.id || "")
+    } catch (err) {
+      if (request !== profileRequest.current) return
+      setProfilesError(err.response?.data?.detail || "Không thể tải hồ sơ bản địa hóa. Kiểm tra kết nối và thử lại.")
+    } finally {
+      if (request === profileRequest.current) setProfilesLoading(false)
+    }
   }, [])
+
+  useEffect(() => {
+    loadProfiles()
+    return () => { profileRequest.current += 1 }
+  }, [loadProfiles])
 
   const submit = async () => {
     if (!files.length) {
       showSnackbar("Hãy chọn ít nhất một video", "warning")
       return
     }
+    if (profilesLoading || profilesError || !selectedProfile) return
     setSubmitting(true)
     try {
       const form = new FormData()
@@ -51,7 +74,7 @@ export default function LocalizationBatch({ embedded = false }) {
       })
       const created = data?.jobs || []
       created.forEach((job) => {
-        startJob(job.job_id, "tool:translate", "Đã xếp hàng để bản địa hóa HQ…")
+        startJob(job.job_id, "tool:translate", `Đã xếp hàng để bản địa hóa · ${selectedProfile.name}…`)
       })
       setJobs(created)
       showSnackbar("Đã xếp hàng " + created.length + " tác vụ bản địa hóa", "success")
@@ -69,7 +92,7 @@ export default function LocalizationBatch({ embedded = false }) {
           backTo="/studio/localize"
           icon={<TranslateOutlinedIcon sx={{ fontSize: 22 }} />}
           title="Bản địa hóa hàng loạt"
-          subtitle="Chạy cùng quy trình bản địa hóa HQ cho tối đa 20 video"
+          subtitle="Chạy hồ sơ đã chọn cho tối đa 20 video"
         />
       )}
       <Box sx={{ flex: 1, overflow: "auto", p: embedded ? 1 : 3 }}>
@@ -106,8 +129,17 @@ export default function LocalizationBatch({ embedded = false }) {
             {files.map((file) => <Chip key={file.name + file.size} label={file.name} />)}
           </Stack>
 
+          {profilesLoading && <Typography role="status">Đang tải hồ sơ…</Typography>}
+          {profilesError && <Alert severity="error">{profilesError}</Alert>}
+          {!profilesLoading && !profilesError && !profiles.length && (
+            <Alert severity="warning">Chưa có hồ sơ bản địa hóa. Tạo hồ sơ trong Cài đặt rồi tải lại.</Alert>
+          )}
+          <Button onClick={loadProfiles} disabled={profilesLoading || submitting} sx={{ alignSelf: "flex-start" }}>
+            Tải lại hồ sơ
+          </Button>
+
           <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-            <FormControl size="small" fullWidth>
+            <FormControl size="small" fullWidth disabled={profilesLoading || submitting}>
               <InputLabel>Hồ sơ</InputLabel>
               <Select value={profileId} label="Hồ sơ" onChange={(e) => setProfileId(e.target.value)}>
                 {profiles.map((p) => <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>)}
@@ -126,7 +158,7 @@ export default function LocalizationBatch({ embedded = false }) {
             <FormControl size="small" fullWidth>
               <InputLabel>Chế độ</InputLabel>
               <Select value={mode} label="Chế độ" onChange={(e) => setMode(e.target.value)}>
-                <MenuItem value="full_dub">Lồng tiếng HQ đầy đủ</MenuItem>
+                <MenuItem value="full_dub">Lồng tiếng đầy đủ</MenuItem>
                 <MenuItem value="captions_only">Chỉ phụ đề</MenuItem>
               </Select>
             </FormControl>
@@ -140,7 +172,7 @@ export default function LocalizationBatch({ embedded = false }) {
           <Button
             variant="contained"
             onClick={submit}
-            disabled={submitting || !files.length || !profileId}
+            disabled={submitting || profilesLoading || Boolean(profilesError) || !files.length || !selectedProfile}
             sx={{ alignSelf: "flex-start" }}
           >
             {submitting ? "Đang xếp hàng…" : "Chạy hàng loạt"}
@@ -151,9 +183,11 @@ export default function LocalizationBatch({ embedded = false }) {
               <Typography variant="subtitle2" sx={{ mb: 1 }}>Tác vụ đã xếp hàng</Typography>
               <Stack spacing={0.75}>
                 {jobs.map((job) => (
-                  <Typography key={job.job_id} variant="caption" color="text.secondary">
-                    {job.filename + " · " + job.job_id}
-                  </Typography>
+                  <Button key={job.job_id} component={RouterLink}
+                    to={`/studio/localize?job=${encodeURIComponent(job.job_id)}`}
+                    size="small" sx={{ justifyContent: "flex-start" }}>
+                    {job.filename} · Mở tác vụ
+                  </Button>
                 ))}
               </Stack>
             </Box>

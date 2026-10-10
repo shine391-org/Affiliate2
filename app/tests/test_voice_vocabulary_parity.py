@@ -75,16 +75,19 @@ def test_the_offered_edge_names_match_the_engines_own(page, const):
         )
 
 
-def test_translate_uses_profile_or_free_form_voice_override():
-    """Localization must not maintain a second hard-coded provider voice list.
-
-    The selected Localization Profile/provider owns the voice vocabulary, and
-    Expert mode may supply a free-form provider voice ID.
-    """
-    text = (FRONTEND / "pages/tools/Translate.jsx").read_text()
-    assert "DUB_VOICES" not in text
-    assert "Hồ sơ bản địa hóa" in text
-    assert "Ghi đè giọng đọc (tùy chọn)" in text
+def test_studio_uses_profile_and_provider_owned_voice_override():
+    """The mounted Studio/profile/speaker owners must not duplicate voices."""
+    studio = (FRONTEND / "pages/StudioLocalize.jsx").read_text(encoding="utf-8")
+    profiles = (FRONTEND / "components/settings/LocalizationProfilesSection.jsx").read_text(encoding="utf-8")
+    speakers = (FRONTEND / "components/tools/SpeakerVoicePanel.jsx").read_text(encoding="utf-8")
+    assert "DUB_VOICES" not in studio + profiles + speakers
+    assert "Hồ sơ bản địa hóa" in studio
+    assert 'form.append("profile_id", profileId)' in studio
+    assert 'value={draft.tts_voice || ""}' in profiles
+    assert 'patch("tts_voice", e.target.value || null)' in profiles
+    assert "<SpeakerVoicePanel" in studio
+    assert "freeSolo options={state.available_voices || []}" in speakers
+    assert "speaker_voices: Object.fromEntries" in speakers
 
 
 # ── OpenAI TTS ──────────────────────────────────────────────────────────────

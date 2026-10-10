@@ -596,8 +596,10 @@ async def test_c7_rejected_rewrite_retries_with_measured_feedback(monkeypatch, t
         work_dir=tmp_path / "work",
     )
     assert seen == [
-        {"measured_duration_ms": 3000, "attempt": 1},
-        {"measured_duration_ms": 3000, "attempt": 2},
+        {"measured_duration_ms": 3000, "attempt": 1,
+         "source_language": None, "localized_terms": {}},
+        {"measured_duration_ms": 3000, "attempt": 2,
+         "source_language": None, "localized_terms": {}},
     ]
     assert result.rewrite_count == 1
 
@@ -1058,9 +1060,11 @@ async def test_c7_targeted_regeneration_keeps_overlong_non_target_immutable(
     assert adapted == [2]
     # Target chunk synthesized before and after its measured-overflow rewrite;
     # the non-target chunk is reused and never synthesized.
-    assert [name.split(".pending", 1)[0] for name in generated] == [
+    assert [name.split(".rewrite-", 1)[0].split(".pending", 1)[0] for name in generated] == [
         "chunk_0002", "chunk_0002",
     ]
+    assert ".rewrite-" not in generated[0]
+    assert ".rewrite-" in generated[1], "Rewrite candidate must not overwrite last-good audio"
     assert len(set(generated)) == len(generated), "Every generation owns a distinct pending path"
     assert all(name.endswith(".wav") for name in generated)
     assert result.transcript.segments[0].translated_text == non_target_text
@@ -1884,9 +1888,11 @@ async def test_c7_targeted_regeneration_never_rewrites_reused_chunk(
     assert adapted == [2]
     # Chunk 2 is synthesized once before the measured-overflow rewrite and once
     # after it; chunk 1 is reused and never synthesized.
-    assert [name.split(".pending", 1)[0] for name in generated] == [
+    assert [name.split(".rewrite-", 1)[0].split(".pending", 1)[0] for name in generated] == [
         "chunk_0002", "chunk_0002",
     ]
+    assert ".rewrite-" not in generated[0]
+    assert ".rewrite-" in generated[1], "Rewrite candidate must not overwrite last-good audio"
     assert len(set(generated)) == len(generated), "Every generation owns a distinct pending path"
     assert all(name.endswith(".wav") for name in generated)
     assert (work / "chunk_0002.wav").read_bytes() == b"new"
@@ -2483,6 +2489,7 @@ async def test_translation_recursive_shape_split_shares_one_batch_deadline(monke
         route_state=None,
         deadline_at=None,
         dispatch_budget=None,
+        cancel_check=None,
     ):
         seen_deadlines.append(deadline_at)
         return "[]"
