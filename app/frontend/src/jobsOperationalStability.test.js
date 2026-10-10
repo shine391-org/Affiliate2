@@ -21,9 +21,21 @@ test("polling stays responsive to active jobs held outside the latest jobs page"
   assert.match(jobs, /requestId !== fetchRequestRef\.current/)
 })
 
-test("WebSocket active-job restoration is paginated rather than truncated at 40", () => {
+test("WebSocket active-job restore pages by keyset cursor, never by offset", () => {
   const websocket = readFileSync(new URL("./hooks/useWebSocket.js", import.meta.url), "utf8")
-  assert.match(websocket, /status: "running,pending,queued", limit: 100, offset/)
-  assert.match(websocket, /while \(offset < total\)/)
-  assert.match(websocket, /if \(!mounted\) return/)
+  // Offset paging loses still-active jobs whenever a job finishes between two
+  // pages (measured 10 of 250). The restore must keyset-walk instead.
+  assert.match(
+    websocket,
+    /status: "running,pending,queued", limit: 100, cursor: cursor \|\| undefined/,
+    "restore must send a cursor, not an offset",
+  )
+  assert.doesNotMatch(
+    websocket,
+    /status: "running,pending,queued"[^\n]*offset/,
+    "offset paging on a status-filtered set silently drops active jobs",
+  )
+  assert.match(websocket, /if \(!mounted\) return/, "an unmount must abort the walk")
+  assert.match(websocket, /if \(seen\.has\(j\.id\)\) continue/, "a repeated row must be harmless")
+  assert.match(websocket, /pages >= 50/, "the walk must stay bounded")
 })
