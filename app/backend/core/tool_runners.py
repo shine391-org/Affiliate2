@@ -96,43 +96,15 @@ def _localization_source_media_preflight_sync(source_path: Path) -> dict:
     return details
 
 
-# GPU concurrency gate (concurrency = 1) for heavy local localization workloads
-# (Demucs separation, Faster-Whisper / WhisperX, and NVENC render) on 8GB VRAM
-from contextlib import asynccontextmanager
-
-_LOCALIZATION_GPU_GATE = asyncio.Semaphore(1)
-
-
-@asynccontextmanager
-async def localization_gpu_gate():
-    await _LOCALIZATION_GPU_GATE.acquire()
-    try:
-        yield
-    finally:
-        _LOCALIZATION_GPU_GATE.release()
-
-
-def _release_localization_torch_cache_sync() -> None:
-    """Release unused PyTorch/Demucs allocator memory after C5/C8 GPU audio work.
-
-    This runs while the localization GPU gate is still held, after Demucs and
-    alignment/diarization have finished. It never frees live tensors; CUDA's
-    empty_cache() only returns UNUSED allocator blocks. Keeping those blocks
-    warm beyond the ASR/alignment boundary made failed jobs pin memory for no
-    useful downstream stage.
-    """
-    import gc
-    import sys
-
-    gc.collect()
-    torch = sys.modules.get("torch")
-    if torch is None:
-        return
-    try:
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-    except Exception:
-        logger.debug("Could not release localization torch cache", exc_info=True)
+# GPU gate moved to core/gpu_gate.py to avoid import cycles.
+# Re-exported here for backward compatibility. `localization_gpu_gate` is the
+# gate primitive every GPU caller shares; importing it from two module paths is
+# safe only because both resolve to the same per-loop semaphore in gpu_gate.
+from backend.core.gpu_gate import (  # noqa: F401
+    _gate_semaphore,
+    localization_gpu_gate,
+    _release_localization_torch_cache_sync,
+)
 
 
 def _cleanup_paths(*paths: Path):

@@ -11,6 +11,7 @@ from backend.database import AsyncSessionLocal
 from backend.models.downloaded_video import DownloadedVideo
 from backend.models.user_settings import UserSettings
 from backend.core.ai_provider import get_ai_client
+from backend.core.gpu_gate import localization_gpu_gate
 from backend.core.ws_manager import ws_manager
 from backend.agents.job_helper import update_job_status
 
@@ -317,8 +318,11 @@ class AnalyzerAgent:
                         continue
 
                     from backend.services.whisper_service import whisper_service
-                    transcript_data = await whisper_service.transcribe(
-                        audio_path, quality=whisper_quality)
+                    # Gate the decode only: the AI correction below is remote
+                    # I/O and must never occupy the local GPU gate.
+                    async with localization_gpu_gate():
+                        transcript_data = await whisper_service.transcribe(
+                            audio_path, quality=whisper_quality)
                     transcript_source = "whisper"
 
                     # AI post-correction of Whisper transcript (chunked; never loses content)
@@ -604,8 +608,13 @@ class AnalyzerAgent:
                 asyncio.run_coroutine_threadsafe(
                     update_job_status(job_id, "running", progress_pct=pct, current_step=step), _loop)
 
-            transcript_data = await whisper_service.transcribe(
-                audio_path, quality=whisper_quality, on_progress=_tx_progress)
+            # Gate the decode only. The gate is process-wide and serialises
+            # against localization's Demucs/Whisper/NVENC stages, so holding it
+            # across DB writes or websocket sends would stall those jobs for no
+            # GPU reason.
+            async with localization_gpu_gate():
+                transcript_data = await whisper_service.transcribe(
+                    audio_path, quality=whisper_quality, on_progress=_tx_progress)
 
             await ws_manager.send_progress(job_id, 40, "Correcting transcript...", user_id)
 
