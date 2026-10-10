@@ -192,6 +192,7 @@ export default function Publish() {
   }, [selected?.id, requestedTarget]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const choose = (id) => {
+    if (id === selected?.id) return
     stopPolling()
     setJob(null)
     setPollError("")
@@ -272,10 +273,11 @@ export default function Publish() {
     setPollError("")
     if (!selected?.id) return undefined
     const videoId = selected.id
+    const restoreVersion = pollVersionRef.current
     let alive = true
     http.get("/api/jobs", { params: { status: "pending,running", job_type: "upload", limit: 200 } })
       .then(({ data }) => {
-        if (!alive || selectedIdRef.current !== videoId) return
+        if (!alive || selectedIdRef.current !== videoId || pollVersionRef.current !== restoreVersion) return
         const matched = (data.jobs || []).find((candidate) => {
           try {
             return JSON.parse(candidate.input_json || "{}").generated_video_id === videoId
@@ -289,7 +291,7 @@ export default function Publish() {
         }
       })
       .catch(() => {
-        if (alive && selectedIdRef.current === videoId) {
+        if (alive && selectedIdRef.current === videoId && pollVersionRef.current === restoreVersion) {
           setPollError("Không thể kiểm tra tác vụ xuất bản đang chạy. Hãy làm mới để thử lại.")
         }
       })
