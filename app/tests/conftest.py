@@ -2,6 +2,7 @@
 # Copyright (c) 2025-2026 ViralMint Contributors
 """Shared test configuration — runs before any test module imports."""
 import os
+import sys
 import tempfile
 from pathlib import Path
 
@@ -41,3 +42,17 @@ if not os.environ.get("VIRALMINT_DATA_DIR"):
 # Generate a valid Fernet key for all tests
 _TEST_KEY = Fernet.generate_key().decode()
 os.environ.setdefault("ENCRYPTION_KEY", _TEST_KEY)
+
+# ── Sibling test modules must be importable ───────────────────────────────
+#
+# Several test modules import helpers from each other by bare module name
+# (`from test_translate_batch_resilience import _EchoAI, ...`). pytest's
+# rootdir handling puts `app/` on sys.path but not `app/tests`, so those
+# modules fail to COLLECT with ModuleNotFoundError - which silently removes
+# them from every run, including the ones a developer runs by hand.
+#
+# Inserting the directory here is the minimal fix: it makes the import the
+# tests already perform resolve, without touching the modules themselves.
+_TESTS_DIR = str(Path(__file__).resolve().parent)
+if _TESTS_DIR not in sys.path:
+    sys.path.insert(0, _TESTS_DIR)

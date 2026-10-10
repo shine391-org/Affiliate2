@@ -34,6 +34,36 @@ from backend.core.exceptions import (DownloadError, RateLimitError,
 from backend.services import ytdlp_service as YT
 
 
+# ── schema ────────────────────────────────────────────────────────────────
+#
+# The download cascade reads UserSettings for the browser/cookie settings, so
+# these tests hit the database. Without this they only passed when some OTHER
+# test module happened to create the tables first: run alone, 21 of them failed
+# with "no such table: user_settings". Declaring the schema here makes the file
+# self-contained instead of order-dependent.
+#
+# The models are imported INSIDE the fixture, at runtime, on purpose:
+# `create_all` only emits a table whose model has been imported, so a
+# module-level import of the app modules plus an early create_all silently
+# omits whatever was not yet registered.
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _schema():
+    import asyncio as _asyncio
+
+    async def _create():
+        from backend.database import Base, engine
+        from backend.models.job import Job  # noqa: F401 - registers the table
+        from backend.models.user_settings import UserSettings  # noqa: F401
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    _asyncio.run(_create())
+    yield
+
+
 # ── error classification ────────────────────────────────────────────────────
 
 class TestErrorClassification:
