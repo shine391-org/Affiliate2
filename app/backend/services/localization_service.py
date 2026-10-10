@@ -1473,7 +1473,13 @@ async def _translate_batch_resilient(
                 "model": getattr(current, "model", None), "attempt": 1,
                 "error_type": "InvalidStructuredOutput", "error": str(exc)[:240],
             })
-            if not _repair_issues and route_state.sticky_index + 1 < len(route_state.clients):
+            # Advance to the next configured route on malformed structure. This
+            # applies to the semantic-repair pass too: a repair that lands on a
+            # route returning malformed JSON must not strand the segment, since
+            # a later configured route can still answer correctly. The recursive
+            # call passes _repair_issues along, so this guard re-fires only
+            # while routes remain and each route is visited at most once here.
+            if route_state.sticky_index + 1 < len(route_state.clients):
                 route_state.sticky_index += 1
                 next_client = route_state.current
                 await _emit_ai_progress(progress_cb, {"event": "switch_fallback", "stage": "translation",
@@ -1731,7 +1737,7 @@ async def translate_transcript(
         for index, client in enumerate(route_clients)
     ]
     checkpoint_meta = {
-        "meaning_guard_version": 12,
+        "meaning_guard_version": 13,
         "translation_prompt_version": _C6_TRANSLATION_PROMPT_VERSION,
         "source_language": transcript.language,
         "protected_terms": profile.protected_terms,
@@ -4657,6 +4663,13 @@ async def synthesize_timed_dub(
                 "measured_fitted_duration_ms": measured_ms,
                 "measured_end_ms": measured_end, "allowed_end_ms": allowed_end,
                 "allocated_end_ms": chunk.end_ms, "silent": not math.isfinite(peak_db),
+                # A reviewer must be able to see HOW MUCH the fitted audio
+                # overran, not just that it did. Without this the shared
+                # error preview renders "speed ?x".
+                "required_speed": round(measured_ms / chunk.available_ms, 4)
+                if chunk.available_ms > 0 else None,
+                "overflow_ms": max(0, measured_end - allowed_end),
+                "speed_factor": chunk.speed_factor,
                 "segment_ids": [fitted_plan[i].segment_id for i in chunk.item_indexes],
             }
             raise LocalizationTimingError([failure], rewrite_count=job_state.rewrite_count,

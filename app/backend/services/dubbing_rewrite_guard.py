@@ -491,6 +491,12 @@ def _numeric_text(text: str) -> str:
     # of an ordinary noun — including 月亮 (the moon) — is an article, and
     # treating it as a month unit made a correct translation look invented.
     text = re.sub(r"(?<![\d零〇一二三四五六七八九两兩十百千万萬])(?<![各每這这那哪兒那個这个這個幾几數数好])(个|個)(?!月(?![亮])|周|週|星期|天|年|秒|分|刻|小時|时)", r"1\1", text)
+    # A 第N ordinal has already been extracted as an ordinal slot by the caller,
+    # leaving its bare classifier (第二个视频 -> <ordinal> 个视频). The rule
+    # above turns that classifier into "1个"; both spellings are the ordinal's
+    # own article, not an extra counted object, so the added 1 must be removed
+    # again. Without this a correct 'Video thứ hai' looks like a lost count.
+    text = re.sub(r"(?<=" + _ORDINAL_MARKER + r"\s)1(?=个|個)", " ", text)
     # 首 in 首歌/詩歌 is a lexical compound, not a bare classifier.
     text = re.sub(r"(?<![\d零〇一二三四五六七八九两兩十百千万萬])(?<![各每這这那哪兒那個这个這個幾几數数好])(?<![歌詩诗詞词樂乐])"
                   r"([隻根])", r"1\1", text)
@@ -582,8 +588,11 @@ _ZH_NAME_MARKER = "\ue001"
 # expression, 'vài' is never a numeral).
 _LEXICAL_QUANTITIES = (
     # 'a little' — 有點/有点, 一點/一点, 一點兒. 一点五 (1.5) is a decimal and is
-    # excluded by the lookahead so the decimal rule still owns it.
-    r"(?:有|沒|没|不)?一[点點](?![点點零〇一二三四五六七八九\d])",
+    # excluded by the lookahead so the decimal rule still owns it. 一点点 is the
+    # reduplicated degree form ('just a little bit more'); the trailing 点 is
+    # not a decimal digit, so the negative lookahead must allow it, otherwise
+    # 再高一点点 reads as the count '1' and a correct translation is rejected.
+    r"(?:有|沒|没|不)?一[点點](?:[点點]|儿|兒)?(?![点點零〇一二三四五六七八九\d])",
     # 'some / a few' — 一些, 一會兒/一会儿, 一陣子, 一會.
         r"一(?=[些會会陣阵])",
         # '一下 / 一下子 / 下子' is the verb-reducing particle ('have a look',
@@ -597,6 +606,15 @@ _LEXICAL_QUANTITIES = (
     # Vietnamese rendering ('ngũ quan', 'đường nét khuôn mặt') carries no
     # numeral, so counting the 五 rejects a correct translation.
     r"五官",
+    # 一劳永逸 / 一勞永逸 is the fixed idiom 'once and for all'. Its 一 names
+    # the single effort, not one counted object, so the natural Vietnamese
+    # ('giải quyết triệt để') legitimately has no numeral. Masking the whole
+    # idiom keeps the 一 from being read as a cardinal.
+        r"一[劳勞]永逸",
+    # 星期一..星期六/日 is a WEEKDAY, whose numeral is a rank inside the word,
+    # not a counted object. Vietnamese renders it as 'thứ hai'..'thứ bảy' and
+    # carries no cardinal at all. 星期天/日 stays out because it has no numeral.
+        r"星期[零〇一二三四五六七八九十]",
     # 'absolutely / never' — 千萬 is a verb of emphasis before a prohibition
     # (千萬不能 = 'must absolutely not'), not 10,000,000. A numeric prefix
     # (一千萬) or a non-prohibition reading keeps the counted meaning.
@@ -870,6 +888,14 @@ def _vi_question_text(text: str) -> tuple[str, bool]:
         tail = match.string[match.end():]
         clause_final = not re.search(r"[^\W\d_]", re.sub(r"[\s?!.,;:]+$", "", tail))
         if clause_final:
+            particles += 1
+        elif re.search(r"(?<!\w)(?:biết|hiểu|nghe|thấy|được|sẵn sàng|đồng ý)(?!\w)\s*$", prefix):
+            # A comprehension/readiness question that a cue boundary splits in
+            # half: 你知道吗，继续看 -> 'Bạn biết không, xem tiếp nhé'. The
+            # Vietnamese 'không' tag sits before a comma instead of closing the
+            # cue, exactly like the Chinese 吗 the source rule already accepts.
+            # Only a comprehension/readiness predicate is licensed, so a genuine
+            # negation followed by another clause stays a negation.
             particles += 1
         return prefix + " "
 
