@@ -322,7 +322,11 @@ async def run_tool_captions(job_id: str, in_path: Path, style: str, emoji_style:
 
         await _tool_progress(job_id, 75, "Burning captions into video...", user_id)
         out_path = tool_out_path(job_id, ".mp4")
-        await burn_captions(in_path, ass_path, out_path)
+        # Gate the NVENC/CPU encode only. This call site is NOT already inside
+        # the localization gate (unlike run_tool_translate's render, which must
+        # not be wrapped twice — Semaphore(1) is not reentrant).
+        async with localization_gpu_gate():
+            await burn_captions(in_path, ass_path, out_path)
         if not out_path.exists():
             raise RuntimeError("Caption burn produced no output")
 
