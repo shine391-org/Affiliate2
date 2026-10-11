@@ -63,12 +63,23 @@ def compact_localization_workspace(job_id: str) -> int:
 
     # These stages are never required for render-only replay once translation,
     # dub_track and mixed_audio are durable.
+    #
+    # The reclaim is RECORDED in the manifest. Losing an artifact by deletion is
+    # damage that must invalidate the dependency closure; losing it to a
+    # deliberate retention decision is not, and treating the two identically
+    # would let a compacted workspace nuke the last-good translation/QC chain it
+    # was compacted to preserve. See LocalizationRun.earliest_damaged_stage.
+    reclaimed = set(data.get("compacted_stages") or []) | {
+        "separation", "asr", "semantic",
+    }
     for name in ("separation", "asr", "semantic"):
         directory = root / name
         if directory.exists():
             shutil.rmtree(directory, ignore_errors=True)
             if not directory.exists():
                 removed += 1
+
+    data["compacted_stages"] = sorted(reclaimed & set(STAGES))
 
     # Dubbing can contain hundreds of raw/fitted TTS files. Keep only the
     # canonical artifacts named by the manifest (transcript, dub_track, plan,
@@ -106,6 +117,13 @@ def compact_localization_workspace(job_id: str) -> int:
                 except OSError:
                     pass
 
+    # Written LAST so a crash mid-compaction never records a reclaim that did
+    # not happen; the recovery path would then see "complete" stages whose
+    # bytes are gone with no compaction to explain it.
+    manifest_path.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2, default=str) + "\n",
+        encoding="utf-8",
+    )
     return removed
 
 
@@ -375,6 +393,7 @@ class LocalizationRun:
             artifacts=serial_artifacts,
             metadata=metadata or {},
         )
+        self.data["compacted_stages"] = sorted(self.compacted_stages() - {stage})
         self._write()
 
     def mark_complete_without_artifacts(
@@ -413,16 +432,18 @@ class LocalizationRun:
         self._check_stage(stage)
         index = STAGES.index(stage)
         invalidated = list(STAGES[index:])
+        self.data["compacted_stages"] = sorted(self.compacted_stages() - set(invalidated))
         preserved_names = set(preserve_files or ())
 
         for name in invalidated:
             record = self.record(name)
+            durable_audit = self.root / "dubbing" / "rewrite_audit.json"
             if delete_artifacts:
                 directory = self.root / name
                 if directory.exists():
-                    if name == "translation" and "checkpoint.json" in preserved_names:
+                    if name == "dubbing" or (name == "translation" and "checkpoint.json" in preserved_names):
                         for item in list(directory.iterdir()):
-                            if item.name in preserved_names:
+                            if item.name in preserved_names or (name == "dubbing" and item.name == "rewrite_audit.json"):
                                 continue
                             if item.is_dir():
                                 shutil.rmtree(item, ignore_errors=True)
@@ -431,6 +452,8 @@ class LocalizationRun:
                                     item.unlink(missing_ok=True)
                                 except Exception:
                                     pass
+                        if not any(directory.iterdir()):
+                            directory.rmdir()
                     else:
                         shutil.rmtree(directory, ignore_errors=True)
             record.update(
@@ -441,6 +464,13 @@ class LocalizationRun:
                 artifacts={},
                 metadata={},
             )
+            if name == "dubbing" and durable_audit.exists():
+                record["artifacts"]["rewrite_audit"] = str(durable_audit.resolve())
+        if index <= STAGES.index("translation"):
+            self.invalidate_rewrite_revision()
+        if index <= STAGES.index("asr"):
+            self.invalidate_dubbing_state(reset_source=True)
+            self.data["effective_profile"].update(speaker_voices={}, speaker_genders={}, speaker_reference_audio={})
         self._write()
         return invalidated
 
@@ -448,6 +478,43 @@ class LocalizationRun:
         for name in STAGES:
             if self.record(name).get("status") != "complete":
                 return name
+        return None
+
+    def compacted_stages(self) -> set[str]:
+        """Stages whose artifacts retention DELIBERATELY reclaimed.
+
+        Recorded by ``compact_localization_workspace``. These are not damage:
+        the stage is still declared complete, its bytes were dropped on purpose
+        so a render-only replay stays cheap, and the retained downstream chain
+        (translation, dubbing, mix, render, QC) is exactly what must survive.
+        """
+        return {
+            name for name in (self.data.get("compacted_stages") or [])
+            if name in STAGES
+        }
+
+    def earliest_damaged_stage(self) -> str | None:
+        """Earliest stage that claims ``complete`` but cannot prove it.
+
+        A stage record is a claim plus the artifact paths that back it. When one
+        of those paths is gone the claim is false, and every LATER stage was
+        derived from the artifact that disappeared -- so this is the point from
+        which the dependency closure has to be rebuilt. ``None`` means the
+        manifest is internally consistent and a resume may reuse every stage.
+
+        Only artifacts a complete record NAMED are checked. A stage completed
+        without artifacts (skipped separation, captions-only audio stage) makes
+        no claim to violate, and reporting it as damaged would make every
+        captions-only job invalidate itself on each resume.
+        """
+        compacted = self.compacted_stages()
+        for name in STAGES:
+            record = self.record(name)
+            if record.get("status") != "complete" or name in compacted:
+                continue
+            for key in (record.get("artifacts") or {}):
+                if self.artifact(name, key) is None:
+                    return name
         return None
 
     def save_json(self, stage: str, name: str, payload: Any) -> Path:
@@ -467,8 +534,46 @@ class LocalizationRun:
         return json.loads(path.read_text(encoding="utf-8"))
 
     def update_effective_profile(self, profile: dict) -> None:
+        keys = ("tts_provider", "tts_connection_id", "tts_model", "tts_voice", "tts_base_url", "tts_region")
+        if any(self.effective_profile.get(key) != profile.get(key) for key in keys):
+            self.invalidate_dubbing_state()
+            profile = {**profile, "speaker_voices": {}, "speaker_reference_audio": {}, "voice_genders": {}}
+        revision_keys = {key for key in {*self.effective_profile, *profile}
+                         if key.startswith(("tts_", "speaker_", "voice_", "dub_", "rewrite_", "video_retime"))
+                         or key in {"glossary", "protected_terms"}}
+        if any(self.effective_profile.get(key) != profile.get(key) for key in revision_keys):
+            self.invalidate_rewrite_revision()
         self.data["effective_profile"] = dict(profile)
         self._write()
+
+    def invalidate_rewrite_revision(self) -> None:
+        # Invalidate the public count immediately, before a new C7 attempt.
+        # A fresh acceptance token prevents A -> B -> A from reviving old edits.
+        from backend.services.dubbing_job_state import write_json_atomic
+        self.record("dubbing").setdefault("metadata", {})["rewrite_count"] = 0
+        for path in (self.root / "dubbing_state.json", self.root / "dubbing" / "rewrite_audit.json"):
+            if not path.exists():
+                continue
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            entries = payload.get("rewrite_audit", payload.get("entries", []))
+            for entry in entries:
+                entry.setdefault("acceptance_key", "legacy-unscoped")
+            payload.update(acceptance_key=None, acceptance_input_key=None, rewrite_count=0)
+            if path.name == "dubbing_state.json":
+                payload["accepted_text"] = {}
+            write_json_atomic(path, payload)
+
+    def invalidate_dubbing_state(self, *, reset_source: bool = False) -> None:
+        self.invalidate_rewrite_revision()
+        path = self.root / "dubbing_state.json"
+        if path.exists():
+            from backend.services.dubbing_job_state import write_json_atomic
+            state = json.loads(path.read_text(encoding="utf-8"))
+            state.update(binding=None, speaker_voices={}, measurements={}, available_voices=[],
+                         voice_catalogue=[], voice_genders={}, accepted_text={}, voice_warnings=[], voice_catalog_error=None, voice_catalogue_loaded=False, shared_voice=False)
+            if reset_source:
+                state.update(detected_speakers=[], speaker_genders={})
+            write_json_atomic(path, state)
 
     def update_request(self, request: dict) -> None:
         self.data["request"] = dict(request)
@@ -514,6 +619,9 @@ class ManifestTransaction:
             stages_root.mkdir(parents=True, exist_ok=True)
             manifest_bytes = self.run.manifest_path.read_bytes()
             (self.backup_root / "manifest.json").write_bytes(manifest_bytes)
+            state = self.run.root / "dubbing_state.json"
+            if state.exists():
+                shutil.copy2(state, self.backup_root / state.name)
             for name in self.stage_names:
                 source = self.run.root / name
                 if source.is_dir():
@@ -539,6 +647,12 @@ class ManifestTransaction:
             if backup.is_dir():
                 shutil.copytree(backup, current)
         manifest_bytes = (self.backup_root / "manifest.json").read_bytes()
+        state = self.run.root / "dubbing_state.json"
+        backup_state = self.backup_root / state.name
+        if backup_state.exists():
+            shutil.copy2(backup_state, state)
+        else:
+            state.unlink(missing_ok=True)
         tmp = self.run.manifest_path.with_suffix(".json.rollback")
         tmp.write_bytes(manifest_bytes)
         tmp.replace(self.run.manifest_path)

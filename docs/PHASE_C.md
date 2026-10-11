@@ -123,7 +123,9 @@ HQ alignment:
 - uses separated vocal audio on full HQ clean-dub jobs
 
 Multi-speaker:
-- optional WhisperX/pyannote diarization
+- WhisperX/pyannote diarization defaults to `auto` in HQ and Fast; Fast keeps forced alignment off
+- diarization-only preserves existing ASR IDs, words and word timestamps; deterministic cue normalization retains speaker turns
+- auto failure is reported explicitly and blocks clean QC; strict failure aborts the stage
 - Hugging Face gated-model token via encrypted Settings or .env
 - SmartSub-style overlap-duration speaker assignment
 - stable `speaker_id` propagated downstream
@@ -161,7 +163,13 @@ Behavior:
 - following unused silence may be borrowed safely
 - ONE natural-rate TTS request per dubbing chunk
 - real generated duration is authoritative
-- bounded AI rewrite/regeneration for overlong speech
+- only measured `required_speed(actual_duration_ms, available_ms) > dub_speed_max` can authorize AI rewrite; calibrated estimates are telemetry
+- job-local calibration is keyed by effective provider/model/connection/voice/reference identity and observes the estimate and duration of the exact synthesized text
+- job-local speaker voice mapping survives resume/rerun/targeted regeneration; detected speakers receive distinct available voices unless shared mode is explicit
+- incompatible TTS bindings invalidate mappings and calibration; reusable profiles strip diarizer labels such as `SPEAKER_00`
+- `rewrite_count` is the unique changed-segment count in the job audit; `rewrite_audit.json` is a declared durable dubbing artifact, saved before subsequent TTS calls
+- C6 and C7 validate deterministic negation, numeric values, numeric/unit bindings and explicit glossary/protected terms; C7 antonym checks are bidirectional and phrase-aware
+- bounded AI rewrite/regeneration for measured overlong speech
 - profile-scoped C7 rewrite instructions are appended after editable semantic guardrails; stable-ID/order/JSON protocol remains locked
 - AI rewrite is best-effort: local/provider timeout or malformed rewrite records a review warning and continues through measured TTS / atempo / bounded retime instead of killing the whole dubbing stage
 - local OpenAI-compatible endpoints get a longer request timeout than cloud endpoints
@@ -184,6 +192,9 @@ Expert overrides:
 - speaker identity
 
 Targeted chunk regeneration can reuse raw audio for all unaffected chunks.
+Studio shows detected speakers and permits job-scoped voice selection and speaker correction. QC reports diarization status, speaker count, acoustic voice identities and unresolved overlap; an unresolved multi-speaker/voice mismatch cannot be `READY`.
+
+The 2026-10-03 branch review and remaining real-media gaps are recorded in [QA_LOCALIZATION_MEASURED_SPEAKERS.md](QA_LOCALIZATION_MEASURED_SPEAKERS.md). These deterministic checks do not replace C13 semantic or perceptual acceptance.
 
 ## C8R — HQ Clean Dub / TTS / Final Media — IMPLEMENTED
 

@@ -96,43 +96,15 @@ def _localization_source_media_preflight_sync(source_path: Path) -> dict:
     return details
 
 
-# GPU concurrency gate (concurrency = 1) for heavy local localization workloads
-# (Demucs separation, Faster-Whisper / WhisperX, and NVENC render) on 8GB VRAM
-from contextlib import asynccontextmanager
-
-_LOCALIZATION_GPU_GATE = asyncio.Semaphore(1)
-
-
-@asynccontextmanager
-async def localization_gpu_gate():
-    await _LOCALIZATION_GPU_GATE.acquire()
-    try:
-        yield
-    finally:
-        _LOCALIZATION_GPU_GATE.release()
-
-
-def _release_localization_torch_cache_sync() -> None:
-    """Release unused PyTorch/Demucs allocator memory after C5/C8 GPU audio work.
-
-    This runs while the localization GPU gate is still held, after Demucs and
-    alignment/diarization have finished. It never frees live tensors; CUDA's
-    empty_cache() only returns UNUSED allocator blocks. Keeping those blocks
-    warm beyond the ASR/alignment boundary made failed jobs pin memory for no
-    useful downstream stage.
-    """
-    import gc
-    import sys
-
-    gc.collect()
-    torch = sys.modules.get("torch")
-    if torch is None:
-        return
-    try:
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-    except Exception:
-        logger.debug("Could not release localization torch cache", exc_info=True)
+# GPU gate moved to core/gpu_gate.py to avoid import cycles.
+# Re-exported here for backward compatibility. `localization_gpu_gate` is the
+# gate primitive every GPU caller shares; importing it from two module paths is
+# safe only because both resolve to the same per-loop semaphore in gpu_gate.
+from backend.core.gpu_gate import (  # noqa: F401
+    _gate_semaphore,
+    localization_gpu_gate,
+    _release_localization_torch_cache_sync,
+)
 
 
 def _cleanup_paths(*paths: Path):
@@ -164,8 +136,9 @@ async def _tool_progress(job_id: str, pct: float, step: str, user_id: str):
     update_job_status alone is invisible to the frontend."""
     from backend.agents.job_helper import update_job_status
     from backend.core.ws_manager import ws_manager
-    await update_job_status(job_id, "running", progress_pct=pct, current_step=step)
-    await ws_manager.send_progress(job_id, pct, step, user_id)
+    accepted = await update_job_status(job_id, "running", progress_pct=pct, current_step=step)
+    if accepted:
+        await ws_manager.send_progress(job_id, pct, step, user_id)
 
 
 # Demucs owns the separation stage (job 6% → 15%); ASR starts at 16%.
@@ -224,6 +197,7 @@ async def _tool_success(
     job_id: str, out_path: Path, cleanup: list[Path], user_id: str,
     extra_output: dict | None = None,
     expect: dict | None = None,
+    completion_step: str = "Done",
 ) -> bool:
     """Validate the artifact, mark job success, emit job_complete, delete
     input scratch files. Returns True when the artifact was delivered, False
@@ -267,7 +241,7 @@ async def _tool_success(
     if extra_output:
         output_data.update(extra_output)
     accepted = await update_job_status(
-        job_id, "success", progress_pct=100, current_step="Done",
+        job_id, "success", progress_pct=100, current_step=completion_step,
         output_data=output_data,
     )
     if not accepted:
@@ -348,7 +322,11 @@ async def run_tool_captions(job_id: str, in_path: Path, style: str, emoji_style:
 
         await _tool_progress(job_id, 75, "Burning captions into video...", user_id)
         out_path = tool_out_path(job_id, ".mp4")
-        await burn_captions(in_path, ass_path, out_path)
+        # Gate the NVENC/CPU encode only. This call site is NOT already inside
+        # the localization gate (unlike run_tool_translate's render, which must
+        # not be wrapped twice — Semaphore(1) is not reentrant).
+        async with localization_gpu_gate():
+            await burn_captions(in_path, ass_path, out_path)
         if not out_path.exists():
             raise RuntimeError("Caption burn produced no output")
 
@@ -1037,7 +1015,6 @@ async def run_tool_translate(
         caption_segments_from_localization,
         materialize_localization_profile,
         mix_dub_audio,
-        persist_dubbing_rewrites,
         prepare_semantic_transcript,
         resolve_localization_profile,
         synthesize_timed_dub,
@@ -1099,9 +1076,11 @@ async def run_tool_translate(
     elif cleanup_input is None:
         # Safe by default: only treat as ephemeral scratch if inside tools/in or tools/staging
         try:
-            from backend.api.tools import tools_in_dir, tools_staging_dir
+            from backend.api.tools import tools_in_dir
             res_orig = original_input.resolve()
-            if res_orig.is_relative_to(tools_in_dir().resolve()) or res_orig.is_relative_to(tools_staging_dir().resolve()):
+            upload_root = tools_in_dir().resolve()
+            staging_root = (upload_root / ".staging").resolve()
+            if res_orig.is_relative_to(upload_root) or res_orig.is_relative_to(staging_root):
                 cleanup.append(original_input)
         except Exception:
             pass
@@ -1287,6 +1266,32 @@ async def run_tool_translate(
         run.verify_source_identity()
         await _cancel_checkpoint("media processing")
 
+        # ── Dependency closure of LOST artifacts ───────────────────────────
+        # The `is_complete(stage, ...)` checks below only decide whether to
+        # rebuild ONE stage. Without this, a stage whose artifact was lost
+        # (deleted delivery file, wiped mixed audio, missing transcript) is
+        # rebuilt while every LATER stage still reads `status == "complete"`
+        # and is reused -- so QC, the approval surface and the delivered video
+        # end up describing artifacts that no longer exist.
+        #
+        # Invalidate from the earliest stage that claims a completeness it can
+        # no longer prove, which invalidates its whole closure including QC, and
+        # leaves everything upstream byte-identical. `delete_artifacts=True`
+        # also drops targeting/reuse bookkeeping; targeted retry still opts out
+        # through the explicit `delete_artifacts=False` paths below.
+        damaged_stage = run.earliest_damaged_stage()
+        if damaged_stage is not None:
+            logger.warning(
+                "Localization resume: %s artifacts are missing; rebuilding from %s",
+                job_id[:8], damaged_stage,
+            )
+            run.invalidate_from(
+                damaged_stage,
+                delete_artifacts=True,
+                preserve_files={"checkpoint.json"},
+            )
+        await _cancel_checkpoint("artifact closure")
+
         # Never clean the persisted source snapshot.
         cleanup = [
             path for path in cleanup
@@ -1336,11 +1341,15 @@ async def run_tool_translate(
                         _sep_forward = _separation_progress_forwarder(
                             job_id, user_id, [SEPARATION_PROGRESS_START],
                         )
-                        vocals_file, background_file = await separate_vocals_background(
-                            source_path,
-                            run.stage_dir("separation"),
-                            on_progress=_sep_forward,
-                        )
+                        async with localization_gpu_gate():
+                            try:
+                                vocals_file, background_file = await separate_vocals_background(
+                                    source_path,
+                                    run.stage_dir("separation"),
+                                    on_progress=_sep_forward,
+                                )
+                            finally:
+                                await asyncio.to_thread(_release_localization_torch_cache_sync)
                         run.complete(
                             "separation",
                             artifacts={
@@ -1368,7 +1377,7 @@ async def run_tool_translate(
             else:
                 await _tool_progress(
                     job_id, 16,
-                    f"Transcribing/alignment with {profile.asr_model or profile.asr_quality}...",
+                    f"Transcribing/alignment · {profile.asr_provider}/{profile.asr_model or profile.asr_quality}...",
                     user_id,
                 )
                 run.start("asr")
@@ -1377,7 +1386,9 @@ async def run_tool_translate(
                         asr_input,
                         profile,
                         user_settings=user_settings,
+                        cancel_check=lambda: job_cancelled(job_id),
                     )
+                    await _cancel_checkpoint("ASR artifact publication")
                     path = run.save_json("asr", "transcript.json", transcript.model_dump())
                     run.complete(
                         "asr",
@@ -1388,18 +1399,8 @@ async def run_tool_translate(
                     run.fail("asr", exc)
                     raise
 
-        if needs_separation or needs_asr:
-            async with localization_gpu_gate():
-                try:
-                    await _run_gpu_audio_pipeline()
-                finally:
-                    # Release unused Demucs/WhisperX allocator memory even when
-                    # separation/ASR fails or the task is cancelled. Without a
-                    # finally, exactly the failure path that stops a job can
-                    # leave multi-GB resident memory pinned in the backend.
-                    await asyncio.to_thread(_release_localization_torch_cache_sync)
-        else:
-            await _run_gpu_audio_pipeline()
+        # C5 owns its local compute gate, not remote network I/O.
+        await _run_gpu_audio_pipeline()
 
         await _cancel_checkpoint("semantic segmentation")
         source_segment_count = len(transcript.segments)
@@ -1501,14 +1502,19 @@ async def run_tool_translate(
                 user_id,
             )
             run.start("translation")
+            if run.request.get("translation_review_approved"):
+                # A rebuilt C6 artifact cannot inherit approval of its predecessor.
+                run.update_request({**run.request, "translation_review_approved": False})
             translation_runtime = {
                 "attempts": 0,
                 "errors": 0,
                 "fallback_provider_used": False,
+                "http_dispatch_count": 0,
             }
             translation_batch = {"current": 1, "total": 1}
 
             async def _translation_progress(event: dict):
+                await _cancel_checkpoint("translation progress")
                 name = event.get("event")
                 if name == "batch":
                     translation_batch["current"] = int(event.get("batch") or 1)
@@ -1519,6 +1525,12 @@ async def run_tool_translate(
                 role = str(event.get("role") or "primary")
                 provider = str(event.get("provider") or "")
                 model = str(event.get("model") or "")
+                if name == "http_dispatch":
+                    translation_runtime["http_dispatch_count"] += 1
+                if name == "provider_wait":
+                    await _tool_progress(job_id, pct,
+                        f"Đang chờ provider · {event.get('reason')} · còn {event.get('wait_s')}s",
+                        user_id)
                 if name == "attempt":
                     translation_runtime["attempts"] += 1
                     if role.startswith("fallback"):
@@ -1569,7 +1581,10 @@ async def run_tool_translate(
                     for_dub=is_dub,
                     checkpoint_dir=run.stage_dir("translation"),
                     progress_cb=_translation_progress,
+                    source_media=source_path,
+                    cancel_check=lambda: job_cancelled(job_id),
                 )
+                await _cancel_checkpoint("translation artifact publication")
                 path = run.save_json(
                     "translation", "transcript.json", localized.model_dump()
                 )
@@ -1581,6 +1596,11 @@ async def run_tool_translate(
                             1 for s in localized.segments
                             if s.translation_status == "success"
                         ),
+                        "draft_count": sum(
+                            1 for s in localized.segments
+                            if s.translation_status == "draft"
+                        ),
+                        "omitted_count": sum(s.translation_status == "omitted" for s in localized.segments),
                         "translation_provider": profile.translation_provider,
                         "translation_model": profile.translation_model,
                         "translation_fallback_provider": profile.translation_fallback_provider,
@@ -1640,6 +1660,13 @@ async def run_tool_translate(
                 raise
 
         await _cancel_checkpoint("translation review / dubbing")
+
+        # Strict keeps the forced C6 gate. Auto carries findings into final
+        # review-ready QC instead; explicit user-requested pre-TTS review below
+        # is unchanged. Auto continuity is not a quality approval.
+        if (is_dub and profile.translation_automation != "auto"
+                and localized.metadata.get("translation_guard_review")):
+            run.update_request({**run.request, "review_translation": True})
 
         # Optional human quality gate: stop after C6 and expose source/target
         # pairs before spending on TTS/render. The same manifest/job resumes at
@@ -1710,7 +1737,7 @@ async def run_tool_translate(
         # ── C7 smart dubbing ────────────────────────────────────────────
         current_stage = "dubbing"
         if is_dub:
-            if run.is_complete("dubbing", ("transcript", "dub_track", "plan", "chunks")):
+            if run.is_complete("dubbing", ("transcript", "dub_track", "plan", "chunks", "rewrite_audit")):
                 localized = LocalizationTranscript.model_validate(
                     run.load_json("dubbing", "transcript")
                 )
@@ -1723,18 +1750,31 @@ async def run_tool_translate(
                 max_fitted_dubbing_speed = float(meta.get("max_fitted_speed_factor") or 1.0)
                 dubbing_rewrite_count = int(meta.get("rewrite_count") or 0)
             else:
+                # Rebuilding an older/incomplete dub also rebuilds its consumers;
+                # a completed mix/QC cannot continue to describe the previous audio.
+                if any(run.record(stage).get("status") == "complete"
+                       for stage in ("audio_mix", "final_render", "qc")):
+                    run.invalidate_from("dubbing", delete_artifacts=False)
                 await _tool_progress(
                     job_id, 52,
                     "Planning chunks, synthesizing and fitting HQ dubbing...",
                     user_id,
                 )
                 run.start("dubbing")
+                run.record("dubbing").setdefault("artifacts", {})["rewrite_audit"] = str(
+                    (run.stage_dir("dubbing") / "rewrite_audit.json").resolve()
+                )
+                run._write()
                 try:
                     async def _rewrite_progress(event: dict):
                         name = event.get("event")
                         provider = str(event.get("provider") or "")
                         model = str(event.get("model") or "")
                         role = str(event.get("role") or "primary")
+                        if name == "provider_wait":
+                            await _tool_progress(job_id, 54,
+                                f"C7 đang chờ provider · {event.get('reason')} · còn {event.get('wait_s')}s",
+                                user_id)
                         if name == "attempt":
                             await _tool_progress(
                                 job_id,
@@ -1787,6 +1827,15 @@ async def run_tool_translate(
                         reuse_existing_chunks=True,
                         reference_media=asr_input,
                         progress_cb=_rewrite_progress,
+                        job_state_path=run.root / "dubbing_state.json",
+                        # Poll the persisted job row at C7's own chunk/fit
+                        # boundaries. Cancellation currently only takes effect
+                        # between stages, so a cancelled job kept spending TTS
+                        # on every remaining chunk of a long dub. This observes
+                        # cancellation; it never interrupts a native call in
+                        # flight, so the GPU gate is still only released once
+                        # compute has actually stopped.
+                        cancel_check=lambda: job_cancelled(job_id),
                     )
                     localized = dub.transcript
                     dub_track = dub.dub_track
@@ -1807,6 +1856,11 @@ async def run_tool_translate(
                         "dubbing", "chunks.json",
                         [asdict(x) for x in (dub.chunks or [])],
                     )
+                    audit_path = run.save_json("dubbing", "rewrite_audit.json", {
+                        "rewrite_count": dubbing_rewrite_count,
+                        "entries": localized.metadata.get("dubbing", {}).get("rewrite_audit") or [],
+                        "rate_calibration": localized.metadata.get("dubbing", {}).get("rate_calibration") or {},
+                    })
                     run.complete(
                         "dubbing",
                         artifacts={
@@ -1814,6 +1868,7 @@ async def run_tool_translate(
                             "dub_track": dub_track,
                             "plan": plan_path,
                             "chunks": chunks_path,
+                            "rewrite_audit": audit_path,
                         },
                         metadata={
                             "issues": timing_issues,
@@ -1844,37 +1899,19 @@ async def run_tool_translate(
                             ),
                         },
                     )
-                    if dubbing_rewrite_count:
-                        translation_base = LocalizationTranscript.model_validate(
-                            run.load_json("translation", "transcript")
-                        )
-                        durable_translation = persist_dubbing_rewrites(
-                            translation_base,
-                            localized,
-                        )
-                        translation_path = run.save_json(
-                            "translation",
-                            "transcript.json",
-                            durable_translation.model_dump(),
-                        )
-                        translation_meta = dict(
-                            run.record("translation").get("metadata") or {}
-                        )
-                        translation_meta["duration_rewrite_count"] = (
-                            int(translation_meta.get("duration_rewrite_count") or 0)
-                            + dubbing_rewrite_count
-                        )
-                        run.complete(
-                            "translation",
-                            artifacts={"transcript": translation_path},
-                            metadata=translation_meta,
-                        )
                     if regenerate_chunk_ids:
                         run.update_request({
                             **run.request,
                             "regenerate_chunk_ids": [],
                         })
                 except Exception as exc:
+                    audit_path = run.stage_dir("dubbing") / "rewrite_audit.json"
+                    if audit_path.exists():
+                        run.record("dubbing").setdefault("artifacts", {})["rewrite_audit"] = str(audit_path.resolve())
+                        import json as _audit_json
+                        run.record("dubbing").setdefault("metadata", {})["rewrite_count"] = int(
+                            _audit_json.loads(audit_path.read_text(encoding="utf-8")).get("rewrite_count") or 0
+                        )
                     # Timing failures happen after C7 may already have attempted
                     # one or more rewrites. Persist that audit evidence before
                     # marking the stage failed so the UI can prove whether C7
@@ -2041,6 +2078,7 @@ async def run_tool_translate(
                     video_slowdown=video_slowdown if is_dub else 1.0,
                     timing_issues=timing_issues,
                     check_tts_quality=is_dub,
+                    target_language=target_language,
                 )
                 qc = qc_report.as_dict()
                 report_path = run.save_json("qc", "report.json", qc)
@@ -2089,7 +2127,9 @@ async def run_tool_translate(
             "localization_profile": profile.id,
             "localization_manifest": str(run.manifest_path),
             "asr_quality": profile.asr_quality,
-            "asr_model": profile.asr_model,
+            "asr_provider": transcript.metadata.get("asr", {}).get("provider", profile.asr_provider),
+            "asr_model": transcript.metadata.get("asr", {}).get("model") or profile.asr_model,
+            "asr_fallback_reason": transcript.metadata.get("asr", {}).get("fallback_reason"),
             "alignment_mode": profile.alignment_mode,
             "diarization_mode": profile.diarization_mode,
             "render_profile": profile.render_profile,
@@ -2124,12 +2164,21 @@ async def run_tool_translate(
                 previous_generated_video_id
             )
 
+        # A playable render is a successful TOOL artifact even if editorial
+        # QC fails. Keep the file reviewable, but never label failed QC "Done"
+        # or imply Publish is allowed. Publish uses qc_status as its hard gate.
+        qc_completion_step = {
+            "READY": "Rendered · QC READY",
+            "NEEDS_REVIEW": "Rendered · QC NEEDS_REVIEW (approval required)",
+            "FAILED": "Rendered · QC FAILED (not publishable)",
+        }.get(str(qc.get("status") or "").upper(), "Rendered · QC unknown")
         delivered = await _tool_success(
             job_id,
             delivery_path,
             cleanup,
             user_id,
             extra_output=output_meta,
+            completion_step=qc_completion_step,
         )
         if not delivered:
             if delivery_is_new:
@@ -2240,9 +2289,35 @@ async def run_tool_translate(
             "requires reference audio", "requires a base url",
             "matches no streams", "no audio", "source media has changed",
             "source identity", "missing or inaccessible",
+            "unlocalized vietnamese text", "invalid dubbing job state",
         )
         cancelled = "cancel" in error_name
         deterministic = any(marker in message for marker in deterministic_markers)
+        if stage in {"semantic", "translation"}:
+            # C6 wraps exhausted routes in RuntimeError. Inspect the original
+            # provider status too; retrying cannot repair credentials/config.
+            ai_config_markers = (
+                "invalid model", "model does not exist", "model_not_found",
+                "unknown ai connection", "unsupported ai provider",
+                "not logged in", "login expired", "token expired",
+            )
+            cause = e
+            seen_causes = set()
+            while cause is not None and id(cause) not in seen_causes:
+                seen_causes.add(id(cause))
+                status = getattr(cause, "status_code", None) or getattr(cause, "code", None)
+                if str(status) in {"400", "401", "403", "404", "422"} or any(
+                    marker in str(cause).lower()
+                    for marker in (*deterministic_markers, *ai_config_markers)
+                ):
+                    deterministic = True
+                    break
+                cause = cause.__cause__ or (
+                    None if cause.__suppress_context__ else cause.__context__
+                )
+        if stage == "dubbing":
+            from backend.services.tts_service import retryable_tts_error
+            deterministic = deterministic or not retryable_tts_error(e)
         attempt_count = int(attempts.get(stage, 0) or 0) if stage else 0
 
         if (
@@ -2263,8 +2338,10 @@ async def run_tool_translate(
                     "error": str(e)[:500],
                 },
             }
-            delete_artifacts = True
+            delete_artifacts = stage != "dubbing"
             preserve_files: set[str] = set()
+            if stage != "dubbing":
+                repair_request.pop("regenerate_chunk_ids", None)
             if stage == "translation":
                 preserve_files = {"checkpoint.json"}
             if stage == "dubbing" and hasattr(e, "issues"):
@@ -2292,25 +2369,31 @@ async def run_tool_translate(
                 f"Tự động sửa: thử lại đúng bước {stage} (1/1)...",
                 user_id,
             )
-            await run_tool_translate(
-                job_id,
-                run.source_path,
-                str(run.request.get("target_language") or target_language),
-                str(run.request.get("mode") or mode),
-                str(run.request.get("voice_id") or voice_id or ""),
-                str(run.effective_profile.get("caption_style") or caption_style or "viral"),
-                str(run.request.get("emoji_style") or emoji_style or "moderate"),
-                user_id=user_id,
-                target_aspect=run.effective_profile.get("target_aspect") or run.request.get("target_aspect"),
-                profile_id=run.request.get("profile_id"),
-                profile_override=run.effective_profile,
-                review_translation=bool(run.request.get("review_translation")),
-                cleanup_input=False,
-                mask_box=run.request.get("mask_box"),
-                caption_placement=run.request.get("caption_placement"),
-                downloaded_video_id=run.request.get("downloaded_video_id"),
-                auto_repair=None,
-            )
+            try:
+                await run_tool_translate(
+                    job_id,
+                    run.source_path,
+                    str(run.request.get("target_language") or target_language),
+                    str(run.request.get("mode") or mode),
+                    str(run.request.get("voice_id") or voice_id or ""),
+                    str(run.effective_profile.get("caption_style") or caption_style or "viral"),
+                    str(run.request.get("emoji_style") or emoji_style or "moderate"),
+                    user_id=user_id,
+                    target_aspect=run.effective_profile.get("target_aspect") or run.request.get("target_aspect"),
+                    profile_id=run.request.get("profile_id"),
+                    profile_override=run.effective_profile,
+                    review_translation=bool(run.request.get("review_translation")),
+                    cleanup_input=False,
+                    mask_box=run.request.get("mask_box"),
+                    caption_placement=run.request.get("caption_placement"),
+                    downloaded_video_id=run.request.get("downloaded_video_id"),
+                    auto_repair=None,
+                )
+            finally:
+                # Recursive stage-only repair reuses the immutable source copy.
+                # The outer invocation still owns its original upload scratch;
+                # releasing it here closes the success/failure leak on retry.
+                _cleanup_paths(*cleanup)
             return
 
         await _tool_fail(job_id, e, cleanup, user_id, "translate")

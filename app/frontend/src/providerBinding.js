@@ -13,12 +13,13 @@ export const PROVIDER_BINDING_CURRENT_UNAVAILABLE_LABEL =
   "Cấu hình hiện tại không khả dụng — không thể dùng cấu hình hiện tại."
 
 const CHANGED_STAGE_LABELS = {
+  asr: "Nhận giọng nói ASR",
   translation: "Bản dịch C6",
   rewrite: "Viết lại C7",
   tts: "TTS",
 }
 
-const REBIND_STAGES = ["semantic", "translation", "dubbing"]
+const REBIND_STAGES = ["asr", "semantic", "translation", "dubbing"]
 
 /** The canonical provider-binding block, verbatim, or null when absent. */
 export function providerBinding(detail) {
@@ -104,6 +105,7 @@ export function bindingSideSummary(side) {
       [identity, endpoint ? `endpoint ${endpoint}` : null].filter(Boolean).join(" · ")
   })
   return [
+    side.asr ? "ASR " + [side.asr.asr_provider, side.asr.asr_model, side.asr.asr_connection_id, side.asr.asr_fallback_to_local ? `fallback local ${side.asr.asr_local_model}` : null].filter(Boolean).join(" / ") : null,
     ...chain(bindingTranslationRoutes(side), "C6"),
     ...chain(bindingRewriteRoutes(side), "C7"),
     bindingTtsLabel(side) ? "TTS " + bindingTtsLabel(side) : null,

@@ -144,7 +144,7 @@ export default function Library() {
 
   const {
     items, total, libraryTotal, facets, loading, pageCount,
-    families, loners, familyTotal, matchedKeys, familiesLoading,
+    families, loners, familyTotal, matchedKeys, familiesLoading, familiesReady,
     removeLocal, refresh,
   } = useLibraryIndex({ media, origins, producer, q, sort, view, page, pageSize })
 
@@ -219,9 +219,10 @@ export default function Library() {
   // the last page, or a hand-edited URL) — the pager would then highlight a
   // page the fetch disagrees with. Clamp instead of showing an empty grid.
   useEffect(() => {
-    if (!loading && total > 0 && page > pageCount) setPage(Math.max(1, pageCount))
+    const ready = view === "tree" ? familiesReady && !familiesLoading : !loading
+    if (ready && page > pageCount) setPage(Math.max(1, pageCount))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, total, page, pageCount])
+  }, [view, loading, familiesLoading, familiesReady, page, pageCount])
 
   // When a running job finishes, its output belongs in this grid — but nothing
   // else refetches the index, so the pending tile would just vanish. One

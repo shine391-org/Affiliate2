@@ -26,35 +26,39 @@ def _media_metadata_with_identity(
 
 
 def _detect_platform(url: str) -> str:
-    """Extract platform name while preserving identity-sensitive host aliases."""
-    from urllib.parse import urlparse
+    """Classify a URL by its hostname, never by a subdomain or path fragment.
+
+    Keep the generic yt-dlp fallback for less-common providers; only special
+    case platform domains with known aliases.
+    """
+    from urllib.parse import urlsplit
+
     try:
-        host = (urlparse(url).hostname or "").lower().rstrip(".")
-    except Exception:
+        host = (urlsplit(url).hostname or "").lower().rstrip(".")
+    except (AttributeError, TypeError, ValueError):
         return "unknown"
+    if not host:
+        return ""
 
-    # Douyin short/share hosts carry the same requested aweme identity as
-    # www.douyin.com. Returning "v" / "iesdouyin" here bypasses the fail-closed
-    # download guard and can send an exact-identity failure to ai_fix_url().
-    if (
-        host == "douyin.com"
-        or host.endswith(".douyin.com")
-        or host == "iesdouyin.com"
-        or host.endswith(".iesdouyin.com")
-    ):
-        return "douyin"
+    domains = {
+        "douyin": ("douyin.com", "iesdouyin.com"),
+        "tiktok": ("tiktok.com",),
+        "youtube": ("youtube.com", "youtu.be", "youtube-nocookie.com"),
+        "bilibili": ("bilibili.com",),
+    }
+    for platform, suffixes in domains.items():
+        if any(host == domain or host.endswith("." + domain) for domain in suffixes):
+            return platform
 
-    # Strip www. and take the domain name (e.g. "bilibili.com" → "bilibili")
-    host = host.removeprefix("www.")
-    parts = host.rsplit(".", 1)  # ["bilibili", "com"] or ["youtube", "co.uk"] etc
-    if len(parts) >= 1:
-        # Handle two-part TLDs like "co.uk", "com.br"
-        domain = host.split(".")[0]
-        # Map common shorteners/variants to canonical names
-        aliases = {"youtu": "youtube", "m": "youtube"}  # youtu.be, m.youtube.com
-        return aliases.get(domain, domain)
-    return "unknown"
-
+    # Preserve generic discovery for sites yt-dlp supports, including
+    # uncommon subdomains. This is only a display/provider hint, not a
+    # security boundary or public-suffix parser.
+    parts = host.split(".")
+    if len(parts) < 2:
+        return parts[0]
+    if len(parts) >= 3 and parts[-2:] in (["co", "uk"], ["com", "br"]):
+        return parts[-3]
+    return parts[-2]
 
 async def run_scout(job_id: str, niche: str, platforms: list[str], user_id: str = "local"):
     logger.info("TASK START scout | job=%s niche=%r platforms=%s", job_id[:8], niche, platforms)
@@ -411,6 +415,10 @@ async def _download_single_video_to_db(job_id: str, url: str, title: str, user_i
     from datetime import datetime
     from pathlib import Path
 
+    # Reject unsafe agent/scout-supplied targets before attempting any
+    # AI-based URL correction; a private URL is not a broken video link.
+    from backend.services.download_url_guard import validate_download_url
+    validate_download_url(url)
     video_id = str(uuid4())[:12]
 
     try:
@@ -426,6 +434,10 @@ async def _download_single_video_to_db(job_id: str, url: str, title: str, user_i
             # the caption search keyed on the exact aweme id.
             title_hint=title or "",
         )
+    except ValueError:
+        # DNS/private-target preflight is a policy rejection, not a
+        # recoverable URL typo to hand to an AI URL rewriter.
+        raise
     except Exception as first_error:
         # A Douyin URL carries the requested aweme identity. Rewriting it with
         # an LLM can silently turn a controlled failure into the wrong video,

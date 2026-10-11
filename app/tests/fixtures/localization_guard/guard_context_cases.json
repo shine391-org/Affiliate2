@@ -1,0 +1,268 @@
+{
+  "_note": "Task C guard context/group fixtures. Minimal text only: no media, no credentials, no raw provider payload. Sources and targets are the authentic cue strings recorded in the 2026-10-05 research artifacts (probe-results.json guard block, plan VI section 1). 'facts_certain' lists only what the text alone proves; 'unresolved' lists what still needs audio/ASR adjudication, so nothing here certifies a full translation as correct.",
+  "cases": [
+    {
+      "id": "f1a3f70c-seg-0009-two-eyes",
+      "origin": "f1a3f70c / seg-0009",
+      "source_language": "zh",
+      "target_language": "vi",
+      "source": "看你的兩眼之間",
+      "target": "Xem giữa 2 mắt của bạn",
+      "expect_blocked": false,
+      "facts_certain": [
+        "source carries the count 2 (兩 = two) plus the body-part classifier 眼",
+        "target carries the same count 2 on the same entity (mắt = eyes)"
+      ],
+      "unresolved": [
+        "ASR confidence of 兩眼 in the source audio was never adjudicated"
+      ],
+      "mutations": [
+        {
+          "name": "count_changed",
+          "target": "Xem giữa 3 mắt của bạn",
+          "expect_blocked": true,
+          "expect_kind": "quantity_lost"
+        },
+        {
+          "name": "entity_classifier_only",
+          "target": "Xem giữa 2 con mắt của bạn",
+          "expect_blocked": false
+        }
+      ]
+    },
+    {
+      "id": "25babc2c-seg-0086-implicit-age",
+      "origin": "25babc2c / seg-0086",
+      "source_language": "zh",
+      "target_language": "vi",
+      "source": "我23了",
+      "target": "Tôi 23 tuổi rồi",
+      "expect_blocked": false,
+      "source_context": "你多大",
+      "target_context": "Bạn bao nhiêu tuổi",
+      "facts_certain": [
+        "source numeral 23 is identical in the target",
+        "the target adds only the age unit that the Chinese 我…了 predicate carries implicitly"
+      ],
+      "unresolved": [
+        "whether the preceding cue really asks the age was never audio-adjudicated"
+      ],
+      "mutations": [
+        {
+          "name": "wrong_age",
+          "target": "Tôi 24 tuổi rồi",
+          "expect_blocked": true,
+          "expect_kind": "quantity_lost"
+        },
+        {
+          "name": "wrong_unit",
+          "target": "Tôi 23 kg rồi",
+          "expect_blocked": true,
+          "expect_kind": "unit_lost"
+        },
+        {
+          "name": "unrelated_context",
+          "target": "Tôi 23 tuổi rồi",
+          "source_context": "我们去看电影吧",
+          "target_context": "Chúng ta đi xem phim nhé",
+          "expect_blocked": true,
+          "expect_kind": "unit_lost"
+        }
+      ]
+    },
+    {
+      "id": "25babc2c-seg-0068-rhetorical",
+      "origin": "25babc2c / seg-0068",
+      "source_language": "zh",
+      "target_language": "vi",
+      "source": "哪来的",
+      "target": "Ở đâu ra thế?",
+      "expect_blocked": false,
+      "facts_certain": [
+        "哪来的 is an interrogative rhetorical cue; the target keeps an interrogative act"
+      ],
+      "unresolved": [
+        "the full recorded response appended a clause (Bán được tiền) that is not in this cue",
+        "ASR of 哪来的 in the source audio was never adjudicated"
+      ],
+      "mutations": [
+        {
+          "name": "interrogative_dropped",
+          "target": "Nó từ đó đến.",
+          "expect_blocked": true,
+          "expect_kind": "question_changed"
+        }
+      ]
+    },
+    {
+      "id": "f1a3f70c-seg-0025-0026-question-halves",
+      "origin": "f1a3f70c / seg-0025 + seg-0026",
+      "source_language": "zh",
+      "target_language": "vi",
+      "source": "看你的鼻翼有沒有超過",
+      "target": "Xem cánh mũi của bạn có vượt quá",
+      "group_id": "grp-0025-0026",
+      "group": [
+        {
+          "id": "seg-0025",
+          "source": "看你的鼻翼有沒有超過",
+          "target": "Xem cánh mũi của bạn có vượt quá"
+        },
+        {
+          "id": "seg-0026",
+          "source": "你的兩個瞳孔的內側",
+          "target": "phía trong 2 đồng tử của bạn không"
+        }
+      ],
+      "expect_blocked": false,
+      "facts_certain": [
+        "joined, the two cues form one question in both languages",
+        "each half alone is not a complete speech act"
+      ],
+      "unresolved": [],
+      "mutations": [
+        {
+          "name": "group_question_dropped",
+          "group": [
+            {
+              "id": "seg-0025",
+              "source": "看你的鼻翼有沒有超過",
+              "target": "Xem cánh mũi của bạn có vượt quá"
+            },
+            {
+              "id": "seg-0026",
+              "source": "你的兩個瞳孔的內側",
+              "target": "phía trong 2 đồng tử của bạn"
+            }
+          ],
+          "expect_blocked": true,
+          "expect_kind": "question_changed"
+        },
+        {
+          "name": "group_count_changed",
+          "group": [
+            {
+              "id": "seg-0025",
+              "source": "看你的鼻翼有沒有超過",
+              "target": "Xem cánh mũi của bạn có vượt quá"
+            },
+            {
+              "id": "seg-0026",
+              "source": "你的兩個瞳孔的內側",
+              "target": "phía trong 3 đồng tử của bạn không"
+            }
+          ],
+          "expect_blocked": true,
+          "expect_kind": "quantity_lost"
+        }
+      ]
+    },
+    {
+      "id": "f1a3f70c-seg-0008-article-vs-cardinal",
+      "origin": "f1a3f70c / seg-0008",
+      "source_language": "zh",
+      "target_language": "vi",
+      "source": "你現在就自拍",
+      "target": "Bây giờ bạn hãy tự chụp 1 tấm ảnh",
+      "expect_blocked": true,
+      "expect_kind": "quantity_lost",
+      "facts_certain": [
+        "tấm is a Vietnamese count classifier, so 1 tấm ảnh is a counted object",
+        "the source cue carries no count at all"
+      ],
+      "unresolved": [
+        "whether the speaker meant 'take one photo' or 'take a photo' needs audio"
+      ],
+      "mutations": [
+        {
+          "name": "article_spelled_out_is_the_same_reading",
+          "target": "Bây giờ bạn hãy tự chụp một tấm ảnh",
+          "expect_blocked": true,
+          "expect_kind": "quantity_lost"
+        },
+        {
+          "name": "no_count_at_all",
+          "target": "Bây giờ bạn hãy tự chụp ảnh",
+          "expect_blocked": false
+        }
+      ]
+    },
+    {
+      "id": "f1a3f70c-seg-0044-moon-article",
+      "origin": "f1a3f70c / seg-0044",
+      "source_language": "zh",
+      "target_language": "vi",
+      "source": "你是個月亮下巴",
+      "target": "Bạn là 1 cái cằm mặt trăng",
+      "expect_blocked": false,
+      "facts_certain": [
+        "月亮 is the moon, not a month count",
+        "the source 個 is an indefinite article; the target 1 cái is the same article"
+      ],
+      "unresolved": [
+        "the recorded target also contained 'cằm dài' (a long chin), an added fact"
+      ],
+      "mutations": [
+        {
+          "name": "month_unit_invented",
+          "target": "Bạn là 1 tháng",
+          "expect_blocked": true,
+          "expect_kind": "unit_lost"
+        }
+      ]
+    },
+    {
+      "id": "f1a3f70c-seg-0066-superlative-article",
+      "origin": "f1a3f70c / seg-0066",
+      "source_language": "zh",
+      "target_language": "vi",
+      "source": "其實是最正的一個和面",
+      "target": "thì thật ra là 1 khuôn mặt hài hòa nhất",
+      "expect_blocked": false,
+      "expect_advisory_kind": "article_asymmetry",
+      "facts_certain": [
+        "最正的一個 is a superlative plus article, not a count of one",
+        "the target numeral 1 sits on a bare noun with no count classifier"
+      ],
+      "unresolved": [
+        "the source ASR '和面' is doubtful, so this does not certify the translation as correct"
+      ],
+      "mutations": [
+        {
+          "name": "count_invented",
+          "target": "thì thật ra là 3 khuôn mặt hài hòa nhất",
+          "expect_blocked": true,
+          "expect_kind": "quantity_lost"
+        },
+        {
+          "name": "counted_object",
+          "target": "thì thật ra là 1 cái bột hài hòa nhất",
+          "expect_blocked": true,
+          "expect_kind": "quantity_lost"
+        }
+      ]
+    },
+    {
+      "id": "negation-scope-flip",
+      "origin": "probe research artifact (zh → vi constructed pair)",
+      "source_language": "zh",
+      "target_language": "vi",
+      "source": "我不买苹果，我买梨",
+      "target": "Tôi mua táo, tôi không mua lê",
+      "expect_blocked": true,
+      "expect_kind": "negation_scope_changed",
+      "facts_certain": [
+        "the source negates the apple clause; the target negates the pear clause",
+        "negation token counts are identical, so counting alone cannot see the flip"
+      ],
+      "unresolved": [],
+      "mutations": [
+        {
+          "name": "scope_preserved",
+          "target": "Tôi không mua táo, tôi mua lê",
+          "expect_blocked": false
+        }
+      ]
+    }
+  ]
+}

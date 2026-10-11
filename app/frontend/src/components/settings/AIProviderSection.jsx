@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react"
 import {
   Alert, Box, Button, Chip, FormControl, IconButton, InputAdornment,
   InputLabel, MenuItem, Select, Stack, TextField, Typography,
+  Switch, FormControlLabel, Collapse, Divider,
 } from "@mui/material"
 import AddIcon from "@mui/icons-material/AddOutlined"
 import DeleteIcon from "@mui/icons-material/DeleteOutlineOutlined"
@@ -51,6 +52,11 @@ export default function AIProviderSection({ settings, updateSettings }) {
   const [saving, setSaving] = useState(false)
   const [probing, setProbing] = useState(false)
   const [effectiveRuntime, setEffectiveRuntime] = useState(null)
+  const [trafficPolicyEnabled, setTrafficPolicyEnabled] = useState(false)
+  const [minGap, setMinGap] = useState(10)
+  const [cooldownInitial, setCooldownInitial] = useState(30)
+  const [cooldownMax, setCooldownMax] = useState(300)
+  const [resourceGroup, setResourceGroup] = useState("")
 
   const selected = selectedId ? connections[selectedId] : null
   const meta = PROVIDERS[provider] || PROVIDERS.compatible
@@ -73,6 +79,12 @@ export default function AIProviderSection({ settings, updateSettings }) {
     setBaseUrl(cfg.base_url || PROVIDERS[cfg.provider]?.baseUrl || "")
     setApiKey("")
     setDiscovered([])
+    const tp = cfg.traffic_policy
+    setTrafficPolicyEnabled(tp?.enabled ?? false)
+    setMinGap(tp?.min_gap_s ?? 10)
+    setCooldownInitial(tp?.cooldown_initial_s ?? 30)
+    setCooldownMax(tp?.cooldown_max_s ?? 300)
+    setResourceGroup(tp?.resource_group ?? "")
   }
 
   useEffect(() => {
@@ -107,6 +119,11 @@ export default function AIProviderSection({ settings, updateSettings }) {
     setBaseUrl("")
     setApiKey("")
     setDiscovered([])
+    setTrafficPolicyEnabled(false)
+    setMinGap(10)
+    setCooldownInitial(30)
+    setCooldownMax(300)
+    setResourceGroup("")
   }
 
   const changeProvider = (next) => {
@@ -117,12 +134,21 @@ export default function AIProviderSection({ settings, updateSettings }) {
     setDiscovered([])
   }
 
+  const trafficPolicy = () => trafficPolicyEnabled ? {
+    enabled: true,
+    min_gap_s: minGap,
+    cooldown_initial_s: cooldownInitial,
+    cooldown_max_s: cooldownMax,
+    resource_group: resourceGroup.trim() || null,
+  } : null
+
   const probePayload = () => ({
     ...(selectedId ? { connection_id: selectedId } : {}),
     provider,
     model: effectiveModel.trim() || null,
     base_url: isCompatible(provider) ? (baseUrl.trim() || null) : null,
     ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
+    traffic_policy: trafficPolicy(),
   })
 
   const save = async () => {
@@ -153,6 +179,7 @@ export default function AIProviderSection({ settings, updateSettings }) {
         base_url: isCompatible(provider) ? baseUrl.trim() : null,
         ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
         activate: true,
+        traffic_policy: trafficPolicy(),
       })
       setSettings(data)
       setSelectedId(data.ai_connection_id || selectedId)
@@ -345,6 +372,68 @@ export default function AIProviderSection({ settings, updateSettings }) {
           ),
         }}
       />
+
+      <Divider sx={{ my: 1 }} />
+
+      <FormControlLabel
+        control={
+          <Switch
+            size="small"
+            checked={trafficPolicyEnabled}
+            onChange={(e) => {
+              setTrafficPolicyEnabled(e.target.checked)
+            }}
+          />
+        }
+        label={
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+            Web proxy pacing (opt-in)
+          </Typography>
+        }
+      />
+      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+        Conservative dispatch pacing for shared upstream endpoints. This is NOT an upstream quota guarantee — it only bounds this app's request rate.
+      </Typography>
+
+      <Collapse in={trafficPolicyEnabled} timeout="auto" unmountOnExit>
+        <Stack spacing={1.5} sx={{ pl: 1 }}>
+          <TextField
+            label="Minimum gap between requests (s)"
+            type="number"
+            size="small"
+            value={minGap}
+            onChange={(e) => setMinGap(Math.max(0, Number(e.target.value) || 0))}
+            inputProps={{ min: 0, step: 1 }}
+            helperText="Wait after the previous response completes, before the next dispatch"
+          />
+          <TextField
+            label="Initial cooldown (s)"
+            type="number"
+            size="small"
+            value={cooldownInitial}
+            onChange={(e) => setCooldownInitial(Math.max(0, Number(e.target.value) || 0))}
+            inputProps={{ min: 0, step: 1 }}
+            helperText="First cooldown after a rate error; doubles up to max"
+          />
+          <TextField
+            label="Max cooldown (s)"
+            type="number"
+            size="small"
+            value={cooldownMax}
+            onChange={(e) => setCooldownMax(Math.max(0, Number(e.target.value) || 0))}
+            inputProps={{ min: 0, step: 1 }}
+            helperText="Upper bound for exponential cooldown backoff"
+          />
+          <TextField
+            label="Resource group (optional)"
+            size="small"
+            value={resourceGroup}
+            onChange={(e) => setResourceGroup(e.target.value)}
+            placeholder="e.g. hermes-cluster"
+            helperText="Connections sharing a resource group share the same pacing gate"
+          />
+        </Stack>
+      </Collapse>
 
       <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
         <Button variant="outlined" onClick={discover} disabled={probing || provider === "anthropic"}>

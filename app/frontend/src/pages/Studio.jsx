@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Alert, Box, Button, Chip, CircularProgress, FormControl, InputLabel, MenuItem, Paper, Select, Stack, TextField, Typography } from "@mui/material"
 import MovieCreationOutlinedIcon from "@mui/icons-material/MovieCreationOutlined"
 import FolderOpenOutlinedIcon from "@mui/icons-material/FolderOpenOutlined"
@@ -104,6 +104,8 @@ export default function Studio() {
   const startJob = useAppStore((s) => s.startJob)
   const showSnackbar = useAppStore((s) => s.showSnackbar)
   const [sources, setSources] = useState([])
+  const [sourcesError, setSourcesError] = useState("")
+  const sourcesRequestRef = useRef(0)
   const [loading, setLoading] = useState(true)
   const [sourceDetail, setSourceDetail] = useState(null)
   const [sourceUrl, setSourceUrl] = useState("")
@@ -114,16 +116,27 @@ export default function Studio() {
   const localizationJobId = params.get("job") || ""
 
   const loadSources = useCallback(async () => {
+    const requestId = ++sourcesRequestRef.current
     setLoading(true)
+    setSourcesError("")
     try {
       const { data } = await http.get("/api/downloaded", { params: { limit: 200 } })
-      setSources((data?.videos || []).filter((item) => item.file_exists && item.video_path))
+      if (requestId === sourcesRequestRef.current) {
+        setSources((data?.videos || []).filter((item) => item.file_exists && item.video_path))
+      }
+    } catch (error) {
+      if (requestId === sourcesRequestRef.current) {
+        setSourcesError(error.response?.data?.detail || "Không thể tải danh sách nguồn video.")
+      }
     } finally {
-      setLoading(false)
+      if (requestId === sourcesRequestRef.current) setLoading(false)
     }
   }, [])
 
-  useEffect(() => { loadSources() }, [loadSources])
+  useEffect(() => {
+    loadSources()
+    return () => { sourcesRequestRef.current += 1 }
+  }, [loadSources])
 
   // A review-paused localization job may be opened from Activity using only
   // its job id. Recover the original downloaded source from the persisted run
@@ -289,6 +302,10 @@ export default function Studio() {
             <Button size="small" startIcon={<FolderOpenOutlinedIcon />} onClick={() => navigate("/library")}>Chọn từ Thư viện</Button>
           )}
         </Stack>
+        {sourcesError && <Alert severity="warning" sx={{ mt: 1 }}
+          action={<Button size="small" onClick={loadSources}>Thử lại</Button>}>
+          {sourcesError}
+        </Alert>}
       </Box>
 
       <Box sx={{ flex: 1, minHeight: 0, overflow: (mode === "manual" || mode === "smart-cut") ? "hidden" : "auto" }}>

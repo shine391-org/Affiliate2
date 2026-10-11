@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Literal
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
@@ -99,12 +101,16 @@ def _provider_scoped_tts_resets(
     connection_changed = bool(
         previous_connection and next_connection and previous_connection != next_connection
     )
-    if not provider_changed and not connection_changed:
+    model_changed = effective_profile.get("tts_model") != binding.get("tts_model")
+    endpoint_changed = any(effective_profile.get(key) != binding.get(key)
+                           for key in ("tts_base_url", "tts_region") if key in binding)
+    if not provider_changed and not connection_changed and not model_changed and not endpoint_changed:
         return {}
 
     resets: dict[str, Any] = {
         "speaker_voices": {},
         "speaker_reference_audio": {},
+        "voice_genders": {},
     }
     if next_provider not in _CLONE_CAPABLE_TTS_PROVIDERS:
         resets.update({
@@ -123,6 +129,7 @@ class RenderRerunRequest(BaseModel):
 
 _ASR_KEYS = {
     "asr_provider", "asr_model", "asr_quality",
+    "asr_connection_id", "asr_fallback_to_local", "asr_local_model",
     "alignment_mode", "diarization_mode", "diarization_speakers",
 }
 _AI_TRANSLATION_ROUTE_KEYS = {
@@ -140,7 +147,9 @@ _SEMANTIC_KEYS = {
 _TRANSLATION_KEYS = {
     *_AI_TRANSLATION_ROUTE_KEYS,
     "translation_retry_attempts", "translation_attempt_timeout_s", "translation_total_timeout_s",
-    "translation_preset", "translation_instructions", "translation_guardrails", "glossary",
+    "translation_preset", "translation_instructions", "translation_guardrails", "glossary", "protected_terms",
+    "translation_automation",
+    "translation_omission_max_ratio",
 }
 _DUBBING_KEYS = {
     "rewrite_routes",
@@ -149,14 +158,14 @@ _DUBBING_KEYS = {
     "rewrite_retry_attempts", "rewrite_attempt_timeout_s", "rewrite_total_timeout_s",
     "rewrite_guardrails", "rewrite_instructions",
     "tts_connection_id", "tts_provider", "tts_model", "tts_voice", "tts_base_url", "tts_region",
-    "speaker_voices", "speaker_reference_audio", "tts_reference_audio",
+    "speaker_voices", "speaker_genders", "voice_genders", "speaker_voice_mode", "speaker_reference_audio", "tts_reference_audio",
     "tts_reference_text", "tts_reference_language", "voice_clone_reference_mode",
     "dub_min_cue_duration_ms",
     "dub_max_chunk_size", "dub_gap_tolerance_ms", "dub_speed_accept",
-    "dub_speed_max", "dub_rewrite_attempts", "video_retime_mode",
+    "dub_speed_max", "dub_emergency_speed_max", "dub_rewrite_attempts", "video_retime_mode",
     "video_retime_max_slowdown",
 }
-_AUDIO_KEYS = {"audio_mode", "preserve_background", "background_gain_db", "dub_gain_db"}
+_AUDIO_KEYS = {"preserve_background", "background_gain_db", "dub_gain_db"}
 _RENDER_KEYS = {"caption_style", "target_aspect", "render_profile"}
 _QC_KEYS = {"qc_profile"}
 
@@ -231,12 +240,44 @@ async def _restore_job_mutation(job_id: str, token: dict) -> None:
         )
 
 
+class _NoRollback:
+    """Stand-in used when a caller passes a run double with no workspace.
+
+    Production always returns a real :class:`ManifestTransaction`; this exists
+    so lightweight decision tests can drive the endpoint without a manifest on
+    disk. It deliberately does NOT pretend to roll anything back.
+    """
+
+    def begin(self) -> None:
+        return None
+
+    def commit(self) -> None:
+        return None
+
+    def rollback(self) -> None:
+        return None
+
+
+def _stage_transaction(run: LocalizationRun, stage: str) -> "ManifestTransaction | _NoRollback":
+    """Transaction over the artifact window a rerun of *stage* may destroy.
+
+    Scoped to the invalidated stage and everything after it: those are the only
+    trees ``invalidate_from`` can delete. Upstream stages are never written by
+    a rerun, so they are deliberately not copied.
+    """
+    if not hasattr(run, "root") or not hasattr(run, "manifest_path"):
+        return _NoRollback()
+    return ManifestTransaction(run, STAGES[STAGES.index(stage):])
+
+
 def _earliest_stage(stages: list[str]) -> str:
     return min(stages, key=STAGES.index)
 
 
 def _profile_invalidation(keys: set[str]) -> str | None:
     stages: list[str] = []
+    if "audio_mode" in keys:
+        stages.append("separation")
     if keys & _ASR_KEYS:
         stages.append("asr")
     if keys & _SEMANTIC_KEYS:
@@ -305,9 +346,38 @@ def _job_detail(run: LocalizationRun) -> dict:
     chunks = _optional_json(run, "dubbing", "chunks")
     qc = _optional_json(run, "qc", "report")
     request = run.request
+    transcript = dubbing_tx or translation or _optional_json(run, "semantic", "transcript") or _optional_json(run, "asr", "transcript") or {}
+    state_path = run.root / "dubbing_state.json"
+    speaker_state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
+    detected = set()
+    for segment in transcript.get("segments") or []:
+        if segment.get("speaker_id"):
+            detected.add(segment["speaker_id"])
+        for word in segment.get("source_words") or []:
+            detected.update(word.get("speaker_ids") or [])
+            if word.get("speaker_id"):
+                detected.add(word["speaker_id"])
+    if not transcript.get("segments"):
+        detected.update(speaker_state.get("detected_speakers") or [])
     return {
         "manifest": run.snapshot(),
-        "transcript": dubbing_tx or translation,
+        "transcript": transcript or None,
+        "speaker_state": {
+            "detected_speakers": sorted(detected),
+            "speaker_voices": {**(speaker_state.get("speaker_voices") or {}),
+                               **(run.effective_profile.get("speaker_voices") or {})},
+            "available_voices": speaker_state.get("available_voices") or [],
+            "voice_catalogue": speaker_state.get("voice_catalogue") or [],
+            "speaker_genders": {**(transcript.get("metadata", {}).get("alignment", {}).get("speaker_genders") or {}),
+                                **(speaker_state.get("speaker_genders") or {}),
+                                **{speaker: {"gender": gender, "confirmed": gender != "unknown", "source": "reviewer"}
+                                   for speaker, gender in (run.effective_profile.get("speaker_genders") or {}).items()}},
+            "voice_genders": {**(speaker_state.get("voice_genders") or {}), **(run.effective_profile.get("voice_genders") or {}),
+                              **{row["voice_id"]: row["gender"] for row in (speaker_state.get("voice_catalogue") or [])
+                                 if row.get("gender") in {"male", "female"}}},
+            "shared_voice": run.effective_profile.get("speaker_voice_mode") == "shared",
+            "diarization": transcript.get("metadata", {}).get("alignment", {}),
+        },
         "plan": plan or [],
         "chunks": chunks or [],
         "qc": qc,
@@ -526,6 +596,10 @@ _REWRITE_BINDING_KEYS = (
     "rewrite_fallback_provider", "rewrite_fallback_model",
     "rewrite_fallback_base_url",
 )
+_ASR_BINDING_KEYS = (
+    "asr_provider", "asr_model", "asr_quality", "asr_connection_id",
+    "asr_fallback_to_local", "asr_local_model",
+)
 _TTS_BINDING_KEYS = (
     "tts_connection_id", "tts_provider", "tts_model", "tts_voice",
     "tts_base_url", "tts_region",
@@ -614,6 +688,7 @@ def _binding_identity(profile: Any) -> dict:
         "translation_routes": _route_identity(translation_routes),
         "rewrite_routes": _route_identity(rewrite_routes),
         "tts": _tts_identity(profile),
+        "asr": {key: profile.get(key, LocalizationProfile.model_fields[key].default) for key in _ASR_BINDING_KEYS},
     }
 
 
@@ -623,6 +698,8 @@ def _binding_diff(job_profile: Any, current_profile: Any, *, is_dub: bool) -> di
     current_identity = _binding_identity(current_profile)
 
     changed: list[str] = []
+    if job_identity["asr"] != current_identity["asr"]:
+        changed.append("asr")
     if job_identity["translation_routes"] != current_identity["translation_routes"]:
         changed.append("translation")
     if is_dub:
@@ -634,6 +711,8 @@ def _binding_diff(job_profile: Any, current_profile: Any, *, is_dub: bool) -> di
     # Identity comparison selects changed fields; the canonical profile
     # dependency contract owns the earliest invalidated stage.
     changed_keys: set[str] = set()
+    if "asr" in changed:
+        changed_keys.update(_ASR_BINDING_KEYS)
     if "translation" in changed:
         changed_keys.update(_TRANSLATION_BINDING_KEYS)
     if "rewrite" in changed:
@@ -704,6 +783,7 @@ async def _describe_provider_binding(run: LocalizationRun, *, user_id: str = "lo
             "translation_routes": identity["translation_routes"],
             "rewrite_routes": identity["rewrite_routes"] if is_dub else None,
             "tts": identity["tts"] if is_dub else None,
+            "asr": identity["asr"],
         }
 
     return {
@@ -726,7 +806,7 @@ def _binding_profile_updates(current: Any, *, is_dub: bool) -> dict:
     """
     if hasattr(current, "model_dump"):
         current = current.model_dump()
-    keys = list(_TRANSLATION_BINDING_KEYS)
+    keys = list(_ASR_BINDING_KEYS) + list(_TRANSLATION_BINDING_KEYS)
     if is_dub:
         keys += list(_REWRITE_BINDING_KEYS) + list(_TTS_BINDING_KEYS)
     return {key: current.get(key) for key in keys}
@@ -1024,6 +1104,7 @@ async def retry_localization_publish_registration(job_id: str):
 @router.post("/jobs/{job_id}/override")
 async def localization_expert_override(job_id: str, body: ExpertOverrideRequest):
     claim = await _claim_job_mutation(job_id)
+    transaction = None
     try:
         # Reload only AFTER winning the claim. A losing request may have started
         # from an older manifest snapshot; using it here would overwrite the
@@ -1031,8 +1112,17 @@ async def localization_expert_override(job_id: str, body: ExpertOverrideRequest)
         run = _load_run(job_id)
         _verify_run_source_identity(run)
         invalidations: list[str] = []
+        planned = _profile_invalidation(set(body.profile_updates or {}))
+        if body.segments:
+            planned = _earliest_stage([planned, "translation"] if planned else ["translation"])
+        transaction = ManifestTransaction(run, STAGES[STAGES.index(planned):] if planned else [])
+        transaction.begin()
 
         if body.profile_updates:
+            if {"speaker_voices", "speaker_genders", "voice_genders", "speaker_voice_mode"} & set(body.profile_updates):
+                revision = _review_revision(run, "translation", "transcript")
+                if not revision or revision != body.revision:
+                    raise HTTPException(status_code=409, detail="Bản dịch đã thay đổi. Hãy tải lại trước khi sửa giọng.")
             merged = {**run.effective_profile, **body.profile_updates}
             try:
                 profile = LocalizationProfile.model_validate(merged)
@@ -1074,6 +1164,7 @@ async def localization_expert_override(job_id: str, body: ExpertOverrideRequest)
                 )
             transcript = LocalizationTranscript.model_validate(raw)
             by_id = {seg.id: seg for seg in transcript.segments}
+            corrected_speaker = False
 
             for change in body.segments:
                 seg = by_id.get(change.id)
@@ -1094,8 +1185,19 @@ async def localization_expert_override(job_id: str, body: ExpertOverrideRequest)
                     seg.translation_status = "success"
                     seg.qc_status = "pending"
 
-                if change.speaker_id is not None:
+                if (change.speaker_id is not None
+                        and (change.speaker_id.strip() or None) != seg.speaker_id):
+                    # Existing pitch hints refer to the old diarizer ownership.
+                    (transcript.metadata.get("alignment") or {}).pop("speaker_genders", None)
+                    corrected_speaker = True
                     seg.speaker_id = change.speaker_id.strip() or None
+                    for word in seg.source_words:
+                        previous = word.get("speaker_id")
+                        secondary = [speaker for speaker in (word.get("speaker_ids") or [])
+                                     if speaker != previous]
+                        word["speaker_id"] = seg.speaker_id
+                        if "speaker_ids" in word:
+                            word["speaker_ids"] = sorted(set(secondary + ([seg.speaker_id] if seg.speaker_id else [])))
 
                 overrides = dict(seg.overrides or {})
                 if change.clear_timing:
@@ -1124,6 +1226,15 @@ async def localization_expert_override(job_id: str, body: ExpertOverrideRequest)
 
                 seg.overrides = overrides
 
+            run.invalidate_rewrite_revision()
+            if corrected_speaker:
+                state_path = run.root / "dubbing_state.json"
+                if state_path.exists():
+                    from backend.services.dubbing_job_state import write_json_atomic
+                    state = json.loads(state_path.read_text(encoding="utf-8"))
+                    state["speaker_genders"] = {}
+                    write_json_atomic(state_path, state)
+
             path = run.save_json(
                 "translation", "transcript.json", transcript.model_dump()
             )
@@ -1147,6 +1258,9 @@ async def localization_expert_override(job_id: str, body: ExpertOverrideRequest)
                     "translation_review_pending": False,
                     "translation_review_approved": False,
                 })
+            if STAGES.index(stage) <= STAGES.index("dubbing"):
+                # Deleted raw chunks cannot satisfy an old targeted retry.
+                next_request.pop("regenerate_chunk_ids", None)
             run.update_request(next_request)
             run.invalidate_from(stage, delete_artifacts=True)
         else:
@@ -1157,7 +1271,10 @@ async def localization_expert_override(job_id: str, body: ExpertOverrideRequest)
             "invalidated_from": stage,
             "effective_profile": run.effective_profile,
         }
+        transaction.commit()
     except Exception:
+        if transaction is not None:
+            transaction.rollback()
         await _restore_job_mutation(job_id, claim)
         raise
 
@@ -1416,7 +1533,10 @@ async def rebind_localization_providers(job_id: str, body: ProviderRebindRequest
         run.invalidate_from(from_stage, delete_artifacts=True)
         # invalidate_from is intentionally best-effort for ordinary reruns.
         # Rebinding must not let old provider chunk caches survive silently.
-        if any((run.root / stage).exists() for stage in transaction.stage_names):
+        if any((run.root / stage).exists() and (
+            stage != "dubbing" or any(item.name != "rewrite_audit.json" or not item.is_file()
+                                       for item in (run.root / stage).iterdir())
+        ) for stage in transaction.stage_names):
             raise OSError("Provider artifacts could not be removed completely")
 
         review_pending = bool(
@@ -1470,6 +1590,7 @@ async def rerun_localization_job(job_id: str, body: RerunRequest):
     """Rerun the SAME persisted job binding from the exact failed stage."""
     claim = await _claim_job_mutation(job_id)
     dispatched = False
+    transaction = None
     try:
         run = _load_run(job_id)
         smart_retry = body.from_stage is None
@@ -1485,6 +1606,16 @@ async def rerun_localization_job(job_id: str, body: RerunRequest):
                 status_code=409,
                 detail="Bản dịch đang chờ duyệt. Hãy duyệt/tiếp tục C6 trước khi chạy lại bước phía sau.",
             )
+
+        # The invalidation below DELETES artifact trees and rewrites the
+        # manifest, and the dispatch that follows can still fail (lost claim,
+        # unreadable source, no worker). Restoring only the Job row would leave
+        # a job whose manifest promises a rebuild that never started and whose
+        # bytes are already gone, so every manifest write from here on must
+        # survive or none of them may. Scoped to the invalidated stage and
+        # everything after it: those are the only trees this rerun can touch.
+        transaction = _stage_transaction(run, stage)
+        transaction.begin()
 
         rerun_request = {
             **run.request,
@@ -1506,6 +1637,7 @@ async def rerun_localization_job(job_id: str, body: RerunRequest):
             else set()
         )
         delete_artifacts = True
+        targeted_chunk_ids: list[int] = []
 
         if smart_retry and stage == "dubbing":
             meta = dict(run.record("dubbing").get("metadata") or {})
@@ -1517,11 +1649,21 @@ async def rerun_localization_job(job_id: str, body: RerunRequest):
                 and item.get("chunk_id") is not None
             })
             if failed_chunk_ids:
+                targeted_chunk_ids = failed_chunk_ids
                 run.update_request({
                     **run.request,
                     "regenerate_chunk_ids": failed_chunk_ids,
                 })
+                # Every non-target raw chunk is still valid input, so the
+                # targeted retry must not delete them.
                 delete_artifacts = False
+            else:
+                # Nothing overflowed, so this is a full dubbing rebuild. A
+                # regenerate_chunk_ids list recorded by an EARLIER attempt now
+                # points at chunks this very rerun is about to delete; keeping
+                # it would demand reusable bytes that no longer exist.
+                rerun_request.pop("regenerate_chunk_ids", None)
+                run.update_request(rerun_request)
         else:
             # Artifacts of this stage are about to be deleted, so a targeted
             # retry recorded by an earlier attempt can no longer be honored;
@@ -1539,16 +1681,29 @@ async def rerun_localization_job(job_id: str, body: RerunRequest):
 
         await _dispatch_existing_run(run, already_claimed=True)
         dispatched = True
+        transaction.commit()
+        transaction = None
         return {
             "ok": True,
             "job_id": job_id,
             "from_stage": stage,
             "smart_retry": smart_retry,
             "preserved_upstream": list(STAGES[:STAGES.index(stage)]),
-            "targeted_chunk_ids": run.request.get("regenerate_chunk_ids", [])
-                if smart_retry and stage == "dubbing" else [],
+            "targeted_chunk_ids": targeted_chunk_ids,
         }
-    except Exception:
+    except (Exception, asyncio.CancelledError):
+        if transaction is not None:
+            try:
+                transaction.rollback()
+            except Exception as restore_error:
+                # Do not release a runnable claim onto half-restored state. The
+                # backup is retained so the disk can be recovered after the
+                # storage fault is fixed.
+                raise HTTPException(
+                    status_code=503,
+                    detail="Không thể khôi phục bản chạy lại do lỗi lưu trữ. Bản sao cũ còn trong "
+                    ".rollback của job; kiểm tra dung lượng/quyền ghi và khôi phục trước khi chạy lại.",
+                ) from restore_error
         if not dispatched:
             await _restore_job_mutation(job_id, claim)
         raise
@@ -1728,16 +1883,123 @@ async def rerender_localization_job(job_id: str, body: RenderRerunRequest):
             await _restore_job_mutation(job_id, claim)
         raise
 
+async def _merge_job_input(job_id: str, extra: dict, *, expect_batch_admitted: bool = True) -> None:
+    """Merge *extra* into the row's durable input_json.
+
+    *expect_batch_admitted* is part of the SAME write as the row's own upload
+    path when admission is finalizing, so the recovery marker and the value
+    that makes the row resumable can never disagree.
+    """
+    from backend.database import AsyncSessionLocal
+    from backend.models.job import Job
+
+    async with AsyncSessionLocal() as db:
+        row = await db.get(Job, job_id)
+        if row is None:
+            return
+        try:
+            payload = json.loads(str(row.input_json or "{}"))
+        except (TypeError, ValueError):
+            payload = {}
+        payload.update(extra)
+        row.input_json = json.dumps(payload)
+        await db.commit()
+
+
+async def _write_batch_markers(
+    admitted: list[str], markers: dict, *, expect_batch_admitted: bool = True,
+) -> None:
+    """Write the batch marker set to EVERY admitted row in ONE transaction.
+
+    The marker set used to be committed one row at a time, so a crash partway
+    through left a batch that was genuinely indistinguishable from a partially
+    uploaded one: recovery could not tell "crashed while marking" from
+    "crashed while uploading", so it could neither resume nor refuse it
+    truthfully. One transaction makes the batch all-admitted or none.
+    """
+    from sqlalchemy import select
+
+    from backend.database import AsyncSessionLocal
+    from backend.models.job import Job
+
+    async with AsyncSessionLocal() as db:
+        rows = (await db.execute(
+            select(Job).where(Job.id.in_(admitted))
+        )).scalars().all()
+        for row in rows:
+            try:
+                payload = json.loads(str(row.input_json or "{}"))
+            except (TypeError, ValueError):
+                payload = {}
+            payload.update(markers)
+            row.input_json = json.dumps(payload)
+        await db.commit()
+
+
+async def _attach_batch_item(job_id: str, claim: str | None) -> bool:
+    """Atomically move a queued item pending->running and drop its claim.
+
+    ONE conditional write, not two. Releasing the claim while the row was
+    still `pending` opened a window in which the boot sweep could fail the row
+    the coordinator was about to run - an orphan created by the recovery
+    machinery itself. Returns False when the row is no longer ours to run
+    (already terminal, or claimed by somebody else), so the coordinator skips
+    it instead of double-running it.
+    """
+    from sqlalchemy import or_, update
+
+    from backend.database import AsyncSessionLocal
+    from backend.models.job import Job
+
+    async with AsyncSessionLocal() as db:
+        stmt = update(Job).where(
+            Job.id == job_id,
+            Job.status == "pending",
+            or_(Job.task_id == claim, Job.task_id.is_(None)),
+        ).values(status="running", task_id=None)
+        res = await db.execute(stmt)
+        await db.commit()
+        return bool(res.rowcount)
+
+
 async def _run_localization_batch_sequential(specs: list[dict]) -> None:
     """Run HQ localization jobs one-by-one to avoid loading Demucs/WhisperX N times.
 
     The normal per-job runner is reused verbatim; this is only a lightweight
     coordinator and intentionally bypasses the generic max-3 heavy-task fanout.
     """
+    import os as _os
+
     from backend.core.tool_runners import run_tool_translate
 
+    from backend.agents.job_helper import update_job_status
+
     for spec in specs:
-        await run_tool_translate(**spec)
+        # Each item is independent. An unexpected runner exception must not
+        # strand later pending siblings with no live coordinator.
+        try:
+            # pending->running and claim release are one conditional write.
+            if not await _attach_batch_item(spec["job_id"], spec.get("claim")):
+                continue  # another owner already claimed/completed this item
+            kwargs = {k: v for k, v in spec.items() if k != "claim"}
+            kwargs["in_path"] = Path(kwargs["in_path"])
+            await run_tool_translate(**kwargs)
+        except Exception as exc:
+            logging.getLogger(__name__).exception(
+                "Localization batch item %s crashed; continuing siblings",
+                spec["job_id"],
+            )
+            # Job helper refuses to overwrite existing terminal/cancelled
+            # status. Preserve canonical status instead of forcing failure.
+            try:
+                await update_job_status(
+                    spec["job_id"], "failed",
+                    error_message=f"Unhandled localization batch error: {exc}",
+                )
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "Could not mark batch item %s failed", spec["job_id"]
+                )
 
 
 @router.post("/batch")
@@ -1750,6 +2012,7 @@ async def localization_batch(
     emoji_style: str = Form("moderate"),
     target_aspect: str | None = Form(None),
     profile_id: str | None = Form(None),
+    auto_repair: bool = Form(False),
 ):
     """C9 batch = one proven localization runner applied to N source files."""
     if not files:
@@ -1757,38 +2020,187 @@ async def localization_batch(
     if len(files) > 20:
         raise HTTPException(status_code=400, detail="Maximum 20 videos per batch")
 
+    import os
+
+    from datetime import datetime
+    from uuid import uuid4
+
     from backend.agents.job_helper import create_job
     from backend.api.tools import VIDEO_EXTS, VIDEO_MAX_BYTES, save_upload
     from backend.core.task_runner import dispatch
+    from backend.database import AsyncSessionLocal
+    from backend.models.job import Job
 
-    jobs = []
-    specs = []
-    for file in files:
-        job = await create_job("tool:translate", "local", {
-            "target_language": target_language,
-            "mode": mode,
-            "voice_id": voice_id if mode == "full_dub" else None,
-            "caption_style": caption_style,
-            "target_aspect": target_aspect,
-            "profile_id": profile_id,
-            "batch": True,
-            "filename": file.filename,
-        })
-        in_path = await save_upload(file, job.id, VIDEO_EXTS, VIDEO_MAX_BYTES)
-        specs.append({
-            "job_id": job.id,
-            "in_path": in_path,
-            "target_language": target_language,
-            "mode": mode,
-            "voice_id": voice_id,
-            "caption_style": caption_style,
-            "emoji_style": emoji_style,
-            "target_aspect": target_aspect,
-            "profile_id": profile_id,
-        })
-        jobs.append({"job_id": job.id, "filename": file.filename})
+    # Direct Python callers (including recovery tests) receive FastAPI's Form
+    # descriptor when the argument is omitted. Only an actual boolean True
+    # enables self-repair; the public HTTP binder supplies that boolean.
+    auto_repair_enabled = auto_repair is True
+    batch_id = uuid4().hex
+    jobs: list[dict] = []
+    specs: list[dict] = []
+    admitted: list[str] = []
 
-    # One coordinator consumes one global heavy-task slot; jobs inside it are
-    # strictly sequential, so a 20-video batch cannot fan out 20 Demucs models.
-    dispatch(_run_localization_batch_sequential(specs))
+    try:
+        for file in files:
+            job = await create_job("tool:translate", "local", {
+                "target_language": target_language,
+                "mode": mode,
+                "voice_id": voice_id if mode == "full_dub" else None,
+                "caption_style": caption_style,
+                # Persisted: a recovered item must run the style the user asked
+                # for, not fall back to a default.
+                "emoji_style": emoji_style,
+                "target_aspect": target_aspect,
+                "profile_id": profile_id,
+                "batch": True,
+                "auto_repair": auto_repair_enabled,
+                "cleanup_input": True,
+                "batch_id": batch_id,
+                "batch_index": len(jobs),
+                "filename": file.filename,
+            })
+            # Registered BEFORE the upload so a failure mid-batch still finds
+            # this row: an admitted item is never left `pending` with nothing
+            # attached to it, which is what made a rejected batch orphan file 1.
+            admitted.append(job.id)
+            in_path = await save_upload(file, job.id, VIDEO_EXTS, VIDEO_MAX_BYTES)
+            # in_path is the recovery key. Without it a restarted process holds
+            # a pending row and no way to tell which upload is its own, so the
+            # item could only ever be failed, never resumed.
+            await _merge_job_input(job.id, {
+                "in_path": str(in_path),
+                "batch_id": batch_id,
+                "batch_index": len(jobs),
+                "batch": True,
+                "auto_repair": auto_repair_enabled,
+                "cleanup_input": True,
+            }, expect_batch_admitted=False)
+            specs.append({
+                "job_id": job.id,
+                "in_path": in_path,
+                "target_language": target_language,
+                "mode": mode,
+                "voice_id": voice_id,
+                "caption_style": caption_style,
+                "emoji_style": emoji_style,
+                "target_aspect": target_aspect,
+                "profile_id": profile_id,
+                "auto_repair": auto_repair_enabled,
+                "cleanup_input": True,
+            })
+            jobs.append({"job_id": job.id, "filename": file.filename})
+
+        # Immutable snapshot of the RESOLVED profile, taken once at admission.
+        # Recovery replays this instead of re-resolving against live Settings,
+        # so a settings edit between the crash and the restart cannot silently
+        # change what the batch runs.
+        #
+        # The outcome is CLASSIFIED, never silently dropped. Two failures look
+        # identical in the row if both land as an unlabelled `None`:
+        #   * no Settings row at all - benign, the runner resolves profile_id
+        #     at execution time exactly as it would have without a snapshot;
+        #   * a profile that cannot be resolved - deterministic, and it will
+        #     raise the SAME way on every recovery attempt.
+        # The second case still admits the batch (the snapshot is an aid to
+        # recovery, not the user's fault, and profile_id stays durable), but it
+        # records WHY there is no snapshot so a recovery failure can explain
+        # itself instead of looking like an unexplained crash.
+        profile_override = None
+        profile_snapshot_status = "no_settings"
+        profile_snapshot_error: str | None = None
+        try:
+            # Resolve the profile ONCE, here, and persist it. This is the SAME
+            # resolution the runner performs (Settings -> profile store ->
+            # materialized snapshot, defaulting to the store's default profile
+            # when the batch named none), so a recovered item replays exactly
+            # what was admitted instead of re-resolving against whatever
+            # Settings happen to say at restart time.
+            from sqlalchemy import select as _select
+
+            from backend.database import AsyncSessionLocal as _sess
+            from backend.models.user_settings import UserSettings as _US
+            from backend.services.localization_service import (
+                materialize_localization_profile as _materialize,
+                resolve_localization_profile as _resolve,
+            )
+
+            async with _sess() as _db:
+                _row = (await _db.execute(
+                    _select(_US).where(_US.user_id == "local")
+                )).scalar_one_or_none()
+            if _row is not None:
+                _profile = _materialize(
+                    _row, _resolve(_row, profile_id),
+                    target_language=target_language,
+                    for_dub=(mode == "full_dub"),
+                )
+                profile_override = _profile.model_dump(mode="json")
+                profile_snapshot_status = "captured"
+        except Exception as exc:
+            profile_override = None
+            profile_snapshot_status = "unreproducible"
+            profile_snapshot_error = f"{type(exc).__name__}: {exc}"[:500]
+            # Not fatal: profile_id stays durable and the runner resolves it
+            # exactly as it would have without this snapshot. Logged at
+            # WARNING, not INFO: a deterministic resolution failure must be
+            # visible in the server log, not filed as routine noise.
+            logging.getLogger(__name__).warning(
+                "Batch %s: profile snapshot could not be materialized (%s); "
+                "recovery will resolve profile_id instead and may fail the "
+                "same way.",
+                batch_id, exc,
+            )
+
+        # Complete-batch marker set, written BEFORE any dispatch and in ONE
+        # transaction for every row: each admitted row now carries its upload
+        # path, the shared batch id, the stable index, the size, the resolved
+        # profile snapshot, and the pid that owns it. A crash in the next
+        # instant is recoverable rather than ambiguous, and nothing that lives
+        # at this pid can be stolen by an overlapping boot.
+        await _write_batch_markers(admitted, {
+                "batch_admitted": True,
+                "batch_size": len(admitted),
+                "batch_owner_pid": os.getpid(),
+                "profile_override": profile_override,
+                # The classification travels WITH the snapshot. Recovery replays
+                # `profile_override`; `profile_snapshot_status` is what lets an
+                # operator tell "there was never a Settings row" from "the
+                # profile cannot be resolved and recovery will fail identically".
+                "profile_snapshot_status": profile_snapshot_status,
+                "profile_snapshot_error": profile_snapshot_error,
+            })
+
+        # One coordinator consumes one global heavy-task slot; jobs inside it
+        # are strictly sequential, so a 20-video batch cannot fan out 20 Demucs
+        # models. INSIDE the try: a dispatch failure must fail the rows, not
+        # leave an admitted batch with nothing consuming it.
+        dispatch(_run_localization_batch_sequential(specs))
+    except BaseException as exc:
+        # Partial admission must fail SAFELY: mark every row this request
+        # created terminal. Cancellation is re-raised untouched - swallowing
+        # BaseException would strand the rows on shutdown.
+        detail = getattr(exc, "detail", None) or str(exc) or "Batch admission failed"
+        async with AsyncSessionLocal() as db:
+            for job_id in admitted:
+                row = await db.get(Job, job_id)
+                if row is not None and str(row.status) in {"pending", "running"}:
+                    row.status = "failed"
+                    row.error_message = (
+                        f"Batch rejected before dispatch: {detail}"
+                    )
+                    row.completed_at = datetime.utcnow()
+            await db.commit()
+        # None of these files has a live coordinator after a rejected
+        # admission. Delete earlier successful uploads, not just the partial
+        # temp file from the item that failed.
+        for staged_spec in specs:
+            try:
+                Path(staged_spec["in_path"]).unlink(missing_ok=True)
+            except OSError:
+                logging.getLogger(__name__).warning(
+                    "Could not reclaim rejected batch upload %s",
+                    staged_spec["job_id"],
+                )
+        raise
+
     return {"count": len(jobs), "jobs": jobs}

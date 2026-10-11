@@ -279,7 +279,7 @@ _WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday",
 def _weekday_index(name: str) -> int:
     """Sort key for day names — Monday first, anything unrecognised last.
 
-    Day keys come from `created_at.strftime("%A").lower()`, so a non-English
+    Day keys come from `PublicationRecord.published_at.strftime("%A").lower()`, so a non-English
     locale can yield a name that isn't in the tuple; that must sort, not raise.
     """
     try:
@@ -294,8 +294,8 @@ async def recommend_posting_time(
 ) -> dict:
     """
     Analyze when uploaded videos performed best and recommend optimal posting time.
-    Groups videos by upload hour and day-of-week, compares early view velocity
-    (views in first 24h) to find the best time slot.
+    Uses verified publication timestamps (UTC), not asset creation time.
+    Compares first-day observations normalized by hours since publication.
 
     Requires at least 5 uploaded videos with performance data for meaningful results.
     """
@@ -334,43 +334,56 @@ async def recommend_posting_time(
                 "message": f"Need at least 3 videos uploaded to {platform} for recommendations (found {len(platform_videos)}).",
             }
 
-        # For each video, get early metrics (first data point = ~2h after upload)
-        hour_performance = {}   # hour (0-23) → list of early view counts
-        day_performance = {}    # day name → list of early view counts
-
+        # Filter out legacy assets without a verified publication timestamp.
+        # Never silently substitute video.created_at; that is the rendering time.
+        hour_performance = {}  # UTC posting hour -> observed views/hour
+        day_performance = {}   # UTC posting weekday -> observed views/hour
         for v in platform_videos:
-            if not v.created_at:
+            published_at = (await db.execute(
+                select(PublicationRecord.published_at)
+                .where(
+                    PublicationRecord.generated_video_id == v.id,
+                    PublicationRecord.platform == platform,
+                    PublicationRecord.status == "PUBLISHED",
+                    PublicationRecord.published_at.is_not(None),
+                )
+                .order_by(PublicationRecord.published_at.asc()).limit(1)
+            )).scalar_one_or_none()
+            if published_at is None:
                 continue
 
-            # Get the earliest metric snapshot for this video
-            metrics_result = await db.execute(
+            first_metric = (await db.execute(
                 select(VideoMetrics)
                 .where(
-                    and_(
-                        VideoMetrics.generated_video_id == v.id,
-                        VideoMetrics.platform == platform,
-                    )
+                    VideoMetrics.generated_video_id == v.id,
+                    VideoMetrics.platform == platform,
+                    VideoMetrics.fetched_at >= published_at,
+                    VideoMetrics.fetched_at <= published_at + timedelta(hours=24),
+                    VideoMetrics.views.is_not(None),
                 )
-                .order_by(VideoMetrics.fetched_at.asc())
-                .limit(1)
-            )
-            first_metric = metrics_result.scalar_one_or_none()
-            if not first_metric or first_metric.views == 0:
+                .order_by(VideoMetrics.fetched_at.asc()).limit(1)
+            )).scalar_one_or_none()
+            if first_metric is None:
                 continue
 
-            upload_hour = v.created_at.hour
-            upload_day = v.created_at.strftime("%A").lower()  # monday, tuesday, etc.
+            elapsed_hours = (first_metric.fetched_at - published_at).total_seconds() / 3600
+            # Snapshots taken immediately after posting cannot establish
+            # comparable engagement velocity. Count only 1h..24h windows.
+            if not 1 <= elapsed_hours <= 24:
+                continue
+            early_views_per_hour = first_metric.views / elapsed_hours
+            upload_hour = published_at.hour
+            upload_day = published_at.strftime("%A").lower()
+            hour_performance.setdefault(upload_hour, []).append(early_views_per_hour)
+            day_performance.setdefault(upload_day, []).append(early_views_per_hour)
 
-            # Use views from first metric as proxy for early velocity
-            hour_performance.setdefault(upload_hour, []).append(first_metric.views)
-            day_performance.setdefault(upload_day, []).append(first_metric.views)
-
-    if not hour_performance:
+    qualified_count = sum(len(values) for values in hour_performance.values())
+    if qualified_count < 3:
         return {
             "recommendation": None,
             "confidence": 0,
-            "sample_size": len(platform_videos),
-            "message": "Not enough performance data yet. Wait for metrics to be collected.",
+            "sample_size": qualified_count,
+            "message": "Need at least 3 verified publication timestamps with comparable 1–24h view snapshots.",
         }
 
     # Find best hour
@@ -403,13 +416,14 @@ async def recommend_posting_time(
     else:
         confidence = 0.25
 
-    note_parts = [f"Based on {total_data_points} uploads"]
+    note_parts = [f"Based on {total_data_points} matched publication timestamps and early snapshots (heuristic)"]
     if hour_lift > 10:
-        note_parts.append(f"posting at {best_hour}:00 UTC gets {hour_lift:.0f}% more early views")
+        note_parts.append(f"posting at {best_hour}:00 UTC was associated with {hour_lift:.0f}% higher observed views/hour")
     if best_day and day_lift > 10:
         note_parts.append(f"{best_day.title()}s perform {day_lift:.0f}% better")
 
     return {
+        "confidence_basis": "heuristic_sample_size_not_statistical_confidence",
         "recommendation": {
             "hour_utc": best_hour,
             "day": best_day,

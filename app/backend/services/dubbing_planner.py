@@ -55,7 +55,12 @@ class DubbingCue:
     speaker_id: str | None = None
     voice_id: str | None = None
     source_text: str = ""
-    timing_locked: bool = False
+    timing_locked: bool = False  # Legacy callers lock both edges.
+    start_locked: bool = False
+    end_locked: bool = False
+
+    def __post_init__(self):
+        self.timing_locked = self.timing_locked or self.start_locked or self.end_locked
 
     @property
     def duration_ms(self) -> int:
@@ -80,7 +85,12 @@ class PlanItem:
     chunk_id: int = 0
     rewrite_attempts: int = 0
     warning: str = ""
-    timing_locked: bool = False
+    timing_locked: bool = False  # Legacy callers lock both edges.
+    start_locked: bool = False
+    end_locked: bool = False
+
+    def __post_init__(self):
+        self.timing_locked = self.timing_locked or self.start_locked or self.end_locked
 
 
 @dataclass(slots=True)
@@ -107,6 +117,92 @@ class DubbingReport:
     rewrite_count: int = 0
 
 
+# Calibration bounds. A coefficient belongs to ONE voice + ONE video, so it is
+# clamped hard: a wild value would do more damage than the raw estimate.
+_CALIBRATION_MIN_SAMPLES = 3
+_CALIBRATION_MIN_RATE = 0.60
+_CALIBRATION_MAX_RATE = 1.80
+
+
+@dataclass(slots=True)
+class DubbingRateCalibrator:
+    """Learns this job's real speech rate from measured TTS durations.
+
+    `estimate_spoken_ms` uses fixed per-language constants that know nothing
+    about the actual voice, provider or speaking style. Measured evidence on a
+    real job put actual/estimated between 0.77x and 2.10x. Rather than invent a
+    better constant, calibrate from the measurements the job already makes:
+    every synthesized chunk stores `actual_duration_ms`.
+
+        calibrated_rate = sum(actual) / sum(estimated)   # measured chunks only
+
+    The coefficient is deliberately NOT shared across jobs -- a slow narrator
+    must not silently re-rate a fast one.
+    """
+
+    samples: int = 0
+    total_estimated_ms: int = 0
+    total_actual_ms: int = 0
+    #: Persisted so a rerun resumes with prior knowledge instead of relearning.
+    persisted_rate: float | None = None
+
+    def observe(self, estimated_ms: int, actual_ms: int) -> None:
+        """Record one measured chunk. Non-positive measurements are ignored."""
+        if estimated_ms <= 0 or actual_ms <= 0:
+            return
+        self.samples += 1
+        self.total_estimated_ms += int(estimated_ms)
+        self.total_actual_ms += int(actual_ms)
+
+    @property
+    def rate(self) -> float:
+        """Calibrated actual/estimated ratio, clamped to safe bounds.
+
+        Uses total/total rather than mean-of-ratios so one pathological short
+        chunk cannot dominate the coefficient.
+        """
+        rate = 1.0
+        if self.samples >= _CALIBRATION_MIN_SAMPLES and self.total_estimated_ms > 0:
+            rate = self.total_actual_ms / self.total_estimated_ms
+        elif self.persisted_rate:
+            rate = float(self.persisted_rate)
+        return max(_CALIBRATION_MIN_RATE, min(_CALIBRATION_MAX_RATE, rate))
+
+    @property
+    def is_trustworthy(self) -> bool:
+        """Enough measurements for telemetry; never authority to rewrite text."""
+        return self.samples >= _CALIBRATION_MIN_SAMPLES or bool(self.persisted_rate)
+
+    def calibrated_ms(self, estimated_ms: int) -> int:
+        """Apply the learned rate to a fresh estimate."""
+        return int(round(estimated_ms * self.rate))
+
+    def as_dict(self) -> dict:
+        return {
+            "samples": self.samples,
+            "total_estimated_ms": self.total_estimated_ms,
+            "total_actual_ms": self.total_actual_ms,
+            "rate": round(self.rate, 4),
+            "is_trustworthy": self.is_trustworthy,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict | None) -> "DubbingRateCalibrator":
+        if not isinstance(data, dict):
+            return cls()
+        try:
+            return cls(
+                samples=int(data.get("samples") or 0),
+                total_estimated_ms=int(data.get("total_estimated_ms") or 0),
+                total_actual_ms=int(data.get("total_actual_ms") or 0),
+                persisted_rate=(
+                    float(data["rate"]) if data.get("rate") else None
+                ),
+            )
+        except (TypeError, ValueError):
+            return cls()
+
+
 _STRONG_END = re.compile(r"[.!?。！？…][\"'”’」』）】》)\]}»]*\s*$")
 
 # Semantic segmentation already treats gaps up to 350 ms as a continuous thought.
@@ -124,8 +220,12 @@ def clean_text_for_speech(text: str) -> str:
 def estimate_spoken_ms(text: str, language: str = "Vietnamese") -> int:
     """Statistical/heuristic pre-TTS estimate inspired by OpenCreator.
 
-    Actual synthesized duration remains authoritative; this estimate is only
-    used to decide whether a bounded rewrite is worth attempting before TTS.
+    KEEP as a budget hint only. Measured evidence on a real 29-chunk job showed
+    actual/estimated spanning 0.77x-2.10x (median 0.99x), and the estimate was
+    LOWER than reality on 15/29 chunks. It therefore must never decide whether
+    approved text is rewritten -- see DubbingRateCalibrator.
+
+    Actual synthesized duration always remains authoritative.
     """
     clean = clean_text_for_speech(text)
     if not clean:
@@ -161,6 +261,7 @@ def build_plan(
     *,
     language: str = "Vietnamese",
     timeline_end_ms: int | None = None,
+    split_before_segment_ids: set[str] | None = None,
 ) -> tuple[list[PlanItem], list[DubbingChunk]]:
     config.validate()
     ordered = sorted(cues, key=lambda x: (x.start_ms, x.index))
@@ -182,7 +283,7 @@ def build_plan(
             speaker_id=cue.speaker_id,
             voice_id=cue.voice_id,
             estimated_duration_ms=estimate_spoken_ms(cue.text, language),
-            timing_locked=cue.timing_locked,
+            timing_locked=cue.timing_locked, start_locked=cue.start_locked, end_locked=cue.end_locked,
         )
         for cue in ordered
     ]
@@ -225,7 +326,8 @@ def build_plan(
         # hard boundary as well.
         voice_change = prev.voice_id != cue.voice_id
         must_split = (
-            len(current.item_indexes) >= config.max_chunk_size
+            cue.segment_id in (split_before_segment_ids or set())
+            or len(current.item_indexes) >= config.max_chunk_size
             or continuation_span_ms > _NATURAL_CONTINUATION_MAX_SPAN_MS
             or not should_merge_continuation
             or prev.timing_locked or cue.timing_locked
@@ -268,7 +370,8 @@ def build_plan(
         orphan_cue = ordered[orphan_idx]
         orphan_gap = orphan_cue.start_ms - previous_last.end_ms
         if (
-            previous_last.speaker_id != orphan_cue.speaker_id
+            orphan_cue.segment_id in (split_before_segment_ids or set())
+            or previous_last.speaker_id != orphan_cue.speaker_id
             or previous_last.voice_id != orphan_cue.voice_id
             or orphan_gap < -_MAX_NATURAL_CUE_OVERLAP_MS
             or orphan_gap > min(config.gap_tolerance_ms, _NATURAL_CONTINUATION_GAP_MS)
@@ -340,14 +443,18 @@ def allocate_silence(
          max(plan[idx].original_end_ms for idx in c.item_indexes))
         for c in chunks
     ]
-    locked = [any(plan[idx].timing_locked for idx in c.item_indexes) for c in chunks]
-    immutable = [
-        locked[pos] or (only_chunk_ids is not None and c.id not in only_chunk_ids)
-        for pos, c in enumerate(chunks)
-    ]
+    def edge_locked(item, edge):
+        return getattr(item, edge + "_locked") or (item.timing_locked and not (item.start_locked or item.end_locked))
+    start_locked = [any(edge_locked(plan[idx], "start") for idx in c.item_indexes) for c in chunks]
+    end_locked = [any(edge_locked(plan[idx], "end") for idx in c.item_indexes) for c in chunks]
+    untouched = [only_chunk_ids is not None and c.id not in only_chunk_ids for c in chunks]
+    fixed_start = [start_locked[pos] or untouched[pos] for pos in range(len(chunks))]
+    fixed_end = [end_locked[pos] or untouched[pos] for pos in range(len(chunks))]
     for pos, chunk in enumerate(chunks):
-        if not immutable[pos]:
-            chunk.start_ms, chunk.end_ms = original[pos]
+        if not fixed_start[pos]:
+            chunk.start_ms = original[pos][0]
+        if not fixed_end[pos]:
+            chunk.end_ms = original[pos][1]
 
     # Alignment may overlap by <=120ms even when a hard boundary forces split.
     # Keep the later onset and cap the earlier flexible slot; if the earlier
@@ -358,15 +465,15 @@ def allocate_silence(
         overlap = previous.end_ms - chunk.start_ms
         if overlap <= 0:
             continue
-        if immutable[pos - 1] and immutable[pos]:
-            reason = "expert timing conflict" if locked[pos - 1] and locked[pos] else "immutable timing conflict"
+        if fixed_end[pos - 1] and fixed_start[pos]:
+            reason = "expert timing conflict" if end_locked[pos - 1] and start_locked[pos] else "immutable timing conflict"
             raise ValueError(f"{reason}: chunks {previous.id} and {chunk.id} overlap by {overlap}ms")
         if overlap > _MAX_NATURAL_CUE_OVERLAP_MS:
             raise ValueError(
                 f"chunk timestamp overlap {overlap}ms exceeds "
                 f"{_MAX_NATURAL_CUE_OVERLAP_MS}ms tolerance: chunks {previous.id} and {chunk.id}"
             )
-        if not immutable[pos - 1]:
+        if not fixed_end[pos - 1]:
             if chunk.start_ms <= previous.start_ms:
                 raise ValueError(f"timing conflict: chunk {previous.id} has no positive window after overlap normalization")
             previous.end_ms = chunk.start_ms
@@ -374,51 +481,55 @@ def allocate_silence(
             if previous.end_ms >= chunk.end_ms:
                 raise ValueError(f"timing conflict: chunk {chunk.id} has no positive window after overlap normalization")
             chunk.start_ms = previous.end_ms
-    # Allocate the later cue first: it may need the tail of the preceding gap,
-    # which the preceding cue must not consume before that request is known.
-    for pos in range(len(chunks) - 1, -1, -1):
-        chunk = chunks[pos]
-        if only_chunk_ids is not None and chunk.id not in only_chunk_ids:
-            continue
-        if any(plan[idx].timing_locked for idx in chunk.item_indexes):
-            continue
-        start, end = original[pos]
-        duration = chunk.actual_duration_ms or sum(
-            plan[idx].estimated_duration_ms for idx in chunk.item_indexes
-        )
-        needed = max(0, duration - chunk.available_ms)
-        if not needed:
-            continue
-        span_limit = max(_NATURAL_CONTINUATION_MAX_SPAN_MS, end - start)
-        if pos + 1 < len(chunks):
-            source_gap = max(0, original[pos + 1][0] - end)
-            reserve = min(source_gap, _NATURAL_CONTINUATION_GAP_MS)
-            boundary = chunks[pos + 1].start_ms - reserve
-        else:
-            boundary = end if timeline_end_ms is None else timeline_end_ms
-        extension = max(0, min(
-            needed, boundary - chunk.end_ms,
-            end + config.gap_tolerance_ms - chunk.end_ms,
-            span_limit - chunk.available_ms,
-        ))
-        chunk.end_ms += extension
-        # Prefer a mild speed-up to moving onset unnecessarily. Following
-        # silence, when sufficient, has already provided the full natural slot.
-        needed = max(0, math.ceil(duration / config.speed_accept) - chunk.available_ms)
-        if not needed:
-            continue
-        if pos:
-            source_gap = max(0, start - original[pos - 1][1])
-            reserve = min(source_gap, _NATURAL_CONTINUATION_GAP_MS)
-            boundary = chunks[pos - 1].end_ms + reserve
-        else:
-            boundary = 0
-        extension = max(0, min(
-            needed, chunk.start_ms - boundary,
-            chunk.start_ms - max(0, start - config.gap_tolerance_ms),
-            span_limit - chunk.available_ms,
-        ))
-        chunk.start_ms -= extension
+    # Meet every chunk's hard demand before spending shared silence on comfort.
+    # Reverse order reserves only the minimum preceding slack needed by a later
+    # chunk; improving it to 1.15x first can strand an otherwise feasible neighbour.
+    # Following silence remains preferred; early onset is never used just for 1x.
+    for target_speed in (config.speed_max, config.speed_accept, 1.0):
+        for pos in range(len(chunks) - 1, -1, -1):
+            chunk = chunks[pos]
+            if only_chunk_ids is not None and chunk.id not in only_chunk_ids:
+                continue
+            if fixed_start[pos] and fixed_end[pos]:
+                continue
+            start, end = original[pos]
+            duration = chunk.actual_duration_ms or sum(
+                plan[idx].estimated_duration_ms for idx in chunk.item_indexes
+            )
+            needed = max(0, math.ceil(duration / target_speed) - chunk.available_ms)
+            if not needed:
+                continue
+            span_limit = max(_NATURAL_CONTINUATION_MAX_SPAN_MS, end - start)
+            if pos + 1 < len(chunks):
+                source_gap = max(0, original[pos + 1][0] - end)
+                reserve = min(source_gap, _NATURAL_CONTINUATION_GAP_MS)
+                boundary = chunks[pos + 1].start_ms - reserve
+            else:
+                boundary = end if timeline_end_ms is None else timeline_end_ms
+            extension = max(0, min(
+                needed, boundary - chunk.end_ms,
+                end + config.gap_tolerance_ms - chunk.end_ms,
+                span_limit - chunk.available_ms,
+            ))
+            if not fixed_end[pos]:
+                chunk.end_ms += extension
+            # Prefer a mild speed-up to moving onset unnecessarily. Following
+            # silence, when sufficient, has already provided the full natural slot.
+            needed = max(0, math.ceil(duration / max(target_speed, config.speed_accept)) - chunk.available_ms)
+            if not needed or fixed_start[pos]:
+                continue
+            if pos:
+                source_gap = max(0, start - original[pos - 1][1])
+                reserve = min(source_gap, _NATURAL_CONTINUATION_GAP_MS)
+                boundary = chunks[pos - 1].end_ms + reserve
+            else:
+                boundary = 0
+            extension = max(0, min(
+                needed, chunk.start_ms - boundary,
+                chunk.start_ms - max(0, start - config.gap_tolerance_ms),
+                span_limit - chunk.available_ms,
+            ))
+            chunk.start_ms -= extension
     return chunks
 
 
@@ -561,3 +672,4 @@ def atempo_filter(speed: float) -> str:
         remaining /= 0.5
     parts.append(f"atempo={remaining:.3f}")
     return ",".join(parts)
+

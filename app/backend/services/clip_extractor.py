@@ -2613,7 +2613,12 @@ async def _burn_clip_captions(
             segments, style=style, aspect_ratio=aspect,
             hook_text=hook_text or None, emoji_style=emoji_style,
         )
-        captioned = await burn_captions(clip_path, ass_path)
+        # Gate the NVENC/CPU encode only, and only here — NOT inside
+        # burn_captions(), which localization already calls while holding this
+        # same gate (Semaphore(1) is not reentrant, so that would hang).
+        from backend.core.gpu_gate import localization_gpu_gate
+        async with localization_gpu_gate():
+            captioned = await burn_captions(clip_path, ass_path)
 
         # Cleanup ASS file
         if ass_path and ass_path.exists():

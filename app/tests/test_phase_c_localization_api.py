@@ -26,7 +26,7 @@ async def _fake_restore(_job_id: str, _token: dict):
 
 
 @pytest.mark.asyncio
-async def test_localization_batch_coordinator_runs_jobs_sequentially(monkeypatch):
+async def test_localization_batch_coordinator_runs_jobs_sequentially(monkeypatch, tmp_path):
     active = 0
     peak = 0
     order = []
@@ -46,10 +46,21 @@ async def test_localization_batch_coordinator_runs_jobs_sequentially(monkeypatch
         "backend.core.tool_runners.run_tool_translate",
         fake_runner,
     )
+    # The coordinator now attaches pending->running in ONE conditional write
+    # before running an item. That is ownership, not sequencing, and this test
+    # pins SEQUENTIAL execution only, so the attach is stubbed here; the real
+    # conditional write against SQLite is covered by
+    # test_localization_batch_lifecycle.py::test_coordinator_attaches_running_before_releasing_the_claim.
+    async def fake_attach(_job_id, _claim=None, **_kwargs):
+        return True
+
+    monkeypatch.setattr(api, "_attach_batch_item", fake_attach)
+    # The coordinator forwards each item's runner spec verbatim (admission
+    # always records in_path); the stub runner above ignores the payload.
     await api._run_localization_batch_sequential([
-        {"job_id": "a"},
-        {"job_id": "b"},
-        {"job_id": "c"},
+        {"job_id": "a", "in_path": tmp_path / "a.mp4"},
+        {"job_id": "b", "in_path": tmp_path / "b.mp4"},
+        {"job_id": "c", "in_path": tmp_path / "c.mp4"},
     ])
 
     assert peak == 1
@@ -58,6 +69,7 @@ async def test_localization_batch_coordinator_runs_jobs_sequentially(monkeypatch
         ("start", "b"), ("end", "b"),
         ("start", "c"), ("end", "c"),
     ]
+
 
 
 def test_profile_invalidation_uses_earliest_quality_stage():
@@ -70,10 +82,16 @@ def test_profile_invalidation_uses_earliest_quality_stage():
     assert api._profile_invalidation({"rewrite_base_url"}) == "dubbing"
     assert api._profile_invalidation({"rewrite_instructions"}) == "dubbing"
     assert api._profile_invalidation({"rewrite_guardrails"}) == "dubbing"
-    assert api._profile_invalidation({"audio_mode"}) == "audio_mix"
+    assert api._profile_invalidation({"audio_mode"}) == "separation"
     assert api._profile_invalidation({"render_profile"}) == "final_render"
     assert api._profile_invalidation({"translation_model", "tts_model"}) == "semantic"
     assert api._profile_invalidation({"asr_model", "render_profile"}) == "asr"
+
+
+def test_emergency_ceiling_invalidates_dubbing_even_when_changed_alone():
+    assert api._profile_invalidation({"dub_emergency_speed_max"}) == "dubbing"
+    assert api._profile_invalidation({"dub_emergency_speed_max", "render_profile"}) == "dubbing"
+    assert api._profile_invalidation({"dub_emergency_speed_max", "translation_guardrails"}) == "translation"
 
 
 @pytest.mark.asyncio
@@ -549,7 +567,7 @@ def test_provider_scoped_tts_resets_keeps_clone_reference_for_gpt_sovits():
     resets = api._provider_scoped_tts_resets(
         {"tts_provider": "elevenlabs"}, {"tts_provider": "gpt_sovits"},
     )
-    assert resets == {"speaker_voices": {}, "speaker_reference_audio": {}}
+    assert resets == {"speaker_voices": {}, "speaker_reference_audio": {}, "voice_genders": {}}
 
 
 def test_rebuilt_profile_validates_after_provider_scoped_resets():
@@ -940,7 +958,8 @@ async def test_rerender_accepts_canonical_ready_upstream(monkeypatch, mode):
 
 
 @pytest.mark.asyncio
-async def test_canonical_rerender_resume_never_calls_upstream_processors(monkeypatch, tmp_path):
+@pytest.mark.parametrize("asr_fallback", [False, True])
+async def test_canonical_rerender_resume_never_calls_upstream_processors(monkeypatch, tmp_path, asr_fallback):
     from backend.core import tool_runners
     from backend.core.localization import LocalizationProfile, LocalizationSegment, LocalizationTranscript
 
@@ -964,12 +983,15 @@ async def test_canonical_rerender_resume_never_calls_upstream_processors(monkeyp
             translation_status="success",
             timing_status="fit",
         )],
+        metadata={"asr": {"provider":"faster_whisper", "model":"medium", "fallback_reason":"Groq timeout"}} if asr_fallback else {},
     )
     profile = LocalizationProfile(
         id="rerender-test",
         name="Rerender test",
         audio_mode="fast_duck",
         target_aspect="9:16",
+        asr_provider="groq" if asr_fallback else "faster_whisper",
+        asr_model="whisper-large-v3-turbo" if asr_fallback else "large-v3",
     )
     statuses = {
         stage: "complete"
@@ -1002,6 +1024,9 @@ async def test_canonical_rerender_resume_never_calls_upstream_processors(monkeyp
         def verify_source_identity(self):
             return {}
 
+        def earliest_damaged_stage(self):
+            return None  # Intact mock stage inventory; closure has real-file tests.
+
         def is_complete(self, stage, required_artifacts=()):
             if statuses.get(stage) != "complete":
                 return False
@@ -1010,7 +1035,7 @@ async def test_canonical_rerender_resume_never_calls_upstream_processors(monkeyp
         def artifact(self, stage, key):
             if key == "transcript" and stage in {"asr", "semantic", "translation", "dubbing"}:
                 return tmp_path / f"{stage}-transcript.json"
-            if key in {"plan", "chunks"} and stage == "dubbing":
+            if key in {"plan", "chunks", "rewrite_audit"} and stage == "dubbing":
                 return tmp_path / f"{key}.json"
             return artifacts.get((stage, key))
 
@@ -1047,6 +1072,10 @@ async def test_canonical_rerender_resume_never_calls_upstream_processors(monkeyp
 
     globals_artifacts = artifacts
     fake_run = FakeRun()
+    success = {}
+
+    async def capture_success(*args, **kwargs):
+        success.update(kwargs.get("extra_output", {}))
 
     async def fail_upstream(*args, **kwargs):
         raise AssertionError("rerender must not execute upstream processing")
@@ -1068,7 +1097,7 @@ async def test_canonical_rerender_resume_never_calls_upstream_processors(monkeyp
     )
     monkeypatch.setattr(tool_runners, "_load_user_settings", fake_noop)
     monkeypatch.setattr(tool_runners, "_tool_progress", fake_noop)
-    monkeypatch.setattr(tool_runners, "_tool_success", fake_noop)
+    monkeypatch.setattr(tool_runners, "_tool_success", capture_success)
     monkeypatch.setattr(tool_runners, "_tool_fail", fake_noop)
     monkeypatch.setattr("backend.api.tools.tool_out_path", lambda job_id, suffix: tmp_path / f"out{suffix}")
     monkeypatch.setattr("backend.services.localization_service.transcribe_for_localization", fail_upstream)
@@ -1101,6 +1130,10 @@ async def test_canonical_rerender_resume_never_calls_upstream_processors(monkeyp
     assert failures == []
     assert statuses["final_render"] == "complete"
     assert statuses["qc"] == "complete"
+    if asr_fallback:
+        assert success["asr_provider"] == "faster_whisper"
+        assert success["asr_model"] == "medium"
+        assert success["asr_fallback_reason"] == "Groq timeout"
 
 
 @pytest.mark.asyncio
@@ -1472,4 +1505,3 @@ def test_qc_review_revision_changes_when_final_video_bytes_change(tmp_path):
     assert before
     assert after
     assert before != after
-

@@ -33,7 +33,11 @@ def _write_wav_ms(path: Path, ms: int) -> None:
         handle.setnchannels(1)
         handle.setsampwidth(2)
         handle.setframerate(16000)
-        handle.writeframes(b"\0\0" * int(16000 * ms / 1000))
+        import array
+        import math
+        samples = array.array("h", (round(3000 * math.sin(2 * math.pi * 440 * n / 16000))
+                                  for n in range(16000 * ms // 1000)))
+        handle.writeframes(samples.tobytes())
 
 
 def _transcript(text: str = "Cảm ơn.") -> LocalizationTranscript:
@@ -75,8 +79,9 @@ async def _run_dub(tmp_path, monkeypatch, *, measured_ms, retime="fallback", cei
         return str(output_path)
 
     monkeypatch.setattr(tts_service, "generate_tts", stub_generate_tts)
+    real_probe = video_utils.probe_duration
     monkeypatch.setattr(video_utils, "probe_duration", lambda p, at: (
-        15.0 if Path(p) == SAMPLE else measured_ms / 1000.0
+        15.0 if Path(p) == SAMPLE else real_probe(p, at)
     ))
 
     profile = LocalizationProfile.model_validate({

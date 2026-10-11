@@ -83,6 +83,7 @@ def _load_ai_connections(settings_row) -> dict[str, dict]:
             "base_url": cfg.get("base_url"),
             "api_key_encrypted": cfg.get("api_key_encrypted"),
             "archived": bool(cfg.get("archived")),
+            "traffic_policy": cfg.get("traffic_policy"),
         }
 
     if not connections:
@@ -111,6 +112,7 @@ def _load_ai_connections(settings_row) -> dict[str, dict]:
             "base_url": getattr(settings_row, "ai_base_url", None),
             "api_key_encrypted": getattr(settings_row, "ai_api_key_encrypted", None),
             "archived": False,
+            "traffic_policy": existing.get("traffic_policy"),
         }
     return connections
 
@@ -176,6 +178,7 @@ def _public_ai_connections(settings_row) -> dict[str, dict]:
             "model": cfg.get("model"),
             "base_url": cfg.get("base_url"),
             "api_key_set": bool(cfg.get("api_key_encrypted")),
+            "traffic_policy": cfg.get("traffic_policy"),
         }
         for connection_id, cfg in _load_ai_connections(settings_row).items()
         if not cfg.get("archived")
@@ -770,6 +773,7 @@ class AIConnectionRequest(BaseModel):
     base_url: Optional[str] = None
     api_key: Optional[str] = None
     activate: bool = True
+    traffic_policy: Optional[dict] = None
 
 
 class TTSConnectionRequest(BaseModel):
@@ -876,6 +880,16 @@ async def upsert_ai_connection(body: AIConnectionRequest):
             if "base_url" not in fields_set
             else (body.base_url.strip() if body.base_url and body.base_url.strip() else None)
         )
+        # traffic_policy: omitted preserves, explicit null clears, explicit
+        # dict is validated and stored.
+        if "traffic_policy" in fields_set:
+            from backend.core.ai_provider import normalize_ai_traffic_policy
+            try:
+                traffic_policy = normalize_ai_traffic_policy(body.traffic_policy)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)[:240]) from exc
+        else:
+            traffic_policy = existing.get("traffic_policy")
         key = decrypt_safe(encrypted) if encrypted else ""
         try:
             make_ai_client(
@@ -883,6 +897,7 @@ async def upsert_ai_connection(body: AIConnectionRequest):
                 api_key=key or "",
                 model=model,
                 base_url=base_url,
+                traffic_policy=traffic_policy,
             )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)[:240]) from exc
@@ -894,6 +909,7 @@ async def upsert_ai_connection(body: AIConnectionRequest):
             "base_url": base_url,
             "api_key_encrypted": encrypted,
             "archived": False,
+            "traffic_policy": traffic_policy,
         }
         s.ai_connections_json = _save_provider_registry(connections)
         if body.activate:
@@ -1071,6 +1087,7 @@ class AIProbeRequest(BaseModel):
     model: Optional[str] = None
     base_url: Optional[str] = None
     api_key: Optional[str] = None
+    traffic_policy: Optional[dict] = None
 
 
 class TTSProbeRequest(BaseModel):
@@ -1277,11 +1294,18 @@ async def test_ai_connection(body: AIProbeRequest):
     model = body.model or connection.get("model")
     base_url = body.base_url or connection.get("base_url")
     try:
+        # Explicit null clears the unsaved probe policy; omission uses saved.
+        from backend.core.ai_provider import normalize_ai_traffic_policy
+        traffic_policy = normalize_ai_traffic_policy(
+            body.traffic_policy if "traffic_policy" in body.model_fields_set
+            else connection.get("traffic_policy")
+        )
         client = make_ai_client(
             provider_name=provider_name,
             api_key=key,
             model=model,
             base_url=base_url,
+            traffic_policy=traffic_policy,
         )
         # Probe owns its retry/timeout policy just like C6/C7. Do not let an SDK
         # retry loop or a half-open local endpoint make the Settings UI hang.
@@ -1383,6 +1407,7 @@ async def discover_tts_voices(body: TTSProbeRequest):
     try:
         voices = await tts_service.list_voices(
             provider, key, base_url=body.base_url or connection.get("base_url"),
+            **({"region": body.region or connection.get("region")} if provider == tts_service.TTSProvider.AZURE else {}),
         )
         models = []
         if provider == tts_service.TTSProvider.ELEVENLABS:
@@ -1407,7 +1432,10 @@ async def discover_tts_voices(body: TTSProbeRequest):
 
 
 def _localization_profile_payload(store):
+    from backend.core.localization import fast_localization_profile
     payload = store.model_dump()
+    # Offered, never automatically persisted or used to overwrite user profiles.
+    payload["presets"] = {"fast": fast_localization_profile().model_dump()}
     payload["prompt_defaults"] = {
         "translation_guardrails": DEFAULT_TRANSLATION_GUARDRAILS,
         "rewrite_guardrails": DEFAULT_REWRITE_GUARDRAILS,

@@ -672,18 +672,30 @@ def _apply_cookies(
     return True
 
 
+def _hostname_matches(url: str, *domains: str) -> bool:
+    """Only a real hostname may select a platform-specific auth/identity path.
+
+    A crafted unrelated URL containing 'tiktok.com/' in its path must never
+    trigger TikTok cookie or Douyin CDP logic.
+    """
+    from urllib.parse import urlsplit
+    try:
+        host = (urlsplit(url).hostname or "").lower().rstrip(".")
+    except (AttributeError, ValueError, TypeError):
+        return False
+    return any(host == domain or host.endswith("." + domain) for domain in domains)
+
+
 def _is_youtube_url(url: str) -> bool:
-    value = (url or "").lower()
-    return "youtube.com/" in value or "youtu.be/" in value
+    return _hostname_matches(url, "youtube.com", "youtu.be", "youtube-nocookie.com")
 
 
 def _is_douyin_url(url: str) -> bool:
-    value = (url or "").lower()
-    return "douyin.com/" in value or "iesdouyin.com/" in value
+    return _hostname_matches(url, "douyin.com", "iesdouyin.com")
 
 
 def _is_tiktok_url(url: str) -> bool:
-    return "tiktok.com/" in (url or "").lower()
+    return _hostname_matches(url, "tiktok.com")
 
 
 def _is_bytedance_url(url: str) -> bool:
@@ -691,13 +703,11 @@ def _is_bytedance_url(url: str) -> bool:
 
 
 def _required_bytedance_cookie_count(url: str, session: dict) -> int:
-    value = (url or "").lower()
-    if "douyin.com/" in value or "iesdouyin.com/" in value:
+    if _is_douyin_url(url):
         return int(session.get("douyin_cookie_count") or 0)
-    if "tiktok.com/" in value:
+    if _is_tiktok_url(url):
         return int(session.get("tiktok_cookie_count") or 0)
     return 0
-
 
 async def _prepare_download_source(
     url: str,
@@ -1073,6 +1083,11 @@ async def download_video(
     than erroring). Surfacing it is what lets a UI say "you asked for 4K, this
     source only had 1080p" instead of implying the cap was honoured.
     """
+    # Fail before touching CDP/cookies or creating output files. The endpoint
+    # performs a cheap syntactic check; the download service verifies DNS too
+    # so chat/scout/AI-corrected URLs cannot bypass that trust boundary.
+    from backend.services.download_url_guard import validate_public_download_target
+    await asyncio.to_thread(validate_public_download_target, url)
     if output_dir is None:
         output_dir = settings.VIDEOS_DIR
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1099,6 +1114,7 @@ async def download_video(
         url, cookie_session, douyin_cdp_url=douyin_cdp_url, title_hint=title_hint,
         alternates_out=_douyin_alternates,
     )
+    await asyncio.to_thread(validate_public_download_target, effective_url)
     use_browser_cookies = cookie_session_ok and resolved_via is None
     _format_chain = _format_chain_for_source(
         effective_url, resolved_via, _format_chain
@@ -1200,6 +1216,9 @@ async def download_video(
             # would make this a fresh per-rendition local and silently undo
             # the once-only guarantee the rung exists to provide.
             nonlocal opt_pps_dropped
+            # Every alternate URL gets its own DNS validation; the original
+            # source preflight alone does not protect a rewritten CDN target.
+            validate_public_download_target(target_url)
 
             attempt_base = {**base_opts, "http_headers": target_headers}
             video_path = None

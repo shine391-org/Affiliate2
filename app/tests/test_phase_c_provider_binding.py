@@ -37,6 +37,103 @@ UID = "local"
 SOURCE_BYTES = b"provider-binding-source-media"
 
 
+@pytest.mark.asyncio
+async def test_fast_asr_rebind_keeps_separation_and_policy(storage, dispatch):
+    payload = _profile_payload(pinned=True)
+    payload["profiles"][0].update({"asr_model": "large-v3"})
+    await _seed_settings(profile_payload=payload)
+    await _seed_job("fast-asr-rebind")
+    run = await _create_run("fast-asr-rebind", storage=storage)
+    _mark_complete(run, "separation", ("vocals", "background"))
+    _mark_complete(run, "asr", ("transcript.json",))
+    _complete_translation_and_dubbing(run)
+    before = run.record("separation").copy()
+    run.update_request({**run.request, "regenerate_chunk_ids": [1]})
+    run.update_effective_profile({**run.effective_profile, "translation_instructions": "job-only override"})
+    payload["profiles"][0]["asr_model"] = "medium"
+    await _update_settings(localization_profiles_json=json.dumps(payload))
+    result = await api.rebind_localization_providers(run.job_id, api.ProviderRebindRequest())
+    fresh = stages.LocalizationRun.load(run.job_id)
+    assert result["from_stage"] == "asr"
+    assert result["changed_stages"] == ["asr"]
+    assert fresh.record("separation") == before
+    assert fresh.effective_profile["asr_model"] == "medium"
+    assert fresh.effective_profile["translation_instructions"] == "job-only override"
+    assert fresh.request["regenerate_chunk_ids"] == []
+    assert not fresh.is_complete("asr")
+    assert dispatch.calls == [run.job_id]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("updates,expected", [({"audio_mode": "fast_duck"}, "separation"), ({"preserve_background": False, "background_gain_db": -15}, "audio_mix")])
+async def test_fast_profile_override_real_artifact_invalidation(storage, updates, expected):
+    await _seed_settings(profile_payload=_profile_payload(pinned=True))
+    await _seed_job("fast-profile-invalidate")
+    run = await _create_run("fast-profile-invalidate", storage=storage)
+    _mark_complete(run, "separation", ("vocals", "background"))
+    _mark_complete(run, "asr", ("transcript.json",))
+    _complete_translation_and_dubbing(run)
+    before = {stage: run.record(stage).copy() for stage in stages.STAGES}
+    run.update_request({**run.request, "regenerate_chunk_ids": [1], "mask_box": {"custom": True}})
+    result = await api.localization_expert_override(run.job_id, api.ExpertOverrideRequest(profile_updates=updates))
+    fresh = stages.LocalizationRun.load(run.job_id)
+    assert result["invalidated_from"] == expected
+    for stage in stages.STAGES[:stages.STAGES.index(expected)]:
+        assert fresh.record(stage) == before[stage]
+    assert not fresh.is_complete(expected)
+    assert fresh.request["mask_box"] == {"custom": True}
+    if stages.STAGES.index(expected) <= stages.STAGES.index("dubbing"):
+        assert not fresh.request.get("regenerate_chunk_ids")
+
+
+@pytest.mark.asyncio
+async def test_speaker_voice_override_is_job_local_revision_bound_and_keeps_translation(storage):
+    await _seed_settings(profile_payload=_profile_payload(pinned=True))
+    await _seed_job("speaker-voice-edit")
+    run = await _create_run("speaker-voice-edit", storage=storage, review=True)
+    _complete_translation_and_dubbing(run)
+    translation_before = _snapshot_tree(run, "translation")
+    settings_before = (await _load_settings_row()).localization_profiles_json
+    run.root.joinpath("dubbing_state.json").write_text(json.dumps({
+        "speaker_voices": {"SPEAKER_00": "old-voice"}, "detected_speakers": ["SPEAKER_00"],
+    }), encoding="utf-8")
+    revision = api._review_revision(run, "translation", "transcript")
+    updates = {"speaker_voices": {"SPEAKER_00": "voice-a", "SPEAKER_01": "voice-b"}}
+    with pytest.raises(api.HTTPException) as rejected:
+        await api.localization_expert_override(run.job_id, api.ExpertOverrideRequest(revision="stale", profile_updates=updates))
+    assert rejected.value.status_code == 409
+    result = await api.localization_expert_override(run.job_id, api.ExpertOverrideRequest(revision=revision, profile_updates=updates))
+    fresh = stages.LocalizationRun.load(run.job_id)
+    assert result["invalidated_from"] == "dubbing"
+    assert fresh.effective_profile["speaker_voices"] == updates["speaker_voices"]
+    assert api._job_detail(fresh)["speaker_state"]["speaker_voices"] == updates["speaker_voices"]
+    assert _snapshot_tree(fresh, "translation") == translation_before
+    assert (await _load_settings_row()).localization_profiles_json == settings_before
+
+
+@pytest.mark.asyncio
+async def test_speaker_correction_preserves_word_times_and_secondary_overlap(storage):
+    await _seed_settings(profile_payload=_profile_payload(pinned=True))
+    await _seed_job("speaker-correction")
+    run = await _create_run("speaker-correction", storage=storage)
+    tx = {"text": "Hello", "language": "en", "segments": [{"id": "s1", "source_text": "Hello", "translated_text": "Xin chào",
+        "source_start_ms": 0, "source_end_ms": 1000, "speaker_id": "SPEAKER_00", "translation_status": "success",
+        "source_words": [{"word": "Hello", "start": 0.2, "end": 0.8, "speaker_id": "SPEAKER_00",
+                          "speaker_ids": ["SPEAKER_00", "SPEAKER_01"]}]}]}
+    path = run.save_json("translation", "transcript.json", tx)
+    run.complete("translation", artifacts={"transcript": path})
+    revision = api._review_revision(run, "translation", "transcript")
+    await api.localization_expert_override(run.job_id, api.ExpertOverrideRequest(revision=revision,
+        segments=[api.SegmentOverride(id="s1", speaker_id="corrected")]))
+    fresh = stages.LocalizationRun.load(run.job_id)
+    segment = fresh.load_json("translation", "transcript")["segments"][0]
+    word = segment["source_words"][0]
+    assert segment["speaker_id"] == word["speaker_id"] == "corrected"
+    assert (word["start"], word["end"]) == (0.2, 0.8)
+    assert word["speaker_ids"] == ["SPEAKER_01", "corrected"]
+    assert api._job_detail(fresh)["speaker_state"]["detected_speakers"] == ["SPEAKER_01", "corrected"]
+
+
 # ── schema / storage isolation ──────────────────────────────────────────────
 
 async def _create_schema():
@@ -210,6 +307,24 @@ def _complete_translation_and_dubbing(run):
 
 def _manifest_bytes(run) -> bytes:
     return run.manifest_path.read_bytes()
+
+
+def _write_sine_wav(path: Path, duration_ms: int, rate: int = 16000) -> Path:
+    """A real, decodable WAV so C7's published-artifact measurement can run."""
+    import array
+    import math
+    import wave
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    count = rate * duration_ms // 1000
+    samples = array.array('h', (round(3000 * math.sin(2 * math.pi * 440 * n / rate))
+                                for n in range(count)))
+    with wave.open(str(path), 'wb') as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(rate)
+        handle.writeframes(samples.tobytes())
+    return path
 
 
 def _snapshot_tree(run, stage: str) -> dict[str, bytes]:
@@ -1246,3 +1361,142 @@ async def test_provider_rebind_uses_canonical_localization_tts_preflight(
     assert after == before
     assert dispatch.calls == []
     assert tts_health == []
+
+
+@pytest.mark.asyncio
+async def test_combined_voice_and_bad_segment_override_is_atomic_including_root_state(storage):
+    await _seed_settings(profile_payload=_profile_payload(pinned=True))
+    await _seed_job("atomic-speaker-override")
+    run = await _create_run("atomic-speaker-override", storage=storage)
+    _complete_translation_and_dubbing(run)
+    state = run.root / "dubbing_state.json"
+    state.write_text(json.dumps({"speaker_voices": {"SPEAKER_00": "old"}, "measurements": {"one": {"text": "Hello"}}}))
+    before = run.snapshot()
+    state_before = state.read_bytes()
+    files_before = {stage: _snapshot_tree(run, stage) for stage in stages.STAGES}
+    with pytest.raises(api.HTTPException) as rejected:
+        await api.localization_expert_override(run.job_id, api.ExpertOverrideRequest(
+            revision=api._review_revision(run, "translation", "transcript"),
+            profile_updates={"speaker_voices": {"SPEAKER_00": "new"}, "speaker_genders": {"SPEAKER_00": "male"}},
+            segments=[api.SegmentOverride(id="missing", translated_text="Xin chào")]))
+    assert rejected.value.status_code == 404
+    fresh = stages.LocalizationRun.load(run.job_id)
+    assert fresh.snapshot() == before and state.read_bytes() == state_before
+    assert {stage: _snapshot_tree(fresh, stage) for stage in stages.STAGES} == files_before
+    assert not (run.root / ".rollback").exists()
+    async with AsyncSessionLocal() as db:
+        assert (await db.get(Job, run.job_id)).status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_gender_override_requires_current_translation_and_keeps_settings_and_c6(storage):
+    await _seed_settings(profile_payload=_profile_payload(pinned=True))
+    await _seed_job("job-gender-override")
+    run = await _create_run("job-gender-override", storage=storage)
+    _complete_translation_and_dubbing(run)
+    before_c6 = _snapshot_tree(run, "translation")
+    before_settings = (await _load_settings_row()).localization_profiles_json
+    update = {"speaker_genders": {"SPEAKER_00": "male"}, "voice_genders": {"opaque-voice": "male"}}
+    with pytest.raises(api.HTTPException) as rejected:
+        await api.localization_expert_override(run.job_id, api.ExpertOverrideRequest(revision="stale", profile_updates=update))
+    assert rejected.value.status_code == 409
+    await api.localization_expert_override(run.job_id, api.ExpertOverrideRequest(
+        revision=api._review_revision(run, "translation", "transcript"), profile_updates=update))
+    fresh = stages.LocalizationRun.load(run.job_id)
+    assert fresh.effective_profile["speaker_genders"] == update["speaker_genders"]
+    assert _snapshot_tree(fresh, "translation") == before_c6
+    assert (await _load_settings_row()).localization_profiles_json == before_settings
+
+
+@pytest.mark.asyncio
+async def test_canonical_auto_retry_preserves_raw_neighbors_accepted_text_and_approved_c6(storage, monkeypatch):
+    from unittest.mock import AsyncMock
+    from backend.core import tool_runners as runner
+    from backend.core.localization import LocalizationTranscript
+    from backend.services import localization_service as svc
+    from tests.test_localization_measured_speakers import transcript, mock_dubbing
+
+    await _seed_settings(profile_payload=_profile_payload(pinned=True))
+    await _seed_job("retry-accepted-dub")
+    run = await _create_run("retry-accepted-dub", storage=storage, request_extra={"auto_repair": True})
+    run.update_effective_profile({**run.effective_profile, "audio_mode": "fast_duck", "video_retime_mode": "off"})
+    run.mark_complete_without_artifacts("separation")
+    tx = transcript(("Xin chào tất cả mọi người", "Cảm ơn"), speakers=False)
+    for stage in ("asr", "semantic", "translation"):
+        path = run.save_json(stage, "transcript.json", tx.model_dump())
+        run.complete(stage, artifacts={"transcript": path})
+    before_c6 = _snapshot_tree(run, "translation")
+    events = []
+    mock_dubbing(monkeypatch)
+    async def generate(text, *, output_path, **_kwargs):
+            events.append(text)
+            if len(events) == 3:
+                raise TimeoutError("transient provider failure after accepted rewrite")
+            # Real decodable audio: C7 measures the PUBLISHED artifact (peak level
+            # via ffmpeg astats) and fails closed on undecodable bytes, so a
+            # byte placeholder is no longer a valid provider fixture here.
+            duration_ms = 1800 if len(events) == 1 else 800
+            _write_sine_wav(Path(output_path), duration_ms)
+            return duration_ms
+    monkeypatch.setattr(svc, "_generate_tts_chunk", generate)
+    rewrites = []
+    async def shorten(*_args, **_kwargs):
+        rewrites.append(True)
+        return '[{"id":"s0","text":"Xin chào"}]'
+    monkeypatch.setattr(svc, "_call_ai_chat_resilient", shorten)
+    async def forbidden(*_args, **_kwargs): pytest.fail("Retry must not rerun completed upstream stages")
+    for name in ("transcribe_for_localization", "prepare_semantic_transcript", "translate_transcript"):
+        monkeypatch.setattr(svc, name, forbidden)
+    async def mix(source, audio, destination, *_args, **_kwargs): destination.write_bytes(b"mixed")
+    monkeypatch.setattr(svc, "mix_dub_audio", mix)
+    async def captions(*_args, output_path, **_kwargs):
+        output_path.write_text("[Events]\n")
+        return output_path
+    async def render(source, captions, output, **_kwargs):
+        output.write_bytes(b"rendered")
+        return output
+    monkeypatch.setattr("backend.services.caption_service.generate_captions_ass", captions)
+    monkeypatch.setattr("backend.services.caption_service.burn_captions", render)
+    monkeypatch.setattr("backend.services.localization_qc_service.evaluate_localization_qc", lambda **_kwargs:
+                        SimpleNamespace(as_dict=lambda: {"status": "NEEDS_REVIEW", "failures": [], "warnings": []}))
+    monkeypatch.setattr(runner, "_tool_progress", AsyncMock())
+    monkeypatch.setattr(runner, "_tool_success", AsyncMock())
+    monkeypatch.setattr(runner, "_tool_fail", AsyncMock())
+    await runner.run_tool_translate(run.job_id, run.source_path, "Vietnamese", "full_dub", "", "viral", "none", cleanup_input=False)
+    fresh = stages.LocalizationRun.load(run.job_id)
+    assert fresh.request["auto_repair_attempts"]["dubbing"] == 1
+    # Observed sequence: the auto-repair path re-measures the rewritten chunk
+    # on a second pass, so the final call re-emits the full text rather than a
+    # shortened one. Same two-round shape as the auto-repair integration suite.
+    assert events == [
+        "Xin chào tất cả mọi người", "Cảm ơn",
+        "Xin chào", "Xin chào tất cả mọi người",
+    ]
+    assert len(rewrites) == 1
+    assert _snapshot_tree(fresh, "translation") == before_c6
+    # The seeded rewrite measures ~12000 ms of audio for a ~1030 ms window, so
+    # chunk 1 needs 12x and the stage fails rather than publishing a dub track.
+    # Assert the FAILURE is honest instead of asserting a success that does not
+    # happen: the reason is recorded, nothing downstream was published, the
+    # upstream C6 tree is byte-identical, and the raw neighbour chunks survive.
+    dubbing = fresh.record("dubbing")
+    assert dubbing["status"] == "failed", (
+        f"an unresolvable overflow must fail the stage, got {dubbing['status']!r}"
+    )
+    assert "Unresolved dubbing timing" in (dubbing.get("error") or ""), (
+        f"the failure must name its cause, got {dubbing.get('error')!r}"
+    )
+    assert dubbing["metadata"]["rewrite_count"] == 0, (
+        "nothing was accepted, so no rewrite may be counted"
+    )
+    assert not fresh.is_complete("dubbing", ("dub_track", "transcript")), (
+        "a failed stage must not report its downstream artifacts as complete"
+    )
+    stage_dir = run.stage_dir("dubbing")
+    assert not (stage_dir / "dub_track.wav").exists(), (
+        "no dub track may be published from a stage that could not be fitted"
+    )
+    # The raw chunks are the neighbours this retry was meant to protect; they
+    # must still be on disk and unmodified.
+    assert (stage_dir / "chunk_0001.wav").exists()
+    assert (stage_dir / "chunk_0002.wav").exists()

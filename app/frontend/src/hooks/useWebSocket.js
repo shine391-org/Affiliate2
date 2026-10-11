@@ -34,21 +34,36 @@ export default function useWebSocket() {
 
   useEffect(() => {
     ws.connect()
+    let mounted = true
 
     // Restore running/pending jobs from API so active jobs survive page refresh
     const restoreJobs = async () => {
       try {
-        // ONE request for both statuses (the endpoint takes a comma list).
-        // This used to be two, on a load that already fetches jobs twice more
-        // for the Activity panel. Limit is 40, not 20, because it now covers
-        // what were two separate 20-row windows.
-        const { data } = await http.get("/api/jobs", {
-          params: { status: "running,pending", limit: 40 },
-        })
-        const allJobs = data.jobs || []
-        // Restore active jobs from API on reconnect
-        allJobs.forEach(j => {
-          if (!useAppStore.getState().activeJobs[j.id]) {
+        // Keyset (cursor) paging, NOT offset. The filter is on `status`, so a
+        // job that finishes LEAVES the result set and every later row shifts one
+        // position toward the head. Offset paging therefore skips real,
+        // still-running jobs whenever the set changes between two pages —
+        // measured at 10 of 250 jobs lost when 10 finished mid-restore, with
+        // no error anywhere. A cursor anchored on (created_at, id) cannot be
+        // moved by rows leaving the set, so the restore sees every active job.
+        //
+        // `seen` is a second line of defence, not a substitute: it makes a
+        // duplicate or repeated row harmless if the set ever shifts the other
+        // way (a queued job starting between pages).
+        const seen = new Set()
+        let cursor = null
+        let pages = 0
+        for (;;) {
+          const { data } = await http.get("/api/jobs", {
+            params: { status: "running,pending,queued", limit: 100, cursor: cursor || undefined },
+          })
+          if (!mounted) return
+          const page = data.jobs || []
+          if (!page.length) break
+          for (const j of page) {
+            if (seen.has(j.id)) continue
+            seen.add(j.id)
+            if (useAppStore.getState().activeJobs[j.id]) continue
             const msg = localizeUiMessage(j.current_step || j.title || j.job_type)
             // Parse input_json to preserve job metadata (e.g. type: "clip_extraction")
             let inputData = null
@@ -59,7 +74,12 @@ export default function useWebSocket() {
               updateJobProgress(j.id, j.progress_pct, j.current_step || "")
             }
           }
-        })
+          cursor = data.next_cursor
+          // No continuation token means the backend served the final page.
+          // A page bound stops a backend that keeps returning a cursor.
+          pages += 1
+          if (!cursor || pages >= 50) break
+        }
       } catch (err) {
         // Silent fail — jobs will be picked up on next WS message
       }
@@ -331,6 +351,7 @@ export default function useWebSocket() {
     ]
 
     return () => {
+      mounted = false
       unsubs.forEach(fn => fn())
       if (rafRef.current != null) {
         cancelAnimationFrame(rafRef.current)

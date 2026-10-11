@@ -64,8 +64,6 @@ async def list_downloaded(
                 if not title:
                     title = sr.title
                     platform = sr.platform
-                    v.title = title
-                    v.platform = platform
                 thumbnail_url = sr.thumbnail_url
 
             source_url = sr.video_url if sr else None
@@ -111,9 +109,6 @@ async def list_downloaded(
                 "media_metadata": _safe_json(v.media_metadata_json, {}),
                 "created_at": v.created_at.isoformat() if v.created_at else None,
             })
-
-        # Persist any backfilled titles
-        await db.commit()
 
     return {"videos": items, "total": total}
 
@@ -225,29 +220,112 @@ def drop_bench_caches(video_id: str) -> int:
     return removed
 
 
+def _job_uses_downloaded_source(input_data: object, video: DownloadedVideo) -> bool:
+    """Recognize a source reference in durable job inputs (including batches).
+
+    Do not infer ownership from titles or guessed file names. A pending job
+    may not yet have copied the source to its immutable workspace.
+    """
+    source_paths = {
+        str(Path(p).resolve())
+        for p in (video.video_path, video.audio_path) if p
+    }
+    reference_keys = {
+        "downloaded_video_id", "source_downloaded_video_id", "source_id", "video_id"
+    }
+    file_keys = {"in_path", "video_path", "source_path", "input_path"}
+    pending = [(input_data, 0)]
+    while pending:
+        item, depth = pending.pop()
+        if depth > 8:
+            continue
+        if isinstance(item, dict):
+            for key, value in item.items():
+                if key in reference_keys and value == video.id:
+                    return True
+                if key in file_keys and isinstance(value, str) and source_paths:
+                    try:
+                        if str(Path(value).resolve()) in source_paths:
+                            return True
+                    except (OSError, ValueError):
+                        pass
+                if isinstance(value, (dict, list)):
+                    pending.append((value, depth + 1))
+        elif isinstance(item, list):
+            pending.extend((value, depth + 1) for value in item)
+    return False
+
+
 @router.delete("/downloaded/{video_id}")
 async def delete_downloaded(video_id: str):
     """Delete a downloaded video — removes DB record and files from disk."""
+    from sqlalchemy import text
+    from backend.models.job import Job
+
     async with AsyncSessionLocal() as db:
+        # Guard deletion against job admission/recovery in another backend
+        # process. The lock is intentionally taken before reading source state.
+        await db.execute(text("BEGIN IMMEDIATE"))
         result = await db.execute(
             select(DownloadedVideo).where(DownloadedVideo.id == video_id)
         )
         video = result.scalar_one_or_none()
         if not video:
+            await db.rollback()
             raise HTTPException(status_code=404, detail="Downloaded video not found")
 
-        # Delete files from disk
-        for path_str in [video.video_path, video.audio_path]:
-            if path_str:
-                p = Path(path_str)
-                if p.exists():
-                    p.unlink()
+        active = (await db.execute(select(Job).where(
+            Job.status.in_(["pending", "running", "awaiting_review"])
+        ))).scalars().all()
+        for job in active:
+            try:
+                inputs = json.loads(job.input_json or "{}")
+            except (TypeError, ValueError):
+                # Cannot prove that a corrupted active job does NOT own the
+                # source. Fail closed rather than deleting media underneath it.
+                await db.rollback()
+                raise HTTPException(
+                    status_code=409,
+                    detail="An active job has unreadable input; source deletion is blocked",
+                )
+            if _job_uses_downloaded_source(inputs, video):
+                await db.rollback()
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Source is in use by active job {job.id}; cancel/finish it before deleting",
+                )
+
+        # Another source or generated artifact can legitimately point at the
+        # same disk path (historical/imported rows). Deleting ONE row must not
+        # delete the other owner's media. Compare resolved paths conservatively.
+        from backend.models.generated_video import GeneratedVideo
+        source_refs = (await db.execute(select(
+            DownloadedVideo.video_path, DownloadedVideo.audio_path
+        ).where(DownloadedVideo.id != video_id))).all()
+        generated_refs = (await db.execute(select(
+            GeneratedVideo.video_path, GeneratedVideo.audio_path,
+            GeneratedVideo.video_path_landscape,
+        ))).all()
+        protected_paths = {
+            str(Path(p).resolve())
+            for record in [*source_refs, *generated_refs]
+            for p in record if p
+        }
+        shared_video_path = bool(
+            video.video_path and str(Path(video.video_path).resolve()) in protected_paths
+        )
+        for path_str in {video.video_path, video.audio_path} - {None, ""}:
+            p = Path(path_str)
+            if str(p.resolve()) in protected_paths:
+                continue
+            if p.exists():
+                p.unlink()
 
         # Sidecar subtitles kept by the `subtitles: "file"` download option
         # live next to the video (`<stem>.<lang>.srt/.vtt`) with no DB column
         # of their own — sweep them with the row or they orphan forever: a
         # delete must cover every file the row owns.
-        if video.video_path:
+        if video.video_path and not shared_video_path:
             vp = Path(video.video_path)
             for ext in ("srt", "vtt"):
                 for f in vp.parent.glob(f"{vp.stem}.*.{ext}"):
@@ -375,21 +453,24 @@ async def batch_download_from_urls(body: dict = None):
                 detail=(f"Each entry must be a URL string or an object with a "
                         f"`url` field, got {type(u).__name__}"),
             )
+    # The chat planner may supply a non-string field. Fail as a 400, not an
+    # AttributeError while trying to call .strip() on an integer/list.
+    if any(not isinstance(u.get("url", ""), str) for u in normalized):
+        raise HTTPException(status_code=400, detail="Each url must be a string")
     urls = [u for u in normalized if (u.get("url") or "").strip()]
     if not urls:
         raise HTTPException(status_code=400, detail="No usable URLs provided")
 
-    # URL trust boundary. This endpoint is reachable by the chat planner (i.e.
-    # by LLM-relayed values) as well as by our own UI, and every entry here is
-    # handed to yt-dlp — which happily accepts `file:///etc/passwd`. Guard at
-    # the endpoint so the check can't be bypassed by a different caller.
+    # LLM/agent-controlled URLs must never enter yt-dlp as local, ambiguous,
+    # credential-bearing or private-IP targets. DNS is checked at the downloader
+    # boundary too (including concrete Douyin/CDN targets).
+    from backend.services.download_url_guard import validate_download_url
     for u in urls:
-        link = (u.get("url") or "").strip()
-        if not link.lower().startswith(("http://", "https://")):
-            raise HTTPException(
-                status_code=400,
-                detail="Every url must be a full http(s) link",
-            )
+        link = u.get("url") or ""
+        try:
+            validate_download_url(link)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     from backend.services.download_options import normalize as _normalize_opts
     options = _normalize_opts(body.get("options"))
@@ -452,22 +533,21 @@ async def import_local_video(
     # Stream upload to disk (max 2GB)
     MAX_UPLOAD_SIZE = 2 * 1024 * 1024 * 1024
     file_size = 0
-    with open(dest_path, "wb") as f:
-        while chunk := await file.read(1024 * 1024):  # 1MB chunks
-            file_size += len(chunk)
-            if file_size > MAX_UPLOAD_SIZE:
-                f.close()
-                dest_path.unlink(missing_ok=True)
-                raise HTTPException(413, "File too large. Maximum upload size is 2GB.")
-            f.write(chunk)
-
-    # An empty upload is not an import. The size was capped above but never
-    # floored, so a zero-byte file became a Library row pointing at zero bytes
-    # — it would fail later in whatever tool the user pointed at it, with no
-    # hint that the import itself was the problem.
-    if file_size == 0:
-        dest_path.unlink(missing_ok=True)
-        raise HTTPException(400, "The uploaded file is empty.")
+    pending_path = dest_path.with_suffix(dest_path.suffix + ".partial")
+    try:
+        with open(pending_path, "wb") as f:
+            while chunk := await file.read(1024 * 1024):  # 1MB chunks
+                file_size += len(chunk)
+                if file_size > MAX_UPLOAD_SIZE:
+                    raise HTTPException(413, "File too large. Maximum upload size is 2GB.")
+                f.write(chunk)
+        if file_size == 0:
+            raise HTTPException(400, "The uploaded file is empty.")
+        # Only a complete upload may replace the destination. The finally also
+        # handles disconnects and cancellation without deleting a prior file.
+        pending_path.replace(dest_path)
+    finally:
+        pending_path.unlink(missing_ok=True)
 
     file_size_mb = round(file_size / (1024 * 1024), 2)
     display_title = title or Path(file.filename).stem if file.filename else "Imported video"

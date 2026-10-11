@@ -8,6 +8,20 @@ from types import SimpleNamespace
 
 import pytest
 
+@pytest.fixture(autouse=True)
+def mocked_postfit_measurement(monkeypatch):
+    """Unit orchestration uses byte placeholders, NOT playable audio.
+
+    Real measurement/failure gates run unmocked in postfit/rhythm suites.
+    """
+    from backend.services import localization_service as service
+
+    async def measure(_path, raw_duration_ms, speed_factor):
+        return round(raw_duration_ms / speed_factor), -12.0
+
+    monkeypatch.setattr(service, "_measure_fitted_audio", measure)
+
+
 from backend.core.localization import (
     LocalizationProfile,
     LocalizationSegment,
@@ -98,7 +112,7 @@ class _EchoAI:
         if self.bad_first and self.calls == 1:
             return json.dumps([{"id": "wrong", "text": "bad"}])
         return json.dumps(
-            [{"id": x["id"], "text": f"vi:{x['text']}"} for x in items],
+            [{"id": x["id"], "text": {"第一句": "Câu đầu tiên", "品牌很好": "Thương hiệu rất tốt"}[x["text"]]} for x in items],
             ensure_ascii=False,
         )
 
@@ -235,7 +249,7 @@ async def test_c6_prompt_carries_context_glossary_style_and_duration(monkeypatch
     assert "品牌 => thương hiệu" in prompt
     assert "Giọng nói tự nhiên." in prompt
     assert '"source_duration_ms": 1000' in prompt
-    assert [s.translated_text for s in tx.segments] == ["vi:第一句", "vi:品牌很好"]
+    assert [s.translated_text for s in tx.segments] == ["Câu đầu tiên", "Thương hiệu rất tốt"]
 
 
 @pytest.mark.asyncio
@@ -250,7 +264,7 @@ async def test_c6_shape_error_splits_instead_of_sliding_ids(monkeypatch):
         for_dub=False,
     )
     assert ai.calls == 3
-    assert [s.translated_text for s in tx.segments] == ["vi:第一句", "vi:品牌很好"]
+    assert [s.translated_text for s in tx.segments] == ["Câu đầu tiên", "Thương hiệu rất tốt"]
 
 
 def _patch_dub_io(monkeypatch, tmp_path, durations, generated=None):
@@ -293,7 +307,7 @@ async def test_c7_rewrite_prompt_keeps_locked_core_and_uses_its_own_profile_inst
 
         async def chat(self, messages, **kwargs):
             self.prompt = messages[0]["content"]
-            return json.dumps([{"id": "s1", "text": "ngắn"}], ensure_ascii=False)
+            return json.dumps([{"id": "s1", "text": "câu rất dài"}], ensure_ascii=False)
 
     ai = CaptureAI()
     plan = [
@@ -347,7 +361,7 @@ async def test_c7_rewrite_prompt_keeps_locked_core_and_uses_its_own_profile_inst
     assert "Return every input ID exactly once and no extra IDs." in ai.prompt
     assert "this protocol wins" in ai.prompt
     assert "semantic guardrails and locked protocol above remain active" in ai.prompt
-    assert segment.translated_text == "ngắn"
+    assert segment.translated_text == "câu rất dài"
 
 
 @pytest.mark.asyncio
@@ -582,8 +596,10 @@ async def test_c7_rejected_rewrite_retries_with_measured_feedback(monkeypatch, t
         work_dir=tmp_path / "work",
     )
     assert seen == [
-        {"measured_duration_ms": 3000, "attempt": 1},
-        {"measured_duration_ms": 3000, "attempt": 2},
+        {"measured_duration_ms": 3000, "attempt": 1,
+         "source_language": None, "localized_terms": {}},
+        {"measured_duration_ms": 3000, "attempt": 2,
+         "source_language": None, "localized_terms": {}},
     ]
     assert result.rewrite_count == 1
 
@@ -738,7 +754,8 @@ async def test_c7_targeted_regeneration_reuses_other_raw_chunks(monkeypatch, tmp
         regenerate_chunk_ids={2},
         reuse_existing_chunks=True,
     )
-    assert generated == ["chunk_0002.pending.wav"]
+    assert [name.split(".pending", 1)[0] for name in generated] == ["chunk_0002"]
+    assert all(name.endswith(".wav") for name in generated)
     assert (work / "chunk_0002.wav").read_bytes() == b"new"
 
 
@@ -785,7 +802,7 @@ async def test_c7_rewrite_retries_transient_provider_failure_before_disabling(
             self.calls += 1
             if self.calls == 1:
                 raise Transient503("provider overloaded")
-            return json.dumps([{"id": "s1", "text": "ngắn"}], ensure_ascii=False)
+            return json.dumps([{"id": "s1", "text": "câu rất dài"}], ensure_ascii=False)
 
     async def no_sleep(_delay):
         return None
@@ -812,7 +829,7 @@ async def test_c7_rewrite_retries_transient_provider_failure_before_disabling(
     assert ai.max_retries == 0
     assert state.get("unavailable") is not True
     assert issues == []
-    assert segment.translated_text == "ngắn"
+    assert segment.translated_text == "câu rất dài"
 
 
 @pytest.mark.asyncio
@@ -882,16 +899,17 @@ async def test_c7_rewrite_exhausts_bounded_retries_before_opening_the_circuit(
     assert changed is False
     # Bounded: exactly the helper's budget, then it stops.
     assert ai.calls == 3
-    assert state.get("unavailable") is True
+    assert state.get("unavailable") is False
+    assert state["retry_scope"] == "chunk"
     # The plan and caption transcript must stay untouched so a failed rewrite
     # can never half-apply.
     assert plan[0].spoken_text == "một câu rất dài"
     assert segment.translated_text == "một câu rất dài"
-    assert [i["reason"] for i in issues] == ["rewrite_ai_unavailable"]
+    assert [i["reason"] for i in issues] == ["rewrite_ai_transient"]
 
 
 @pytest.mark.asyncio
-async def test_c7_optional_rewrite_provider_failure_opens_job_circuit_breaker(
+async def test_c7_optional_transient_failure_does_not_disable_later_chunks(
     monkeypatch, tmp_path,
 ):
     long_text = "đây là một câu tiếng Việt rất dài cần được rút gọn trước khi đọc"
@@ -904,6 +922,7 @@ async def test_c7_optional_rewrite_provider_failure_opens_job_circuit_breaker(
             source_start_ms=i * 1000,
             source_end_ms=i * 1000 + 500,
             translation_status="success",
+            overrides={"target_start_ms": i * 1000, "target_end_ms": i * 1000 + 500},
         )
         for i in range(3)
     ])
@@ -921,7 +940,11 @@ async def test_c7_optional_rewrite_provider_failure_opens_job_circuit_breaker(
 
     ai = TimeoutAI()
     monkeypatch.setattr(ls.asyncio, "sleep", no_sleep)
-    calls = _patch_dub_io(monkeypatch, tmp_path, [400, 400, 400])
+    # Locked 500ms windows make this outage probe independent of silence
+    # allocation. 660ms requires 1.32x: normal overflow, emergency-review fits.
+    calls = _patch_dub_io(monkeypatch, tmp_path, [660, 660, 660])
+    # Three source cues span 3 seconds; a 2s source stub is invalid at EOF.
+    monkeypatch.setattr("backend.services.video_utils.probe_duration", lambda *a, **k: 3.0)
     monkeypatch.setattr(ls, "_profile_ai_client", lambda *_: ai)
 
     result = await ls.synthesize_timed_dub(
@@ -933,14 +956,15 @@ async def test_c7_optional_rewrite_provider_failure_opens_job_circuit_breaker(
         work_dir=tmp_path / "work",
     )
 
-    assert ai.calls == 3
+    assert ai.calls == 9  # Exactly three bounded transport attempts per chunk.
     assert calls["n"] == 3
-    unavailable = [
+    transient = [
         issue for issue in result.issues
-        if issue["reason"] == "rewrite_ai_unavailable"
+        if issue["reason"] == "rewrite_ai_transient"
     ]
-    assert len(unavailable) == 1
-    assert unavailable[0]["chunk_id"] == 1
+    assert len(transient) == 3
+    assert [i["chunk_id"] for i in transient] == [1, 2, 3]
+    assert all(i["retry_scope"] == "chunk" for i in transient)
     assert result.chunk_count == 3
 
 
@@ -988,10 +1012,15 @@ async def test_c7_targeted_regeneration_keeps_overlong_non_target_immutable(
         return True
 
     generated = []
+    synth_calls = []
+
     async def fake_generate(text, *, output_path, **kwargs):
         generated.append(output_path.name)
+        synth_calls.append(text)
         output_path.write_bytes(b"new")
-        return 500
+        # The regeneration target must be genuinely MEASURED-overlong before the
+        # rewrite is allowed; since Y1 the estimate cannot authorise it.
+        return 1500 if len(synth_calls) == 1 else 900
 
     fit_calls = []
     def fake_fit(source, destination, speed_factor):
@@ -1029,7 +1058,15 @@ async def test_c7_targeted_regeneration_keeps_overlong_non_target_immutable(
     )
 
     assert adapted == [2]
-    assert generated == ["chunk_0002.pending.wav"]
+    # Target chunk synthesized before and after its measured-overflow rewrite;
+    # the non-target chunk is reused and never synthesized.
+    assert [name.split(".rewrite-", 1)[0].split(".pending", 1)[0] for name in generated] == [
+        "chunk_0002", "chunk_0002",
+    ]
+    assert ".rewrite-" not in generated[0]
+    assert ".rewrite-" in generated[1], "Rewrite candidate must not overwrite last-good audio"
+    assert len(set(generated)) == len(generated), "Every generation owns a distinct pending path"
+    assert all(name.endswith(".wav") for name in generated)
     assert result.transcript.segments[0].translated_text == non_target_text
     assert (work / "chunk_0001.wav").read_bytes() == b"old"
     assert result.transcript.segments[1].translated_text == "ngắn"
@@ -1107,6 +1144,8 @@ async def test_c7_natural_rate_chunks_skip_audio_fit_ffmpeg(monkeypatch, tmp_pat
         for i in range(3)
     ])
     calls = _patch_dub_io(monkeypatch, tmp_path, [800, 900, 700])
+    # Three source cues span 3 seconds; a 2s source stub is invalid at EOF.
+    monkeypatch.setattr("backend.services.video_utils.probe_duration", lambda *a, **k: 3.0)
 
     result = await ls.synthesize_timed_dub(
         tx,
@@ -1138,6 +1177,8 @@ async def test_c7_only_material_speed_change_runs_audio_fit_ffmpeg(
         for i in range(3)
     ])
     calls = _patch_dub_io(monkeypatch, tmp_path, [1100, 800, 800])
+    # Three source cues span 3 seconds; a 2s source stub is invalid at EOF.
+    monkeypatch.setattr("backend.services.video_utils.probe_duration", lambda *a, **k: 3.0)
 
     await ls.synthesize_timed_dub(
         tx,
@@ -1570,8 +1611,13 @@ async def test_c7_ai_rewrite_timeout_degrades_to_tts_instead_of_failing(
     async def fake_generate(text, *, output_path, **kwargs):
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(b"raw")
-        # Measured TTS happens to fit, proving rewrite timeout is not fatal.
-        return 450
+        # Measured TTS overflows its allocated window, so the measured loop --
+        # the only rewrite authority since Y1 removed the estimate-driven
+        # branch -- attempts a rewrite. Its timeout must degrade to plain TTS
+        # instead of failing the job. allocate_silence grows the 500 ms source
+        # window to ~1000 ms, so the measured value must exceed THAT, not the
+        # raw source window.
+        return 1400
 
     def fake_fit(source, destination, speed_factor):
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -1603,13 +1649,12 @@ async def test_c7_ai_rewrite_timeout_degrades_to_tts_instead_of_failing(
         work_dir=tmp_path / "work",
     )
 
-    # A transient provider failure is retried within one bounded budget before
-    # the optional rewrite is disabled for the rest of the job. The contract
-    # under test is graceful degradation, not a single-attempt call count.
+    # A transient failure exhausts this chunk's bounded transport attempts,
+    # without falsely declaring every later chunk's provider unavailable.
     assert slow.calls == 3
     assert result.chunk_count == 1
     assert any(
-        issue["reason"] == "rewrite_ai_unavailable"
+        issue["reason"] == "rewrite_ai_transient"
         for issue in result.issues
     )
     assert result.transcript.segments[0].target_start_ms is not None
@@ -1646,7 +1691,7 @@ async def test_adapt_chunk_timeout_is_best_effort_and_records_issue():
             raise TimeoutError("slow local model")
 
     issues = []
-    state = {}
+    state = {"measured_duration_ms": 1800, "attempt": 1}
     changed = await ls._adapt_chunk_items(
         TimeoutAI(),
         plan=plan,
@@ -1659,8 +1704,9 @@ async def test_adapt_chunk_timeout_is_best_effort_and_records_issue():
         state=state,
     )
     assert changed is False
-    assert state["unavailable"] is True
-    assert issues[0]["reason"] == "rewrite_ai_unavailable"
+    assert state["unavailable"] is False
+    assert state["retry_scope"] == "chunk"
+    assert issues[0]["reason"] == "rewrite_ai_transient"
     assert issues[0]["error_type"] == "TimeoutError"
 
 @pytest.mark.asyncio
@@ -1671,7 +1717,7 @@ async def test_c7_rewrite_client_setup_failure_is_non_fatal(monkeypatch, tmp_pat
             source_text="source",
             translated_text=(
                 "Đây là một câu tiếng Việt cố ý rất dài để kích hoạt bước "
-                "rút gọn trước khi tổng hợp giọng nói."
+                "rút gọn sau khi đo giọng nói."
             ),
             source_start_ms=0,
             source_end_ms=500,
@@ -1688,7 +1734,7 @@ async def test_c7_rewrite_client_setup_failure_is_non_fatal(monkeypatch, tmp_pat
     async def fake_generate(text, *, output_path, **kwargs):
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(b"raw")
-        return 450
+        return 1400
 
     def fake_fit(source, destination, speed_factor):
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -1761,17 +1807,23 @@ async def test_c7_targeted_regeneration_never_rewrites_reused_chunk(
     ])
     work = tmp_path / "work"
     work.mkdir()
+    # Seeded durations make both chunks genuinely MEASURED-overlong (500 ms
+    # windows). Since Y1 the estimate no longer authorises a rewrite, so the
+    # measured duration is what must drive chunk 2's rewrite; chunk 1 must stay
+    # immutable because it is not a regeneration target.
     _seed_reusable_chunk(
         work,
         1,
         "đây là câu rất dài dùng để buộc estimator muốn rewrite nhưng chunk này phải được reuse nguyên trạng",
         "A",
+        duration_ms=670,
     )
     _seed_reusable_chunk(
         work,
         2,
         "đây cũng là câu dài để chunk mục tiêu được phép rewrite trước khi regenerate",
         "B",
+        duration_ms=1550,
     )
 
     monkeypatch.setattr(ls, "_profile_ai_client", lambda *_: object())
@@ -1781,10 +1833,18 @@ async def test_c7_targeted_regeneration_never_rewrites_reused_chunk(
         return 400
 
     generated = []
+    synth_calls = []
+
     async def fake_generate(text, *, output_path, **kwargs):
         generated.append(output_path.name)
+        synth_calls.append(text)
         output_path.write_bytes(b"new")
-        return 400
+        # Chunk 2 is the regeneration target, so its MEASURED duration is what
+        # authorises a rewrite; since Y1 the estimate no longer can. The first
+        # synthesis overflows chunk 2's ~1150 ms allocated window (>1.30x) but
+        # stays under emergency_speed_max. Once the rewrite has shortened the
+        # text the next synthesis fits, so the loop converges in one rewrite.
+        return 1500 if len(synth_calls) == 1 else 900
 
     adapted = []
     async def fake_adapt(ai, *, plan, chunk, segment_by_id, **kwargs):
@@ -1826,7 +1886,15 @@ async def test_c7_targeted_regeneration_never_rewrites_reused_chunk(
     )
 
     assert adapted == [2]
-    assert generated == ["chunk_0002.pending.wav"]
+    # Chunk 2 is synthesized once before the measured-overflow rewrite and once
+    # after it; chunk 1 is reused and never synthesized.
+    assert [name.split(".rewrite-", 1)[0].split(".pending", 1)[0] for name in generated] == [
+        "chunk_0002", "chunk_0002",
+    ]
+    assert ".rewrite-" not in generated[0]
+    assert ".rewrite-" in generated[1], "Rewrite candidate must not overwrite last-good audio"
+    assert len(set(generated)) == len(generated), "Every generation owns a distinct pending path"
+    assert all(name.endswith(".wav") for name in generated)
     assert (work / "chunk_0002.wav").read_bytes() == b"new"
     assert result.transcript.segments[0].translated_text.startswith("đây là câu rất dài")
     assert result.transcript.segments[1].translated_text == "ngắn"
@@ -1989,7 +2057,7 @@ async def test_atomic_chunk_regeneration_preserves_previous_audio_on_failure(
         )
 
     assert target.read_bytes() == b"previous-good-audio"
-    assert not (tmp_path / "chunk_0001.pending.wav").exists()
+    assert {path.name for path in tmp_path.iterdir()} == {target.name}, "Failed generation leaves no pending artifact"
 
 
 
@@ -2033,6 +2101,7 @@ async def test_adapt_chunk_invalid_shape_records_qc_warning():
         target_ms=1000,
         profile=_profile(),
         issues=issues,
+        state={"measured_duration_ms": 1800, "attempt": 1},
     )
     assert changed is False
     assert issues[0]["reason"] == "rewrite_invalid_response"
@@ -2419,6 +2488,8 @@ async def test_translation_recursive_shape_split_shares_one_batch_deadline(monke
         stage="translation",
         route_state=None,
         deadline_at=None,
+        dispatch_budget=None,
+        cancel_check=None,
     ):
         seen_deadlines.append(deadline_at)
         return "[]"
@@ -2762,3 +2833,196 @@ async def test_all_malformed_translation_routes_attach_terminal_route_audit(monk
     assert exc.value.ai_selected_connection == "lmstudio-qwen"
     assert exc.value.ai_attempt_count == 2
     assert exc.value.ai_success_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first_ms", [1000, 1150, 1250])
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_targeted_retry_preserves_measured_non_target_windows(
+    monkeypatch, tmp_path, first_ms, legacy,
+):
+    tx = LocalizationTranscript(segments=[
+        LocalizationSegment(id="a", speaker_id="A", source_text="first",
+            translated_text="Giữ lời đầu.", source_start_ms=0, source_end_ms=800,
+            translation_status="success"),
+        LocalizationSegment(id="b", speaker_id="B", source_text="second",
+            translated_text="Câu thứ hai dài hơn nhiều.", source_start_ms=1400,
+            source_end_ms=1800, translation_status="success"),
+    ])
+    original = tx.model_dump()
+    calls = _patch_dub_io(monkeypatch, tmp_path, [first_ms, 300, 200, 500])
+    profile = _profile(dub_rewrite_attempts=0)
+    work = tmp_path / "work"
+    async def run_dub(targets=None):
+        return await ls.synthesize_timed_dub(
+            tx, source_media=tmp_path / "source.mp4", target_language="Vietnamese",
+            profile=profile, user_settings=object(), work_dir=work,
+            regenerate_chunk_ids=targets, reuse_existing_chunks=bool(targets),
+        )
+
+    full = await run_dub()
+    assert full.chunks
+    frozen = (full.chunks[0].start_ms, full.chunks[0].end_ms)
+    assert frozen[1] > 800, "fixture must reclaim actual, not estimated, slack"
+    raw = work / "chunk_0001.wav"
+    before = (raw.read_bytes(), raw.stat().st_mtime_ns)
+    if legacy:
+        state_path = work / "dubbing_state.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state.pop("measured_allocation", None)
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+    for _ in range(2):
+        retry = await run_dub({2})
+        assert retry.chunks
+        assert (retry.chunks[0].start_ms, retry.chunks[0].end_ms) == frozen
+        assert retry.chunks[0].end_ms <= retry.chunks[1].start_ms
+        assert (raw.read_bytes(), raw.stat().st_mtime_ns) == before
+        assert tx.model_dump() == original
+    assert calls["n"] == 4, "only the requested chunk may regenerate"
+
+
+def _pressure_transcript(count=12):
+    return LocalizationTranscript(language="en", segments=[LocalizationSegment(
+        id=f"p{i}", source_text="Do not move." if i == 7 else "Hello.",
+        source_start_ms=i * 1000, source_end_ms=(i + 1) * 1000,
+    ) for i in range(count)])
+
+
+class _PartialTranslationAI:
+    connection_name = "qa-partial"
+    provider = SimpleNamespace(value="compatible")
+    model = "qa-model"
+    base_url = "http://localhost:9655/v1"
+    max_retries = 0
+
+    def __init__(self, *, repair=False, crash=False):
+        self.repair = repair
+        self.crash = crash
+        self.ids = []
+
+    async def chat(self, messages, **kwargs):
+        prompt = messages[0]["content"]
+        items = json.loads(prompt.split("SEGMENTS:\n", 1)[1].split("\n\nReturn ONLY", 1)[0])
+        self.ids.append([x["id"] for x in items])
+        if self.crash and len(self.ids) == 2:
+            raise RuntimeError("provider unavailable during repair")
+        return json.dumps([{"id": x["id"], "text": (
+            "Đừng di chuyển." if self.repair and x["id"] == "p7"
+            else "Di chuyển." if x["id"] == "p7" else "Xin chào."
+        )} for x in items], ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_semantic_repair_only_sends_rejected_id(monkeypatch):
+    ai = _PartialTranslationAI(repair=True)
+    original = ai.chat
+
+    async def first_bad_then_good(*args, **kwargs):
+        ai.repair = bool(ai.ids)
+        return await original(*args, **kwargs)
+
+    ai.chat = first_bad_then_good
+    monkeypatch.setattr(ls, "_profile_ai_client", lambda *_: ai)
+    result = await ls.translate_transcript(_pressure_transcript(), target_language="vi",
+        profile=_profile(glossary={}, qc_profile="strict"), user_settings=object(), for_dub=True)
+    assert ai.ids == [[f"p{i}" for i in range(12)], ["p7"]]
+    assert all(x.translation_status == "success" for x in result.segments)
+    assert result.segments[7].translated_text == "Đừng di chuyển."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("crash", [False, True])
+async def test_partial_checkpoint_survives_semantic_or_transport_failure(monkeypatch, tmp_path, crash):
+    ai = _PartialTranslationAI(crash=crash)
+    monkeypatch.setattr(ls, "_profile_ai_client", lambda *_: ai)
+    profile = _profile(glossary={}, qc_profile="strict", translation_retry_attempts=1)
+    kwargs = dict(target_language="vi", profile=profile, user_settings=object(),
+                  for_dub=True, checkpoint_dir=tmp_path)
+    with pytest.raises(RuntimeError):
+        await ls.translate_transcript(_pressure_transcript(), **kwargs)
+    checkpoint = json.loads((tmp_path / "checkpoint.json").read_text(encoding="utf-8"))
+    saved = checkpoint["batches"]["0"]
+    assert [x["id"] for x in saved["items"]] == [f"p{i}" for i in range(12) if i != 7]
+    assert saved["pending_ids"] == ["p7"]
+    assert ai.ids == [[f"p{i}" for i in range(12)], ["p7"]]
+    accepted_before = saved["items"]
+    repaired = _PartialTranslationAI(repair=True)
+    monkeypatch.setattr(ls, "_profile_ai_client", lambda *_: repaired)
+    result = await ls.translate_transcript(_pressure_transcript(), **kwargs)
+    assert repaired.ids == [["p7"]]
+    assert all(x.translation_status == "success" for x in result.segments)
+    after = json.loads((tmp_path / "checkpoint.json").read_text(encoding="utf-8"))["batches"]["0"]
+    assert [x for x in after["items"] if x["id"] != "p7"] == accepted_before
+    assert after["pending_ids"] == []
+
+
+@pytest.mark.asyncio
+async def test_malformed_batches_split_once_inside_original_budget():
+    class Malformed:
+        calls = 0
+
+        async def chat(self, **kwargs):
+            self.calls += 1
+            return "not JSON"
+
+    ai = Malformed()
+    texts, failed = await ls._translate_batch_resilient(ai, _pressure_transcript().segments,
+        target_language="vi", source_language="en", context="context",
+        profile=_profile(glossary={}), for_dub=True)
+    assert ai.calls == 3  # initial + two halves, no singleton fan-out
+    assert failed == set(range(12))
+    assert len(texts) == 12
+
+
+@pytest.mark.asyncio
+async def test_transport_and_shape_retries_share_four_dispatch_budget(monkeypatch):
+    class Transient(RuntimeError):
+        status_code = 503
+
+    class Failing:
+        calls = 0
+
+        async def chat(self, **kwargs):
+            self.calls += 1
+            if self.calls % 2:
+                raise Transient("transport unavailable")
+            return "not JSON"
+
+    async def no_sleep(_):
+        pass
+
+    monkeypatch.setattr(ls.asyncio, "sleep", no_sleep)
+    ai = Failing()
+    with pytest.raises(RuntimeError, match="dispatch budget"):
+        await ls._translate_batch_resilient(ai, _pressure_transcript().segments,
+            target_language="vi", context="context", profile=_profile(glossary={},
+                translation_retry_attempts=3), for_dub=True)
+    assert ai.calls == 4
+
+
+@pytest.mark.asyncio
+async def test_name_conflict_repairs_all_dependent_items_but_keeps_independent():
+    batch = [LocalizationSegment(id=f"n{i}", source_text=source,
+        source_start_ms=i * 1000, source_end_ms=(i + 1) * 1000)
+        for i, source in enumerate(["张三来了", "张三走了", "你好"])]
+
+    class Names:
+        ids = []
+
+        async def chat(self, messages, **kwargs):
+            items = json.loads(messages[0]["content"].split("SEGMENTS:\n", 1)[1].split("\n\nReturn ONLY", 1)[0])
+            self.ids.append([x["id"] for x in items])
+            return json.dumps([{"id": x["id"], "text": (
+                "Trương Tam đến." if x["id"] == "n0" else "Trương Ba đi." if x["id"] == "n1" else "Xin chào."
+            ), "localized_terms": {"张三": "Trương Tam" if x["id"] == "n0" else "Trương Ba"}
+                if x["id"] != "n2" else {}} for x in items], ensure_ascii=False)
+
+    ai = Names()
+    terms = {}
+    texts, failed = await ls._translate_batch_resilient(ai, batch,
+        source_language="zh", target_language="vi", context="context",
+        profile=_profile(glossary={}), for_dub=True, localized_terms=terms)
+    assert ai.ids == [["n0", "n1", "n2"], ["n0", "n1"]]
+    assert failed == {0, 1}
+    assert texts[2] == "Xin chào."
+    assert terms == {}  # conflicting names must never be committed arbitrarily

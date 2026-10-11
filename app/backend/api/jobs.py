@@ -1,11 +1,15 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (c) 2025-2026 ViralMint Contributors
 """REST /api/jobs — job CRUD + status."""
+import base64
+import binascii
 import logging
+from datetime import datetime
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from sqlalchemy import select, text
+from sqlalchemy import and_, or_, select, text
 
 from backend.database import AsyncSessionLocal
 from backend.models.job import Job
@@ -13,6 +17,36 @@ from backend.agents.job_helper import update_job_status
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _encode_job_cursor(row) -> str:
+    """Anchor a keyset page on the last row's immutable identity.
+
+    (created_at, id) is stable for the life of a row, unlike a position in a
+    filtered list. Encoded rather than exposed as two query params so a caller
+    cannot pair a timestamp from one page with an id from another.
+
+    A row with no created_at (pre-migration data, written before the column
+    existed) encodes the empty string, which decodes back to the SAME
+    sentinel rather than raising. The keyset predicate sorts such a row to the
+    very end of the walk, so it is served exactly once and cannot strand the
+    pages before it - failing the whole restore on one legacy row would trade
+    a cosmetic gap for a visible outage.
+    """
+    raw = f"{row.created_at.isoformat() if row.created_at else ''}|{row.id}"
+    return base64.urlsafe_b64encode(raw.encode("utf-8")).decode("ascii")
+
+
+def _decode_job_cursor(cursor: str) -> tuple[datetime | None, str]:
+    try:
+        raw = base64.urlsafe_b64decode(cursor.encode("ascii")).decode("utf-8")
+        created_at_raw, _, cursor_id = raw.partition("|")
+        if not cursor_id:
+            raise ValueError("malformed cursor")
+        created_at = datetime.fromisoformat(created_at_raw) if created_at_raw else None
+        return created_at, cursor_id
+    except (ValueError, binascii.Error, UnicodeDecodeError) as exc:
+        raise ValueError("Malformed pagination cursor") from exc
 
 
 class JobResponse(BaseModel):
@@ -40,6 +74,7 @@ async def list_jobs(
     job_type: Optional[str] = None,
     limit: int = 20,
     offset: int = 0,
+    cursor: Optional[str] = None,
 ):
     """List jobs, optionally filtered by status and/or type.
 
@@ -48,6 +83,23 @@ async def list_jobs(
     was issuing one request per status on every page load; one filter answers
     both. A single value still means what it always did, so every existing
     caller is unaffected.
+
+    `cursor` is an OPTIONAL keyset continuation for callers paging a set that
+    changes while they read it. Offset paging cannot be used there: the restore
+    filter is on `status`, so a job that finishes LEAVES the result set and
+    every later row shifts one position toward the head. Reading page 2 at a
+    fixed offset then skips real, still-active rows - measured at 10 jobs lost
+    out of 250 when 10 finished between two pages. The cursor anchors on the
+    last row's immutable (created_at, id) instead of on a POSITION, so rows
+    leaving the set cannot move the window.
+
+    `offset` keeps its previous meaning: same window, same `total`, same
+    newest-first order. The only change it can observe is `next_cursor`, which
+    is additive and ignored by offset callers. The `(created_at, id)` tie-break
+    added to the ORDER BY makes the order deterministic where it previously
+    was not - rows sharing a created_at used to come back in whatever order
+    SQLite produced, which is exactly the instability a keyset cursor cannot
+    tolerate.
     """
     async with AsyncSessionLocal() as db:
         statuses = [s.strip() for s in (status or "").split(",") if s.strip()]
@@ -68,13 +120,61 @@ async def list_jobs(
             select(func.count(Job.id)).where(*filters)
         )).scalar()
 
-        query = base.order_by(Job.created_at.desc()).offset(offset).limit(limit)
+        # `id` is the tie-breaker on both sides. created_at alone is not a
+        # total order: rows admitted in the same tick share a timestamp, and an
+        # unstable tie-break makes a cursor skip or repeat those rows.
+        if cursor:
+            try:
+                created_at, cursor_id = _decode_job_cursor(cursor)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            # A NULL anchor means every dated row precedes it, so the legacy
+            # rows behind it are all still served. `IS NULL` rows sort last
+            # under `created_at DESC` on SQLite, so they must be included
+            # explicitly rather than dropped by `<` against NULL.
+            if created_at is None:
+                base = base.where(or_(
+                    Job.created_at.is_(None),
+                    and_(Job.created_at.is_not(None), Job.id < cursor_id),
+                ))
+            else:
+                base = base.where(or_(
+                    Job.created_at < created_at,
+                    and_(Job.created_at == created_at, Job.id < cursor_id),
+                ))
+            query = base.order_by(
+                Job.created_at.desc(), Job.id.desc(),
+            ).limit(limit)
+        else:
+            # The offset path gets the SAME deterministic ordering, so a
+            # caller that pages by offset and one that pages by cursor agree
+            # on which rows exist - only the windowing differs.
+            query = base.order_by(
+                Job.created_at.desc(), Job.id.desc(),
+            ).offset(offset).limit(limit)
         result = await db.execute(query)
         jobs = result.scalars().all()
 
+    # A continuation is offered whenever the page came back FULL.
+    #
+    # It is NOT gated on "did the caller send a cursor": the FIRST keyset
+    # page is sent WITHOUT one, and gating there would leave it without a
+    # token, so a caller walking from the start would stop after one page -
+    # the exact truncation this replaced. Gating on `offset` is no better:
+    # offset=0 is both the default and a real window, so no value of it can
+    # express intent.
+    #
+    # An offset caller simply ignores the token - its next call carries an
+    # offset, and the window it receives is unchanged either way. The
+    # restore is the keyset consumer; `total` and the row window keep their
+    # previous meaning for everyone.
+    next_cursor = (
+        _encode_job_cursor(jobs[-1]) if jobs and len(jobs) >= limit else None
+    )
     return {
         "total": total,
-        "jobs": [
+        "next_cursor": next_cursor,
+    "jobs": [
             {
                 "id": j.id,
                 "job_type": j.job_type,

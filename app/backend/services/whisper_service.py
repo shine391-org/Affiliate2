@@ -9,6 +9,7 @@ import os
 import sys
 import threading
 import time
+import weakref
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -160,11 +161,46 @@ def resolve_whisper_model(quality: str = "balanced", model_name: str | None = No
     return WHISPER_QUALITY_MAP[quality]
 
 
+def _describe_executed(model, provenance: dict, *, fallback_reason=None) -> dict:
+    """Describe the executor of ``model`` after it really produced a transcript.
+
+    The device/compute type are read back from the model INSTANCE that decoded
+    the audio, not from the requested values and not from class-level state
+    another job may have changed. faster-whisper's WhisperModel keeps the
+    resolved ``device``/``compute_type`` as attributes; anything unknown falls
+    back to the load-time values rather than inventing a claim.
+    """
+    out = dict(provenance)
+    device = getattr(model, "device", None)
+    compute_type = getattr(model, "compute_type", None)
+    if device or compute_type:
+        # The instance is authoritative for BOTH fields or for neither. Keeping
+        # a class-level value for the half it does not expose produced a record
+        # whose device described this model and whose compute type described
+        # whichever singleton happened to be resident - a claim about no real
+        # executor. Unknown stays unknown.
+        out["device"] = device or None
+        out["compute_type"] = compute_type or None
+    if fallback_reason is not None:
+        out["fallback_used"] = True
+        out["fallback_reason"] = str(fallback_reason)[:220]
+    return out
+
+
 class WhisperService:
     _model = None
     _loaded_quality = None
     _loaded_model_name = None
     _loaded_device = None
+    # The compute type the RESIDENT model was constructed with. Device alone
+    # is not provenance: "cuda" says nothing about float16 vs int8, and the
+    # CUDA->CPU fallback silently changes both. Recorded together with the
+    # model so a manifest can state the executor that really ran.
+    _loaded_compute_type = None
+    # Executor description keyed BY THE MODEL INSTANCE that was loaded, not by
+    # class state. A concurrent job that swaps the singleton must not be able to
+    # change what this caller records about the model it is still iterating.
+    _executor_by_model: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
     _lock = threading.Lock()
     _last_used = 0.0
     _evict_task = None
@@ -229,6 +265,9 @@ class WhisperService:
     def load_with_device(cls, quality: str = "balanced", model_name: str | None = None):
         """Return ``(model, device)`` captured atomically under the singleton lock.
 
+        Kept for backward compatibility; ``load_with_provenance`` is the richer
+        form used by new callers that need to record what actually ran.
+
         The device has to travel WITH the model instance. `_loaded_device` is
         class-level mutable state: when a CUDA compute failure makes one job
         swap the singleton for a CPU model, every other in-flight caller that
@@ -237,12 +276,79 @@ class WhisperService:
         concurrent failure re-raise instead of reusing the CPU singleton the
         first job had just built.
         """
+        model, provenance = cls.load_with_provenance(quality, model_name=model_name)
+        return model, provenance["device"]
+
+    @classmethod
+    def describe_executor(cls, model, device: str | None = None) -> dict:
+        """Executor provenance for ``model``, as recorded when it was loaded.
+
+        Falls back to the values ``load_with_device`` returned for the device,
+        and to the resident compute type, so a caller that only has the model
+        and a device string still records something truthful instead of a
+        guessed device. Never invents a device it cannot substantiate.
+        """
+        with cls._lock:
+            recorded = cls._executor_by_model.get(model)
+        if recorded is not None:
+            return dict(recorded)
+        instance_device = getattr(model, "device", None)
+        instance_compute = getattr(model, "compute_type", None)
+        if instance_device or instance_compute:
+            # An instance that exposes its own executor is described BY it.
+            # Its model identity was never recorded here, so it stays unknown.
+            return {
+                "model": None,
+                "device": instance_device or device,
+                "compute_type": instance_compute,
+                "requested_device": device,
+                "fallback_used": False,
+                "fallback_reason": None,
+            }
+        if cls._model is model:
+            # The resident singleton: class state IS this instance's state.
+            return {
+                "model": cls._loaded_model_name,
+                "device": device if device is not None else cls._loaded_device,
+                "compute_type": cls._loaded_compute_type,
+                "requested_device": device if device is not None else cls._loaded_device,
+                "fallback_used": False,
+                "fallback_reason": None,
+            }
+        # No record and no instance attributes: this model's executor is simply
+        # not known. Reporting the resident singleton's model/device/compute
+        # would attribute another model's execution to this instance.
+        return {
+            "model": None,
+            "device": device,
+            "compute_type": None,
+            "requested_device": device,
+            "fallback_used": False,
+            "fallback_reason": None,
+        }
+
+    @classmethod
+    def load_with_provenance(cls, quality: str = "balanced", model_name: str | None = None):
+        """Return ``(model, provenance)`` for the model this caller will execute.
+
+        ``provenance`` describes the executor bound to THIS model instance, not
+        the class-level singleton as it may be by the time it is read:
+        ``model``, ``device``, ``compute_type``, the ``requested_device`` the
+        load started from, and whether the construction itself had to fall back.
+        ``transcribe()`` extends this with whether a LAZY (during-generation)
+        fallback actually executed.
+        """
         resolved_model = resolve_whisper_model(quality, model_name)
         with cls._lock:
+            # Reused singleton: there is no fresh selection, so the executor
+            # requested for this call is simply the one already resident.
+            requested_device = cls._loaded_device
+            load_fallback_reason = None
             if cls._model is None or cls._loaded_model_name != resolved_model:
                 register_nvidia_dll_directories()
                 from faster_whisper import WhisperModel
-                device, compute_type = cls._select_device()
+                requested_device, compute_type = cls._select_device()
+                device = requested_device
                 logger.info("Loading Whisper model: %s (quality=%s, device=%s, compute=%s)",
                             resolved_model, quality, device, compute_type)
                 try:
@@ -252,25 +358,41 @@ class WhisperService:
                         compute_type=compute_type,
                     )
                     cls._loaded_device = device
+                    cls._loaded_compute_type = compute_type
                 except Exception as exc:
-                    if device != "cpu" and _is_cuda_runtime_error(exc):
+                    if requested_device != "cpu" and _is_cuda_runtime_error(exc):
                         logger.warning(
                             "Failed to initialize Whisper on %s (%s): %s. Falling back to CPU int8.",
-                            device, compute_type, exc,
+                            requested_device, compute_type, exc,
                         )
                         cls._model = WhisperModel(
                             resolved_model,
                             device="cpu",
                             compute_type="int8",
                         )
+                        device = "cpu"
                         cls._loaded_device = "cpu"
+                        cls._loaded_compute_type = "int8"
+                        load_fallback_reason = str(exc)
                     else:
                         raise
                 cls._loaded_quality = quality
                 cls._loaded_model_name = resolved_model
                 logger.info("Whisper model '%s' loaded successfully on %s", resolved_model, cls._loaded_device)
             cls._last_used = time.monotonic()
-            return cls._model, cls._loaded_device
+            provenance = {
+                "model": resolved_model,
+                "device": cls._loaded_device,
+                "compute_type": cls._loaded_compute_type,
+                "requested_device": requested_device,
+                "fallback_used": load_fallback_reason is not None,
+                "fallback_reason": load_fallback_reason,
+            }
+            try:
+                cls._executor_by_model[cls._model] = dict(provenance)
+            except TypeError:  # a non-weakrefable stand-in model
+                pass
+            return cls._model, provenance
 
     @classmethod
     def _replace_failed_cuda_model(cls, failed_model, resolved_model: str, quality: str, exc: BaseException):
@@ -291,6 +413,7 @@ class WhisperService:
             )
             cls._model = None
             cls._loaded_device = None
+            cls._loaded_compute_type = None
             from faster_whisper import WhisperModel
             cls._model = WhisperModel(
                 resolved_model,
@@ -300,6 +423,18 @@ class WhisperService:
             cls._loaded_quality = quality
             cls._loaded_model_name = resolved_model
             cls._loaded_device = "cpu"
+            cls._loaded_compute_type = "int8"
+            try:
+                cls._executor_by_model[cls._model] = {
+                    "model": resolved_model,
+                    "device": "cpu",
+                    "compute_type": "int8",
+                    "requested_device": "cuda",
+                    "fallback_used": True,
+                    "fallback_reason": str(exc)[:220],
+                }
+            except TypeError:
+                pass
             return cls._model
 
     @classmethod
@@ -313,6 +448,7 @@ class WhisperService:
             cls._loaded_quality = None
             cls._loaded_model_name = None
             cls._loaded_device = None
+            cls._loaded_compute_type = None
         import gc
         gc.collect()
         # Do not import torch just to clean Whisper. If Demucs/WhisperX already
@@ -414,8 +550,12 @@ class WhisperService:
         # `initial_device` is the device THIS invocation's model was loaded on.
         # It is captured together with the model, before any compute happens, so
         # the CUDA→CPU fallback below cannot be flipped by another job swapping
-        # the class-level singleton to CPU mid-flight.
+        # the class-level singleton to CPU mid-flight. The whole executor
+        # description (device AND compute type) travels with it and is returned
+        # to the caller, so a manifest records what really decoded the audio
+        # rather than what was merely requested.
         model, initial_device = self.load_with_device(quality, model_name=model_name)
+        provenance = type(self).describe_executor(model, initial_device)
 
         # Duration serves two decisions: the progress fraction denominator AND
         # whether this transcription is long enough to take the batch gate.
@@ -483,9 +623,10 @@ class WhisperService:
                     Path(audio_path).name, total_duration,
                 )
                 gate.acquire()
+            executed = dict(provenance)
             try:
                 try:
-                    return _consume(model)
+                    return _consume(model), executed
                 except Exception as exc:
                     # Decide from the device this invocation STARTED on, not from
                     # the class-level singleton. A concurrent job that already
@@ -499,7 +640,14 @@ class WhisperService:
                         quality,
                         exc,
                     )
-                    return _consume(cpu_model)
+                    # Record the fallback ONLY after the retry has actually run.
+                    # A lazy CTranslate2 failure can recur on the CPU model too,
+                    # and a manifest must never claim a CPU executor that did not
+                    # finish the job.
+                    result, executed = _consume(cpu_model), _describe_executed(
+                        cpu_model, provenance, fallback_reason=exc,
+                    )
+                    return result, executed
             finally:
                 if gate is not None:
                     gate.release()
@@ -507,7 +655,10 @@ class WhisperService:
         with type(self)._lock:
             type(self)._active_transcriptions += 1
         try:
-            return await asyncio.to_thread(_run)
+            result, executed = await asyncio.to_thread(_run)
+            executed["timing_only"] = bool(timing_only)
+            result["asr_provenance"] = executed
+            return result
         finally:
             with type(self)._lock:
                 type(self)._active_transcriptions = max(

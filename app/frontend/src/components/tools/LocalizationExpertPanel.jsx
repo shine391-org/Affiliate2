@@ -8,6 +8,7 @@ import RefreshOutlinedIcon from "@mui/icons-material/RefreshOutlined"
 import ReplayOutlinedIcon from "@mui/icons-material/ReplayOutlined"
 import SaveOutlinedIcon from "@mui/icons-material/SaveOutlined"
 import http from "../../api/http"
+import SpeakerVoicePanel from "./SpeakerVoicePanel"
 import useAppStore from "../../store/appStore"
 import { resolveAiStageSelection } from "../../localizationPreview"
 import { ProviderBindingChip, ProviderBindingRerunDialog } from "./ProviderBindingRerun"
@@ -34,12 +35,14 @@ function SegmentEditor({ segment, onSave, busy }) {
   const [start, setStart] = useState(segment.overrides?.target_start_ms ?? "")
   const [end, setEnd] = useState(segment.overrides?.target_end_ms ?? "")
   const [voice, setVoice] = useState(segment.overrides?.voice_id || "")
+  const [speaker, setSpeaker] = useState(segment.speaker_id || "")
 
   useEffect(() => {
     setText(segment.translated_text || "")
     setStart(segment.overrides?.target_start_ms ?? "")
     setEnd(segment.overrides?.target_end_ms ?? "")
     setVoice(segment.overrides?.voice_id || "")
+    setSpeaker(segment.speaker_id || "")
   }, [segment])
 
   const save = () => {
@@ -47,6 +50,8 @@ function SegmentEditor({ segment, onSave, busy }) {
       id: segment.id,
       translated_text: text,
       voice_id: voice,
+      speaker_id: speaker,
+      clear_voice: !voice.trim(),
     }
     if (start !== "" || end !== "") {
       payload.target_start_ms = Number(start)
@@ -83,6 +88,7 @@ function SegmentEditor({ segment, onSave, busy }) {
         onChange={(e) => setVoice(e.target.value)}
         placeholder="ID giọng của nhà cung cấp (tùy chọn)"
       />
+      <TextField label="Người nói" size="small" value={speaker} onChange={(event) => setSpeaker(event.target.value)} placeholder="SPEAKER_00" />
       <Button
         size="small"
         variant="outlined"
@@ -353,6 +359,8 @@ export default function LocalizationExpertPanel({ jobId }) {
 
   return (
     <Stack spacing={2}>
+      <SpeakerVoicePanel key={jobId} jobId={jobId} detail={detail}
+        disabled={busy || ["pending", "running"].includes(detail?.job_status)} onSaved={load} />
       {finalReady && (
         <Box component="video" src={"/api/tools/download/" + jobId} controls playsInline sx={{ width: "100%", borderRadius: 1.5, bgcolor: "#000" }} />
       )}
@@ -396,6 +404,13 @@ export default function LocalizationExpertPanel({ jobId }) {
             ? " · tỷ lệ giọng đọc " + Math.round(qc.metrics.speech_coverage_ratio * 100) + "%"
             : ""}
           {detail?.qc_human_approved ? " · Đã được người dùng duyệt" : ""}
+        </Alert>
+      )}
+
+      {stages?.asr?.metadata?.asr && (
+        <Alert severity={stages.asr.metadata.asr.fallback_reason ? "warning" : "info"} variant="outlined">
+          ASR thực tế: {stages.asr.metadata.asr.provider} / {stages.asr.metadata.asr.model}
+          {stages.asr.metadata.asr.fallback_reason ? ` · fallback: ${stages.asr.metadata.asr.fallback_reason}` : ""}
         </Alert>
       )}
 

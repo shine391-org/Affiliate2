@@ -18,7 +18,10 @@ function sameJobs(a, b) {
     const x = a[i], y = b[i]
     if (x.id !== y.id || x.status !== y.status ||
         x.progress_pct !== y.progress_pct || x.current_step !== y.current_step ||
-        x.output_json !== y.output_json || x.error_message !== y.error_message) {
+        x.output_json !== y.output_json || x.error_message !== y.error_message ||
+        x.title !== y.title || x.job_type !== y.job_type ||
+        x.input_json !== y.input_json || x.estimated_cost_usd !== y.estimated_cost_usd ||
+        x.started_at !== y.started_at || x.completed_at !== y.completed_at) {
       return false
     }
   }
@@ -40,10 +43,13 @@ export default function useJobs(pollInterval = 5000, pageSize = 20) {
   const [jobTotal, setJobTotal] = useState(0)
   const timerRef = useRef(null)
   const tickRef = useRef(0)
+  const fetchRequestRef = useRef(0)
 
   const fetchJobs = async (limit = pageSize, offset = 0) => {
+    const requestId = ++fetchRequestRef.current
     try {
       const { data } = await http.get("/api/jobs", { params: { limit, offset } })
+      if (requestId !== fetchRequestRef.current) return null
       const next = data.jobs || []
       const store = useAppStore.getState()
       const prev = store.jobs
@@ -54,13 +60,38 @@ export default function useJobs(pollInterval = 5000, pageSize = 20) {
       // leaves activeJobs saying "running" forever even though the DB row is
       // awaiting_review (same problem for missed success/failure events).
       const byId = new Map(next.map((job) => [job.id, job]))
+      const missingActive = []
       Object.keys(store.activeJobs || {}).forEach((jobId) => {
         const persisted = byId.get(jobId)
         if (persisted && !ACTIVE_STATUSES.has(persisted.status)) {
           store.removeJob(jobId)
+        } else if (!persisted) {
+          missingActive.push(jobId)
         }
       })
 
+      // A long-running upload/localization can fall beyond the 200 newest rows.
+      // Reconcile exactly those known active IDs; do not infer termination
+      // from their absence in the paginated list.
+      if (missingActive.length) {
+        await Promise.all(missingActive.map(async (jobId) => {
+          try {
+            const { data: live } = await http.get(`/api/jobs/${jobId}`)
+            if (requestId === fetchRequestRef.current &&
+                !ACTIVE_STATUSES.has(live.status) &&
+                useAppStore.getState().activeJobs[jobId]) {
+              useAppStore.getState().removeJob(jobId)
+            }
+          } catch (error) {
+            // Network failures must not erase a still-running job.
+            if (error.response?.status === 404 && requestId === fetchRequestRef.current) {
+              useAppStore.getState().removeJob(jobId)
+            }
+          }
+        }))
+      }
+
+      if (requestId !== fetchRequestRef.current) return null
       setJobTotal(data.total || 0)
       return next
     } catch (err) {
@@ -75,7 +106,9 @@ export default function useJobs(pollInterval = 5000, pageSize = 20) {
     const tick = () => {
       if (document.visibilityState === "hidden") return
       // When nothing is in flight, only poll every IDLE_MULTIPLIER-th tick.
-      const anyActive = useAppStore.getState().jobs.some((j) => ACTIVE_STATUSES.has(j.status))
+      const state = useAppStore.getState()
+      const anyActive = state.jobs.some((j) => ACTIVE_STATUSES.has(j.status)) ||
+        Object.keys(state.activeJobs || {}).length > 0
       tickRef.current = anyActive ? 0 : tickRef.current + 1
       if (anyActive || tickRef.current >= IDLE_MULTIPLIER) {
         tickRef.current = 0
@@ -94,10 +127,11 @@ export default function useJobs(pollInterval = 5000, pageSize = 20) {
     document.addEventListener("visibilitychange", onVisible)
 
     return () => {
+      fetchRequestRef.current += 1
       clearInterval(timerRef.current)
       document.removeEventListener("visibilitychange", onVisible)
     }
-  }, [pollInterval])
+  }, [pollInterval, pageSize])
 
   return { jobs, jobTotal, fetchJobs }
 }

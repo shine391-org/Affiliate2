@@ -37,20 +37,32 @@ def _split_long_segment(
     max_duration_ms: int,
 ) -> list[LocalizationSegment]:
     words = [w for w in seg.source_words if isinstance(w, dict)]
-    if seg.source_end_ms - seg.source_start_ms <= max_duration_ms or len(words) < 2:
+    speakers = {w.get("speaker_id") for w in words if w.get("speaker_id")}
+    if (seg.source_end_ms - seg.source_start_ms <= max_duration_ms and len(speakers) <= 1) or len(words) < 2:
+        return [seg.model_copy(deep=True)]
+    if any(_word_ms(w, "start") is None or _word_ms(w, "end") is None
+           or _word_ms(w, "end") <= _word_ms(w, "start") for w in words):
+        # Never drop untimed ASR words just to gain a speaker boundary.
         return [seg.model_copy(deep=True)]
 
     groups: list[list[dict]] = []
     current: list[dict] = []
     start_ms: int | None = None
+    current_speaker = None
 
     for word in words:
         w_start = _word_ms(word, "start")
         w_end = _word_ms(word, "end")
         if w_start is None or w_end is None or w_end < w_start:
             continue
+        speaker = word.get("speaker_id") or seg.speaker_id
+        if current and current_speaker != speaker:
+            groups.append(current)
+            current = []
+            start_ms = None
         if start_ms is None:
             start_ms = w_start
+            current_speaker = speaker
         current.append(word)
         elapsed = w_end - start_ms
         token = str(word.get("word") or "").strip()
@@ -73,12 +85,12 @@ def _split_long_segment(
         end = _word_ms(group[-1], "end")
         if start is None or end is None or end <= start:
             continue
-        text = "".join(str(w.get("word") or "") for w in group).strip()
+        text = _join_words_preserve_spacing([{"text": w.get("word") or ""} for w in group])
         if not text:
             continue
         out.append(LocalizationSegment(
             id=f"{seg.id}.{idx}",
-            speaker_id=seg.speaker_id,
+            speaker_id=group[0].get("speaker_id") or seg.speaker_id,
             source_text=text,
             source_start_ms=start,
             source_end_ms=end,
@@ -215,7 +227,15 @@ def _deterministic_word_groups(words: list[dict]) -> list[list[str]]:
 
         current.append(word["id"])
         token = str(word.get("text") or "")
-        elapsed = int(word["end_ms"]) - int(group_start or word["start_ms"])
+        # `group_start` of 0 is a REAL start (a timeline whose first word begins
+        # at 0 ms), not "unset". The old `group_start or word["start_ms"]`
+        # treated it as missing, so every word's elapsed time was measured
+        # against its own start and the bounded-duration boundary could never
+        # fire on a zero-based timeline: the same 10 x 1 s cue split 6 + 4 when
+        # shifted 1 ms but collapsed into a single 10 s group at 0 ms. Compare
+        # against None explicitly.
+        group_start_ms = int(word["start_ms"] if group_start is None else group_start)
+        elapsed = int(word["end_ms"]) - group_start_ms
         if _STRONG_END.search(token) or elapsed >= 6000:
             groups.append(current)
             current = []

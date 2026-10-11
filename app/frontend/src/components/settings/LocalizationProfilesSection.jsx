@@ -446,6 +446,22 @@ export default function LocalizationProfilesSection({ settings }) {
     setGlossaryText("")
   }
 
+  const addFastProfile = () => {
+    const preset = store.presets?.fast
+    if (!preset) return
+    const id = "vi-affiliate-fast-" + Date.now().toString(36)
+    const base = store.profiles?.find((p) => p.id === store.default_profile_id) || store.profiles?.[0]
+    // Canonical backend preset pins ASR/TTS/timing/QC. Preserve saved C6/C7
+    // routes and prompts only, never inherit paid TTS connections/voice maps.
+    const aiPolicy = Object.fromEntries(Object.entries(base || {}).filter(([key]) =>
+      (key.startsWith("translation_") && key !== "translation_automation") || key.startsWith("rewrite_") || key === "glossary"
+    ))
+    const next = { ...clone(preset), ...clone(aiPolicy), id }
+    setSelectedId(id)
+    setDraft(normalizeProfile(next))
+    setGlossaryText(glossaryToText(next.glossary))
+  }
+
   const remove = async () => {
     if (!selectedId) return
     setBusy(true)
@@ -507,6 +523,7 @@ export default function LocalizationProfilesSection({ settings }) {
           </Select>
         </FormControl>
         <Button startIcon={<AddOutlinedIcon />} variant="outlined" onClick={addProfile} disabled={busy}>Mới</Button>
+        <Button startIcon={<AddOutlinedIcon />} variant="outlined" onClick={addFastProfile} disabled={busy || !store.presets?.fast}>Fast</Button>
       </Stack>
 
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
@@ -570,6 +587,16 @@ export default function LocalizationProfilesSection({ settings }) {
                 {PRESETS.map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
               </Select>
             </FormControl>
+            <FormControl size="small" fullWidth>
+              <InputLabel id="localization-automation-label">Tự động xử lý lỗi dịch</InputLabel>
+              <Select labelId="localization-automation-label" value={draft.translation_automation || "strict"} label="Tự động xử lý lỗi dịch" onChange={(e) => patch("translation_automation", e.target.value)}>
+                <MenuItem value="strict">Strict — chặn bản dịch chưa đạt kiểm tra</MenuItem>
+                <MenuItem value="auto">Auto — ưu tiên ra bản nháp, ghi rõ lỗi cần duyệt</MenuItem>
+              </Select>
+            </FormControl>
+            <Alert severity={draft.translation_automation === "auto" ? "warning" : "info"} variant="outlined">
+              Auto chấp nhận đánh đổi chất lượng có ghi nhận: tự repair rồi tiếp tục với bản nháp nếu còn bất đồng ngữ nghĩa. Bản nháp có cảnh báo, cần duyệt đúng revision trước xuất bản; không tự publish. Lỗi provider, dữ liệu rỗng hoặc JSON sai không được coi là dịch thành công.
+            </Alert>
             <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
               <TextField
                 size="small" type="number" fullWidth label="Dịch timeout / lần (giây)"
@@ -813,12 +840,64 @@ export default function LocalizationProfilesSection({ settings }) {
           <Stack spacing={2}>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
               <FormControl size="small" fullWidth>
+                <InputLabel id="localization-asr-provider-label">Nhà cung cấp ASR</InputLabel>
+                <Select labelId="localization-asr-provider-label" value={draft.asr_provider || "faster_whisper"} label="Nhà cung cấp ASR" onChange={(e) => setDraft((prev) => ({ ...prev, asr_provider: e.target.value, asr_model: e.target.value === "groq" ? "whisper-large-v3-turbo" : (prev.asr_local_model || "small") }))}>
+                  <MenuItem value="faster_whisper">faster_whisper (Local)</MenuItem>
+                  <MenuItem value="groq">Groq (Cloud)</MenuItem>
+                </Select>
+              </FormControl>
+              <TextField size="small" fullWidth disabled={draft.asr_provider === "groq"} label="Mô hình ASR" helperText={draft.asr_provider === "groq" ? "Luôn dùng whisper-large-v3-turbo, không dùng model chat của connection" : "Chọn rõ model local (small, medium, large-v3…). Hồ sơ HQ cũ để trống vẫn dùng ánh xạ chất lượng."} value={draft.asr_model || ""} onChange={(e) => patch("asr_model", e.target.value || null)} />
+            </Stack>
+            {draft.asr_provider === "groq" && (
+              <Stack spacing={1.5}>
+                <FormControl size="small" fullWidth>
+                  <InputLabel id="localization-asr-connection-label">Connection AI cho Groq ASR</InputLabel>
+                  <Select
+                    labelId="localization-asr-connection-label"
+                    value={draft.asr_connection_id || ""}
+                    label="Connection AI cho Groq ASR"
+                    onChange={(e) => {
+                      const id = e.target.value
+                      setDraft((prev) => ({
+                        ...prev,
+                        asr_connection_id: id || null,
+                        asr_model: "whisper-large-v3-turbo",
+                      }))
+                    }}
+                  >
+                    <MenuItem value=""><em>Chọn connection</em></MenuItem>
+                    {Object.entries(aiConnections).filter(([, cfg]) => {
+                      try { return cfg.provider === "compatible" && new URL(cfg.base_url).hostname === "api.groq.com" } catch { return false }
+                    }).map(([id, cfg]) => (
+                      <MenuItem key={id} value={id}>
+                        {cfg.label || id} · {cfg.provider}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <FormControlLabel
+                  control={<Checkbox checked={draft.asr_fallback_to_local === true} onChange={(e) => patch("asr_fallback_to_local", e.target.checked)} />}
+                  label="Dự phòng về faster_whisper local khi Groq lỗi"
+                />
+                {draft.asr_fallback_to_local && (
+                  <TextField
+                    size="small"
+                    fullWidth
+                    label="Mô hình local dự phòng (chọn rõ small, medium, large-v3…)"
+                    value={draft.asr_local_model || ""}
+                    onChange={(e) => patch("asr_local_model", e.target.value || null)}
+                    helperText="Chỉ fallback khi lỗi mạng/timeout/429/5xx; lỗi khóa hoặc transcript không hợp lệ sẽ được báo, không chuyển provider."
+                  />
+                )}
+              </Stack>
+            )}
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+              <FormControl size="small" fullWidth>
                 <InputLabel>Chất lượng ASR</InputLabel>
                 <Select value={draft.asr_quality || "best"} label="Chất lượng ASR" onChange={(e) => patch("asr_quality", e.target.value)}>
                   {["fast", "balanced", "accurate", "best"].map((v) => <MenuItem key={v} value={v}>{v}</MenuItem>)}
                 </Select>
               </FormControl>
-              <TextField size="small" fullWidth label="Ghi đè mô hình ASR" value={draft.asr_model || ""} onChange={(e) => patch("asr_model", e.target.value || null)} />
             </Stack>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
               <FormControl size="small" fullWidth>
@@ -875,6 +954,18 @@ export default function LocalizationProfilesSection({ settings }) {
                 </Select>
               </FormControl>
             </Stack>
+            {draft.audio_mode === "fast_duck" && (
+              <Alert severity="info" variant="outlined">
+                <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>
+                  Fast: không tách giọng / nhạc bằng Demucs
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {draft.preserve_background === false
+                    ? "Mặc định chỉ giọng Việt: mất toàn bộ nhạc và âm nền gốc. Có thể bật lại âm gốc nhỏ bên dưới."
+                    : "Đang giữ âm gốc nhỏ, không phải nền đã tách: vẫn có thể nghe tiếng nguồn bên dưới giọng Việt. Chọn HQ nếu cần tách nhạc khỏi tiếng nguồn."}
+                </Typography>
+              </Alert>
+            )}
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
               <TextField size="small" fullWidth label="Kiểu phụ đề" value={draft.caption_style || "viral"} onChange={(e) => patch("caption_style", e.target.value)} />
               <FormControl size="small" fullWidth>
@@ -886,7 +977,7 @@ export default function LocalizationProfilesSection({ settings }) {
             </Stack>
             <FormControlLabel
               control={<Checkbox checked={draft.preserve_background !== false} onChange={(e) => patch("preserve_background", e.target.checked)} />}
-              label="Giữ nền / nhạc đã tách"
+              label={draft.audio_mode === "fast_duck" ? "Giữ âm gốc nhỏ (vẫn có thể nghe tiếng nguồn)" : "Giữ nền / nhạc đã tách"}
             />
           </Stack>
         </AccordionDetails>

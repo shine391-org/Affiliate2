@@ -1,0 +1,272 @@
+{
+  "scope": "independent parent audit; exact text/voice and actual files verified",
+  "validated_audio_files": 714,
+  "baseline_rows": 154,
+  "rate_rows": 189,
+  "punctuation_rows": 25,
+  "B_synthesized": 14,
+  "naturalness": "NOT VERIFIED",
+  "C_status": "INCOMPLETE at packaging checkpoint",
+  "strategies": {
+    "baseline": {
+      "scope": "LOCAL canonical allocator+retime projection on LIVE leaf audio; not render/QC",
+      "auto_complete_video_rate": null,
+      "timing_feasible_video_count": 7,
+      "hard_overflow_chunks": 11,
+      "soft_overflow_chunks": 1,
+      "total_chunks": 154,
+      "speed_distribution": {
+        "p50": 1.0,
+        "p90": 1.2605,
+        "p95": 1.5316
+      },
+      "rescued_baseline_hard_chunks": [],
+      "new_hard_chunks": [],
+      "newly_timing_feasible_videos": []
+    },
+    "A_rate_1.1": {
+      "scope": "LOCAL canonical allocator+retime projection on LIVE leaf audio; not render/QC",
+      "auto_complete_video_rate": null,
+      "timing_feasible_video_count": 7,
+      "hard_overflow_chunks": 7,
+      "soft_overflow_chunks": 3,
+      "total_chunks": 154,
+      "speed_distribution": {
+        "p50": 1.0,
+        "p90": 1.1519,
+        "p95": 1.3471
+      },
+      "measured_changed_chunks": 63,
+      "rescued_baseline_hard_chunks": [
+        [
+          "legacy:25babc2c-deaa-48b9-8bad-f9b417d39a6f",
+          43
+        ],
+        [
+          "legacy:25babc2c-deaa-48b9-8bad-f9b417d39a6f",
+          54
+        ],
+        [
+          "legacy:25babc2c-deaa-48b9-8bad-f9b417d39a6f",
+          60
+        ],
+        [
+          "legacy:25babc2c-deaa-48b9-8bad-f9b417d39a6f",
+          64
+        ]
+      ],
+      "new_hard_chunks": [],
+      "newly_timing_feasible_videos": []
+    },
+    "A_rate_1.2": {
+      "scope": "LOCAL canonical allocator+retime projection on LIVE leaf audio; not render/QC",
+      "auto_complete_video_rate": null,
+      "timing_feasible_video_count": 7,
+      "hard_overflow_chunks": 3,
+      "soft_overflow_chunks": 5,
+      "total_chunks": 154,
+      "speed_distribution": {
+        "p50": 1.0,
+        "p90": 1.1192,
+        "p95": 1.298
+      },
+      "measured_changed_chunks": 63,
+      "rescued_baseline_hard_chunks": [
+        [
+          "legacy:25babc2c-deaa-48b9-8bad-f9b417d39a6f",
+          39
+        ],
+        [
+          "legacy:25babc2c-deaa-48b9-8bad-f9b417d39a6f",
+          43
+        ],
+        [
+          "legacy:25babc2c-deaa-48b9-8bad-f9b417d39a6f",
+          54
+        ],
+        [
+          "legacy:25babc2c-deaa-48b9-8bad-f9b417d39a6f",
+          59
+        ],
+        [
+          "legacy:25babc2c-deaa-48b9-8bad-f9b417d39a6f",
+          60
+        ],
+        [
+          "legacy:25babc2c-deaa-48b9-8bad-f9b417d39a6f",
+          62
+        ],
+        [
+          "legacy:25babc2c-deaa-48b9-8bad-f9b417d39a6f",
+          64
+        ],
+        [
+          "legacy:25babc2c-deaa-48b9-8bad-f9b417d39a6f",
+          69
+        ]
+      ],
+      "new_hard_chunks": [],
+      "newly_timing_feasible_videos": []
+    },
+    "A_rate_1.3": {
+      "scope": "LOCAL canonical allocator+retime projection on LIVE leaf audio; not render/QC",
+      "auto_complete_video_rate": null,
+      "timing_feasible_video_count": 7,
+      "hard_overflow_chunks": 2,
+      "soft_overflow_chunks": 2,
+      "total_chunks": 154,
+      "speed_distribution": {
+        "p50": 1.0,
+        "p90": 1.1192,
+        "p95": 1.2166
+      },
+      "measured_changed_chunks": 63,
+      "rescued_baseline_hard_chunks": [
+        [
+          "legacy:25babc2c-deaa-48b9-8bad-f9b417d39a6f",
+          39
+        ],
+        [
+          "legacy:25babc2c-deaa-48b9-8bad-f9b417d39a6f",
+          43
+        ],
+        [
+          "legacy:25babc2c-deaa-48b9-8bad-f9b417d39a6f",
+          54
+        ],
+        [
+          "legacy:25babc2c-deaa-48b9-8bad-f9b417d39a6f",
+          56
+        ],
+        [
+          "legacy:25babc2c-deaa-48b9-8bad-f9b417d39a6f",
+          59
+        ],
+        [
+          "legacy:25babc2c-deaa-48b9-8bad-f9b417d39a6f",
+          60
+        ],
+        [
+          "legacy:25babc2c-deaa-48b9-8bad-f9b417d39a6f",
+          62
+        ],
+        [
+          "legacy:25babc2c-deaa-48b9-8bad-f9b417d39a6f",
+          64
+        ],
+        [
+          "legacy:25babc2c-deaa-48b9-8bad-f9b417d39a6f",
+          69
+        ]
+      ],
+      "new_hard_chunks": [],
+      "newly_timing_feasible_videos": []
+    },
+    "B_punctuation": {
+      "scope": "LOCAL canonical allocator+retime projection on LIVE leaf audio; not render/QC",
+      "auto_complete_video_rate": null,
+      "timing_feasible_video_count": 7,
+      "hard_overflow_chunks": 9,
+      "soft_overflow_chunks": 1,
+      "total_chunks": 154,
+      "speed_distribution": {
+        "p50": 1.0,
+        "p90": 1.2397,
+        "p95": 1.415
+      },
+      "prosody_semantic_acceptance": "NOT VERIFIED; lexical preservation only. Candidates may remove meaningful pauses.",
+      "rescued_baseline_hard_chunks": [
+        [
+          "legacy:25babc2c-deaa-48b9-8bad-f9b417d39a6f",
+          43
+        ],
+        [
+          "legacy:25babc2c-deaa-48b9-8bad-f9b417d39a6f",
+          60
+        ]
+      ],
+      "new_hard_chunks": [],
+      "newly_timing_feasible_videos": []
+    }
+  },
+  "baseline_videos": [
+    {
+      "source_id": "commons:75746142",
+      "total_chunks": 12,
+      "slowdown": 1.0,
+      "hard_ids": [],
+      "soft_ids": [],
+      "timing_feasible": true
+    },
+    {
+      "source_id": "commons:75687222",
+      "total_chunks": 10,
+      "slowdown": 1.0,
+      "hard_ids": [],
+      "soft_ids": [],
+      "timing_feasible": true
+    },
+    {
+      "source_id": "commons:72844427",
+      "total_chunks": 16,
+      "slowdown": 1.0,
+      "hard_ids": [],
+      "soft_ids": [],
+      "timing_feasible": true
+    },
+    {
+      "source_id": "commons:164833398",
+      "total_chunks": 10,
+      "slowdown": 1.0,
+      "hard_ids": [],
+      "soft_ids": [],
+      "timing_feasible": true
+    },
+    {
+      "source_id": "commons:164825067",
+      "total_chunks": 10,
+      "slowdown": 1.0,
+      "hard_ids": [],
+      "soft_ids": [],
+      "timing_feasible": true
+    },
+    {
+      "source_id": "commons:107550546",
+      "total_chunks": 13,
+      "slowdown": 1.0,
+      "hard_ids": [],
+      "soft_ids": [],
+      "timing_feasible": true
+    },
+    {
+      "source_id": "legacy:25babc2c-deaa-48b9-8bad-f9b417d39a6f",
+      "total_chunks": 70,
+      "slowdown": 1.12,
+      "hard_ids": [
+        39,
+        43,
+        54,
+        55,
+        56,
+        59,
+        60,
+        62,
+        64,
+        66,
+        69
+      ],
+      "soft_ids": [
+        58
+      ],
+      "timing_feasible": false
+    },
+    {
+      "source_id": "legacy:f1a3f70c-cf5e-4fab-b691-3ffbe5bd87ea",
+      "total_chunks": 13,
+      "slowdown": 1.0,
+      "hard_ids": [],
+      "soft_ids": [],
+      "timing_feasible": true
+    }
+  ]
+}

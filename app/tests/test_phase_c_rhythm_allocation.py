@@ -206,6 +206,8 @@ async def test_pipeline_preserves_pause_with_measured_audio(
     from backend.services import localization_service as svc
     from backend.services.tts_service import TTSProvider
 
+    from pathlib import Path
+
     second_text = "one two three four five six" if overestimated_neighbour else "Ừ"
     durations = {"First.": 1700 if overestimated_neighbour else 1500,
                  second_text: 100 if overestimated_neighbour else 400, "Last.": 400}
@@ -236,7 +238,9 @@ async def test_pipeline_preserves_pause_with_measured_audio(
     )
     monkeypatch.setattr(svc, "_tts_config", lambda *_: runtime)
     monkeypatch.setattr(svc, "_generate_tts_chunk", generate)
-    monkeypatch.setattr("backend.services.video_utils.probe_duration", lambda *_: 4.0)
+    from backend.services.video_utils import probe_duration as real_probe
+    monkeypatch.setattr("backend.services.video_utils.probe_duration",
+                        lambda path, *args: 4.0 if Path(path).name == "source.mp4" else real_probe(path, *args))
     tx = LocalizationTranscript(segments=[
         LocalizationSegment(
             id=f"s{i}", source_text=text, translated_text=text,

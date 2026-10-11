@@ -1,5 +1,7 @@
 # PROJECT_STATUS.md
 
+> **ACTIVE 2026-10-09:** The integration and acceptance gates for `feat/localization-fast-mode` are tracked in **[docs/ACTIVE_WORK_DOD.md](docs/ACTIVE_WORK_DOD.md)**. Cross-flow fixes were integrated by PR #20; post-merge tests and real Edge TTS → final-video acceptance remain **BLOCKED / not yet verified**. The historical phase summaries below do not override this active release gate.
+
 ## Overall status: PHASE G MERGED TO MASTER — FINAL CLOSEOUT HARDENING
 
 Phase A and Phase B are complete and merged to `master`.
@@ -22,6 +24,14 @@ Branch:
 - C1 Media quality: QA PASS
 - C2 AI/local provider controls: QA PASS
 - C3 Localization Profiles: QA PASS
+
+### Localization Fast / speaker review — 2026-10-03
+
+Fixes on `feat/localization-fast-mode` enforce measured-first C7 rewrites, exact-text per-job/per-acoustic-binding calibration, durable unique changed-segment audits, C6/C7 deterministic meaning invariants, safe Fast diarization-only, persisted distinct speaker voices and Studio controls. QC keeps diarization failure, unresolved multi-speaker voice collisions and overlap in review. Focused backend/frontend verification passes; this is not full real-media or perceptual acceptance. See [docs/QA_LOCALIZATION_MEASURED_SPEAKERS.md](docs/QA_LOCALIZATION_MEASURED_SPEAKERS.md) for exact tests, media attempts and remaining gaps. No merge to `master` is part of this review.
+
+The second corrective review localizes names in reviewed C6 text, guards ages and question/exclamation markers, selects distinct voices matching confirmed source gender, and surfaces unverified gender in Studio/QC. Approved C6 remains immutable during C7; accepted measured rewrites, safe chunk reuse, atomic overrides and pre-C7 provider rebind invalidation are covered by focused regressions. Full dubbed-video/intonation acceptance remains pending: the accessible real audio preserved ASR timestamps but speaker inference lacked a token and live Edge access failed certificate verification. See [docs/QA_LOCALIZATION_VI_VOICES_WORKFLOW.md](docs/QA_LOCALIZATION_VI_VOICES_WORKFLOW.md).
+
+Remaining-edge correction on the same feature branch: unavailable matching voices now degrade to reuse/default with QC review instead of stopping C7. Rewrite counts exclude previous acceptance revisions, including after translation/provider/voice changes. Independent timing locks retain valid word onsets. Focused regressions pass; full real-media acceptance remains pending. See [docs/QA_LOCALIZATION_FALLBACK_REVISIONS.md](docs/QA_LOCALIZATION_FALLBACK_REVISIONS.md).
 
 ### Real-media failure that triggered donor-first rebuild
 The first 65.7s sample exposed the old C7 prototype:

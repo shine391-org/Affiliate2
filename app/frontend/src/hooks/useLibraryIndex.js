@@ -63,6 +63,8 @@ export default function useLibraryIndex({
   const [families, setFamilies] = useState([])
   const [familyTotal, setFamilyTotal] = useState(0)
   const [loners, setLoners] = useState([])
+  const [lonerTotal, setLonerTotal] = useState(0)
+  const [familyResultKey, setFamilyResultKey] = useState(null)
   const [matchedKeys, setMatchedKeys] = useState(null)   // null = "everything matches"
   const [familiesLoading, setFamiliesLoading] = useState(false)
 
@@ -112,6 +114,7 @@ export default function useLibraryIndex({
   // view could otherwise resolve out of order and leave the tree (and the
   // dimming set) showing the OLDER filter's data.
   const famReqIdRef = useRef(0)
+  const familyQueryKey = JSON.stringify({ ...toParams(filters), page, pageSize })
 
   const fetchFamilies = useCallback(async () => {
     const reqId = ++famReqIdRef.current
@@ -124,6 +127,8 @@ export default function useLibraryIndex({
       setFamilies(data.families || [])
       setFamilyTotal(data.family_total || 0)
       setLoners(data.loners || [])
+      setLonerTotal(data.loner_total || 0)
+      setFamilyResultKey(familyQueryKey)
       setMatchedKeys(new Set(data.matched_keys || []))
     } catch (e) {
       if (reqId !== famReqIdRef.current) return
@@ -131,7 +136,7 @@ export default function useLibraryIndex({
     } finally {
       if (reqId === famReqIdRef.current) setFamiliesLoading(false)
     }
-  }, [filters, page, pageSize, showSnackbar])
+  }, [filters, page, pageSize, familyQueryKey, showSnackbar])
 
   // Grid data follows the filters. The tree view fetches lazily (and only when
   // it's the visible view) because it walks the whole library to build lineage.
@@ -158,12 +163,13 @@ export default function useLibraryIndex({
     setLibraryTotal((t) => Math.max(0, t - 1))
   }, [])
 
-  const pageCount = Math.max(1, Math.ceil((view === "tree" ? familyTotal : total) / pageSize))
+  const pageCount = Math.max(1, Math.ceil((view === "tree" ? Math.max(familyTotal, lonerTotal) : total) / pageSize))
 
   return {
     items, total, libraryTotal, facets, loading, error,
     pageCount,
-    families, loners, familyTotal, matchedKeys, familiesLoading,
+    families, loners, familyTotal, lonerTotal, matchedKeys, familiesLoading,
+    familiesReady: familyResultKey === familyQueryKey,
     taxonomy,
     refresh, removeLocal,
   }

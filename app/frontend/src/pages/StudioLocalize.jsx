@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Alert, Box, Button, Checkbox, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Divider, Drawer,
   FormControl, FormControlLabel, IconButton, InputLabel, MenuItem, Paper, Radio, RadioGroup,
@@ -13,6 +13,7 @@ import { useNavigate, useSearchParams } from "react-router-dom"
 import http from "../api/http"
 import useAppStore from "../store/appStore"
 import LocalizationExpertPanel from "../components/tools/LocalizationExpertPanel"
+import SpeakerVoicePanel from "../components/tools/SpeakerVoicePanel"
 import { ProviderBindingChip, ProviderBindingRerunDialog } from "../components/tools/ProviderBindingRerun"
 import LocalizationBatch from "./LocalizationBatch"
 import { providerBindingMismatch, rebindProvidersPayload } from "../providerBinding"
@@ -87,6 +88,9 @@ export default function StudioLocalize({ source, sourcesLoading }) {
   }
   const [expertOpen, setExpertOpen] = useState(false)
   const jobId = params.get("job") || ""
+  const currentJobRef = useRef(jobId)
+  const detailRequestRef = useRef(0)
+  currentJobRef.current = jobId
   const { bindingPrompt, setBindingPrompt, openBindingPrompt, consumeBindingPrompt } = useJobBoundBindingPrompt(jobId)
   useEffect(() => {
     setRetryingFailure(false)
@@ -114,9 +118,11 @@ export default function StudioLocalize({ source, sourcesLoading }) {
       if (!alive) return
       setProfiles(data?.profiles || [])
       setProfileId((current) => current || data?.default_profile_id || "")
-    }).catch(() => {})
+    }).catch((error) => {
+      if (alive) showSnackbar(error.response?.data?.detail || "Không thể tải hồ sơ bản địa hóa", "error")
+    })
     return () => { alive = false }
-  }, [])
+  }, [showSnackbar])
 
   const selectedProfile = useMemo(() => profiles.find((item) => item.id === profileId) || null, [profiles, profileId])
 
@@ -149,24 +155,50 @@ export default function StudioLocalize({ source, sourcesLoading }) {
   }, [jobId])
 
   const loadDetail = useCallback(async () => {
-    if (!jobId) { setDetail(null); setDetailError(""); return }
+    const requestedJob = jobId
+    const requestId = ++detailRequestRef.current
+    if (!requestedJob) { setDetail(null); setDetailError(""); return }
     try {
-      const { data } = await http.get(`/api/localization/jobs/${jobId}`)
+      const { data } = await http.get(`/api/localization/jobs/${requestedJob}`)
+      if (requestId !== detailRequestRef.current || currentJobRef.current !== requestedJob) return
       setDetail(data)
       setDetailError("")
     } catch (error) {
+      if (requestId !== detailRequestRef.current || currentJobRef.current !== requestedJob) return
       if (error.response?.status === 404) { setDetail(null); setDetailError(""); return }
-      if (error.response?.status !== 404) setDetailError(error.response?.data?.detail || error.message)
+      setDetailError(error.response?.data?.detail || error.message)
     }
   }, [jobId])
 
   useEffect(() => {
-    let alive = true
     loadDetail()
+    return () => { detailRequestRef.current += 1 }
+  }, [loadDetail])
+
+  // Only active jobs need repeated detail loading. Serial timeouts prevent
+  // overlapping full-manifest requests; completed/review jobs refresh on action.
+  useEffect(() => {
+    if (!jobId || (detail && !["pending", "running"].includes(detail.job_status))) return undefined
+    let alive = true
+    let timer = null
+    const tick = async () => {
+      if (document.visibilityState === "visible") await loadDetail()
+      if (alive) timer = setTimeout(tick, document.visibilityState === "visible" ? 3000 : 15000)
+    }
+    timer = setTimeout(tick, 3000)
+    const onFocus = () => { if (alive) loadDetail() }
+    window.addEventListener("focus", onFocus)
+    return () => { alive = false; clearTimeout(timer); window.removeEventListener("focus", onFocus) }
+  }, [jobId, detail?.job_status, loadDetail])
+
+  useEffect(() => {
     if (!jobId) return undefined
-    const timer = setInterval(() => { if (alive) loadDetail() }, 3000)
-    return () => { alive = false; clearInterval(timer) }
-  }, [jobId, loadDetail])
+    const onFocus = () => loadDetail()
+    // Terminal/review jobs do not poll but must still reflect external reruns.
+    if (detail && ["pending", "running"].includes(detail.job_status)) return undefined
+    window.addEventListener("focus", onFocus)
+    return () => window.removeEventListener("focus", onFocus)
+  }, [jobId, detail?.job_status, loadDetail])
 
   const effective = detail?.manifest?.effective_profile || selectedProfile || {}
   const stages = detail?.manifest?.stages || {}
@@ -660,6 +692,8 @@ export default function StudioLocalize({ source, sourcesLoading }) {
             )}
           </Box>
 
+          {selectedProfile && <Alert severity="info" variant="outlined">ASR <strong>{selectedProfile.asr_provider || "faster_whisper"}</strong> · <strong>{selectedProfile.asr_model || selectedProfile.asr_quality}</strong>{selectedProfile.asr_fallback_to_local ? ` · dự phòng local ${selectedProfile.asr_local_model}` : ""}</Alert>}
+          {stages.asr?.metadata?.asr && <Alert severity={stages.asr.metadata.asr.fallback_reason ? "warning" : "info"}>ASR thực tế: {stages.asr.metadata.asr.provider} / {stages.asr.metadata.asr.model}{stages.asr.metadata.asr.fallback_reason ? ` · fallback: ${stages.asr.metadata.asr.fallback_reason}` : ""}</Alert>}
           {selectedProfile && <Alert severity="info" variant="outlined">C6 <strong>{selectedProfile.translation_model || "mặc định kết nối"}</strong> · C7 <strong>{selectedProfile.rewrite_model || "mặc định kết nối"}</strong>. Đây là hai mô hình độc lập.</Alert>}
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
             <Button variant="outlined" onClick={() => navigate("/settings?section=localization")}>Quản lý hồ sơ</Button>
@@ -727,7 +761,7 @@ export default function StudioLocalize({ source, sourcesLoading }) {
   )
 
   const voicePanel = (
-    <Stack spacing={2}><Alert severity={rewriteSelection.failureCount > 0 ? "warning" : "info"} variant="outlined">{rewriteSelection.isActual ? "C7 thực tế dùng" : "C7 đang cấu hình"} <strong>{rewriteSelection.connectionId || "kết nối mặc định"}</strong> · <strong>{rewriteSelection.model || "mô hình mặc định"}</strong>{rewriteSelection.failureCount > 0 ? ` sau ${rewriteSelection.failureCount} lỗi route trước đó` : ""}. C7 tách biệt với mô hình dịch C6.</Alert><Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(3, 1fr)" }, gap: 1.5 }}><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Giọng đọc</Typography><Typography variant="body2">{effective.tts_provider || "mặc định nhà cung cấp"} · {effective.tts_voice || "giọng của hồ sơ"}</Typography></Paper><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Giới hạn nhịp</Typography><Typography variant="body2">Ưu tiên {effective.dub_speed_accept || 1.15}× · tối đa {effective.dub_speed_max || 1.3}×</Typography></Paper><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Viết lại</Typography><Typography variant="body2">{effective.dub_rewrite_attempts ?? 2} lần thử</Typography></Paper></Box>{chunks.length > 0 && <Stack spacing={1}>{chunks.map((chunk) => <Paper variant="outlined" key={chunk.id} sx={{ p: 1.25 }}><Typography variant="body2">Đoạn {chunk.id} · {chunk.speaker_id || "người nói —"} · tốc độ {Number(chunk.speed_factor || 1).toFixed(2)}×</Typography></Paper>)}</Stack>}{jobId && <Button variant="outlined" startIcon={<TuneOutlinedIcon />} onClick={() => setExpertOpen(true)} sx={{ alignSelf: "flex-start" }}>Nhịp / giọng nâng cao</Button>}</Stack>
+    <Stack spacing={2}><SpeakerVoicePanel key={jobId} jobId={jobId} detail={detail} disabled={activeLocalization} onSaved={loadDetail} /><Alert severity={rewriteSelection.failureCount > 0 ? "warning" : "info"} variant="outlined">{rewriteSelection.isActual ? "C7 thực tế dùng" : "C7 đang cấu hình"} <strong>{rewriteSelection.connectionId || "kết nối mặc định"}</strong> · <strong>{rewriteSelection.model || "mô hình mặc định"}</strong>{rewriteSelection.failureCount > 0 ? ` sau ${rewriteSelection.failureCount} lỗi route trước đó` : ""}. C7 tách biệt với mô hình dịch C6.</Alert><Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(3, 1fr)" }, gap: 1.5 }}><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Giọng đọc</Typography><Typography variant="body2">{effective.tts_provider || "mặc định nhà cung cấp"} · {effective.tts_voice || "giọng của hồ sơ"}</Typography></Paper><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Giới hạn nhịp</Typography><Typography variant="body2">Ưu tiên {effective.dub_speed_accept || 1.15}× · tối đa {effective.dub_speed_max || 1.3}×</Typography></Paper><Paper variant="outlined" sx={{ p: 2 }}><Typography variant="subtitle2">Viết lại</Typography><Typography variant="body2">{effective.dub_rewrite_attempts ?? 2} lần thử</Typography></Paper></Box>{chunks.length > 0 && <Stack spacing={1}>{chunks.map((chunk) => <Paper variant="outlined" key={chunk.id} sx={{ p: 1.25 }}><Typography variant="body2">Đoạn {chunk.id} · {chunk.speaker_id || "người nói —"} · tốc độ {Number(chunk.speed_factor || 1).toFixed(2)}×</Typography></Paper>)}</Stack>}{jobId && <Button variant="outlined" startIcon={<TuneOutlinedIcon />} onClick={() => setExpertOpen(true)} sx={{ alignSelf: "flex-start" }}>Nhịp / giọng nâng cao</Button>}</Stack>
   )
 
   const renderPanel = (

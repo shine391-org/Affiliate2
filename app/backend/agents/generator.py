@@ -671,7 +671,13 @@ class GeneratorAgent:
             aspect_ratio=aspect_ratio,
             emoji_style=opts.get("caption_emoji_style", "moderate"),
         )
-        result = await burn_captions(video_path, ass_path)
+        # Gate the NVENC/CPU encode only. generate_captions_ass above is file
+        # writing, not GPU work. burn_captions must not be wrapped internally:
+        # localization already holds this gate while calling it, and
+        # Semaphore(1) is not reentrant.
+        from backend.core.gpu_gate import localization_gpu_gate
+        async with localization_gpu_gate():
+            result = await burn_captions(video_path, ass_path)
         # Clean up the actual temp ASS file returned by generate_captions_ass
         # (Wave-1 writes captions_{uuid}.ass, not a fixed name).
         try:

@@ -54,9 +54,16 @@ class LocalizationProfile(BaseModel):
     name: str
 
     download_quality: Literal["best", "2160p", "1440p", "1080p", "720p", "480p"] = "best"
-    asr_provider: Literal["faster_whisper"] = "faster_whisper"
+    asr_provider: Literal["faster_whisper", "groq"] = "faster_whisper"
     asr_model: str | None = None
     asr_quality: Literal["fast", "balanced", "accurate", "best"] = "best"
+    # Cloud ASR via Groq (optional). When set, transcription uses this
+    # connection instead of local faster-whisper.
+    asr_connection_id: str | None = None
+    # Opt-in: fall back to local faster-whisper when cloud ASR fails.
+    asr_fallback_to_local: bool = False
+    # Explicit local model to use when falling back (e.g. "base", "small").
+    asr_local_model: str | None = None
     alignment_mode: Literal["off", "whisperx"] = "whisperx"
     diarization_mode: Literal["off", "auto", "whisperx"] = "auto"
     diarization_speakers: int | None = Field(default=None, ge=1, le=16)
@@ -81,7 +88,13 @@ class LocalizationProfile(BaseModel):
     # protocol (stable IDs/order + JSON schema) stays app-owned because runtime
     # parsing depends on it.
     translation_guardrails: str = DEFAULT_TRANSLATION_GUARDRAILS
+    # Opt-in continuity, not a weaker fidelity verdict: unresolved valid text
+    # may render as a warning-marked draft; publish still requires review.
+    # Old saved profiles keep strict behavior when this field is absent.
+    translation_automation: Literal["strict", "auto"] = "strict"
+    translation_omission_max_ratio: float = Field(default=0.10, ge=0.0, le=0.25)
     glossary: dict[str, str] = Field(default_factory=dict)
+    protected_terms: list[str] = Field(default_factory=list, max_length=100)
 
     # C6 translation and C7 duration rewrite are different jobs. Translation
     # may pin a larger/high-quality model while rewrite can inherit a smaller
@@ -110,6 +123,11 @@ class LocalizationProfile(BaseModel):
     tts_base_url: str | None = None
     tts_region: str | None = None
     speaker_voices: dict[str, str] = Field(default_factory=dict)
+    # Source voice presentation is job-scoped; "unknown" never guesses gender.
+    speaker_genders: dict[str, Literal["male", "female", "unknown"]] = Field(default_factory=dict)
+    # For providers with opaque IDs, a reviewer can confirm the output voice.
+    voice_genders: dict[str, Literal["male", "female", "unknown"]] = Field(default_factory=dict)
+    speaker_voice_mode: Literal["distinct", "shared"] = "distinct"
     speaker_reference_audio: dict[str, str] = Field(default_factory=dict)
     tts_reference_audio: str | None = None
     tts_reference_text: str | None = None
@@ -195,6 +213,12 @@ class LocalizationProfile(BaseModel):
 
     @model_validator(mode="after")
     def validate_dubbing_policy(self):
+        if self.asr_provider == "groq":
+            if self.asr_model not in {None, "whisper-large-v3-turbo"}:
+                raise ValueError("Groq ASR requires whisper-large-v3-turbo, not a chat/local model")
+            self.asr_model = "whisper-large-v3-turbo"
+            if self.asr_fallback_to_local and not (self.asr_local_model or "").strip():
+                raise ValueError("Choose an explicit local ASR fallback model")
         if self.dub_speed_accept > self.dub_speed_max:
             raise ValueError("dub_speed_accept must be <= dub_speed_max")
         if self.dub_emergency_speed_max < self.dub_speed_max:
@@ -240,16 +264,56 @@ class LocalizationProfile(BaseModel):
             out[src] = dst
         return out
 
+    @field_validator("protected_terms")
+    @classmethod
+    def validate_protected_terms(cls, value: list[str]) -> list[str]:
+        terms = list(dict.fromkeys(term.strip() for term in value if term.strip()))
+        if any(len(term) > 240 for term in terms):
+            raise ValueError("Protected terms are limited to 240 characters each")
+        return terms
+
 
 class LocalizationProfileStore(BaseModel):
     default_profile_id: str
     profiles: list[LocalizationProfile]
+
+    @model_validator(mode="after")
+    def keep_detected_speakers_job_local(self):
+        # Diarizer labels identify turns in ONE recording, never reusable roles.
+        self.profiles = [profile.model_copy(update={
+            key: {speaker: value for speaker, value in getattr(profile, key).items()
+                  if not re.fullmatch(r"SPEAKER_\d+", speaker, re.IGNORECASE)}
+            for key in ("speaker_voices", "speaker_genders", "speaker_reference_audio")
+        }) for profile in self.profiles]
+        return self
 
 
 def default_localization_profile() -> LocalizationProfile:
     return LocalizationProfile(
         id="vi-affiliate-hq",
         name="Vietnam Affiliate HQ",
+    )
+
+
+def fast_localization_profile() -> LocalizationProfile:
+    """Fast preset without relaxing the existing timing or QC ceilings."""
+    return LocalizationProfile(
+        id="vi-affiliate-fast",
+        name="Vietnam Affiliate Fast",
+        translation_automation="auto",
+        asr_model="small",
+        asr_quality="balanced",
+        alignment_mode="off",
+        diarization_mode="auto",
+        audio_mode="fast_duck",
+        preserve_background=False,
+        background_gain_db=-18.0,
+        semantic_segmentation=False,
+        render_profile="balanced",
+
+        dub_rewrite_attempts=1,
+        tts_provider="edge_tts",
+        tts_voice="vi-VN-HoaiMyNeural",
     )
 
 
@@ -365,7 +429,13 @@ class LocalizationSegment(BaseModel):
 
     tts_duration_ms: int | None = Field(default=None, ge=0)
 
-    translation_status: Literal["pending", "success", "failed", "untranslated"] = "pending"
+    # Provenance of the target interval for THIS cue. "measured" only when the
+    # interval came from measured provider word boundaries; "allocated" when it
+    # is a proportional estimate inside a measured chunk. None = legacy/unknown.
+    # QC must never treat a job-level aggregate as cue-local measured evidence.
+    tts_duration_basis: Literal["measured", "allocated"] | None = None
+
+    translation_status: Literal["pending", "success", "draft", "omitted", "failed", "untranslated"] = "pending"
     timing_status: Literal["pending", "fit", "adjusted", "overflow"] = "pending"
     qc_status: Literal["pending", "pass", "review", "fail"] = "pending"
 
