@@ -35,6 +35,8 @@ export default function useWebSocket() {
   useEffect(() => {
     ws.connect()
     let mounted = true
+    let restoring = true
+    const settledDuringRestore = new Set()
 
     // Restore running/pending jobs from API so active jobs survive page refresh
     const restoreJobs = async () => {
@@ -61,7 +63,7 @@ export default function useWebSocket() {
           const page = data.jobs || []
           if (!page.length) break
           for (const j of page) {
-            if (seen.has(j.id)) continue
+            if (seen.has(j.id) || settledDuringRestore.has(j.id)) continue
             seen.add(j.id)
             if (useAppStore.getState().activeJobs[j.id]) continue
             const msg = localizeUiMessage(j.current_step || j.title || j.job_type)
@@ -82,6 +84,9 @@ export default function useWebSocket() {
         }
       } catch (err) {
         // Silent fail — jobs will be picked up on next WS message
+      } finally {
+        restoring = false
+        settledDuringRestore.clear()
       }
     }
     restoreJobs()
@@ -207,6 +212,7 @@ export default function useWebSocket() {
       }),
 
       ws.on("job_attention", (msg) => {
+        if (restoring) settledDuringRestore.add(msg.job_id)
         // Human review is an intentional pause, not a completed job and not
         // work still consuming CPU. Remove it from the active-job badge; the
         // Activity poll will surface it under "Cần thao tác".
@@ -220,9 +226,15 @@ export default function useWebSocket() {
       }),
 
       ws.on("job_complete", (msg) => {
+        if (restoring) settledDuringRestore.add(msg.job_id)
         completeJob(msg.job_id)
         // Auto-remove from sidebar after 10s
-        setTimeout(() => removeJob(msg.job_id), 10000)
+        const completedJob = useAppStore.getState().activeJobs[msg.job_id]
+        setTimeout(() => {
+          if (useAppStore.getState().activeJobs[msg.job_id] === completedJob) {
+            removeJob(msg.job_id)
+          }
+        }, 10000)
         const result = msg.result || {}
         // Determine job type from active jobs store
         const jobInfo = useAppStore.getState().activeJobs[msg.job_id]
@@ -271,6 +283,7 @@ export default function useWebSocket() {
       }),
 
       ws.on("job_failed", (msg) => {
+        if (restoring) settledDuringRestore.add(msg.job_id)
         failJob(msg.job_id, msg.error)
         addMessage({
           role: "system",
@@ -362,3 +375,4 @@ export default function useWebSocket() {
     }
   }, [])
 }
+
